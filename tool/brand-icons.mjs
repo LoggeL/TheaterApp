@@ -10,7 +10,10 @@ if (createHash('sha256').update(logo).digest('hex') !== 'c22912bb9397371f959f23f
 async function icon(path, size, fraction = .84, transparent = false) {
   const image = await sharp(logo).resize(Math.round(size * fraction), Math.round(size * fraction), { fit: 'contain', background: '#ffffff' }).png().toBuffer();
   const dest = resolve(root, path); await mkdir(dirname(dest), { recursive: true });
-  await sharp({ create: { width: size, height: size, channels: 4, background: transparent ? '#ffffff00' : '#ffffff' } }).composite([{ input: image, gravity: 'centre' }]).png().toFile(dest);
+  const canvas = sharp({ create: { width: size, height: size, channels: 4, background: transparent ? '#ffffff00' : '#ffffff' } }).composite([{ input: image, gravity: 'centre' }]);
+  // iOS app icons must have no alpha channel, even when all pixels are opaque.
+  if (path.startsWith('ios/')) canvas.removeAlpha();
+  await canvas.png().toFile(dest);
 }
 for (const [density, size] of Object.entries({ mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 })) await icon(`android/app/src/main/res/mipmap-${density}/ic_launcher.png`, size);
 await rm(resolve(root, 'android/app/src/main/res/drawable/ic_launcher_foreground.xml'), { force: true });
