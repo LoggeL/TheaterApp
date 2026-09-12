@@ -1,0 +1,62 @@
+{
+  "project_info": {
+    "project_number": "275051540922",
+    "project_id": "theater-app-6fa5d",
+    "storage_bucket": "theater-app-6fa5d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:275051540922:android:8ef3a3eba5bdaa341aad83",
+        "android_client_info": {
+          "package_name": "de.kolpingtheater.ramsen.theaterapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "275051540922-2hnv3k8fr6fjavnqsgvp88mpn9cf6cl6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "de.kolpingtheater.ramsen.theaterapp",
+            "certificate_hash": "7753ba3f8aa51a89b677f1644a80c1d7ca2b521d"
+          }
+        },
+        {
+          "client_id": "275051540922-77eu5k0tku500h79v9lsdv3coa1kitfo.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "de.kolpingtheater.ramsen.theaterapp",
+            "certificate_hash": "9feed78d2a0764bfe2d02e674234394b4e194b67"
+          }
+        },
+        {
+          "client_id": "275051540922-balqumtuhu5ghv1p3o8vqd72dlmd3ieu.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAXASmDhglUL6uPTJvBAtbMHCPYw8ZBgV0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "275051540922-balqumtuhu5ghv1p3o8vqd72dlmd3ieu.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "275051540922-831k6pu2n22f8p4q4etho4on2rr5n8of.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "de.kolpingtheater.ramsen.theaterapp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,9 @@
+{
+  "environmentId": "3Fw1KMwzFmeNT32WZDcp0",
+  "firebaseProjectId": "theater-app-6fa5d",
+  "host": "theater-app.logge.top",
+  "sshHost": "logge@192.168.178.46",
+  "sshKey": "~/.ssh/id_ed25519_homebox",
+  "remotePath": "/home/logge/projects/theater-app",
+  "composeId": "1TExh-bBx8TlwNpi15pCM"
+}

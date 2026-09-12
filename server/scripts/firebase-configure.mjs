@@ -1,0 +1,13 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import { GoogleAuth } from 'google-auth-library';
+const project = process.env.FIREBASE_PROJECT_ID;
+if (!project || !process.env.GOOGLE_APPLICATION_CREDENTIALS) throw new Error('Projekt und Server-Credentials erforderlich.');
+const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+const client = await auth.getClient();
+const url = `https://identitytoolkit.googleapis.com/admin/v2/projects/${project}/config`;
+const { data } = await client.request({ url });
+const domains = [...new Set([...(data.authorizedDomains ?? []), 'theater-app.logge.top', 'localhost'])];
+await client.request({ url, method: 'PATCH', params: { updateMask: 'authorizedDomains' }, data: { authorizedDomains: domains } });
+const publicConfig = { project, providers: { emailPassword: data.signIn?.email?.enabled === true }, authorizedDomains: domains };
+await writeFile(new URL('../../config/firebase-server-settings.json', import.meta.url), JSON.stringify(publicConfig, null, 2) + '\n');
+console.log('Firebase-Domains geprüft und eingerichtet:', domains.join(', '));

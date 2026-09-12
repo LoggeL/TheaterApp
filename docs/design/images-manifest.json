@@ -1,0 +1,67 @@
+[
+  {
+    "file": "01-drehbuch-hell-dunkel.png",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 1398660,
+    "sha256": "1abc119a95f4487442842adb13298654728bbc0899f9c9312a37473b72550fa4"
+  },
+  {
+    "file": "02-alltag-und-produktionen.png",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 1454937,
+    "sha256": "cbccd50a4a5f35e6bdc2c289ad6e2d8b497c0fbc753caf9ee2b5f4e7dc6d8c24"
+  },
+  {
+    "file": "03-regie-und-technik.png",
+    "width": 1586,
+    "height": 992,
+    "bytes": 1209312,
+    "sha256": "27ca018ea68189790d61059f7d364c6ea63f0f9bc279ba2544a20877e5ec341d"
+  },
+  {
+    "file": "04-drehbuch-minimal.png",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 1375687,
+    "sha256": "98b69f78189e33b97dfa1c75904dfa9d21fbd4d1be47c8eb9a6a3db517db0522"
+  },
+  {
+    "file": "05-probe-rueckmeldung.png",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 1453946,
+    "sha256": "817d3e7e51a8e6df24249af36b73b9c72df1f12ec4c5bbcce5b01683b50fadae"
+  },
+  {
+    "file": "06-admin-probenleitung.png",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 1392378,
+    "sha256": "a25df5991d631bba4cb82dec4322701e811162d9c3116b39f08533ac84f7d6a9"
+  },
+  {
+    "file": "07-spaeterkommen-feste-probe-v2.png",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 1623775,
+    "sha256": "4f957c2db4abc22cbbad3911ac6efa542c94f4adedd3d9793509078460bdb0eb"
+  },
+  {
+    "file": "07-spaeterkommen-und-abstimmung.png",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 1435135,
+    "sha256": "d642183e007e79cc64458aca2710f0a8eddc801eca7f5cabedfe0a88f33c79ac",
+    "status": "withdrawn",
+    "supersededBy": "07-spaeterkommen-feste-probe-v2.png"
+  },
+  {
+    "file": "08-registrierung-und-freigabe.png",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 1378679,
+    "sha256": "4173d434bd362020e6e829f0abe5fad8d145b218d70ba0ee68036fe6d60cdafb"
+  }
+]

@@ -1,0 +1,38 @@
+name: Build and test
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.6'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: npm ci --ignore-scripts
+        working-directory: server
+      - run: npm test
+        working-directory: server
+      - run: npm audit --omit=dev
+        working-directory: server
+      - run: node tool/configure.mjs config/production.web.json
+      - run: flutter build web --release --dart-define-from-file=config/production.web.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: theater-web
+          path: build/web

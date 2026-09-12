@@ -1,0 +1,1119 @@
+{
+  "snapshot": {
+    "apiVersion": 1,
+    "user": {
+      "userId": "demo-alex",
+      "displayName": "Alex Bühnenfreund",
+      "email": "demo@example.invalid",
+      "role": "admin",
+      "group": "Ensemble",
+      "status": "approved",
+      "personId": null,
+      "emailVerified": true,
+      "identityReady": true,
+      "mustChangePassword": false,
+      "directorProductionIds": []
+    },
+    "events": [
+      {
+        "id": "demo-rehearsal",
+        "title": "Szenenprobe · Der erste Auftritt",
+        "startsAt": "2026-09-13T19:00:00.000",
+        "endsAt": "2026-09-13T21:00:00.000",
+        "time": "19:00–21:00",
+        "place": "Kolpingheim · Großer Saal",
+        "group": "Ensemble",
+        "type": "rehearsal",
+        "tone": "orange",
+        "locked": false,
+        "isCustom": false,
+        "people": 12,
+        "response": "open",
+        "declineReason": "",
+        "expectedArrivalAt": null,
+        "version": 1,
+        "productionId": "demo-midnight",
+        "sceneIds": [
+          "1",
+          "2"
+        ]
+      },
+      {
+        "id": "demo-tech",
+        "title": "Licht an! · Technikdurchlauf",
+        "startsAt": "2026-09-15T18:30:00.000",
+        "endsAt": "2026-09-15T20:30:00.000",
+        "time": "18:30–20:30",
+        "place": "Kolpingheim · Bühne",
+        "group": "Technik & Ensemble",
+        "type": "technical",
+        "tone": "green",
+        "locked": false,
+        "isCustom": false,
+        "people": 8,
+        "response": "yes",
+        "declineReason": "",
+        "expectedArrivalAt": null,
+        "version": 1,
+        "productionId": "demo-midnight",
+        "sceneIds": [
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "demo-costume",
+        "title": "Kostümprobe & Requisiten",
+        "startsAt": "2026-09-17T14:00:00.000",
+        "endsAt": "2026-09-17T16:00:00.000",
+        "time": "14:00–16:00",
+        "place": "Kolpingheim · Fundus",
+        "group": "Alle",
+        "type": "costume",
+        "tone": "violet",
+        "locked": false,
+        "isCustom": false,
+        "people": 10,
+        "response": "open",
+        "declineReason": "",
+        "expectedArrivalAt": null,
+        "version": 1,
+        "productionId": "demo-midnight",
+        "sceneIds": []
+      },
+      {
+        "id": "demo-full",
+        "title": "Einmal alles · Durchlaufprobe",
+        "startsAt": "2026-09-20T19:00:00.000",
+        "endsAt": "2026-09-20T22:00:00.000",
+        "time": "19:00–22:00",
+        "place": "Kolpingheim · Großer Saal",
+        "group": "Alle",
+        "type": "rehearsal",
+        "tone": "orange",
+        "locked": false,
+        "isCustom": false,
+        "people": 16,
+        "response": "open",
+        "declineReason": "",
+        "expectedArrivalAt": null,
+        "version": 1,
+        "productionId": "demo-midnight",
+        "sceneIds": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "demo-premiere",
+        "title": "Premiere · Wenn das Licht angeht",
+        "startsAt": "2026-09-28T19:30:00.000",
+        "endsAt": "2026-09-28T22:00:00.000",
+        "time": "19:30–22:00",
+        "place": "Kolpingheim · Bühne",
+        "group": "Alle",
+        "type": "performance",
+        "tone": "pink",
+        "locked": true,
+        "isCustom": false,
+        "people": 18,
+        "response": "yes",
+        "declineReason": "",
+        "expectedArrivalAt": null,
+        "version": 1,
+        "productionId": "demo-midnight",
+        "sceneIds": []
+      }
+    ],
+    "attendanceByEvent": {
+      "demo-tech": "yes",
+      "demo-premiere": "yes"
+    },
+    "declineReasons": {},
+    "absences": [],
+    "polls": [],
+    "members": [
+      {
+        "id": 1,
+        "name": "Alex Bühnenfreund",
+        "group": "Ensemble",
+        "initials": "AB",
+        "avatar": null,
+        "active": true
+      },
+      {
+        "id": 2,
+        "name": "Robin Spielmann",
+        "group": "Ensemble",
+        "initials": "RS",
+        "avatar": null,
+        "active": true
+      },
+      {
+        "id": 3,
+        "name": "Toni Lichtblick",
+        "group": "Technik",
+        "initials": "TL",
+        "avatar": null,
+        "active": true
+      },
+      {
+        "id": 4,
+        "name": "Kim Kulisse",
+        "group": "Regie",
+        "initials": "KK",
+        "avatar": null,
+        "active": true
+      },
+      {
+        "id": 5,
+        "name": "Sam Vorhang",
+        "group": "Ensemble",
+        "initials": "SV",
+        "avatar": null,
+        "active": true
+      }
+    ],
+    "checkinsByEvent": {},
+    "memberAttendanceByEvent": {},
+    "reminders": {
+      "dayBefore": true,
+      "twoHours": true,
+      "changes": true
+    },
+    "productions": [
+      {
+        "id": "demo-midnight",
+        "title": "Wenn das Licht angeht",
+        "subtitle": "Fiktives Probestück · vier Szenen",
+        "revision": "demo-1",
+        "roles": [
+          {
+            "id": "LENA",
+            "name": "Lena",
+            "actor": "Alex Bühnenfreund",
+            "personId": null
+          },
+          {
+            "id": "OSKAR",
+            "name": "Oskar",
+            "actor": "Robin Spielmann",
+            "personId": null
+          },
+          {
+            "id": "MIRA",
+            "name": "Mira",
+            "actor": "Sam Vorhang",
+            "personId": null
+          }
+        ],
+        "sceneCount": 4
+      },
+      {
+        "id": "demo-foyer",
+        "title": "Fünf Minuten im Foyer",
+        "subtitle": "Fiktives Probestück · eine Szene",
+        "revision": "demo-1",
+        "roles": [
+          {
+            "id": "LENA",
+            "name": "Lena",
+            "actor": "Alex Bühnenfreund",
+            "personId": null
+          },
+          {
+            "id": "OSKAR",
+            "name": "Oskar",
+            "actor": "Robin Spielmann",
+            "personId": null
+          }
+        ],
+        "sceneCount": 1
+      }
+    ],
+    "capabilities": {
+      "pushConfigured": false,
+      "liveFocus": true
+    }
+  },
+  "scripts": [
+    {
+      "productionId": "demo-midnight",
+      "revision": "demo-1",
+      "scenes": [
+        {
+          "id": "1",
+          "title": "Ein Schlüssel fehlt",
+          "ordinal": 0,
+          "roles": [
+            "LENA",
+            "OSKAR"
+          ]
+        },
+        {
+          "id": "2",
+          "title": "Hinter dem Vorhang",
+          "ordinal": 1,
+          "roles": [
+            "LENA",
+            "OSKAR",
+            "MIRA"
+          ]
+        },
+        {
+          "id": "3",
+          "title": "Fünf Minuten bis zum Gong",
+          "ordinal": 2,
+          "roles": [
+            "LENA",
+            "OSKAR",
+            "MIRA"
+          ]
+        },
+        {
+          "id": "4",
+          "title": "Das ist unser Zeichen",
+          "ordinal": 3,
+          "roles": [
+            "LENA",
+            "OSKAR",
+            "MIRA"
+          ]
+        }
+      ],
+      "roles": [
+        {
+          "id": "LENA",
+          "name": "Lena",
+          "actor": "Alex Bühnenfreund",
+          "personId": null
+        },
+        {
+          "id": "OSKAR",
+          "name": "Oskar",
+          "actor": "Robin Spielmann",
+          "personId": null
+        },
+        {
+          "id": "MIRA",
+          "name": "Mira",
+          "actor": "Sam Vorhang",
+          "personId": null
+        }
+      ],
+      "cues": [
+        {
+          "id": "demo-cue-0",
+          "sceneId": "1",
+          "ordinal": 0,
+          "category": "scene",
+          "role": "",
+          "text": "Szene 1 · Ein Schlüssel fehlt",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-1",
+          "sceneId": "1",
+          "ordinal": 1,
+          "category": "lighting",
+          "role": "",
+          "text": "LX 01 · Warmes Arbeitslicht, Bühne 40 %.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-2",
+          "sceneId": "1",
+          "ordinal": 2,
+          "category": "direction",
+          "role": "",
+          "text": "Ein kleiner Theaterraum am späten Nachmittag. LENA steht vor einer verschlossenen Kiste. OSKAR balanciert zwei Kaffeebecher.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-3",
+          "sceneId": "1",
+          "ordinal": 3,
+          "category": "props",
+          "role": "",
+          "text": "Requisite: verschlossene Holzkiste, Schlüsselbund, zwei leere Becher.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-4",
+          "sceneId": "1",
+          "ordinal": 4,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Sag bitte, dass du den Schlüssel hast.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-5",
+          "sceneId": "1",
+          "ordinal": 5,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Ich habe Kaffee. Das ist fast dasselbe.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-6",
+          "sceneId": "1",
+          "ordinal": 6,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Nur wenn Kaffee neuerdings Schlösser öffnet.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-7",
+          "sceneId": "1",
+          "ordinal": 7,
+          "category": "direction",
+          "role": "",
+          "text": "OSKAR stellt die Becher ab und tastet seine Taschen ab. Ein einzelner Knopf fällt zu Boden.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-8",
+          "sceneId": "1",
+          "ordinal": 8,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Ein Knopf. Zwei Bonbons. Und die feste Überzeugung, dass der Schlüssel gestern noch hier war.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-9",
+          "sceneId": "1",
+          "ordinal": 9,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "In der Kiste liegt unser gesamtes Finale.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-10",
+          "sceneId": "1",
+          "ordinal": 10,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Dann haben wir wenigstens einen spannenden Schluss.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-11",
+          "sceneId": "1",
+          "ordinal": 11,
+          "category": "audio",
+          "role": "",
+          "text": "SFX 01 · Leises Klopfen von hinter dem Vorhang.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-12",
+          "sceneId": "1",
+          "ordinal": 12,
+          "category": "direction",
+          "role": "",
+          "text": "Beide sehen zum Vorhang. Pause. Noch einmal Klopfen.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-13",
+          "sceneId": "1",
+          "ordinal": 13,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Das stand nicht im Ablauf.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-14",
+          "sceneId": "1",
+          "ordinal": 14,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Seit wann hält sich hier jemand an den Ablauf?",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-15",
+          "sceneId": "2",
+          "ordinal": 15,
+          "category": "scene",
+          "role": "",
+          "text": "Szene 2 · Hinter dem Vorhang",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-16",
+          "sceneId": "2",
+          "ordinal": 16,
+          "category": "lighting",
+          "role": "",
+          "text": "LX 02 · Seitenlicht links auf 60 %, Arbeitslicht halten.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-17",
+          "sceneId": "2",
+          "ordinal": 17,
+          "category": "direction",
+          "role": "",
+          "text": "MIRA schiebt den Vorhang beiseite. Sie trägt einen viel zu großen Hut und hält einen Plan verkehrt herum.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-18",
+          "sceneId": "2",
+          "ordinal": 18,
+          "category": "dialogue",
+          "role": "MIRA",
+          "text": "Ich habe gute Nachrichten.",
+          "microphone": "3",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-19",
+          "sceneId": "2",
+          "ordinal": 19,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Du hast den Schlüssel?",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-20",
+          "sceneId": "2",
+          "ordinal": 20,
+          "category": "dialogue",
+          "role": "MIRA",
+          "text": "Noch besser: Ich weiß jetzt, wo er nicht ist.",
+          "microphone": "3",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-21",
+          "sceneId": "2",
+          "ordinal": 21,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Das grenzt die Sache immerhin auf den Rest der Welt ein.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-22",
+          "sceneId": "2",
+          "ordinal": 22,
+          "category": "direction",
+          "role": "",
+          "text": "MIRA legt den Plan auf die Kiste. Alle drei beugen sich darüber.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-23",
+          "sceneId": "2",
+          "ordinal": 23,
+          "category": "dialogue",
+          "role": "MIRA",
+          "text": "Jemand hat die Umbaupläne mit dem Getränkezettel vertauscht.",
+          "microphone": "3",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-24",
+          "sceneId": "2",
+          "ordinal": 24,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Deshalb sollte die Treppe also neben die Apfelschorle.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-25",
+          "sceneId": "2",
+          "ordinal": 25,
+          "category": "props",
+          "role": "",
+          "text": "Requisite: zwei unterschiedliche Papierpläne; einer mit gezeichneter Treppe.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-26",
+          "sceneId": "2",
+          "ordinal": 26,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Die Treppe steht übrigens schon.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-27",
+          "sceneId": "2",
+          "ordinal": 27,
+          "category": "dialogue",
+          "role": "MIRA",
+          "text": "Wo?",
+          "microphone": "3",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-28",
+          "sceneId": "2",
+          "ordinal": 28,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Neben der Apfelschorle.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-29",
+          "sceneId": "2",
+          "ordinal": 29,
+          "category": "direction",
+          "role": "",
+          "text": "Ein kurzer Blickwechsel. Dann müssen alle drei lachen.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-30",
+          "sceneId": "2",
+          "ordinal": 30,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Gut. Erst die Kiste. Dann die Treppe. Dann die Welt retten.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-31",
+          "sceneId": "3",
+          "ordinal": 31,
+          "category": "scene",
+          "role": "",
+          "text": "Szene 3 · Fünf Minuten bis zum Gong",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-32",
+          "sceneId": "3",
+          "ordinal": 32,
+          "category": "audio",
+          "role": "",
+          "text": "SFX 02 · Gedämpfte Stimmen des ankommenden Publikums, leise unterlegen.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-33",
+          "sceneId": "3",
+          "ordinal": 33,
+          "category": "lighting",
+          "role": "",
+          "text": "LX 03 · Warmes Vorderlicht auf 70 %, Seitenlicht aus.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-34",
+          "sceneId": "3",
+          "ordinal": 34,
+          "category": "dialogue",
+          "role": "MIRA",
+          "text": "Draußen sitzen schon die ersten.",
+          "microphone": "3",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-35",
+          "sceneId": "3",
+          "ordinal": 35,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Vielleicht wollen sie nur Kaffee.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-36",
+          "sceneId": "3",
+          "ordinal": 36,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Wir haben keinen Schlüssel, kein Finale und genau fünf Minuten.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-37",
+          "sceneId": "3",
+          "ordinal": 37,
+          "category": "direction",
+          "role": "",
+          "text": "MIRA setzt sich auf die Kiste. Der Deckel hebt sich an einer Ecke leicht an.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-38",
+          "sceneId": "3",
+          "ordinal": 38,
+          "category": "dialogue",
+          "role": "MIRA",
+          "text": "Hat eigentlich schon jemand versucht, sie einfach aufzumachen?",
+          "microphone": "3",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-39",
+          "sceneId": "3",
+          "ordinal": 39,
+          "category": "direction",
+          "role": "",
+          "text": "Stille. LENA hebt den Deckel. Die Kiste ist offen.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-40",
+          "sceneId": "3",
+          "ordinal": 40,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Ich wollte euch die Überraschung nicht verderben.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-41",
+          "sceneId": "3",
+          "ordinal": 41,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Sie war die ganze Zeit offen.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-42",
+          "sceneId": "3",
+          "ordinal": 42,
+          "category": "dialogue",
+          "role": "MIRA",
+          "text": "Manchmal ist das Problem nur die Geschichte, die wir darüber erzählen.",
+          "microphone": "3",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-43",
+          "sceneId": "3",
+          "ordinal": 43,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Schreib das auf. Das klingt wie unser neues Finale.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-44",
+          "sceneId": "3",
+          "ordinal": 44,
+          "category": "props",
+          "role": "",
+          "text": "Aus der Kiste: ein kleines rotes Tuch und drei Texthefte.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-45",
+          "sceneId": "3",
+          "ordinal": 45,
+          "category": "technical",
+          "role": "",
+          "text": "Bereitschaft: Vorhang, Lichtwechsel LX 04 und Gong SFX 03.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-46",
+          "sceneId": "4",
+          "ordinal": 46,
+          "category": "scene",
+          "role": "",
+          "text": "Szene 4 · Das ist unser Zeichen",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-47",
+          "sceneId": "4",
+          "ordinal": 47,
+          "category": "direction",
+          "role": "",
+          "text": "Alle drei stehen nebeneinander. LENA verteilt die Texthefte, behält aber selbst keines.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-48",
+          "sceneId": "4",
+          "ordinal": 48,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Brauchst du deinen Text nicht?",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-49",
+          "sceneId": "4",
+          "ordinal": 49,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Den Anfang weiß ich. Für den Rest habe ich euch.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-50",
+          "sceneId": "4",
+          "ordinal": 50,
+          "category": "dialogue",
+          "role": "MIRA",
+          "text": "Und falls wir hängen bleiben?",
+          "microphone": "3",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-51",
+          "sceneId": "4",
+          "ordinal": 51,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Dann trinken wir sehr überzeugend Kaffee.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-52",
+          "sceneId": "4",
+          "ordinal": 52,
+          "category": "audio",
+          "role": "",
+          "text": "SFX 03 · Ein klarer Theatergong. Publikumsatmosphäre ausblenden.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-53",
+          "sceneId": "4",
+          "ordinal": 53,
+          "category": "lighting",
+          "role": "",
+          "text": "LX 04 · Bühnenlicht weich auf 100 %, Saallicht aus.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-54",
+          "sceneId": "4",
+          "ordinal": 54,
+          "category": "direction",
+          "role": "",
+          "text": "LENA atmet durch. MIRA legt ihr kurz die Hand auf die Schulter. OSKAR richtet seinen Kragen.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-55",
+          "sceneId": "4",
+          "ordinal": 55,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Das ist unser Zeichen.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-56",
+          "sceneId": "4",
+          "ordinal": 56,
+          "category": "dialogue",
+          "role": "MIRA",
+          "text": "Dann gehen wir.",
+          "microphone": "3",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-57",
+          "sceneId": "4",
+          "ordinal": 57,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Zusammen.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-58",
+          "sceneId": "4",
+          "ordinal": 58,
+          "category": "direction",
+          "role": "",
+          "text": "Sie treten nach vorne. Der Vorhang öffnet sich.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-59",
+          "sceneId": "4",
+          "ordinal": 59,
+          "category": "lighting",
+          "role": "",
+          "text": "LX 05 · Schlussbild halten, nach drei Sekunden langsam auf Schwarz.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        }
+      ],
+      "cache": {
+        "fetchedAt": null,
+        "stale": false
+      }
+    },
+    {
+      "productionId": "demo-foyer",
+      "revision": "demo-1",
+      "scenes": [
+        {
+          "id": "1",
+          "title": "Eine Garderobenmarke zu viel",
+          "ordinal": 0,
+          "roles": [
+            "LENA",
+            "OSKAR"
+          ]
+        }
+      ],
+      "roles": [
+        {
+          "id": "LENA",
+          "name": "Lena",
+          "actor": "Alex Bühnenfreund",
+          "personId": null
+        },
+        {
+          "id": "OSKAR",
+          "name": "Oskar",
+          "actor": "Robin Spielmann",
+          "personId": null
+        }
+      ],
+      "cues": [
+        {
+          "id": "demo-cue-0",
+          "sceneId": "1",
+          "ordinal": 0,
+          "category": "direction",
+          "role": "",
+          "text": "Ein leerer Garderobentresen. Auf ihm liegen zwei völlig gleiche Hüte.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-1",
+          "sceneId": "1",
+          "ordinal": 1,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Es gibt ein kleines Problem mit deiner Garderobenmarke.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-2",
+          "sceneId": "1",
+          "ordinal": 2,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Ich habe gar keinen Mantel abgegeben.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-3",
+          "sceneId": "1",
+          "ordinal": 3,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Eben. Dafür hast du jetzt drei.",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-4",
+          "sceneId": "1",
+          "ordinal": 4,
+          "category": "direction",
+          "role": "",
+          "text": "Oskar betrachtet die Hüte.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-5",
+          "sceneId": "1",
+          "ordinal": 5,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Dann nehme ich den, der zu meinem Hut passt.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-6",
+          "sceneId": "1",
+          "ordinal": 6,
+          "category": "dialogue",
+          "role": "LENA",
+          "text": "Welcher davon ist dein Hut?",
+          "microphone": "1",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-7",
+          "sceneId": "1",
+          "ordinal": 7,
+          "category": "dialogue",
+          "role": "OSKAR",
+          "text": "Das ist das etwas größere Problem.",
+          "microphone": "2",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-8",
+          "sceneId": "1",
+          "ordinal": 8,
+          "category": "audio",
+          "role": "",
+          "text": "Ein Gong aus dem Saal.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        },
+        {
+          "id": "demo-cue-9",
+          "sceneId": "1",
+          "ordinal": 9,
+          "category": "lighting",
+          "role": "",
+          "text": "Langsam auf Schwarz.",
+          "microphone": "",
+          "isAutoMic": false,
+          "micCueType": ""
+        }
+      ],
+      "cache": {
+        "fetchedAt": null,
+        "stale": false
+      }
+    }
+  ]
+}

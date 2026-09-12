@@ -1,0 +1,13 @@
+{
+  "date": "2026-09-12",
+  "zip": "/Users/logge/Downloads/Rampenlicht-Flutter-Paket.zip",
+  "zipSha256": "428f5b563606ed8272f5e913a8955709af3746aac142c04043f18ee1b0eb8799",
+  "manifestFilesChecked": 158,
+  "manifestMismatches": [],
+  "requirementsSource": "/Users/logge/Documents/Projects/skript/docs/theater-app.md",
+  "requirementsSha256": "1d3da525c9194dbe9ae8d2da8e4f9b6c383adc6ce85a4a85c71f83c30b057f03",
+  "requestedUrl": "https://script.blob.top/",
+  "requestedUrlResult": "ERR_NAME_NOT_RESOLVED",
+  "verifiedUiUrl": "https://skript.logge.top/",
+  "verificationScope": "Browser UI and source inspection; no cross-device live rehearsal or native Flutter build performed in this task."
+}

@@ -1,0 +1,12 @@
+{
+  "project": "theater-app-6fa5d",
+  "providers": {
+    "emailPassword": true
+  },
+  "authorizedDomains": [
+    "localhost",
+    "theater-app-6fa5d.firebaseapp.com",
+    "theater-app-6fa5d.web.app",
+    "theater-app.logge.top"
+  ]
+}

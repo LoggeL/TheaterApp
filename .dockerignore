@@ -1,0 +1,12 @@
+**
+!Dockerfile
+!server/
+!server/package.json
+!server/package-lock.json
+!server/src/
+!server/src/**
+!server/scripts/
+!server/scripts/bootstrap-admin.mjs
+!build/
+!build/web/
+!build/web/**

@@ -1,0 +1,25 @@
+services:
+  theater:
+    build: .
+    image: theater-app:local
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      FIREBASE_PROJECT_ID: theater-app-6fa5d
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
+      AUTH_PROVIDERS: password,google.com
+      ALLOWED_ORIGINS: ${APP_ORIGIN:-https://theater-app.logge.top}
+      APP_ORIGIN: ${APP_ORIGIN:-https://theater-app.logge.top}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      SCRIPT_SERVICE_URL: https://skript.logge.top/
+      SCRIPT_CACHE_DIR: /data/mobile-script-cache
+      MOBILE_PUSH_ENABLED: 'true'
+    volumes:
+      - theater-data:/data
+      - ${FIREBASE_CREDENTIALS_FILE:?Set FIREBASE_CREDENTIALS_FILE}:/run/secrets/firebase-service-account.json:ro
+    ports:
+      - 127.0.0.1:8787:8787
+    mem_limit: 512m
+    cpus: 1.0
+volumes:
+  theater-data:

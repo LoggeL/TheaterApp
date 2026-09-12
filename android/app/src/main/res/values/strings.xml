@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Working title; keep in sync with lib/core/brand.dart and iOS Info.plist. -->
+    <string name="app_name">Theater-App</string>
+    <string name="reminder_channel_name">Proben &amp; Termine</string>
+    <string name="reminder_channel_description">Erinnerungen und Änderungen zu deinen Theaterterminen</string>
+</resources>

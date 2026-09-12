@@ -1,0 +1,13 @@
+{
+  "API_BASE_URL": "https://your-app-domain.example",
+  "FIREBASE_PROJECT_ID": "your-firebase-project-id",
+  "FIREBASE_API_KEY": "public-client-api-key",
+  "FIREBASE_APP_ID": "platform-specific-firebase-app-id",
+  "FIREBASE_MESSAGING_SENDER_ID": "firebase-project-number",
+  "FIREBASE_AUTH_DOMAIN": "your-firebase-project-id.firebaseapp.com",
+  "GOOGLE_WEB_CLIENT_ID": "oauth-web-client-id.apps.googleusercontent.com",
+  "GOOGLE_IOS_CLIENT_ID": "oauth-ios-client-id.apps.googleusercontent.com",
+  "AUTH_PROVIDERS": "password,google.com",
+  "PUSH_ENABLED": "true",
+  "FIREBASE_VAPID_KEY": "public-web-push-key"
+}

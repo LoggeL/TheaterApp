@@ -1,0 +1,27 @@
+import { readFileSync } from 'node:fs';
+import { ScriptFocusBridge } from './script-focus.mjs';
+import { initializeApp, applicationDefault } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { getMessaging } from 'firebase-admin/messaging';
+import { Store } from './store.mjs';
+import { Theater } from './theater.mjs';
+import { createHttpServer } from './http.mjs';
+import { createScriptService } from './mobile-scripts.mjs';
+import { deliverPush, scheduleReminders } from './push.mjs';
+
+const projectId = process.env.FIREBASE_PROJECT_ID;
+if (!projectId) throw new Error('FIREBASE_PROJECT_ID fehlt. Siehe server/.env.example.');
+if (process.env.FIREBASE_AUTH_EMULATOR_HOST && process.env.NODE_ENV === 'production') throw new Error('Ein Produktionsserver darf keine Emulator-Tokens akzeptieren.');
+const firebase = initializeApp({ projectId, ...(process.env.FIREBASE_AUTH_EMULATOR_HOST ? {} : { credential: applicationDefault() }) });
+const auth = getAuth(firebase);
+const store = new Store(process.env.DATABASE_PATH ?? './data/theater.sqlite');
+const pushEnabled = process.env.MOBILE_PUSH_ENABLED === 'true' && !process.env.FIREBASE_AUTH_EMULATOR_HOST;
+const theater = new Theater(store, { bootstrapEmail: process.env.BOOTSTRAP_ADMIN_EMAIL, pushEnabled });
+const focusBridge = process.env.SCRIPT_FOCUS_BRIDGE === 'true' ? new ScriptFocusBridge(theater, { url: process.env.SCRIPT_SERVICE_URL, password: process.env.SCRIPT_DIRECTOR_PASSWORD_FILE ? readFileSync(process.env.SCRIPT_DIRECTOR_PASSWORD_FILE, 'utf8').trim() : '' }) : null;
+const server = createHttpServer({ theater, focusBridge, verifyToken: token => auth.verifyIdToken(token, true), scriptService: createScriptService(), allowedOrigins: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:8080,http://127.0.0.1:8080,http://127.0.0.1:8787,http://localhost:8787').split(',').map(x => x.trim()), authProviders: (process.env.AUTH_PROVIDERS ?? 'password,google.com').split(','), webDir: process.env.WEB_APP_DIR ?? '../build/web' });
+let delivering = false;
+const tick = async () => { if (delivering) return; delivering = true; try { scheduleReminders(theater); await deliverPush(theater, pushEnabled ? getMessaging(firebase) : null); } finally { delivering = false; } };
+const interval = setInterval(() => tick().catch(e => console.error('Push worker:', e.code ?? e.message)), 15000);
+const host = process.env.HOST ?? '127.0.0.1', port = Number(process.env.PORT ?? 8787);
+server.listen(port, host, () => console.log(`Theater-App: http://${host}:${port}; Firebase ${projectId}; push ${pushEnabled ? 'enabled' : 'disabled'}`));
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { clearInterval(interval); focusBridge?.close(); server.close(() => { store.close(); process.exit(0); }); });

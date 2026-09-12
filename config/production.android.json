@@ -1,0 +1,15 @@
+{
+  "APP_NAME": "Theater-App",
+  "API_BASE_URL": "https://theater-app.logge.top",
+  "FIREBASE_PROJECT_ID": "theater-app-6fa5d",
+  "FIREBASE_API_KEY": "AIzaSyBtZ9fNkwsLu-0FjyuxRnfkkdz-zpRhLTc",
+  "FIREBASE_APP_ID": "1:275051540922:android:8ef3a3eba5bdaa341aad83",
+  "FIREBASE_WEB_APP_ID": "1:275051540922:web:f517bcbe768d51271aad83",
+  "FIREBASE_MESSAGING_SENDER_ID": "275051540922",
+  "FIREBASE_AUTH_DOMAIN": "theater-app-6fa5d.firebaseapp.com",
+  "AUTH_PROVIDERS": "password,google.com",
+  "PUSH_ENABLED": "true",
+  "FIREBASE_VAPID_KEY": "BF5vz7WSWAbmi0FplhjODir-KdLguUiCS7rIWcMxF3nVQegaxzxFcSZB78nLFOWKz9pjMyEqrrSj-3HfoYHu6Bs",
+  "GOOGLE_WEB_CLIENT_ID": "275051540922-balqumtuhu5ghv1p3o8vqd72dlmd3ieu.apps.googleusercontent.com",
+  "GOOGLE_IOS_CLIENT_ID": "275051540922-831k6pu2n22f8p4q4etho4on2rr5n8of.apps.googleusercontent.com"
+}
