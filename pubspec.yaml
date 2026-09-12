@@ -1,7 +1,7 @@
 name: theater_app
 description: Die native Mitglieder-App des Kolpingtheaters Ramsen.
 publish_to: none
-version: 0.2.0+2
+version: 0.2.1+3
 environment:
   sdk: '>=3.12.0 <4.0.0'
   flutter: '>=3.44.0'

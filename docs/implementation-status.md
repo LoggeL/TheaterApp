@@ -1,23 +1,23 @@
 # Abnahmestand
 
-Stand: 12. September 2026. Produktname: Theater-App. Flutter 3.44.6 / Dart 3.12.2, Node 24.18.0. Terminabstimmungen sind ausgeschlossen.
+Stand: 13. September 2026. Produktname: Theater-App. Flutter 3.44.6 / Dart 3.12.2, Node 24.18.0. Terminabstimmungen sind ausgeschlossen.
 
 ## Bereitgestellt
 
 Die Flutter-Web-App und der SQLite-Backenddienst laufen auf dem vorhandenen Dokploy-Server unter https://theater-app.logge.top. Firebase-Projekt `theater-app-6fa5d` ist mit E-Mail/Passwort, Google und FCM eingerichtet. Die eigene Serveridentität liegt als private Datei außerhalb von Git. Der Admin `hyper.xjo@gmail.com` ist mit `Logge Louis` verknüpft. Seine Google-Anmeldung auf der laufenden Instanz wurde erfolgreich abgeschlossen.
 
-Die beiden Sommerstücke 2025 und 2026 sind aus dem aktuellen Skriptdienst importiert: 24 Szenen / 1351 Cues und 28 Szenen / 1612 Cues. Eine als „Testprobe“ bezeichnete Probe dient zum Ausprobieren. Weitere Personen und verbindliche Besetzungen sind noch von der Theaterleitung zu pflegen. Bestehende Probenplan-Daten wurden nicht automatisch migriert.
+Die beiden Sommerstücke 2025 und 2026 sind aus dem aktuellen Skriptdienst importiert: 24 Szenen / 1351 Cues und 28 Szenen / 1612 Cues. Eine als „Testprobe“ bezeichnete Probe dient zum Ausprobieren. 41 Personen der bisherigen Theaterverwaltung und sieben weitere aus dem Stück von 2025 sind als 48 Personen übernommen. Die bereits vorhandenen Personen Logge, Yunus und Jonas sowie deren Freigaben blieben erhalten. 67 Einzelrollen sind zugeordnet; drei gemeinsame Sprechergruppen von 2025 haben keine einzelne Person. Alte Anmeldenamen und Passwörter wurden nicht in Firebase übertragen. Bestehende Termine und Rückmeldungen des Probenplans bleiben separat.
 
 ## Ausgeführte Prüfungen
 
 | Bereich | Ergebnis und Grenze |
 | --- | --- |
 | Flutter-Analyse | Ohne Befund |
-| Flutter-Tests | 36 Tests bestanden, einschließlich 390-Pixel-Layout, Leser, Kontowechsel, Offline-Warteschlange und tatsächlicher Anwesenheit |
-| Backend | 18 Tests bestanden: Rechte, Freigabe, Versionskonflikte, Idempotenz, Späterkommen, Push-Wiederholung und Regiebrücke |
+| Flutter-Tests | 39 Tests bestanden, einschließlich Kontenübersicht bei 320 und 1100 Pixeln, Suche nach Rolle, Auswahl einer Registrierung zur Person, Leser, Kontowechsel und Offline-Warteschlange |
+| Backend | 21 Tests bestanden, einschließlich atomarem Stammdatenimport, wiederholbarer Anwendung und unveränderten Login-Freigaben: Rechte, Freigabe, Versionskonflikte, Idempotenz, Späterkommen, Push-Wiederholung und Regiebrücke |
 | Android mit Firebase-Emulator | Durchgängiger Gerätetest bestanden: E-Mail-Anmeldung, Später-Zusage, Server-Read-back, Drehbuch, Abmeldung und Wartestatus eines anderen Kontos |
 | Echtes Firebase / öffentlicher Server | Unbestätigte und wartende Konten erhalten HTTP 403 für interne Daten. Manuelle Personenzuordnung und Freigabe ermöglichen Zugriff. Späterkommen mit Uhrzeit, Empfängerbeschränkung, Lesebestätigung und anschließende Sperrung geprüft |
-| Google im Browser | Eigener Admin erfolgreich angemeldet. Live-Startseite, Einstellungen, Verwaltung und Besetzungseditor geöffnet |
+| Google im Browser | Eigener Admin erfolgreich angemeldet. Live-Kontenübersicht mit 48 Personen, drei bestehenden Verknüpfungen und echten Mailadressen geprüft; Personen- und Rollenfilter funktionieren |
 | Android-Push | Echter FCM-Versand an ein temporäres Gerätetestkonto und Empfang mit dem nativen Firebase-SDK bestätigt. Testkonto und Gerätetoken anschließend entfernt |
 | Web-Push | Service Worker und VAPID konfiguriert. Test in Brave endet mit „Registration failed - push service error“. Web-Push daher nicht als zugestellt abgenommen |
 | Skript-Regie | Bidirektionaler Live-Test in einem isolierten Raum des vorhandenen Skriptdienstes bestanden: App-Marker erreicht zweiten Socket-Teilnehmer; Marker und Löschen in Gegenrichtung erreichen App. Keine bestehende Produktion wurde dabei umgeschaltet |

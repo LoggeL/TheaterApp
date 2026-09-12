@@ -134,7 +134,7 @@ export class Theater {
         if (old && old.version !== b.version && (old.version ?? 1) !== b.version) fail(409, 'Die Person wurde zwischenzeitlich geändert.');
         const name = required(b.name, 'Name');
         if (memberId === a.personId && b.active === false) fail(409, 'Den eigenen Zugang hier nicht deaktivieren.');
-        s.put('members', memberId, { id: memberId, name, group: text(b.group), initials: initials(name), active: b.active !== false, version: (old?.version ?? 0) + 1 }); return { id: memberId };
+        s.put('members', memberId, { ...old, id: memberId, name, group: text(b.group), initials: initials(name), active: b.active !== false, version: (old?.version ?? 0) + 1 }); return { id: memberId };
       }
       case 'event.save': {
         admin(); const eventId = b.id || id(), old = s.get('events', eventId);

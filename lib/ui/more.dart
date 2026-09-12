@@ -202,7 +202,7 @@ class MoreScreen extends StatelessWidget {
         ),
         const SizedBox(height: 25),
         const Text(
-          '${Brand.name} · 0.2.0\n${Brand.subtitle}',
+          '${Brand.name} · 0.2.1\n${Brand.subtitle}',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 12, height: 1.6),
         ),
@@ -211,7 +211,7 @@ class MoreScreen extends StatelessWidget {
           onPressed: () => showAboutDialog(
             context: context,
             applicationName: Brand.name,
-            applicationVersion: '0.2.0',
+            applicationVersion: '0.2.1',
             applicationIcon: const Icon(
               Icons.theater_comedy_outlined,
               size: 36,

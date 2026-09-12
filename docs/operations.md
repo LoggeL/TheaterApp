@@ -75,3 +75,25 @@ Private Notizen verbleiben lokal. Kommentare und Mitteilungen liegen auf dem Ser
 Auf Dokploy ist `SCRIPT_FOCUS_BRIDGE=true` gesetzt. Das bestehende Regiepasswort liegt als eigene private Datei unter `secrets/script-director-password` auf HomeBox und wird ausschließlich im Server gelesen. Der Client erhält dieses Passwort nicht. App-Berechtigungen bleiben erforderlich, bevor der Server eine Regieübernahme weiterleitet.
 
 Beim Öffnen der Regiesitzung verbindet sich die App mit dem gleichnamigen Stückraum im bestehenden Skriptdienst. Nur passende Textstellen-IDs und Fassungen werden übernommen. „Regie übernehmen“ und das Antippen einer Textstelle können eine andere Regie ablösen, entsprechend dem bestehenden Skript-Verhalten. Folgen bleibt eine persönliche Entscheidung. Eine unbenutzte Serververbindung wird nach zehn Minuten geschlossen. Technisch ist der bestehende Skriptdienst weiterhin die maßgebliche Quelle für gemeinsame Marker; dessen vorhandene Zugangsregeln werden durch die neue App nicht ersetzt.
+
+
+## Personen, Rollen und Login-Verknüpfungen
+
+Unter „Probenleitung → Konten & Verknüpfungen“ zeigt „Personen“ auch Mitglieder ohne Login. Die E-Mail-Adresse gehört zum tatsächlich verknüpften Firebase-Konto. Eine gesperrte oder inaktive Person bleibt als verknüpft erkennbar; der Zugangsstatus steht daneben. Mehrere Theaterrollen hängen an derselben Person. Über „Konten“ lassen sich ausstehende, freigegebene, gesperrte und abgelehnte Registrierungen filtern. „Rollen“ zeigt die Besetzung je Produktion. Die Suche berücksichtigt Namen, Login-Adressen, Rollen und Produktionen.
+
+„Konto verknüpfen“ an einer Person öffnet die vorhandenen Registrierungen und anschließend die Freigabe mit vorausgewählter Person. Die Freigabe bleibt ein ausdrücklicher Admin-Schritt. Ohne Registrierung wird kein Firebase-Konto angelegt. Personen können sich mit ihrer eigenen E-Mail-Adresse oder Google registrieren. Die generierten alten Adressen `name@kolpingtheater-ramsen.de` sind keine bestätigten Postfächer und werden nicht übernommen.
+
+### Einmaliger Stammdatenimport
+
+`server/scripts/import-roster.mjs` übernimmt explizit ausgewählte Personenfelder und Besetzungen. Es übernimmt keine Passwörter, Login-Adressen oder Admin-Rechte. Die private Eingabedatei liegt außerhalb von Git in `.secrets/roster-import.json`. Sie enthält Quell-IDs, Namen, Gruppen, Aufgaben, explizite Zuordnungen vorhandener Personen und bestätigte Namensvarianten für die Skriptbesetzung.
+
+Vor einer Anwendung `python3 tool/backup.py` ausführen. Vorschau und Anwendung:
+
+```sh
+node server/scripts/import-roster.mjs PFAD_ZUR_DATENBANK .secrets/roster-import.json
+node server/scripts/import-roster.mjs PFAD_ZUR_DATENBANK .secrets/roster-import.json --apply
+```
+
+Die Anwendung läuft in einer SQLite-Transaktion. Bestehende abweichende Besetzungen werden als Konflikt abgewiesen. Eine erfolgreich angewendete Migration ist anhand von Quellname, Migrations-ID und Eingabe-Hash wiederholbar, ohne Personen doppelt anzulegen oder spätere Änderungen zu überschreiben. `member.save` erhält Quellbezüge und importierte Aufgaben bei späteren Namensänderungen.
+
+Der Import vom 13. September 2026 umfasst 41 Personen der bisherigen Theaterverwaltung und sieben weitere Namen aus dem Stück von 2025. Die vorhandene Admin-Person bleibt erhalten und übernimmt den Quellbezug „Logge“. Auch die während der Arbeit angelegten Personen Yunus und Jonas sowie ihre Login-Verknüpfungen bleiben erhalten. Louis bleibt eine eigene Person. Die bestätigten Zuordnungen sind Maximilian → Max F., Max → Max H. und Lina → Lina R.; Sebastian/Sebbi und Tobias/Tobi ergeben sich aus den übereinstimmenden Rollen Wilson und Jacques. 67 Einzelrollen sind besetzt. Die drei Einträge für gemeinsame Sprechergruppen von 2025 bleiben ohne Einzelperson.

@@ -4,6 +4,7 @@ import '../core/app_controller.dart';
 import '../core/identity.dart';
 import '../core/models.dart';
 import 'events.dart';
+import 'accounts_admin.dart';
 import 'rehearsal_admin.dart';
 import 'messages.dart';
 import 'theme.dart';
@@ -145,9 +146,9 @@ class ManagementScreen extends StatelessWidget {
         tile(
           ctx,
           Icons.person_add_alt,
-          'Konten freigeben',
+          'Konten & Verknüpfungen',
           AccountsAdminScreen(controller: controller),
-          '${controller.pendingAccounts.length} neue Konten',
+          'Personen, Rollen und E-Mail-Adressen',
         ),
         const SizedBox(height: 10),
         tile(
@@ -205,166 +206,18 @@ class ManagementScreen extends StatelessWidget {
   );
 }
 
-class AccountsAdminScreen extends StatefulWidget {
-  const AccountsAdminScreen({super.key, required this.controller});
-  final AppController controller;
-  @override
-  State<AccountsAdminScreen> createState() => _AccountsAdminScreenState();
-}
-
-class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
-  late Future<JsonMap> _data;
-  bool _all = false;
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  void _load() {
-    _data = widget.controller.remote('/admin/accounts');
-  }
-
-  Future<void> _change(JsonMap account, String status) async {
-    try {
-      await widget.controller.performAction({
-        'action': 'account.status',
-        'uid': account['uid'],
-        'version': account['version'],
-        'status': status,
-      });
-      if (mounted) setState(_load);
-    } catch (e) {
-      if (mounted) showProblem(context, e);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Konten freigeben'),
-      actions: [
-        IconButton(
-          tooltip: 'Aktualisieren',
-          onPressed: () => setState(_load),
-          icon: const Icon(Icons.refresh),
-        ),
-      ],
-    ),
-    body: FutureBuilder<JsonMap>(
-      future: _data,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return EmptyState(
-            icon: Icons.cloud_off_outlined,
-            title: 'Konten nicht geladen',
-            message: identityError(snapshot.error!),
-            action: OutlinedButton(
-              onPressed: () => setState(_load),
-              child: const Text('Erneut versuchen'),
-            ),
-          );
-        }
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final accounts = jsonList(
-          snapshot.data!['accounts'],
-        ).map(jsonMap).where((a) => _all || a['status'] == 'pending').toList();
-        return ListView(
-          padding: const EdgeInsets.all(22),
-          children: [
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: false, label: Text('Neue Konten')),
-                ButtonSegment(value: true, label: Text('Alle Konten')),
-              ],
-              selected: {_all},
-              onSelectionChanged: (s) => setState(() => _all = s.single),
-            ),
-            const SizedBox(height: 22),
-            if (accounts.isEmpty)
-              const EmptyState(
-                icon: Icons.verified_user_outlined,
-                title: 'Alles erledigt',
-                message: 'Es warten keine neuen Konten auf Freigabe.',
-              ),
-            for (final a in accounts)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Card(
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 10,
-                    ),
-                    leading: const Icon(Icons.person_outline),
-                    title: Text(textValue(a['name'])),
-                    subtitle: Text(
-                      '${textValue(a['email'])}\n${switch (a['status']) {
-                        'pending' => 'Freigabe ausstehend',
-                        'approved' => 'Freigegeben',
-                        'suspended' => 'Gesperrt',
-                        _ => 'Abgelehnt',
-                      }}',
-                    ),
-                    isThreeLine: true,
-                    trailing: a['status'] == 'pending'
-                        ? const Icon(Icons.chevron_right)
-                        : a['uid'] == widget.controller.user?.id
-                        ? null
-                        : PopupMenuButton<String>(
-                            onSelected: (s) => _change(a, s),
-                            itemBuilder: (_) => [
-                              if (a['status'] == 'approved')
-                                const PopupMenuItem(
-                                  value: 'suspended',
-                                  child: Text('Zugang sperren'),
-                                ),
-                              if (a['status'] == 'suspended')
-                                const PopupMenuItem(
-                                  value: 'approved',
-                                  child: Text('Wieder freigeben'),
-                                ),
-                            ],
-                          ),
-                    onTap: a['status'] == 'pending'
-                        ? () async {
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => AccountApprovalScreen(
-                                  controller: widget.controller,
-                                  account: a,
-                                  accounts: jsonList(
-                                    snapshot.data!['accounts'],
-                                  ).map(jsonMap).toList(),
-                                ),
-                              ),
-                            );
-                            if (mounted) setState(_load);
-                          }
-                        : null,
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
-    ),
-  );
-}
-
 class AccountApprovalScreen extends StatefulWidget {
   const AccountApprovalScreen({
     super.key,
     required this.controller,
     required this.account,
     required this.accounts,
+    this.initialPersonId,
   });
   final AppController controller;
   final JsonMap account;
   final List<JsonMap> accounts;
+  final int? initialPersonId;
   @override
   State<AccountApprovalScreen> createState() => _AccountApprovalScreenState();
 }
@@ -373,6 +226,12 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
   int? _person;
   String _search = '', _role = 'member';
   bool _busy = false;
+  @override
+  void initState() {
+    super.initState();
+    _person = widget.initialPersonId;
+  }
+
   Future<void> _save(bool approve) async {
     setState(() => _busy = true);
     try {
