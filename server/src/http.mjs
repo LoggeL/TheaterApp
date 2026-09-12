@@ -1,9 +1,10 @@
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { AppError } from './theater.mjs';
 
-export function createHttpServer({ theater, verifyToken, scriptService, focusBridge = null, allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null }) {
+export function createHttpServer({ theater, verifyToken, scriptService, focusBridge = null, media = null, allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null }) {
   const origins = new Set(allowedOrigins);
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   return createServer(async (req, res) => {
@@ -12,7 +13,8 @@ export function createHttpServer({ theater, verifyToken, scriptService, focusBri
     const origin = req.headers.origin;
     if (origin && origins.has(origin)) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key'); res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS'); }
     try {
-      const path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname).replace(/\/+$/, '') || '/';
+      const requestUrl = new URL(req.url, 'http://localhost');
+      const path = decodeURIComponent(requestUrl.pathname).replace(/\/+$/, '') || '/';
       if (path === '/api/healthz') return json(res, 200, { ok: true, service: 'theater-app', firebase: true, release: process.env.RELEASE_SHA ?? 'development' });
       if (req.method === 'OPTIONS') { if (origin && !origins.has(origin)) throw new AppError(403, 'Diese App-Adresse ist nicht freigegeben.'); res.writeHead(204); res.end(); return; }
       if (!path.startsWith('/api/mobile/v1')) {
@@ -35,10 +37,11 @@ export function createHttpServer({ theater, verifyToken, scriptService, focusBri
       let identity;
       try { identity = await verifyToken(token); } catch { throw new AppError(401, 'Die Anmeldung ist abgelaufen oder wurde gesperrt.'); }
       if (!identity?.uid) throw new AppError(401, 'Ungültige Anmeldung.');
+      if (!['/auth/session', '/auth/logout'].includes(route)) theater.account(identity.uid);
       let body = {};
       if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
         let length = 0; const chunks = [];
-        for await (const chunk of req) { length += chunk.length; if (length > 2 * 1024 * 1024) throw new AppError(413, 'Die Anfrage ist zu groß.'); chunks.push(chunk); }
+        for await (const chunk of req) { length += chunk.length; if (length > (route === '/media' ? 12 : 2) * 1024 * 1024) throw new AppError(413, 'Die Anfrage ist zu groß.'); chunks.push(chunk); }
         if (length) { try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new AppError(400, 'Ungültiges JSON.'); } }
         if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AppError(400, 'Ungültige Anfrage.');
       }
@@ -48,6 +51,30 @@ export function createHttpServer({ theater, verifyToken, scriptService, focusBri
         return json(res, 200, { ok: true });
       }
       theater.account(identity.uid);
+      if (route === '/profile' && req.method === 'PUT') {
+        theater.action(identity.uid, { ...body, action: 'profile.save' }, req.headers['idempotency-key'] || randomUUID());
+        return json(res, 200, { user: theater.profile(theater.account(identity.uid)) });
+      }
+      if (media) {
+        if (route === '/galleries' && req.method === 'GET') return json(res, 200, await media.list(identity.uid));
+        if (route === '/galleries' && req.method === 'POST') return json(res, 200, { gallery: await media.saveGallery(identity.uid, body) });
+        if (route === '/media' && req.method === 'POST') return json(res, 201, await media.upload(identity.uid, body));
+        const galleryPage = route.match(/^\/galleries\/([^/]+)$/);
+        if (galleryPage && req.method === 'GET') return json(res, 200, await media.page(identity.uid, galleryPage[1], { offset: requestUrl.searchParams.get('offset'), limit: requestUrl.searchParams.get('limit'), includeHidden: requestUrl.searchParams.get('includeHidden') === 'true' }));
+        const publication = route.match(/^\/galleries\/([^/]+)\/visibility$/);
+        if (publication && req.method === 'PUT') return json(res, 200, media.publication(identity.uid, publication[1], body.published, body.version));
+        const visible = route.match(/^\/media\/([^/]+)\/visibility$/);
+        if (visible && req.method === 'PUT') return json(res, 200, media.visibility(identity.uid, visible[1], body.hidden));
+        const asset = route.match(/^\/galleries\/([^/]+)\/assets\/([^/]+)(\/original)?$/);
+        const direct = route.match(/^\/media\/([^/]+)$/);
+        if ((asset || direct) && req.method === 'GET') {
+          const result = asset ? await media.galleryImage(identity.uid, asset[1], asset[2], requestUrl.searchParams.get('size') === 'preview', !!asset[3]) : await media.image(identity.uid, direct[1]);
+          theater.account(identity.uid);
+          const headers = { 'Content-Type': result.mime, 'Content-Length': result.bytes.length, 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Authorization, Origin' };
+          if (asset?.[3]) headers['Content-Disposition'] = `attachment; filename="theater-${asset[2].replace(/[^a-zA-Z0-9-]/g, '')}.${({ 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp', 'image/avif':'avif' })[result.mime] || 'img'}"`;
+          res.writeHead(200, headers); res.end(result.bytes); return;
+        }
+      }
       if (route === '/snapshot' && req.method === 'GET') return json(res, 200, theater.snapshot(identity.uid));
       if (route === '/actions' && req.method === 'POST') return json(res, 200, theater.action(identity.uid, body, req.headers['idempotency-key']));
       if (route === '/admin/accounts' && req.method === 'GET') return json(res, 200, theater.adminData(identity.uid));

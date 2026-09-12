@@ -1,3 +1,4 @@
+import 'brand_logo.dart';
 import 'package:flutter/material.dart';
 import '../core/app_controller.dart';
 import '../core/brand.dart';
@@ -127,11 +128,7 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                   children: [
                     const Row(
                       children: [
-                        Icon(
-                          Icons.theater_comedy_outlined,
-                          color: StageTheme.orange,
-                          size: 32,
-                        ),
+                        BrandLogo(size: 37),
                         SizedBox(width: 12),
                         Text(
                           Brand.name,

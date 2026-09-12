@@ -1,3 +1,4 @@
+import 'profile.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../core/app_controller.dart';
@@ -82,7 +83,11 @@ class ResponsesAdminScreen extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 8),
             child: Card(
               child: ListTile(
-                leading: CircleAvatar(child: Text(m.initials)),
+                leading: MemberAvatar(
+                  controller: controller,
+                  avatarId: m.avatarId,
+                  initials: m.initials,
+                ),
                 title: Text(m.name),
                 subtitle: Text(m.group),
                 trailing: ConstrainedBox(
@@ -224,7 +229,11 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
-                    CircleAvatar(child: Text(m.initials)),
+                    MemberAvatar(
+                      controller: widget.controller,
+                      avatarId: m.avatarId,
+                      initials: m.initials,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(

@@ -1,0 +1,23 @@
+// Live read-only gallery qualification using the disposable QA identity.
+import { readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import assert from 'node:assert/strict';
+import { Immich } from '../src/immich.mjs';
+const root = new URL('../../', import.meta.url), cfg = JSON.parse(await readFile(new URL('.secrets/qa-native.json', root)));
+const auth = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${cfg.FIREBASE_API_KEY}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email:cfg.QA_EMAIL,password:cfg.QA_PASSWORD,returnSecureToken:true}) }).then(r => r.json());
+if (!auth.idToken) throw Error('Disposable QA login failed');
+const origin = 'https://theater-app.logge.top/api/mobile/v1';
+const get = async path => { const r = await fetch(origin+path,{headers:{Authorization:`Bearer ${auth.idToken}`}}); assert.equal(r.status,200, `Request failed: ${path}`); return r; };
+const galleries = await get('/galleries/').then(r=>r.json());
+const g = galleries.galleries.find(g=>g.sourceUrl==='https://photo.rittmann.cloud/s/sommerstueck-2026'); assert.ok(g);
+const page = await get(`/galleries/${g.id}/?offset=0&limit=60`).then(r=>r.json());
+const second = await get(`/galleries/${g.id}/?offset=60&limit=60`).then(r=>r.json());
+assert.equal(page.assets.length,60); assert.equal(second.assets.length,60); assert.equal(new Set([...page.assets,...second.assets].map(a=>a.id)).size,120);
+const a=page.assets.find(a=>a.type==='IMAGE'); const image = await get(a.path+'/original/');
+const bytes=Buffer.from(await image.arrayBuffer()); const source = await new Immich().original(g.sourceUrl,a.id);
+const hash=b=>createHash('sha256').update(b).digest('hex'); assert.equal(hash(bytes),hash(source.bytes));
+assert.equal((await fetch(origin+a.path+'/original/')).status,401);
+assert.match(image.headers.get('cache-control'),/no-store/);
+await writeFile(new URL('artifacts/gallery-original-qa.jpg',root),bytes);
+const report={galleryId:g.id,count:page.total,pagination:'120 distinct assets across 2 pages',originalBytes:bytes.length,originalSha256:hash(bytes),sourceMatches:true,anonymousStatus:401,mime:image.headers.get('content-type'),cache:image.headers.get('cache-control')};
+await writeFile(new URL('artifacts/gallery-live.json',root),JSON.stringify(report,null,2));console.log(JSON.stringify(report));

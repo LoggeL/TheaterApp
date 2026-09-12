@@ -23,3 +23,19 @@ subprocess.run(ssh+[f'docker exec {shlex.quote(name)} rm {shlex.quote(remote)}']
 with sqlite3.connect(dest) as db:
  if db.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RuntimeError('Backup integrity check failed')
 print(f'Consistent backup verified: {dest}')
+
+# Media files are immutable and are written before their database record.
+# Copying them after the SQLite snapshot includes every referenced image.
+media_dest = folder/f'theater-{stamp}-media.tar.gz'
+command = f'docker exec {shlex.quote(name)} sh -c '+shlex.quote('if [ -d /data/media ]; then tar czf - -C /data media; else tar czf - --files-from /dev/null; fi')
+with media_dest.open('xb') as f:
+ os.chmod(media_dest, 0o600)
+ subprocess.run(ssh+[command], stdout=f, check=True)
+import tarfile
+with tarfile.open(media_dest, 'r:gz') as archive:
+ with sqlite3.connect(dest) as db:
+  records = [json.loads(row[0]) for row in db.execute("SELECT data FROM entities WHERE kind='media'")]
+ files = set(archive.getnames())
+ for record in records:
+  if 'media/'+record['id']+'.webp' not in files: raise RuntimeError('A referenced media file is missing from the backup')
+print(f'Media backup verified: {media_dest} ({len(records)} referenced images)')

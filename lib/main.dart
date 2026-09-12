@@ -1,3 +1,4 @@
+import 'ui/brand_logo.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -257,11 +258,7 @@ class _AppShellState extends State<AppShell> {
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.theater_comedy_outlined,
-              color: StageTheme.orange,
-              size: 27,
-            ),
+            const BrandLogo(size: 32),
             const SizedBox(width: 10),
             Text(
               Brand.name,

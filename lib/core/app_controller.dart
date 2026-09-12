@@ -475,6 +475,66 @@ class AppController extends ChangeNotifier {
     return result;
   }
 
+  final _mediaCache = <String, MediaData>{};
+  final _mediaLoading = <String, Future<MediaData>>{};
+  Future<MediaData> mediaBytes(String path, {bool cache = true}) async {
+    if (_isDemo || !hasAccess || _token == null) {
+      throw const ApiException(
+        'Bitte mit einem freigegebenen Theaterkonto anmelden.',
+      );
+    }
+    if (cache && _mediaCache.containsKey(path)) {
+      final value = _mediaCache.remove(path)!;
+      _mediaCache[path] = value;
+      return value;
+    }
+    if (cache && _mediaLoading.containsKey(path)) return _mediaLoading[path]!;
+    final generation = _generation;
+    Future<MediaData> fetch() async {
+      final result = await _api.binary(_apiBaseUrl, path, token: _token!);
+      if (!_current(generation) || !hasAccess) {
+        throw const ApiException(
+          'Das Konto hat sich geändert.',
+          statusCode: 401,
+        );
+      }
+      if (cache) {
+        _mediaCache[path] = result;
+        while (_mediaCache.length > 60 ||
+            _mediaCache.values.fold<int>(0, (n, v) => n + v.bytes.length) >
+                32 * 1024 * 1024) {
+          _mediaCache.remove(_mediaCache.keys.first);
+        }
+      }
+      return result;
+    }
+
+    final task = fetch();
+    if (cache) _mediaLoading[path] = task;
+    try {
+      return await task;
+    } finally {
+      if (_current(generation)) _mediaLoading.remove(path);
+    }
+  }
+
+  Future<void> saveProfile({
+    required String tagline,
+    required String? avatarId,
+    required int version,
+  }) async {
+    await remote(
+      '/profile',
+      method: 'PUT',
+      body: {
+        'tagline': tagline,
+        'avatarId': avatarId,
+        'profileVersion': version,
+      },
+    );
+    await refresh();
+  }
+
   Future<void> performAction(JsonMap body) async {
     final previous = _outbox.map((a) => a.id).toSet();
     await _enqueue(body);
@@ -542,6 +602,8 @@ class AppController extends ChangeNotifier {
   }
 
   void _resetMemory() {
+    _mediaCache.clear();
+    _mediaLoading.clear();
     _token = null;
     _account = null;
     _user = null;

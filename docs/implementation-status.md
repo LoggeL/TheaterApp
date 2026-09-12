@@ -13,8 +13,8 @@ Die beiden Sommerstücke 2025 und 2026 sind aus dem aktuellen Skriptdienst impor
 | Bereich | Ergebnis und Grenze |
 | --- | --- |
 | Flutter-Analyse | Ohne Befund |
-| Flutter-Tests | 39 Tests bestanden, einschließlich Kontenübersicht bei 320 und 1100 Pixeln, Suche nach Rolle, Auswahl einer Registrierung zur Person, Leser, Kontowechsel und Offline-Warteschlange |
-| Backend | 21 Tests bestanden, einschließlich atomarem Stammdatenimport, wiederholbarer Anwendung und unveränderten Login-Freigaben: Rechte, Freigabe, Versionskonflikte, Idempotenz, Späterkommen, Push-Wiederholung und Regiebrücke |
+| Flutter-Tests | 46 Tests bestanden, einschließlich Kontenübersicht bei 320 und 1100 Pixeln, Suche nach Rolle, Auswahl einer Registrierung zur Person, Leser, Kontowechsel und Offline-Warteschlange |
+| Backend | 27 Tests bestanden, einschließlich atomarem Stammdatenimport, wiederholbarer Anwendung und unveränderten Login-Freigaben: Rechte, Freigabe, Versionskonflikte, Idempotenz, Späterkommen, Push-Wiederholung und Regiebrücke |
 | Android mit Firebase-Emulator | Durchgängiger Gerätetest bestanden: E-Mail-Anmeldung, Später-Zusage, Server-Read-back, Drehbuch, Abmeldung und Wartestatus eines anderen Kontos |
 | Echtes Firebase / öffentlicher Server | Unbestätigte und wartende Konten erhalten HTTP 403 für interne Daten. Manuelle Personenzuordnung und Freigabe ermöglichen Zugriff. Späterkommen mit Uhrzeit, Empfängerbeschränkung, Lesebestätigung und anschließende Sperrung geprüft |
 | Google im Browser | Eigener Admin erfolgreich angemeldet. Live-Kontenübersicht mit 48 Personen, drei bestehenden Verknüpfungen und echten Mailadressen geprüft; Personen- und Rollenfilter funktionieren |
@@ -24,7 +24,11 @@ Die beiden Sommerstücke 2025 und 2026 sind aus dem aktuellen Skriptdienst impor
 | Web-Release | Produktionsbuild erstellt und auf Dokploy gestartet. Öffentlicher Healthcheck liefert den gebauten Release-Hash; geschützter Snapshot ohne Token HTTP 401 |
 | Android-Release | Signierte APK und AAB erfolgreich gebaut. Debug- und Release-Signatur in Firebase registriert |
 | Laufzeitabhängigkeiten | `npm audit --omit=dev`: keine bekannten Befunde. Ein gezieltes uuid-Override behebt die transitive gaxios-Abhängigkeit |
-| Datensicherung | Konsistentes SQLite-Backup über die Backup-API geladen und mit `PRAGMA integrity_check` geprüft |
+| Galerien und Profile | Immich-Anbindung mit 3.970 Aufnahmen, Pagination, geschützten Vorschaubildern, Lightbox und Originaldownload. Live-Originaldatei und Immich-Quelle sind bytegleich (3.590.919 Bytes). Konto-, Upload-, Freigabe- und Downloadrechte automatisiert geprüft. Browser zeigt Raster und Lightbox |
+| Android-Galerie und Profil | Gerätetest mit echtem Firebase und Dokploy bestanden: Profilupload, Status bearbeiten und zurücklesen, Kalender, Lightbox-Bildwechsel, geschützter Originalabruf und Abmeldung. Der native Dateiauswahldialog wurde nicht automatisiert bedient |
+| Monatskalender | Agenda/Kalender-Wechsel, Monatsgrenzen, Schalttage und mehrtägige Proben geprüft, schmale und breite Darstellung einschließlich dunklem Design |
+| Original-Logo | Unveränderte Originaldatei der offiziellen Presseseite, abgeleitete Icons für Web, Android und iOS |
+| Datensicherung | Konsistentes SQLite-Backup über die Backup-API geladen und mit `PRAGMA integrity_check` geprüft; passendes Medienarchiv einschließlich Referenzprüfung |
 
 Die lokalen Prüfprotokolle liegen unter `artifacts/` und werden nicht in Git übertragen. Die CI führt Analyse, Flutter- und Servertests sowie den Webbuild erneut auf dem gepushten Stand aus.
 

@@ -1,3 +1,6 @@
+import 'brand_logo.dart';
+import 'profile.dart';
+import 'galleries.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -35,16 +38,11 @@ class MoreScreen extends StatelessWidget {
             padding: const EdgeInsets.all(20),
             child: Row(
               children: [
-                CircleAvatar(
+                MemberAvatar(
+                  controller: controller,
+                  avatarId: user?.avatarId,
+                  initials: user?.initials ?? 'KR',
                   radius: 27,
-                  backgroundColor: const Color(0xFFFFE2D3),
-                  child: Text(
-                    user?.initials ?? 'KR',
-                    style: const TextStyle(
-                      color: StageTheme.ink,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -64,6 +62,11 @@ class MoreScreen extends StatelessWidget {
                                   : 'Kolpingtheater Ramsen'),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
+                      if (user?.tagline.isNotEmpty == true)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(user!.tagline),
+                        ),
                       if (user?.isAdmin == true)
                         const Padding(
                           padding: EdgeInsets.only(top: 8),
@@ -79,7 +82,24 @@ class MoreScreen extends StatelessWidget {
             ),
           ),
         ),
+        TextButton.icon(
+          onPressed: () =>
+              _open(context, ProfileScreen(controller: controller)),
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('Profil bearbeiten'),
+        ),
         const SectionTitle('Im Theater'),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: const Text('Galerien'),
+            subtitle: const Text('Unsere Stücke in Bildern'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () =>
+                _open(context, GalleryListScreen(controller: controller)),
+          ),
+        ),
+        const SizedBox(height: 12),
         Card(
           child: ListTile(
             leading: const Icon(Icons.chat_bubble_outline),
@@ -130,7 +150,11 @@ class MoreScreen extends StatelessWidget {
                     : '${controller.pendingCount} ausstehend · ${controller.failedCount} zu prüfen',
                 () => _open(context, SyncScreen(controller: controller)),
               ),
-              if (!controller.isDemo && (!controller.usesFirebase || controller.identity!.linkedProviders.contains('password'))) ...[
+              if (!controller.isDemo &&
+                  (!controller.usesFirebase ||
+                      controller.identity!.linkedProviders.contains(
+                        'password',
+                      ))) ...[
                 const Divider(indent: 60),
                 _MenuItem(
                   Icons.lock_outline,
@@ -202,7 +226,7 @@ class MoreScreen extends StatelessWidget {
         ),
         const SizedBox(height: 25),
         const Text(
-          '${Brand.name} · 0.2.1\n${Brand.subtitle}',
+          '${Brand.name} · 0.3.0\n${Brand.subtitle}',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 12, height: 1.6),
         ),
@@ -211,11 +235,8 @@ class MoreScreen extends StatelessWidget {
           onPressed: () => showAboutDialog(
             context: context,
             applicationName: Brand.name,
-            applicationVersion: '0.2.1',
-            applicationIcon: const Icon(
-              Icons.theater_comedy_outlined,
-              size: 36,
-            ),
+            applicationVersion: '0.3.0',
+            applicationIcon: const BrandLogo(size: 41),
             children: const [
               Text(
                 'Eine gemeinsame Bühne für Termine und Texte. Entwicklungsstand zum Testen; Push und Serverzugriff benötigen eine konfigurierte Installation.',
@@ -493,18 +514,18 @@ class _MembersScreenState extends State<MembersScreen> {
                     horizontal: 24,
                     vertical: 7,
                   ),
-                  leading: CircleAvatar(
-                    backgroundColor: const Color(0xFFE8DED1),
-                    child: Text(
-                      member.initials,
-                      style: const TextStyle(
-                        color: StageTheme.ink,
-                        fontSize: 13,
-                      ),
-                    ),
+                  leading: MemberAvatar(
+                    controller: widget.controller,
+                    avatarId: member.avatarId,
+                    initials: member.initials,
                   ),
                   title: Text(member.name),
-                  subtitle: Text(member.group),
+                  subtitle: Text(
+                    [
+                      member.group,
+                      member.tagline,
+                    ].where((s) => s.isNotEmpty).join('\n'),
+                  ),
                 );
               },
             ),
@@ -574,7 +595,12 @@ class _CheckInScreenState extends State<CheckInScreen> {
                   .elementAt(index);
               return CheckboxListTile(
                 title: Text(member.name),
-                subtitle: Text(member.group),
+                subtitle: Text(
+                  [
+                    member.group,
+                    member.tagline,
+                  ].where((s) => s.isNotEmpty).join('\n'),
+                ),
                 value: _present.contains(member.id),
                 onChanged: (value) => setState(() {
                   if (value == true) {

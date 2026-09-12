@@ -37,7 +37,7 @@ export class Theater {
   }
   profile(a) {
     const m = a.personId == null ? null : this.store.get('members', a.personId);
-    return { userId: a.uid, displayName: m?.name ?? a.name, email: a.email, role: a.role, group: m?.group ?? '', personId: a.personId, status: a.status, emailVerified: a.emailVerified, identityReady: a.identityReady, provider: a.provider, mustChangePassword: false, directorProductionIds: this.store.all('productions').filter(p => list(p.directorMemberIds).includes(a.personId)).map(p => p.id) };
+    return { userId: a.uid, displayName: m?.name ?? a.name, email: a.email, avatarId: m?.avatarId ?? null, tagline: m?.tagline ?? '', profileVersion: m?.profileVersion ?? 0, role: a.role, group: m?.group ?? '', personId: a.personId, status: a.status, emailVerified: a.emailVerified, identityReady: a.identityReady, provider: a.provider, mustChangePassword: false, directorProductionIds: this.store.all('productions').filter(p => list(p.directorMemberIds).includes(a.personId)).map(p => p.id) };
   }
   account(uid, admin = false) {
     const a = this.store.account(uid);
@@ -127,6 +127,18 @@ export class Theater {
         if (b.status === 'approved' && (!target.personId || !target.identityReady)) fail(409, 'Das Konto benötigt erst eine bestätigte Identität und Personenzuordnung.');
         if (target.role === 'admin' && target.status === 'approved' && s.accounts().filter(x => x.status === 'approved' && x.role === 'admin').length <= 1) fail(409, 'Der letzte Admin muss erhalten bleiben.');
         s.saveAccount({ ...target, status: b.status, version: target.version + 1 }); return {};
+      }
+      case 'profile.save': {
+        const m = s.get('members', a.personId);
+        if ((m.profileVersion ?? 0) !== b.profileVersion) fail(409, 'Dein Profil wurde inzwischen geändert. Bitte neu laden.');
+        const avatarId = b.avatarId || null;
+        if (avatarId) {
+          const image = s.get('media', avatarId);
+          if (!image || image.kind !== 'profile' || image.ownerPersonId !== a.personId) fail(403, 'Dieses Profilbild gehört nicht zu deinem Konto.');
+        }
+        if (typeof b.tagline !== 'string' || b.tagline.length > 120) fail(400, 'Die Statuszeile darf höchstens 120 Zeichen haben.');
+        s.put('members', m.id, { ...m, avatarId, tagline: b.tagline.trim().replace(/\s+/g, ' '), profileVersion: (m.profileVersion ?? 0) + 1, version: (m.version ?? 1) + 1 });
+        return {};
       }
       case 'member.save': {
         admin(); const memberId = b.id == null ? this.nextPersonId() : Number(b.id), old = s.get('members', memberId);

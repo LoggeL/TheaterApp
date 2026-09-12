@@ -1,3 +1,4 @@
+import 'brand_logo.dart';
 import 'package:flutter/material.dart';
 
 import '../core/app_controller.dart';
@@ -76,11 +77,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             children: [
               const Row(
                 children: [
-                  Icon(
-                    Icons.theater_comedy_outlined,
-                    color: StageTheme.orange,
-                    size: 30,
-                  ),
+                  BrandLogo(size: 35),
                   SizedBox(width: 12),
                   Expanded(child: Eyebrow('Kolpingtheater Ramsen')),
                 ],

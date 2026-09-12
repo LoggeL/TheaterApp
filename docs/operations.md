@@ -97,3 +97,20 @@ node server/scripts/import-roster.mjs PFAD_ZUR_DATENBANK .secrets/roster-import.
 Die Anwendung läuft in einer SQLite-Transaktion. Bestehende abweichende Besetzungen werden als Konflikt abgewiesen. Eine erfolgreich angewendete Migration ist anhand von Quellname, Migrations-ID und Eingabe-Hash wiederholbar, ohne Personen doppelt anzulegen oder spätere Änderungen zu überschreiben. `member.save` erhält Quellbezüge und importierte Aufgaben bei späteren Namensänderungen.
 
 Der Import vom 13. September 2026 umfasst 41 Personen der bisherigen Theaterverwaltung und sieben weitere Namen aus dem Stück von 2025. Die vorhandene Admin-Person bleibt erhalten und übernimmt den Quellbezug „Logge“. Auch die während der Arbeit angelegten Personen Yunus und Jonas sowie ihre Login-Verknüpfungen bleiben erhalten. Louis bleibt eine eigene Person. Die bestätigten Zuordnungen sind Maximilian → Max F., Max → Max H. und Lina → Lina R.; Sebastian/Sebbi und Tobias/Tobi ergeben sich aus den übereinstimmenden Rollen Wilson und Jacques. 67 Einzelrollen sind besetzt. Die drei Einträge für gemeinsame Sprechergruppen von 2025 bleiben ohne Einzelperson.
+
+
+## Galerien und Profile
+
+„Mein Bereich → Galerien → Album freigeben“ verbindet einen Immich-Freigabelink mit einem Titel und optional einem Stück. Alle freigegebenen Mitglieder sehen das Album. Im Albummenü können Admins die Freigabe beenden und wiederherstellen, Titel und Quelle ändern oder eigene Bilder hinzufügen. Ausgeblendete eigene Bilder lassen sich über das Admin-Menü wieder einblenden. Die Immich-Quelle selbst wird dabei nicht verändert.
+
+Das Raster lädt jeweils 60 Einträge und nur sichtbare Vorschaubilder. Die Lightbox unterstützt Wischen, Pfeile und Zoom. „Original herunterladen“ übernimmt bei Immich die unveränderte Originaldatei, sofern die Quellfreigabe Downloads erlaubt. Videos öffnen sich im Originalalbum. Passwortgeschützte oder abgelaufene Immich-Freigaben melden einen Fehler; bereits hochgeladene lokale Bilder bleiben verfügbar. `GALLERY_HOSTS` begrenzt erlaubte Quellen, standardmäßig auf `photo.rittmann.cloud`. Freigabedaten werden fünf Minuten zwischengespeichert; Änderungen der Download-Erlaubnis in Immich greifen spätestens danach. Ein Entzug der Freigabe in der Theater-App gilt sofort beim nächsten Serverzugriff.
+
+„Mein Bereich → Profil bearbeiten“ speichert ein eigenes Profilbild und eine Statuszeile bis 120 Zeichen. Name, Besetzung und Kontoverknüpfung bleiben Verwaltungsaufgaben. Bilder bis 8 MB werden beim Upload geprüft, ausgerichtet, von Metadaten befreit und als WebP gespeichert. Profilbilder werden quadratisch auf 512 Pixel zugeschnitten, Galeriebilder auf höchstens 2048 Pixel verkleinert. Downloads eigener Uploads enthalten diese normalisierte Datei. Binäre Bildabrufe benötigen einen freigegebenen Zugang. Vorschaubilder bleiben nur im begrenzten Arbeitsspeicher der App, ohne Tokens in URLs.
+
+`/data/media` liegt im vorhandenen persistenten Datenvolume. `tool/backup.py` erzeugt zusätzlich zur SQLite-Sicherung ein gleich datiertes `-media.tar.gz` und prüft alle Datenbankreferenzen. Bei einer Wiederherstellung dieses Archiv zusammen mit der passenden Datenbank zurückspielen und UID/GID 1000 setzen. Immich-Originale werden nicht in diese Sicherung kopiert, ihre Sicherung bleibt Aufgabe des Fotoservers.
+
+Der Probenplan wechselt zwischen Agenda und Monatskalender. Die Kalenderansicht zeigt auch vergangene Proben und alle Tage einer mehrtägigen Probe. Tippen auf einen Tag öffnet dessen Terminliste.
+
+## Original-Logo
+
+Quelle: https://kolpingtheater-ramsen.de/presse, Originaldatei https://kolpingtheater-ramsen.de/img/logo.png. `assets/brand/kolpingtheater-ramsen.png` bleibt unverändert (SHA-256 `c22912bb9397371f959f23fd9caf75880be49ec2e639b1b2c81508c0a9626fab`). `node tool/brand-icons.mjs` erzeugt daraus lediglich passend skalierte Plattformicons auf weißen Flächen. Anmeldung, App-Kopf, Infoansicht und Plattformicons verwenden dieses Logo.

@@ -1,3 +1,4 @@
+import 'calendar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -426,7 +427,8 @@ class ScheduleScreen extends StatefulWidget {
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
   int _filter = 0;
-  DateTime? _day;
+  bool _calendar = false;
+  DateTime _day = DateTime.now();
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -440,9 +442,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             3 => !future,
             _ => future,
           };
-          return filter &&
-              (_day == null ||
-                  e.startsAt != null && DateUtils.isSameDay(_day, e.startsAt));
+          return _calendar ? eventOnDay(e, _day) : filter;
         }).toList()..sort(
           (a, b) => (a.startsAt ?? DateTime(9999)).compareTo(
             b.startsAt ?? DateTime(9999),
@@ -469,54 +469,61 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           style: Theme.of(context).textTheme.headlineMedium,
                         ),
                       ),
-                      IconButton(
-                        tooltip: 'Datum auswählen',
-                        onPressed: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: _day ?? now,
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime(2040),
-                          );
-                          if (mounted && picked != null) {
-                            setState(() => _day = picked);
-                          }
-                        },
-                        icon: const Icon(Icons.calendar_month_outlined),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 18),
-                  SizedBox(
-                    height: 44,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: [
-                        for (var i = 0; i < 4; i++)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                              label: Text(
-                                [
-                                  'Kommend',
-                                  'Offen',
-                                  'Zugesagt',
-                                  'Vergangen',
-                                ][i],
-                              ),
-                              selected: _filter == i,
-                              onSelected: (_) => setState(() => _filter = i),
-                            ),
-                          ),
-                      ],
-                    ),
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(
+                        value: false,
+                        label: Text('Agenda'),
+                        icon: Icon(Icons.view_agenda_outlined),
+                      ),
+                      ButtonSegment(
+                        value: true,
+                        label: Text('Kalender'),
+                        icon: Icon(Icons.calendar_month_outlined),
+                      ),
+                    ],
+                    selected: {_calendar},
+                    onSelectionChanged: (value) =>
+                        setState(() => _calendar = value.first),
                   ),
-                  if (_day != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: InputChip(
-                        label: Text(DateFormat.yMMMd('de').format(_day!)),
-                        onDeleted: () => setState(() => _day = null),
+                  const SizedBox(height: 12),
+                  if (_calendar) ...[
+                    RehearsalCalendar(
+                      selected: _day,
+                      onSelected: (day) => setState(() => _day = day),
+                      events: widget.controller.events,
+                    ),
+                    Text(
+                      DateFormat.yMMMMEEEEd('de').format(_day),
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ],
+                  if (!_calendar)
+                    SizedBox(
+                      height: 44,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          for (var i = 0; i < 4; i++)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                label: Text(
+                                  [
+                                    'Kommend',
+                                    'Offen',
+                                    'Zugesagt',
+                                    'Vergangen',
+                                  ][i],
+                                ),
+                                selected: _filter == i,
+                                onSelected: (_) => setState(() => _filter = i),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                 ],

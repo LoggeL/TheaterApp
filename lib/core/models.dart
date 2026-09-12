@@ -25,6 +25,9 @@ class AppUser {
     this.personId,
     this.emailVerified = true,
     this.identityReady = true,
+    this.avatarId,
+    this.tagline = '',
+    this.profileVersion = 0,
   });
   final String id, name, email, role, group;
   final bool mustChangePassword;
@@ -32,6 +35,9 @@ class AppUser {
   final String status;
   final int? personId;
   final bool emailVerified, identityReady;
+  final String? avatarId;
+  final String tagline;
+  final int profileVersion;
   bool get isApproved => status == 'approved' && identityReady;
   bool get isAdmin => role == 'admin';
   String get firstName => name.trim().split(' ').first;
@@ -53,6 +59,9 @@ class AppUser {
     personId: json['personId'] == null ? null : intValue(json['personId']),
     emailVerified: json['emailVerified'] != false,
     identityReady: json['identityReady'] != false,
+    avatarId: json['avatarId'] as String?,
+    tagline: textValue(json['tagline']),
+    profileVersion: intValue(json['profileVersion']),
     mustChangePassword: json['mustChangePassword'] == true,
     directorProductionIds: jsonList(
       json['directorProductionIds'],
@@ -68,6 +77,9 @@ class AppUser {
     'personId': personId,
     'emailVerified': emailVerified,
     'identityReady': identityReady,
+    'avatarId': avatarId,
+    'tagline': tagline,
+    'profileVersion': profileVersion,
     'mustChangePassword': mustChangePassword,
     'directorProductionIds': directorProductionIds,
   };
@@ -285,11 +297,14 @@ class TheaterMember {
     this.group = '',
     this.initials = '',
     this.avatar,
+    this.avatarId,
+    this.tagline = '',
     this.active = true,
   });
   final int id;
   final String name, group, initials;
-  final String? avatar;
+  final String? avatar, avatarId;
+  final String tagline;
   final bool active;
   factory TheaterMember.fromJson(JsonMap json) => TheaterMember(
     id: intValue(json['id']),
@@ -297,6 +312,8 @@ class TheaterMember {
     group: textValue(json['group']),
     initials: textValue(json['initials']),
     avatar: json['avatar'] as String?,
+    avatarId: json['avatarId'] as String?,
+    tagline: textValue(json['tagline']),
     active: json['active'] != false,
   );
   JsonMap toJson() => {
@@ -305,6 +322,8 @@ class TheaterMember {
     'group': group,
     'initials': initials,
     'avatar': avatar,
+    'avatarId': avatarId,
+    'tagline': tagline,
     'active': active,
   };
 }

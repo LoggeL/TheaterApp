@@ -65,11 +65,16 @@ class ApiClient {
     final origin = normalizeBaseUrl(baseUrl);
     // The existing Next.js deployment uses trailingSlash:true. Avoid a 308
     // redirect (especially on POST); redirects intentionally never get tokens.
-    final canonicalPath = path.endsWith('/') ? path : '$path/';
-    final request =
-        http.Request(method, Uri.parse('$origin$pathPrefix$canonicalPath'))
-          ..followRedirects = false
-          ..headers['Accept'] = 'application/json';
+    final relative = Uri.parse(path);
+    final canonicalPath = relative.path.endsWith('/')
+        ? relative.path
+        : '${relative.path}/';
+    final uri = Uri.parse(
+      '$origin$pathPrefix$canonicalPath',
+    ).replace(query: relative.hasQuery ? relative.query : null);
+    final request = http.Request(method, uri)
+      ..followRedirects = false
+      ..headers['Accept'] = 'application/json';
     if (token != null) {
       final actualToken = token.startsWith('firebase:')
           ? await (firebaseToken?.call(token.substring(9)) ??
@@ -129,6 +134,71 @@ class ApiClient {
     }
   }
 
+  Future<MediaData> binary(
+    String baseUrl,
+    String path, {
+    required String token,
+  }) async {
+    final origin = normalizeBaseUrl(baseUrl), relative = Uri.parse(path);
+    final p = relative.path.endsWith('/') ? relative.path : '${relative.path}/';
+    final uri = Uri.parse(
+      '$origin$pathPrefix$p',
+    ).replace(query: relative.hasQuery ? relative.query : null);
+    final actualToken = token.startsWith('firebase:')
+        ? await (firebaseToken?.call(token.substring(9)) ??
+              Future<String>.error(
+                const ApiException('Bitte erneut anmelden.', statusCode: 401),
+              ))
+        : token;
+    final request = http.Request('GET', uri)
+      ..followRedirects = false
+      ..headers['Authorization'] = 'Bearer $actualToken';
+    try {
+      final response = await _client
+          .send(request)
+          .timeout(const Duration(seconds: 30));
+      if (response.statusCode != 200) {
+        final body = await response.stream.bytesToString().timeout(timeout);
+        String message = 'Das Bild konnte nicht geladen werden.';
+        try {
+          message = textValue(jsonMap(jsonDecode(body))['error'], message);
+        } catch (_) {}
+        throw ApiException(message, statusCode: response.statusCode);
+      }
+      final chunks = <List<int>>[];
+      var size = 0;
+      await for (final chunk in response.stream.timeout(
+        const Duration(seconds: 30),
+      )) {
+        size += chunk.length;
+        if (size > 80 * 1024 * 1024) {
+          throw const ApiException(
+            'Die Bilddatei ist zu groß.',
+            statusCode: 413,
+          );
+        }
+        chunks.add(chunk);
+      }
+      final bytes = Uint8List(size);
+      var offset = 0;
+      for (final chunk in chunks) {
+        bytes.setRange(offset, offset + chunk.length, chunk);
+        offset += chunk.length;
+      }
+      return MediaData(
+        bytes,
+        response.headers['content-type']?.split(';').first ??
+            'application/octet-stream',
+      );
+    } on TimeoutException {
+      throw const ApiException(
+        'Das Bild konnte nicht rechtzeitig geladen werden.',
+      );
+    } on http.ClientException {
+      throw const ApiException('Keine Verbindung zur Fotogalerie.');
+    }
+  }
+
   Future<JsonMap> login(String baseUrl, String email, String password) =>
       request(
         baseUrl,
@@ -155,4 +225,10 @@ class ApiClient {
         token: token,
       );
   void close() => _client.close();
+}
+
+class MediaData {
+  const MediaData(this.bytes, this.mime);
+  final Uint8List bytes;
+  final String mime;
 }

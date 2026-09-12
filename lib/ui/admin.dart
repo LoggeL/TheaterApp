@@ -1,3 +1,4 @@
+import 'profile.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../core/app_controller.dart';
@@ -426,7 +427,11 @@ class _MembersAdminScreenState extends State<MembersAdminScreen> {
           padding: const EdgeInsets.only(bottom: 10),
           child: Card(
             child: ListTile(
-              leading: CircleAvatar(child: Text(textValue(m['initials']))),
+              leading: MemberAvatar(
+                controller: widget.controller,
+                avatarId: m['avatarId'] as String?,
+                initials: textValue(m['initials']),
+              ),
               title: Text(textValue(m['name'])),
               subtitle: Text(
                 '${textValue(m['group'])}${m['active'] == false ? ' · Inaktiv' : ''}',
