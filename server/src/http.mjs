@@ -23,7 +23,7 @@ export function createHttpServer({ theater, verifyToken, scriptService, focusBri
           try { if (!(await stat(file)).isFile()) file = resolve(root, 'index.html'); } catch { file = resolve(root, 'index.html'); }
           const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png', '.svg': 'image/svg+xml', '.ttf': 'font/ttf', '.woff2': 'font/woff2' };
           const content = await readFile(file);
-          res.writeHead(200, { 'Content-Type': types[extname(file)] ?? 'application/octet-stream', 'Cache-Control': ['.html', '.js', '.json'].includes(extname(file)) ? 'no-cache' : 'public, max-age=3600' }); res.end(content); return;
+          res.writeHead(200, { 'Content-Type': types[extname(file)] ?? 'application/octet-stream', 'Cache-Control': ['.html', '.js', '.json'].includes(extname(file)) ? 'private, no-store, max-age=0, must-revalidate' : 'public, max-age=3600' }); res.end(content); return;
         }
         throw new AppError(404, 'Nicht gefunden.');
       }

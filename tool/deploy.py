@@ -28,6 +28,7 @@ def main():
     if not args.skip_build:
         run(['node', 'tool/configure.mjs', 'config/production.web.json'])
         run(['flutter', 'build', 'web', '--release', '--dart-define-from-file=config/production.web.json', '--pwa-strategy=none'])
+    run(['node', 'tool/version-web.mjs'])
     # The SW config must belong to the same production project as the backend.
     if c['firebaseProjectId'] not in (ROOT/'build/web/firebase-web-config.js').read_text():
         raise RuntimeError('build/web contains another Firebase configuration; build the production app first.')

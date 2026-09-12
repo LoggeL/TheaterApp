@@ -32,6 +32,7 @@ jobs:
         working-directory: server
       - run: node tool/configure.mjs config/production.web.json
       - run: flutter build web --release --dart-define-from-file=config/production.web.json
+      - run: node tool/version-web.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: theater-web
