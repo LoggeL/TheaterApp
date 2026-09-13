@@ -21,3 +21,26 @@ Testlink: https://play.google.com/apps/internaltest/4701275968106617341
 Tester müssen in der ausgewählten Play-Console-Liste stehen und den Testbeitritt annehmen. Geräte mit aktivierten Play-Auto-Updates erhalten veröffentlichte Versionen nach der Verteilung durch Google. Der Workflow veröffentlicht nicht in Produktion.
 
 Der Workflow und `server/scripts/play-release.mjs` sind vertrauenswürdiger Release-Code: Änderungen daran auf `main` können auf die Release-Secrets zugreifen. Private Schlüssel niemals committen oder in Logs ausgeben.
+
+## Prüferzugang und Datenschutz
+
+Die öffentliche Datenschutzerklärung liegt unter `/privacy.html`, der Löschweg unter
+`/privacy.html#konto-loeschen`. Anmeldung, Freigabewartebildschirm und „Mein Bereich“
+verlinken beide Seiten. Löschanfragen werden manuell über die veröffentlichte
+Kontaktadresse bearbeitet; es gibt keine automatische serverseitige Kontolöschung.
+
+Für Google Play gibt es einen getrennten Datenbestand. Die serverseitige Datei
+`/run/secrets/play-review.json` enthält ausschließlich die exakte Firebase-UID und
+E-Mail des Prüferkontos. Erst nach Prüfung des Firebase-Tokens wählt der Server
+für diese UID `review.sqlite` und `review-media`; normale Konten verwenden weiterhin
+den normalen Datenbestand. Skriptimporte stammen im Testbereich aus Beispieldaten,
+die externe Regiesynchronisierung und Push-Zustellung sind dort deaktiviert.
+Die normalen Rollen- und Freigabeprüfungen bleiben aktiv. Kein Queryparameter,
+Header oder vom Client gewählter Mandant kann den Datenbestand umschalten.
+
+Die Zugangsdaten liegen lokal in `.secrets/play-review-credentials.json` und werden
+nur im Abschnitt „Sign in details“ der Play Console hinterlegt. Nicht in Git,
+Workflows, Screenshots oder öffentliche Release-Artefakte übernehmen. Bei einer
+UID-Änderung ist eine explizite Migration des Testbereichs nötig; der Server startet
+bei widersprüchlicher Konfiguration nicht. Anfragen zur Kontolöschung müssen auch
+bei diesem Testkonto bearbeitet werden; danach den Prüferzugang in Play ersetzen.

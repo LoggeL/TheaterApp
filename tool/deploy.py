@@ -65,10 +65,12 @@ def main():
       SCRIPT_FOCUS_BRIDGE: 'true'
       SCRIPT_DIRECTOR_PASSWORD_FILE: /run/secrets/script-director-password
       MOBILE_PUSH_ENABLED: 'true'
+      PLAY_REVIEW_CONFIG_FILE: /run/secrets/play-review.json
     volumes:
       - {remote}/data:/data:Z
       - {remote}/secrets/firebase-service-account.json:/run/secrets/firebase-service-account.json:ro,Z
       - {remote}/secrets/script-director-password:/run/secrets/script-director-password:ro,Z
+      - {remote}/secrets/play-review.json:/run/secrets/play-review.json:ro,Z
     expose:
       - '8787'
     mem_limit: 512m

@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Store } from '../src/store.mjs';
+import { Theater } from '../src/theater.mjs';
+import { createReviewServices } from '../src/review.mjs';
+import { createHttpServer } from '../src/http.mjs';
+
+test('review UID isolates reads, writes, media, accounts and script source from production', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'theater-review-'));
+  const store = new Store();
+  const theater = new Theater(store, { bootstrapEmail: 'owner@example.com' });
+  theater.session({ uid: 'owner', email: 'owner@example.com', email_verified: true });
+  store.put('members', 100, { id: 100, name: 'PRIVATE PRODUCTION MEMBER', active: true });
+  const review = createReviewServices({ uid: 'reviewer', email: 'review@example.com', databasePath: join(dir, 'review.sqlite'), mediaDirectory: join(dir, 'media') });
+  const server = createHttpServer({ theater, review, verifyToken: async uid => ({ uid, email: uid === 'reviewer' ? 'review@example.com' : 'owner@example.com', email_verified: true }), scriptService: { configured: true, getProductions: async () => [{ id: 'private-script' }] } });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); review.close(); store.close(); rmSync(dir, { recursive: true }); });
+  const call = (uid, path, body) => fetch(`http://127.0.0.1:${server.address().port}/api/mobile/v1${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${uid}`, 'Content-Type': 'application/json', 'Idempotency-Key': 'review-write' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const [real, demo] = await Promise.all(['owner', 'reviewer'].map(async uid => (await call(uid, '/snapshot')).json()));
+  assert(real.members.some(m => m.id === 100));
+  assert(!demo.members.some(m => m.name === 'PRIVATE PRODUCTION MEMBER'));
+  assert.equal(demo.user.role, 'admin');
+  assert.equal(demo.capabilities.pushConfigured, false);
+  assert.equal((await call('reviewer', '/actions', { action: 'member.save', name: 'Review-only person', group: 'Test' })).status, 200);
+  assert(!store.all('members').some(m => m.name === 'Review-only person'));
+  assert(review.theater.store.all('members').some(m => m.name === 'Review-only person'));
+  const accounts = await (await call('reviewer', '/admin/accounts')).json();
+  assert.deepEqual(accounts.accounts.map(a => a.uid), ['reviewer']);
+  const source = await (await call('reviewer', '/admin/script-source')).json();
+  assert(!source.productions.some(p => p.id === 'private-script'));
+  assert.equal((await call('reviewer', '/media/production-image')).status, 404);
+  assert.equal((await call('unknown', '/snapshot')).status, 403);
+  assert.equal(store.account('reviewer'), null);
+});

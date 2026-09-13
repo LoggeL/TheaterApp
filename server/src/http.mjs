@@ -4,10 +4,11 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { AppError } from './theater.mjs';
 
-export function createHttpServer({ theater, verifyToken, scriptService, focusBridge = null, media = null, allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null }) {
+export function createHttpServer({ theater: defaultTheater, verifyToken, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null }) {
   const origins = new Set(allowedOrigins);
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   return createServer(async (req, res) => {
+    let theater = defaultTheater, scriptService = defaultScriptService, focusBridge = defaultFocusBridge, media = defaultMedia;
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
     const origin = req.headers.origin;
@@ -37,6 +38,9 @@ export function createHttpServer({ theater, verifyToken, scriptService, focusBri
       let identity;
       try { identity = await verifyToken(token); } catch { throw new AppError(401, 'Die Anmeldung ist abgelaufen oder wurde gesperrt.'); }
       if (!identity?.uid) throw new AppError(401, 'Ungültige Anmeldung.');
+      if (review && identity.uid === review.uid) {
+        ({ theater, scriptService, focusBridge, media } = review);
+      }
       if (!['/auth/session', '/auth/logout'].includes(route)) theater.account(identity.uid);
       let body = {};
       if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
