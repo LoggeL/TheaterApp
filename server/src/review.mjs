@@ -6,11 +6,11 @@ import { Immich } from './immich.mjs';
 
 // The reviewer uses the normal authenticated API with a separate database and
 // media directory. Only an exact, server-configured Firebase UID selects it.
-export function createReviewServices({ uid, email, databasePath, mediaDirectory }) {
+export function createReviewServices({ uid, email, databasePath, mediaDirectory, pushEnabled = false }) {
   if (!uid || !email || !databasePath || !mediaDirectory) throw new Error('Incomplete review configuration');
   const fixture = JSON.parse(readFileSync(new URL('./review-data.json', import.meta.url), 'utf8'));
   const store = new Store(databasePath);
-  const theater = new Theater(store);
+  const theater = new Theater(store, { pushEnabled });
   if (!store.get('settings', 'reviewSeeded')) store.transaction(() => {
     for (const kind of ['members', 'events', 'productions']) {
       for (const item of fixture.snapshot[kind]) store.put(kind, item.id, { ...item, version: 1 });

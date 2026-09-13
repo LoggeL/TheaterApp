@@ -34,7 +34,8 @@ Für Google Play gibt es einen getrennten Datenbestand. Die serverseitige Datei
 E-Mail des Prüferkontos. Erst nach Prüfung des Firebase-Tokens wählt der Server
 für diese UID `review.sqlite` und `review-media`; normale Konten verwenden weiterhin
 den normalen Datenbestand. Skriptimporte stammen im Testbereich aus Beispieldaten,
-die externe Regiesynchronisierung und Push-Zustellung sind dort deaktiviert.
+die externe Regiesynchronisierung mit dem echten Ensemble ist dort deaktiviert.
+Push-Zustellung arbeitet getrennt mit den Geräten des Prüferkontos.
 Die normalen Rollen- und Freigabeprüfungen bleiben aktiv. Kein Queryparameter,
 Header oder vom Client gewählter Mandant kann den Datenbestand umschalten.
 
