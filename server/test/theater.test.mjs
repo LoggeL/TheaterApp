@@ -101,3 +101,59 @@ test('HTTP rejects missing and invalid tokens; pending user can only read their 
   const status = await fetch(`${base}/auth/session/`, { headers: { Authorization: 'Bearer sam-token' } });
   assert.equal(status.status, 200); assert.equal((await status.json()).user.status, 'pending');
 });
+
+test('event descriptions and all additional types survive editing and snapshots', t => {
+  const { action, app, store, approve } = setup(t); approve();
+  for (const type of ['readthrough', 'dress', 'meeting', 'workshop', 'setup', 'teardown', 'social']) {
+    const e = action({ action: 'event.save', title: 'Termin', description: 'Bitte Werkzeug mitbringen.\nTreffpunkt: Eingang', type, startsAt: '2026-09-17T17:00:00Z', endsAt: '2026-09-17T19:00:00Z' }).id;
+    assert.equal(app.snapshot('sam').events.find(x => x.id === e).type, type);
+    assert.equal(store.get('events', e).description, 'Bitte Werkzeug mitbringen.\nTreffpunkt: Eingang');
+    action({ ...store.get('events', e), action: 'event.save', title: 'Geändert' });
+    assert.equal(app.snapshot('sam').events.find(x => x.id === e).description, 'Bitte Werkzeug mitbringen.\nTreffpunkt: Eingang');
+  }
+});
+
+test('custom multiple person roles preserve identity and cannot grant admin access', t => {
+  const { action, app, store, memberId, approve } = setup(t); approve();
+  const roleId = action({ action: 'personRole.save', name: 'Requisite' }).id;
+  assert.throws(() => action({ action: 'personRole.save', name: 'Admin' }, 'sam'), { status: 403 });
+  assert.throws(() => action({ action: 'personRole.save', name: 'requisite' }), { status: 409 });
+  action({ ...store.get('members', memberId), action: 'member.save', roleIds: ['role-1', roleId, roleId] });
+  assert.deepEqual(app.snapshot('sam').user.roleIds, ['role-1', roleId]);
+  assert.equal(app.snapshot('sam').user.role, 'member');
+  assert.throws(() => action({ action: 'personRole.delete', id: roleId, version: 1 }), { status: 409 });
+  action({ action: 'personRole.save', id: roleId, version: 1, name: 'Requisite & Ausstattung' });
+  assert.equal(app.snapshot('sam').personRoles.find(r => r.id === roleId).name, 'Requisite & Ausstattung');
+  assert.throws(() => action({ ...store.get('members', memberId), action: 'member.save', roleIds: ['unknown'] }), { status: 400 });
+  action({ ...store.get('members', memberId), action: 'member.save', roleIds: [] });
+  action({ action: 'personRole.delete', id: roleId, version: 2 });
+  assert.equal(store.get('personRoles', roleId), null);
+});
+
+test('general polls accept one replaceable vote per person and enforce closure and deadlines', t => {
+  const { action, app, store, approve } = setup(t); approve();
+  const body = { action: 'poll.save', title: 'Welches Essen?', description: 'Für unser Fest', options: [{ label: 'Pizza' }, { label: 'Pasta' }], closesAt: '2026-09-13T12:00:00Z' };
+  assert.throws(() => action(body, 'sam'), { status: 403 });
+  assert.throws(() => action({ ...body, options: [{ label: 'Pizza' }, { label: 'pizza' }] }), { status: 400 });
+  const pollId = action(body).id, p = store.get('polls', pollId);
+  const vote = { action: 'poll.vote', pollId, optionId: p.options[0].id };
+  action(vote, 'sam', 'one-vote'); action(vote, 'sam', 'one-vote');
+  assert.equal(app.snapshot('sam').polls[0].totalVotes, 1);
+  action({ ...vote, optionId: p.options[1].id }, 'sam');
+  const result = app.snapshot('sam').polls[0];
+  assert.deepEqual(result.options.map(o => o.votes), [0, 1]);
+  assert.equal(result.choice, p.options[1].id);
+  assert.equal(JSON.stringify(app.snapshot('admin').polls).includes('personId'), false);
+  assert.throws(() => action({ ...vote, optionId: 'foreign' }, 'sam'), { status: 400 });
+  assert.throws(() => action({ ...body, id: pollId, version: 1, options: [{ label: 'Suppe' }, { label: 'Pasta' }] }), { status: 409 });
+  action({ action: 'poll.close', id: pollId, version: 1 });
+  assert.throws(() => action(vote, 'sam'), { status: 409 });
+  assert.equal(app.snapshot('sam').polls[0].closed, true);
+  action({ action: 'poll.close', id: pollId, version: 2, closed: false });
+  assert.equal(app.snapshot('sam').polls[0].closed, false);
+  const expired = { ...store.get('polls', pollId), closesAt: '2026-09-11T12:00:00Z' };
+  store.put('polls', pollId, expired);
+  assert.throws(() => action(vote, 'sam'), { status: 409 });
+  assert.equal(app.snapshot('sam').polls[0].closed, true);
+  assert.equal(store.all('events').length, 0);
+});

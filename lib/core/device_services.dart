@@ -204,6 +204,35 @@ class DeviceServices {
         : 'Gerät registriert. Der Server hat den Push-Versand noch nicht aktiviert.';
   }
 
+  Future<bool> preparePushPrompt() async {
+    if (!Brand.pushEnabled ||
+        controller.isDemo ||
+        !controller.hasAccess ||
+        controller.preferences['pushPromptSeen'] == true ||
+        controller.preferences.containsKey('pushEnabled')) {
+      return false;
+    }
+    final session = controller.sessionEpoch;
+    try {
+      await _initializePush();
+      final settings = await FirebaseMessaging.instance
+          .getNotificationSettings();
+      if (session != controller.sessionEpoch) return false;
+      if (settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional) {
+        await enablePush();
+        return false;
+      }
+      if (kIsWeb &&
+          settings.authorizationStatus == AuthorizationStatus.denied) {
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> restorePush() async {
     final session = controller.sessionEpoch;
     if (!Brand.pushEnabled ||

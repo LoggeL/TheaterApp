@@ -5,12 +5,15 @@ Flutter-App für das Kolpingtheater Ramsen. Web und Android verwenden denselben 
 ## Funktionen
 
 - Selbstregistrierung mit E-Mail/Passwort und Google; manuelle Personenzuordnung und Freigabe durch einen Admin.
-- Feste Termine, dabei/später/abgesagt, optionale Ankunftszeit und längere Abwesenheiten. Keine Terminabstimmungen.
+- Feste Termine mit Beschreibung und zwölf Terminarten, dabei/später/abgesagt, optionale Ankunftszeit und längere Abwesenheiten. Keine Terminabstimmungen.
+- Frei verwaltbare Mehrfachrollen pro Person und allgemeine Abstimmungen mit Frist, Stimmwechsel und Ergebnisübersicht.
 - Verwaltung von Ensemble, Konten, Terminen, Produktionen und Besetzungen; tatsächliche Anwesenheit und spielbare Szenen.
 - Admin-Übersicht mit allen Personen, ihren Rollen und echten Login-Adressen; Filter für verknüpfte Personen, fehlende Konten, offene Freigaben und unbesetzte Rollen.
 - Minimalistischer Leser mit mehreren eigenen Rollen, Lernmodus, Kategorien, Suche, privaten Notizen, Kommentaren, Lesezeichen und PDF-Export.
 - Drehbuchimport aus dem bestehenden Skriptdienst, gemeinsame Regiemarkierungen zwischen Flutter-Web, mobilen Apps und dem bestehenden Skript-Browser.
-- Mitteilungen und Firebase-Push mit Erinnerungseinstellungen und passenden Links.
+- Mitteilungen und Firebase-Push mit Berechtigungsabfrage beim Öffnen, Erinnerungseinstellungen und passenden Links.
+- Profilbilder und Galerien mit Immich-Titelbildern, eigenem Bildupload, Lightbox und Download.
+- Direkter Admin-Einstieg, Seitenleiste für Desktop und Kalender mit Termintiteln.
 - Lokaler Cache und sichtbare Warteschlange für Rückmeldungen bei fehlender Verbindung.
 
 Der [Abnahmestand](docs/implementation-status.md) unterscheidet implementierte, getestete und noch extern einzurichtende Funktionen.

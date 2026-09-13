@@ -102,15 +102,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Eyebrow(
-                            'Gemeinsam auf die Bühne',
-                            color: Color(0xFFFFBD96),
-                          ),
-                          const SizedBox(height: 10),
                           Text(
-                            _showLogin
-                                ? 'Dein Platz im Ensemble.'
-                                : 'Vorhang auf.\nFür uns.',
+                            _showLogin ? 'Anmelden' : 'Kolpingtheater\nRamsen',
                             style: TextStyle(
                               fontSize: _showLogin ? 24 : 38,
                               height: 1.08,
@@ -134,7 +127,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               Text(
                 _showLogin
                     ? 'Melde dich mit deinem bestehenden Theaterkonto an.'
-                    : 'Deine nächste Probe. Dein Text. Dein Ensemble. Alles an einem Ort.',
+                    : 'Termine, Drehbücher und Mitteilungen.',
                 style: Theme.of(context).textTheme.bodyLarge,
               ),
               const SizedBox(height: 26),

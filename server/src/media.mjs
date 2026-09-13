@@ -33,8 +33,8 @@ export class MediaService {
     return { galleries: await Promise.all(galleries.map(async g => {
       let source = null, sourceError = null;
       if (g.sourceUrl) { try { source = await this.immich.album(g.sourceUrl); } catch (e) { sourceError = e.message; } }
-      const local = this.localAssets(g.id), cover = local[0] ? `local-${local[0].id}` : source?.assets[0]?.id;
-      return { ...g, count: local.length + (source?.assets.length ?? 0), sourceError, coverPath: cover ? `/galleries/${g.id}/assets/${cover}` : null };
+      const local = this.localAssets(g.id), cover = source?.coverId ?? (local[0] ? `local-${local[0].id}` : source?.assets.find(a => a.type === 'IMAGE')?.id);
+      return { ...g, count: local.length + (source?.assets.length ?? 0), sourceError, coverPath: cover ? `/galleries/${g.id}/assets/${cover}?size=preview` : null };
     })) };
   }
   async page(uid, id, { offset = 0, limit = 60, includeHidden = false } = {}) {

@@ -26,7 +26,7 @@ class AppUser {
     this.emailVerified = true,
     this.identityReady = true,
     this.avatarId,
-    this.tagline = '',
+    this.roleIds = const [],
     this.profileVersion = 0,
   });
   final String id, name, email, role, group;
@@ -36,7 +36,7 @@ class AppUser {
   final int? personId;
   final bool emailVerified, identityReady;
   final String? avatarId;
-  final String tagline;
+  final List<String> roleIds;
   final int profileVersion;
   bool get isApproved => status == 'approved' && identityReady;
   bool get isAdmin => role == 'admin';
@@ -60,7 +60,7 @@ class AppUser {
     emailVerified: json['emailVerified'] != false,
     identityReady: json['identityReady'] != false,
     avatarId: json['avatarId'] as String?,
-    tagline: textValue(json['tagline']),
+    roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
     profileVersion: intValue(json['profileVersion']),
     mustChangePassword: json['mustChangePassword'] == true,
     directorProductionIds: jsonList(
@@ -78,7 +78,7 @@ class AppUser {
     'emailVerified': emailVerified,
     'identityReady': identityReady,
     'avatarId': avatarId,
-    'tagline': tagline,
+    'roleIds': roleIds,
     'profileVersion': profileVersion,
     'mustChangePassword': mustChangePassword,
     'directorProductionIds': directorProductionIds,
@@ -91,6 +91,7 @@ class TheaterEvent {
     required this.title,
     this.startsAt,
     this.endsAt,
+    this.description = '',
     this.time = '',
     this.place = '',
     this.group = '',
@@ -108,6 +109,7 @@ class TheaterEvent {
   });
   final String id,
       title,
+      description,
       time,
       place,
       group,
@@ -126,6 +128,7 @@ class TheaterEvent {
   factory TheaterEvent.fromJson(JsonMap json) => TheaterEvent(
     id: textValue(json['id']),
     title: textValue(json['title']),
+    description: textValue(json['description']),
     startsAt: dateValue(json['startsAt'])?.toLocal(),
     endsAt: dateValue(json['endsAt'])?.toLocal(),
     time: textValue(json['time']),
@@ -151,6 +154,7 @@ class TheaterEvent {
   }) => TheaterEvent(
     id: id,
     title: title,
+    description: description,
     startsAt: startsAt,
     endsAt: endsAt,
     time: time,
@@ -173,6 +177,7 @@ class TheaterEvent {
   JsonMap toJson() => {
     'id': id,
     'title': title,
+    'description': description,
     'startsAt': startsAt?.toIso8601String(),
     'endsAt': endsAt?.toIso8601String(),
     'time': time,
@@ -234,7 +239,7 @@ class PollOption {
     time: textValue(json['time']),
     votes: intValue(json['votes']),
   );
-  JsonMap toJson() => {'id': id, 'day': label, 'time': time, 'votes': votes};
+  JsonMap toJson() => {'id': id, 'label': label, 'time': time, 'votes': votes};
 }
 
 class Poll {
@@ -245,11 +250,21 @@ class Poll {
     this.options = const [],
     this.selectedOptionId,
     this.confirmedOptionId,
+    this.closed = false,
+    this.closesAt,
+    this.version = 1,
   });
   final String id, title, description;
   final List<PollOption> options;
   final String? selectedOptionId, confirmedOptionId;
-  bool get isClosed => confirmedOptionId != null;
+  final bool closed;
+  final DateTime? closesAt;
+  final int version;
+  int get totalVotes => options.fold(0, (n, o) => n + o.votes);
+  bool get isClosed =>
+      closed ||
+      confirmedOptionId != null ||
+      (closesAt != null && !closesAt!.isAfter(DateTime.now()));
   factory Poll.fromJson(JsonMap json) => Poll(
     id: textValue(json['id']),
     title: textValue(json['title']),
@@ -259,6 +274,9 @@ class Poll {
     ).map((e) => PollOption.fromJson(jsonMap(e))).toList(),
     selectedOptionId: (json['choice'] ?? json['selectedOptionId']) as String?,
     confirmedOptionId: json['confirmedOptionId'] as String?,
+    closed: json['closed'] == true,
+    closesAt: dateValue(json['closesAt']),
+    version: intValue(json['version'], 1),
   );
   Poll withChoice(String optionId) => Poll(
     id: id,
@@ -279,6 +297,9 @@ class Poll {
         .toList(),
     selectedOptionId: optionId,
     confirmedOptionId: confirmedOptionId,
+    closed: closed,
+    closesAt: closesAt,
+    version: version,
   );
   JsonMap toJson() => {
     'id': id,
@@ -287,6 +308,9 @@ class Poll {
     'options': options.map((e) => e.toJson()).toList(),
     'choice': selectedOptionId,
     'confirmedOptionId': confirmedOptionId,
+    'closed': closed,
+    'closesAt': closesAt?.toUtc().toIso8601String(),
+    'version': version,
   };
 }
 
@@ -298,13 +322,13 @@ class TheaterMember {
     this.initials = '',
     this.avatar,
     this.avatarId,
-    this.tagline = '',
+    this.roleIds = const [],
     this.active = true,
   });
   final int id;
   final String name, group, initials;
   final String? avatar, avatarId;
-  final String tagline;
+  final List<String> roleIds;
   final bool active;
   factory TheaterMember.fromJson(JsonMap json) => TheaterMember(
     id: intValue(json['id']),
@@ -313,7 +337,7 @@ class TheaterMember {
     initials: textValue(json['initials']),
     avatar: json['avatar'] as String?,
     avatarId: json['avatarId'] as String?,
-    tagline: textValue(json['tagline']),
+    roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
     active: json['active'] != false,
   );
   JsonMap toJson() => {
@@ -323,7 +347,7 @@ class TheaterMember {
     'initials': initials,
     'avatar': avatar,
     'avatarId': avatarId,
-    'tagline': tagline,
+    'roleIds': roleIds,
     'active': active,
   };
 }

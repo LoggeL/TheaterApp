@@ -51,6 +51,12 @@ class AppController extends ChangeNotifier {
       jsonList(_baseSnapshot['productions']).map(jsonMap).toList();
   List<JsonMap> get memberRecords =>
       jsonList(_baseSnapshot['members']).map(jsonMap).toList();
+  List<JsonMap> get personRoles =>
+      jsonList(_baseSnapshot['personRoles']).map(jsonMap).toList();
+  String roleNames(Iterable<String> ids) => personRoles
+      .where((r) => ids.contains(r['id']))
+      .map((r) => textValue(r['name']))
+      .join(' · ');
   final DateTime Function() _clock;
   Future<void> _writeTail = Future.value();
   Future<void>? _refreshTask, _drainTask;
@@ -519,18 +525,13 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> saveProfile({
-    required String tagline,
     required String? avatarId,
     required int version,
   }) async {
     await remote(
       '/profile',
       method: 'PUT',
-      body: {
-        'tagline': tagline,
-        'avatarId': avatarId,
-        'profileVersion': version,
-      },
+      body: {'avatarId': avatarId, 'profileVersion': version},
     );
     await refresh();
   }
@@ -767,7 +768,7 @@ class AppController extends ChangeNotifier {
         statusCode: 409,
       );
     }
-    await _enqueue({
+    await performAction({
       'action': 'poll.vote',
       'pollId': pollId,
       'optionId': optionId,

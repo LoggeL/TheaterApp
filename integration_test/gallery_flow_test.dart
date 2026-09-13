@@ -77,7 +77,6 @@ void main() {
         },
       );
       await c.saveProfile(
-        tagline: 'Temporäre Geräteprüfung',
         avatarId: textValue(uploaded['id']),
         version: c.user!.profileVersion,
       );
@@ -87,19 +86,16 @@ void main() {
       expect(profileBytes.bytes.length, greaterThan(1000));
       await tester.tap(find.text('Mein Bereich'));
       await tester.pumpAndSettle();
-      expect(find.text('Temporäre Geräteprüfung'), findsOneWidget);
+      expect(c.user!.avatarId, uploaded['id']);
       await tester.tap(find.text('Profil bearbeiten'));
       await tester.pumpAndSettle();
       expect(find.byType(ProfileScreen), findsOneWidget);
-      await tester.enterText(
-        find.byType(TextField),
-        'Profil auf Android geprüft',
-      );
+      expect(find.text('Deine Statuszeile'), findsNothing);
       await tester.tap(find.text('Speichern'));
       await waitFor(find.text('Mein Bereich.'));
-      expect(c.user!.tagline, 'Profil auf Android geprüft');
+      expect(c.user!.avatarId, uploaded['id']);
       await tester.tap(find.text('Galerien'));
-      await waitFor(find.text('Unsere Erinnerungen.'));
+      await waitFor(find.text('Alben'));
       await tester.tap(find.text('Sommerstück 2026'));
       await waitFor(find.text('3970 Aufnahmen'));
       await waitFor(find.bySemanticsLabel('Aufnahme 1 öffnen'));

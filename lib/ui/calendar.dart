@@ -78,7 +78,10 @@ class RehearsalCalendar extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) => GridView.count(
             crossAxisCount: 7,
-            childAspectRatio: constraints.maxWidth / 7 / 52,
+            childAspectRatio:
+                constraints.maxWidth /
+                7 /
+                (constraints.maxWidth >= 700 ? 96 : 52),
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             children: [
@@ -125,6 +128,26 @@ class RehearsalCalendar extends StatelessWidget {
                                       : FontWeight.normal,
                                 ),
                               ),
+                              if (constraints.maxWidth >= 700)
+                                for (final event
+                                    in events
+                                        .where((e) => eventOnDay(e, day))
+                                        .take(2))
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    child: Text(
+                                      event.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: foreground,
+                                      ),
+                                    ),
+                                  ),
                               const SizedBox(height: 3),
                               SizedBox(
                                 height: 5,

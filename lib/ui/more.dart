@@ -1,3 +1,5 @@
+import 'polls.dart';
+import 'responsive.dart';
 import 'brand_logo.dart';
 import 'profile.dart';
 import 'galleries.dart';
@@ -29,8 +31,6 @@ class MoreScreen extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(22, 20, 22, 30),
       children: [
-        const Eyebrow('Teil des Ensembles'),
-        const SizedBox(height: 10),
         Text('Mein Bereich.', style: Theme.of(context).textTheme.headlineLarge),
         const SizedBox(height: 24),
         Card(
@@ -62,11 +62,6 @@ class MoreScreen extends StatelessWidget {
                                   : 'Kolpingtheater Ramsen'),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
-                      if (user?.tagline.isNotEmpty == true)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(user!.tagline),
-                        ),
                       if (user?.isAdmin == true)
                         const Padding(
                           padding: EdgeInsets.only(top: 8),
@@ -89,6 +84,15 @@ class MoreScreen extends StatelessWidget {
           label: const Text('Profil bearbeiten'),
         ),
         const SectionTitle('Im Theater'),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.poll_outlined),
+            title: const Text('Abstimmungen'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _open(context, PollsScreen(controller: controller)),
+          ),
+        ),
+        const SizedBox(height: 12),
         Card(
           child: ListTile(
             leading: const Icon(Icons.photo_library_outlined),
@@ -179,7 +183,7 @@ class MoreScreen extends StatelessWidget {
                 const Divider(indent: 60),
                 _MenuItem(
                   Icons.admin_panel_settings_outlined,
-                  'Probenleitung',
+                  'Administration',
                   'Konten, Termine, Ensemble und Besetzung',
                   () =>
                       _open(context, ManagementScreen(controller: controller)),
@@ -424,10 +428,8 @@ class _AddAbsenceScreenState extends State<AddAbsenceScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Abwesenheit melden')),
     body: ListView(
-      padding: const EdgeInsets.all(24),
+      padding: pagePadding(context),
       children: [
-        const Eyebrow('Gut zu wissen'),
-        const SizedBox(height: 12),
         Text(
           'Wann fehlst du?',
           style: Theme.of(context).textTheme.headlineLarge,
@@ -484,9 +486,10 @@ class _MembersScreenState extends State<MembersScreen> {
   Widget build(BuildContext context) {
     final members = widget.controller.members
         .where(
-          (m) => '${m.name} ${m.group}'.toLowerCase().contains(
-            _query.toLowerCase(),
-          ),
+          (m) =>
+              '${m.name} ${m.group} ${widget.controller.roleNames(m.roleIds)}'
+                  .toLowerCase()
+                  .contains(_query.toLowerCase()),
         )
         .toList();
     return Scaffold(
@@ -497,7 +500,7 @@ class _MembersScreenState extends State<MembersScreen> {
             padding: const EdgeInsets.fromLTRB(22, 8, 22, 18),
             child: TextField(
               decoration: const InputDecoration(
-                hintText: 'Name oder Gruppe suchen',
+                hintText: 'Name, Gruppe oder Rolle suchen',
                 prefixIcon: Icon(Icons.search),
               ),
               onChanged: (v) => setState(() => _query = v),
@@ -523,7 +526,7 @@ class _MembersScreenState extends State<MembersScreen> {
                   subtitle: Text(
                     [
                       member.group,
-                      member.tagline,
+                      widget.controller.roleNames(member.roleIds),
                     ].where((s) => s.isNotEmpty).join('\n'),
                   ),
                 );
@@ -568,7 +571,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
     body: Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(22),
+          padding: pagePadding(context),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -598,7 +601,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                 subtitle: Text(
                   [
                     member.group,
-                    member.tagline,
+                    widget.controller.roleNames(member.roleIds),
                   ].where((s) => s.isNotEmpty).join('\n'),
                 ),
                 value: _present.contains(member.id),
@@ -666,9 +669,8 @@ class SettingsScreen extends StatelessWidget {
     builder: (context, _) => Scaffold(
       appBar: AppBar(title: const Text('Darstellung & Erinnerungen')),
       body: ListView(
-        padding: const EdgeInsets.all(22),
+        padding: pagePadding(context),
         children: [
-          const Eyebrow('Deine App'),
           const SectionTitle('Darstellung'),
           Card(
             child: Padding(
@@ -781,7 +783,7 @@ class SyncScreen extends StatelessWidget {
     builder: (context, _) => Scaffold(
       appBar: AppBar(title: const Text('Synchronisierung')),
       body: ListView(
-        padding: const EdgeInsets.all(22),
+        padding: pagePadding(context),
         children: [
           StatePill(
             controller.isDemo

@@ -9,7 +9,6 @@ import '../core/app_controller.dart';
 import '../core/models.dart';
 import '../data/api_client.dart';
 import 'profile.dart';
-import 'theme.dart';
 
 class GalleryListScreen extends StatefulWidget {
   const GalleryListScreen({super.key, required this.controller});
@@ -81,123 +80,137 @@ class _GalleryListScreenState extends State<GalleryListScreen> {
         return RefreshIndicator(
           onRefresh: _refresh,
           child: LayoutBuilder(
-            builder: (context, constraints) => ListView(
-              padding: EdgeInsets.symmetric(
-                horizontal: constraints.maxWidth > 900
-                    ? (constraints.maxWidth - 850) / 2
-                    : 22,
-                vertical: 18,
-              ),
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                const Eyebrow('Auf und hinter der Bühne'),
-                const SizedBox(height: 10),
-                Text(
-                  'Unsere Erinnerungen.',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                const SizedBox(height: 24),
-                if (galleries.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 60),
-                    child: Text(
-                      'Hier erscheinen die freigegebenen Alben.',
-                      textAlign: TextAlign.center,
-                    ),
+            builder: (context, size) {
+              final width = size.maxWidth.clamp(0, 1150).toDouble();
+              final side = (size.maxWidth - width) / 2 + 22;
+              final cardWidth = width >= 800
+                  ? (width - 44 - 22) / 2
+                  : width - 44;
+              return ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.symmetric(horizontal: side, vertical: 18),
+                children: [
+                  Text(
+                    'Alben',
+                    style: Theme.of(context).textTheme.headlineMedium,
                   ),
-                for (final gallery in galleries)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 22),
-                    child: Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: InkWell(
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => GalleryScreen(
-                                controller: widget.controller,
-                                gallery: gallery,
-                              ),
-                            ),
-                          );
-                          if (mounted && widget.controller.hasAccess) {
-                            try {
-                              await _refresh();
-                            } catch (_) {}
-                          }
-                        },
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            AspectRatio(
-                              aspectRatio: 1.9,
-                              child: gallery['coverPath'] != null
-                                  ? ProtectedImage(
+                  const SizedBox(height: 24),
+                  if (galleries.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 60),
+                      child: Text(
+                        'Hier erscheinen die freigegebenen Alben.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  Wrap(
+                    spacing: 22,
+                    runSpacing: 22,
+                    children: [
+                      for (final gallery in galleries)
+                        SizedBox(
+                          width: cardWidth,
+                          child: Card(
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => GalleryScreen(
                                       controller: widget.controller,
-                                      path: textValue(gallery['coverPath']),
-                                      decodeWidth: 1000,
-                                    )
-                                  : ColoredBox(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.surfaceContainerHighest,
-                                      child: const Icon(
-                                        Icons.photo_library_outlined,
-                                        size: 48,
-                                      ),
+                                      gallery: gallery,
                                     ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.all(20),
-                              child: Row(
+                                  ),
+                                );
+                                if (mounted && widget.controller.hasAccess) {
+                                  try {
+                                    await _refresh();
+                                  } catch (_) {}
+                                }
+                              },
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          textValue(gallery['title']),
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.titleLarge,
-                                        ),
-                                        const SizedBox(height: 5),
-                                        Text(
-                                          '${intValue(gallery['count'])} Aufnahmen',
-                                        ),
-                                        if (gallery['published'] == false)
-                                          const Text('Nur Administration'),
-                                        if (gallery['sourceError'] != null)
-                                          Text(
-                                            'Fotoquelle zurzeit nicht erreichbar',
-                                            style: TextStyle(
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.error,
+                                  AspectRatio(
+                                    aspectRatio: 1.9,
+                                    child: gallery['coverPath'] != null
+                                        ? ProtectedImage(
+                                            controller: widget.controller,
+                                            path: textValue(
+                                              gallery['coverPath'],
+                                            ),
+                                            decodeWidth: 1200,
+                                          )
+                                        : ColoredBox(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .surfaceContainerHighest,
+                                            child: const Icon(
+                                              Icons.photo_library_outlined,
+                                              size: 48,
                                             ),
                                           ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.all(20),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                textValue(gallery['title']),
+                                                style: Theme.of(
+                                                  context,
+                                                ).textTheme.titleLarge,
+                                              ),
+                                              const SizedBox(height: 5),
+                                              Text(
+                                                '${intValue(gallery['count'])} Aufnahmen',
+                                              ),
+                                              if (gallery['published'] == false)
+                                                const Text(
+                                                  'Nur Administration',
+                                                ),
+                                              if (gallery['sourceError'] !=
+                                                  null)
+                                                Text(
+                                                  'Fotoquelle zurzeit nicht erreichbar',
+                                                  style: TextStyle(
+                                                    color: Theme.of(
+                                                      context,
+                                                    ).colorScheme.error,
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                        const Icon(Icons.arrow_forward),
                                       ],
                                     ),
                                   ),
-                                  const Icon(Icons.arrow_forward),
                                 ],
                               ),
                             ),
-                          ],
+                          ),
                         ),
+                    ],
+                  ),
+                  if (widget.controller.user?.isAdmin == true)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 24),
+                      child: OutlinedButton.icon(
+                        onPressed: () => _edit(),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Album freigeben'),
                       ),
                     ),
-                  ),
-                if (widget.controller.user?.isAdmin == true)
-                  OutlinedButton.icon(
-                    onPressed: () => _edit(),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Album freigeben'),
-                  ),
-              ],
-            ),
+                ],
+              );
+            },
           ),
         );
       },

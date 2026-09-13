@@ -1,3 +1,4 @@
+import 'responsive.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -131,7 +132,6 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  late final TextEditingController _tagline;
   late String? _avatar;
   late int _version;
   Uint8List? _selected;
@@ -141,15 +141,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     final u = widget.controller.user!;
-    _tagline = TextEditingController(text: u.tagline);
     _avatar = u.avatarId;
     _version = u.profileVersion;
-  }
-
-  @override
-  void dispose() {
-    _tagline.dispose();
-    super.dispose();
   }
 
   Future<void> _pick() async {
@@ -197,11 +190,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _avatar = textValue(upload['id']);
         _selected = null;
       }
-      await widget.controller.saveProfile(
-        tagline: _tagline.text,
-        avatarId: _avatar,
-        version: _version,
-      );
+      await widget.controller.saveProfile(avatarId: _avatar, version: _version);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -214,7 +203,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Mein Profil')),
     body: ListView(
-      padding: const EdgeInsets.all(24),
+      padding: pagePadding(context),
       children: [
         Center(
           child: SizedBox.square(
@@ -258,16 +247,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           style: Theme.of(context).textTheme.titleLarge,
         ),
         const SizedBox(height: 28),
-        TextField(
-          controller: _tagline,
-          enabled: !_busy,
-          maxLength: 120,
-          maxLines: 2,
-          decoration: const InputDecoration(
-            labelText: 'Deine Statuszeile',
-            hintText: 'Was beschäftigt dich gerade?',
-          ),
-        ),
         const SizedBox(height: 16),
         if (_error != null)
           Padding(

@@ -190,6 +190,15 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
           '${textValue(m['group'])}${m['active'] == false ? ' · Inaktiv' : ''}',
           style: Theme.of(context).textTheme.bodySmall,
         ),
+        if (jsonList(m['roleIds']).isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              widget.controller.roleNames(
+                jsonList(m['roleIds']).map((r) => r.toString()),
+              ),
+            ),
+          ),
         if (textValue(m['roleName']).isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),

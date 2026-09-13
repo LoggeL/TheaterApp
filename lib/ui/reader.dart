@@ -1174,7 +1174,11 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
                 for (final scene in _document!.scenes)
                   ListTile(
                     title: Text('${scene.id} · ${scene.title}'),
-                    subtitle: Text(scene.roles.join(' · ')),
+                    selected: _document!.cues.any(
+                      (c) => c.sceneId == scene.id && _own(c),
+                    ),
+                    selectedColor: _accent,
+                    selectedTileColor: _accent.withValues(alpha: 0.08),
                     onTap: () {
                       final cue = _document!.cues
                           .where(
@@ -1541,9 +1545,8 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
       showDragHandle: true,
       isScrollControlled: true,
       builder: (context) => _SheetFrame(
-        title: 'Auf einen Blick',
-        subtitle:
-            '${doc.scenes.length} Szenen · ${doc.cues.where((cue) => cue.kind != 'scene' && cue.kind != 'role').length} Textstellen',
+        title: 'Szenen',
+        subtitle: '${doc.scenes.length} Szenen',
         child: ListView.builder(
           shrinkWrap: true,
           itemCount: doc.scenes.length,
@@ -1564,19 +1567,17 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
             }
             final firstCue = first;
             return ListTile(
+              selected: ownCount > 0,
+              selectedTileColor: _accent.withValues(alpha: 0.08),
+              selectedColor: _accent,
               leading: CircleAvatar(
-                backgroundColor: _accent.withValues(alpha: 0.12),
+                backgroundColor: _accent.withValues(
+                  alpha: ownCount > 0 ? 0.25 : 0.06,
+                ),
                 foregroundColor: _accent,
                 child: Text('${index + 1}'),
               ),
               title: Text(scene.title),
-              subtitle: Text(
-                _hasRoles
-                    ? '$ownCount eigene Textstellen'
-                    : scene.roles.join(' · '),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
               trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
               onTap: firstCue == null
                   ? null

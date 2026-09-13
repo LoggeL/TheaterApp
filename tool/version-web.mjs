@@ -11,6 +11,10 @@ async function versionIcon(path) {
   return name;
 }
 const main = await readFile(new URL('main.dart.js', root));
+// A stale Flutter plugin registrant can silently ship the native channel on web.
+if (!main.includes(Buffer.from('__image_picker_web-file-input'))) {
+  throw new Error('Web image picker is missing. Run flutter clean and rebuild web before deploying.');
+}
 const mainName = `main.${hash(main)}.dart.js`;
 let bootstrap = await readFile(new URL('flutter_bootstrap.js', root), 'utf8');
 bootstrap = bootstrap.replaceAll('main.dart.js', mainName);

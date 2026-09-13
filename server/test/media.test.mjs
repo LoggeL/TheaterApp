@@ -31,14 +31,14 @@ test('profile uploads require approval and profile save cannot select another pe
   await assert.rejects(media.image('admin', image.id), { status: 404 });
   assert.throws(() => app.action('admin', { action: 'profile.save', avatarId: image.id, tagline: '', profileVersion: 0 }, 'spoof'), { status: 403 });
   app.action('sam', { action: 'profile.save', avatarId: image.id, tagline: '  Auf der Bühne!  ', profileVersion: 0, personId: 1, role: 'admin' }, 'save');
-  assert.equal(app.snapshot('sam').user.tagline, 'Auf der Bühne!');
+  assert.equal(app.snapshot('sam').user.tagline, undefined);
   assert.equal(store.account('sam').role, 'member');
   assert.equal(store.get('members', 1).avatarId, undefined);
   assert.equal(store.get('members', personId).avatarId, image.id);
   const processed = await media.image('admin', image.id), metadata = await sharp(processed.bytes).metadata();
   assert.equal(metadata.format, 'webp'); assert.equal(metadata.width, 512); assert.equal(metadata.height, 512); assert.equal(metadata.exif, undefined);
   assert.throws(() => app.action('sam', { action: 'profile.save', avatarId: image.id, tagline: 'Stale', profileVersion: 0 }, 'stale'), { status: 409 });
-  assert.throws(() => app.action('sam', { action: 'profile.save', avatarId: image.id, tagline: 'x'.repeat(121), profileVersion: 1 }, 'long'), { status: 400 });
+  app.action('sam', { action: 'profile.save', avatarId: image.id, profileVersion: 1 }, 'photo-only');
 });
 
 test('gallery uploads are admin-only, paginate, hide and restore without crossing album boundaries', async t => {
@@ -68,7 +68,7 @@ function fakeSource({ allowDownload = true, fetches = [] } = {}) {
     const u = new URL(input); fetches.push(u.pathname);
     if (u.pathname === '/s/photos') return new Response('<meta property="og:image" content="https://photo.rittmann.cloud/api/assets/a/thumbnail?key=private-share-key">');
     assert.equal(u.searchParams.get('key'), 'private-share-key');
-    if (u.pathname === '/api/shared-links/me') return Response.json({ type: 'ALBUM', allowDownload, album: { id: 'album', albumName: 'Photos' } });
+    if (u.pathname === '/api/shared-links/me') return Response.json({ type: 'ALBUM', allowDownload, album: { id: 'album', albumName: 'Photos', albumThumbnailAssetId: 'c' } });
     if (u.pathname === '/api/timeline/buckets') return Response.json([{ timeBucket: '2026-08-01' }, { timeBucket: '2026-07-01' }]);
     if (u.pathname === '/api/timeline/bucket') return Response.json(u.searchParams.get('timeBucket') === '2026-08-01' ? { id: ['a', 'b', 'trash'], isImage: [true, false, true], isTrashed: [false, false, true], fileCreatedAt: ['2026-08-02', '2026-08-01', '2026-08-03'], ratio: [1.5, .75, 1] } : [{ id: 'a', type: 'IMAGE', fileCreatedAt: '2026-08-02' }, { id: 'c', type: 'IMAGE', fileCreatedAt: '2026-07-01' }]);
     if (/\/assets\/a\/(thumbnail|original)$/.test(u.pathname)) return new Response('original-image-bytes', { headers: { 'Content-Type': 'image/jpeg' } });
@@ -80,6 +80,7 @@ test('Immich validates source hosts, resolves custom slugs, deduplicates columna
   for (const url of ['http://photo.rittmann.cloud/s/photos', 'https://127.0.0.1/s/photos', 'https://photo.rittmann.cloud.evil.test/s/photos', 'https://user:pw@photo.rittmann.cloud/s/photos', 'https://photo.rittmann.cloud/api/server', 'https://photo.rittmann.cloud/s/photos?foo=bar']) assert.throws(() => media.immich.url(url), { status: 400 });
   const g = await media.saveGallery('admin', { title: 'Photos', sourceUrl: 'https://photo.rittmann.cloud/s/photos' });
   const page = await media.page('sam', g.id);
+  assert.equal((await media.list('sam')).galleries[0].coverPath, `/galleries/${g.id}/assets/c?size=preview`);
   assert.deepEqual(page.assets.map(a => a.id), ['a', 'b', 'c']); assert.equal(page.assets[1].type, 'VIDEO');
   assert.equal(JSON.stringify(page).includes('private-share-key'), false); assert.equal(page.assets[0].canDownload, true);
   assert.equal(fetches.filter(p => p === '/api/shared-links/me').length, 1);

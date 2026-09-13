@@ -59,7 +59,8 @@ export class Immich {
     }
     const unique = [...new Map(assets.map(a => [a.id, a])).values()];
     unique.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
-    return { title: share.album.albumName, description: share.album.description ?? '', allowDownload: share.allowDownload === true, assets: unique, ids: new Set(unique.map(a => a.id)), api };
+    const coverId = unique.find(a => a.id === share.album.albumThumbnailAssetId && a.type === 'IMAGE')?.id ?? unique.find(a => a.type === 'IMAGE')?.id ?? unique[0]?.id;
+    return { coverId, title: share.album.albumName, description: share.album.description ?? '', allowDownload: share.allowDownload === true, assets: unique, ids: new Set(unique.map(a => a.id)), api };
   }
   async image(sourceUrl, assetId, preview = false) {
     const album = await this.album(sourceUrl);

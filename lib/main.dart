@@ -1,3 +1,6 @@
+import 'ui/admin.dart';
+import 'ui/responsive.dart';
+import 'ui/push_prompt.dart';
 import 'ui/brand_logo.dart';
 import 'dart:async';
 
@@ -233,16 +236,26 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
             ? ApprovalPendingScreen(controller: controller)
             : controller.user!.mustChangePassword
             ? PasswordScreen(controller: controller, requiredChange: true)
-            : AppShell(controller: controller, devices: _devices),
+            : AppShell(
+                controller: controller,
+                devices: _devices,
+                promptForPush: widget.enableDeviceServices,
+              ),
       );
     },
   );
 }
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key, required this.controller, required this.devices});
+  const AppShell({
+    super.key,
+    required this.controller,
+    required this.devices,
+    this.promptForPush = true,
+  });
   final AppController controller;
   final DeviceServices devices;
+  final bool promptForPush;
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -250,8 +263,53 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _tab = 0;
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.promptForPush) {
+        requestPushOnOpen(context, widget.controller, widget.devices);
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final c = widget.controller;
+    final wide = MediaQuery.sizeOf(context).width >= 900;
+    final admin = c.user?.isAdmin == true;
+    final destinations = <NavigationDestination>[
+      const NavigationDestination(
+        icon: Icon(Icons.wb_sunny_outlined),
+        selectedIcon: Icon(Icons.wb_sunny),
+        label: 'Heute',
+      ),
+      const NavigationDestination(
+        icon: Icon(Icons.calendar_month_outlined),
+        selectedIcon: Icon(Icons.calendar_month),
+        label: 'Termine',
+      ),
+      const NavigationDestination(
+        icon: Icon(Icons.auto_stories_outlined),
+        selectedIcon: Icon(Icons.auto_stories),
+        label: 'Drehbücher',
+      ),
+      const NavigationDestination(
+        icon: Icon(Icons.person_outline),
+        selectedIcon: Icon(Icons.person),
+        label: 'Mein Bereich',
+      ),
+      if (admin)
+        NavigationDestination(
+          icon: Badge(
+            isLabelVisible: c.pendingAccounts.isNotEmpty,
+            label: Text('${c.pendingAccounts.length}'),
+            child: const Icon(Icons.admin_panel_settings_outlined),
+          ),
+          selectedIcon: const Icon(Icons.admin_panel_settings),
+          label: 'Admin',
+        ),
+    ];
+    final selectedTab = _tab.clamp(0, destinations.length - 1);
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 65,
@@ -302,103 +360,129 @@ class _AppShellState extends State<AppShell> {
           const SizedBox(width: 10),
         ],
       ),
-      body: Column(
+      body: Row(
         children: [
-          if (c.isDemo)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
-              color: const Color(0xFFEEE6DA),
-              child: const Text(
-                'DEMO · Beispieldaten, lokal auf deinem Gerät',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: StageTheme.ink,
-                ),
-              ),
-            ),
-          if (!c.isDemo && (c.isOffline || c.failedCount > 0))
-            Material(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: InkWell(
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => SyncScreen(controller: c)),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 10,
+          if (wide) ...[
+            NavigationRail(
+              labelType: MediaQuery.sizeOf(context).width >= 1250
+                  ? NavigationRailLabelType.none
+                  : NavigationRailLabelType.all,
+              extended: MediaQuery.sizeOf(context).width >= 1250,
+              selectedIndex: selectedTab,
+              onDestinationSelected: (i) => setState(() => _tab = i),
+              destinations: [
+                for (final d in destinations)
+                  NavigationRailDestination(
+                    icon: d.icon,
+                    selectedIcon: d.selectedIcon,
+                    label: Text(d.label),
                   ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        c.failedCount > 0
-                            ? Icons.error_outline
-                            : Icons.cloud_off,
-                        size: 17,
+              ],
+            ),
+            const VerticalDivider(width: 1),
+          ],
+          Expanded(
+            child: Column(
+              children: [
+                if (c.isDemo)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 7,
+                    ),
+                    color: const Color(0xFFEEE6DA),
+                    child: const Text(
+                      'DEMO · Beispieldaten, lokal auf deinem Gerät',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: StageTheme.ink,
                       ),
-                      const SizedBox(width: 9),
-                      Expanded(
-                        child: Text(
-                          c.failedCount > 0
-                              ? '${c.failedCount} Änderung(en) benötigen deine Prüfung'
-                              : 'Offline · Du siehst zuletzt gespeicherte Inhalte',
-                          style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                if (!c.isDemo && (c.isOffline || c.failedCount > 0))
+                  Material(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    child: InkWell(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => SyncScreen(controller: c),
                         ),
                       ),
-                      const Icon(Icons.chevron_right, size: 17),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 10,
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              c.failedCount > 0
+                                  ? Icons.error_outline
+                                  : Icons.cloud_off,
+                              size: 17,
+                            ),
+                            const SizedBox(width: 9),
+                            Expanded(
+                              child: Text(
+                                c.failedCount > 0
+                                    ? '${c.failedCount} Änderung(en) benötigen deine Prüfung'
+                                    : 'Offline · Du siehst zuletzt gespeicherte Inhalte',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right, size: 17),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                if (c.busy && !c.isDemo)
+                  const LinearProgressIndicator(minHeight: 2),
+                Expanded(
+                  child: IndexedStack(
+                    index: selectedTab,
+                    children: [
+                      ContentWidth(
+                        child: TodayScreen(
+                          controller: c,
+                          onPlan: () => setState(() => _tab = 1),
+                          onScripts: () => setState(() => _tab = 2),
+                        ),
+                      ),
+                      ContentWidth(
+                        maxWidth: 1050,
+                        child: ScheduleScreen(controller: c),
+                      ),
+                      ContentWidth(
+                        maxWidth: 1050,
+                        child: ProductionsScreen(controller: c),
+                      ),
+                      ContentWidth(
+                        child: MoreScreen(
+                          controller: c,
+                          devices: widget.devices,
+                        ),
+                      ),
+                      if (admin) ManagementScreen(controller: c),
                     ],
                   ),
                 ),
-              ),
-            ),
-          if (c.busy && !c.isDemo) const LinearProgressIndicator(minHeight: 2),
-          Expanded(
-            child: IndexedStack(
-              index: _tab,
-              children: [
-                TodayScreen(
-                  controller: c,
-                  onPlan: () => setState(() => _tab = 1),
-                  onScripts: () => setState(() => _tab = 2),
-                ),
-                ScheduleScreen(controller: c),
-                ProductionsScreen(controller: c),
-                MoreScreen(controller: c, devices: widget.devices),
               ],
             ),
           ),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.wb_sunny_outlined),
-            selectedIcon: Icon(Icons.wb_sunny),
-            label: 'Heute',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.calendar_month_outlined),
-            selectedIcon: Icon(Icons.calendar_month),
-            label: 'Termine',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.auto_stories_outlined),
-            selectedIcon: Icon(Icons.auto_stories),
-            label: 'Drehbücher',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Mein Bereich',
-          ),
-        ],
-      ),
+      bottomNavigationBar: wide
+          ? null
+          : NavigationBar(
+              selectedIndex: selectedTab,
+              onDestinationSelected: (i) => setState(() => _tab = i),
+              destinations: destinations,
+            ),
     );
   }
 }

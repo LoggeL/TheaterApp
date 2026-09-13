@@ -1,3 +1,6 @@
+import 'polls.dart';
+import 'responsive.dart';
+import '../core/event_types.dart';
 import 'calendar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -90,8 +93,6 @@ class TodayScreen extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(22, 20, 22, 28),
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          const Eyebrow('Dein Theater. Dein Moment.'),
-          const SizedBox(height: 10),
           Text(
             'Hallo, ${controller.user?.firstName ?? 'Ensemble'}.',
             style: Theme.of(context).textTheme.headlineLarge,
@@ -108,7 +109,7 @@ class TodayScreen extends StatelessWidget {
             const Card(
               child: EmptyState(
                 icon: Icons.event_available_outlined,
-                title: 'Platz zum Durchatmen.',
+                title: 'Keine anstehenden Termine',
                 message: 'Aktuell stehen keine kommenden Termine an.',
               ),
             ),
@@ -134,6 +135,24 @@ class TodayScreen extends StatelessWidget {
               ),
             ],
           ),
+          if (controller.polls.any((p) => !p.isClosed)) ...[
+            const SectionTitle('Abstimmungen'),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.poll_outlined),
+                title: Text(
+                  controller.polls.firstWhere((p) => !p.isClosed).title,
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PollsScreen(controller: controller),
+                  ),
+                ),
+              ),
+            ),
+          ],
           SectionTitle(
             'Dein Drehbuch',
             trailing: TextButton(
@@ -282,7 +301,7 @@ class _NextRehearsal extends StatelessWidget {
             ),
             onPressed: () => openEvent(context, controller, event.id),
             icon: const Icon(Icons.arrow_forward, size: 19),
-            label: const Text('Probe ansehen'),
+            label: const Text('Termin ansehen'),
           ),
         ),
       ],
@@ -459,8 +478,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Eyebrow('Zusammen kommen'),
-                  const SizedBox(height: 10),
                   Row(
                     children: [
                       Expanded(
@@ -650,7 +667,7 @@ class EventCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    eventTime(event),
+                    '${eventTypeLabel(event.kind)} · ${eventTime(event)}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 3),
@@ -704,7 +721,7 @@ class EventDetailScreen extends StatelessWidget {
       final event = matches.first;
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Deine Probe'),
+          title: const Text('Termin'),
           actions: [
             IconButton(
               tooltip: 'Kalenderdatei teilen',
@@ -716,13 +733,22 @@ class EventDetailScreen extends StatelessWidget {
           ],
         ),
         body: ListView(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 36),
+          padding: pagePadding(context, top: 16, bottom: 36),
           children: [
             Eyebrow(
               event.group.isEmpty ? 'Kolpingtheater Ramsen' : event.group,
             ),
             const SizedBox(height: 12),
             Text(event.title, style: Theme.of(context).textTheme.headlineLarge),
+            const SizedBox(height: 8),
+            Text(
+              eventTypeLabel(event.kind),
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            if (event.description.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              SelectableText(event.description),
+            ],
             const SizedBox(height: 24),
             Card(
               child: Padding(
@@ -1191,6 +1217,8 @@ String calendarFile(TheaterEvent event, {DateTime? now}) {
     if (event.endsAt != null) 'DTEND:${_icsStamp(event.endsAt!)}',
     'SUMMARY:${_icsEscape(event.title)}',
     'LOCATION:${_icsEscape(event.place)}',
+    if (event.description.isNotEmpty)
+      'DESCRIPTION:${_icsEscape(event.description)}',
     'END:VEVENT',
     'END:VCALENDAR',
   ];

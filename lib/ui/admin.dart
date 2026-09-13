@@ -1,3 +1,7 @@
+import '../core/event_types.dart';
+import 'roles_admin.dart';
+import 'polls.dart';
+import 'galleries.dart';
 import 'profile.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -83,7 +87,7 @@ class ManagementScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AdminPage(
     controller: controller,
-    title: 'Probenleitung',
+    title: 'Administration',
     children: (ctx) {
       final next = controller.events
           .where((e) => e.endsAt?.isAfter(DateTime.now()) ?? false)
@@ -100,7 +104,7 @@ class ManagementScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'NÄCHSTE PROBE',
+                  'NÄCHSTER TERMIN',
                   style: TextStyle(
                     color: Color(0xFFFFA584),
                     letterSpacing: 1.5,
@@ -164,6 +168,28 @@ class ManagementScreen extends StatelessWidget {
           Icons.groups_outlined,
           'Ensemble verwalten',
           MembersAdminScreen(controller: controller),
+        ),
+        const SizedBox(height: 10),
+        tile(
+          ctx,
+          Icons.badge_outlined,
+          'Rollen verwalten',
+          RolesAdminScreen(controller: controller),
+          'Eigene Rollen und Mehrfachzuordnung',
+        ),
+        const SizedBox(height: 10),
+        tile(
+          ctx,
+          Icons.poll_outlined,
+          'Abstimmungen',
+          PollsScreen(controller: controller),
+        ),
+        const SizedBox(height: 10),
+        tile(
+          ctx,
+          Icons.photo_library_outlined,
+          'Galerien verwalten',
+          GalleryListScreen(controller: controller),
         ),
         const SizedBox(height: 10),
         tile(
@@ -434,7 +460,13 @@ class _MembersAdminScreenState extends State<MembersAdminScreen> {
               ),
               title: Text(textValue(m['name'])),
               subtitle: Text(
-                '${textValue(m['group'])}${m['active'] == false ? ' · Inaktiv' : ''}',
+                [
+                  textValue(m['group']),
+                  widget.controller.roleNames(
+                    jsonList(m['roleIds']).map((r) => r.toString()),
+                  ),
+                  if (m['active'] == false) 'Inaktiv',
+                ].where((s) => s.isNotEmpty).join(' · '),
               ),
               trailing: const Icon(Icons.edit_outlined),
               onTap: () => openPage(
@@ -459,6 +491,7 @@ class MemberEditorScreen extends StatefulWidget {
 class _MemberEditorScreenState extends State<MemberEditorScreen> {
   late final TextEditingController _name, _group;
   late bool _active;
+  late Set<String> _roles;
   bool _busy = false;
   @override
   void initState() {
@@ -468,6 +501,9 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
       text: textValue(widget.member?['group'], 'Ensemble'),
     );
     _active = widget.member?['active'] != false;
+    _roles = jsonList(
+      widget.member?['roleIds'],
+    ).map((r) => r.toString()).toSet();
   }
 
   @override
@@ -488,6 +524,7 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
         'name': _name.text,
         'group': _group.text,
         'active': _active,
+        'roleIds': _roles.toList(),
       });
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -513,6 +550,34 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
         decoration: const InputDecoration(labelText: 'Gruppe'),
       ),
       const SizedBox(height: 20),
+      const SectionTitle('Rollen'),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final r in widget.controller.personRoles)
+            FilterChip(
+              label: Text(textValue(r['name'])),
+              selected: _roles.contains(r['id']),
+              onSelected: _busy
+                  ? null
+                  : (selected) => setState(() {
+                      if (selected) {
+                        _roles.add(textValue(r['id']));
+                      } else {
+                        _roles.remove(r['id']);
+                      }
+                    }),
+            ),
+        ],
+      ),
+      TextButton.icon(
+        onPressed: () =>
+            openPage(context, RolesAdminScreen(controller: widget.controller)),
+        icon: const Icon(Icons.edit_outlined),
+        label: const Text('Rollen anpassen'),
+      ),
+      const SizedBox(height: 16),
       SwitchListTile(
         value: _active,
         onChanged: (v) => setState(() => _active = v),
@@ -582,7 +647,7 @@ class EventEditorScreen extends StatefulWidget {
 }
 
 class _EventEditorScreenState extends State<EventEditorScreen> {
-  late final TextEditingController _title, _place, _group;
+  late final TextEditingController _title, _place, _group, _description;
   late DateTime _start, _end;
   late bool _locked;
   late String _kind;
@@ -593,6 +658,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     super.initState();
     final e = widget.event;
     _title = TextEditingController(text: e?.title);
+    _description = TextEditingController(text: e?.description);
     _place = TextEditingController(text: e?.place ?? 'Kolpingheim');
     _group = TextEditingController(text: e?.group ?? 'Ensemble');
     final next = DateTime.now().add(const Duration(days: 1));
@@ -606,6 +672,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
   @override
   void dispose() {
     _title.dispose();
+    _description.dispose();
     _place.dispose();
     _group.dispose();
     super.dispose();
@@ -645,6 +712,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         'id': widget.event?.id,
         'version': widget.event?.version,
         'title': _title.text,
+        'description': _description.text,
         'startsAt': _start.toUtc().toIso8601String(),
         'endsAt': _end.toUtc().toIso8601String(),
         'place': _place.text,
@@ -710,6 +778,14 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         decoration: const InputDecoration(labelText: 'Titel'),
       ),
       const SizedBox(height: 20),
+      TextField(
+        controller: _description,
+        minLines: 3,
+        maxLines: 8,
+        maxLength: 5000,
+        decoration: const InputDecoration(labelText: 'Beschreibung'),
+      ),
+      const SizedBox(height: 20),
       Card(
         child: Column(
           children: [
@@ -745,15 +821,12 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       ),
       const SizedBox(height: 20),
       DropdownButtonFormField<String>(
+        key: const ValueKey('event-kind'),
         initialValue: _kind,
         decoration: const InputDecoration(labelText: 'Art des Termins'),
-        items: const [
-          DropdownMenuItem(value: 'rehearsal', child: Text('Probe')),
-          DropdownMenuItem(value: 'technical', child: Text('Technikprobe')),
-          DropdownMenuItem(value: 'performance', child: Text('Aufführung')),
-          DropdownMenuItem(value: 'costume', child: Text('Kostümprobe')),
-          DropdownMenuItem(value: 'other', child: Text('Sonstiges')),
-        ],
+        items: eventTypes.entries
+            .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+            .toList(),
         onChanged: (s) => setState(() => _kind = s!),
       ),
       const SizedBox(height: 20),

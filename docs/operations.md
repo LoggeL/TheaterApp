@@ -105,7 +105,7 @@ Der Import vom 13. September 2026 umfasst 41 Personen der bisherigen Theaterverw
 
 Das Raster lädt jeweils 60 Einträge und nur sichtbare Vorschaubilder. Die Lightbox unterstützt Wischen, Pfeile und Zoom. „Original herunterladen“ übernimmt bei Immich die unveränderte Originaldatei, sofern die Quellfreigabe Downloads erlaubt. Videos öffnen sich im Originalalbum. Passwortgeschützte oder abgelaufene Immich-Freigaben melden einen Fehler; bereits hochgeladene lokale Bilder bleiben verfügbar. `GALLERY_HOSTS` begrenzt erlaubte Quellen, standardmäßig auf `photo.rittmann.cloud`. Freigabedaten werden fünf Minuten zwischengespeichert; Änderungen der Download-Erlaubnis in Immich greifen spätestens danach. Ein Entzug der Freigabe in der Theater-App gilt sofort beim nächsten Serverzugriff.
 
-„Mein Bereich → Profil bearbeiten“ speichert ein eigenes Profilbild und eine Statuszeile bis 120 Zeichen. Name, Besetzung und Kontoverknüpfung bleiben Verwaltungsaufgaben. Bilder bis 8 MB werden beim Upload geprüft, ausgerichtet, von Metadaten befreit und als WebP gespeichert. Profilbilder werden quadratisch auf 512 Pixel zugeschnitten, Galeriebilder auf höchstens 2048 Pixel verkleinert. Downloads eigener Uploads enthalten diese normalisierte Datei. Binäre Bildabrufe benötigen einen freigegebenen Zugang. Vorschaubilder bleiben nur im begrenzten Arbeitsspeicher der App, ohne Tokens in URLs.
+„Mein Bereich → Profil bearbeiten“ speichert ein eigenes Profilbild. Statuszeilen und dekorative Slogans sind entfernt. Name, Besetzung und Kontoverknüpfung bleiben Verwaltungsaufgaben. Bilder bis 8 MB werden beim Upload geprüft, ausgerichtet, von Metadaten befreit und als WebP gespeichert. Profilbilder werden quadratisch auf 512 Pixel zugeschnitten, Galeriebilder auf höchstens 2048 Pixel verkleinert. Downloads eigener Uploads enthalten diese normalisierte Datei. Binäre Bildabrufe benötigen einen freigegebenen Zugang. Vorschaubilder bleiben nur im begrenzten Arbeitsspeicher der App, ohne Tokens in URLs.
 
 `/data/media` liegt im vorhandenen persistenten Datenvolume. `tool/backup.py` erzeugt zusätzlich zur SQLite-Sicherung ein gleich datiertes `-media.tar.gz` und prüft alle Datenbankreferenzen. Bei einer Wiederherstellung dieses Archiv zusammen mit der passenden Datenbank zurückspielen und UID/GID 1000 setzen. Immich-Originale werden nicht in diese Sicherung kopiert, ihre Sicherung bleibt Aufgabe des Fotoservers.
 
@@ -114,3 +114,17 @@ Der Probenplan wechselt zwischen Agenda und Monatskalender. Die Kalenderansicht 
 ## Original-Logo
 
 Quelle: https://kolpingtheater-ramsen.de/presse, Originaldatei https://kolpingtheater-ramsen.de/img/logo.png. `assets/brand/kolpingtheater-ramsen.png` bleibt unverändert (SHA-256 `c22912bb9397371f959f23fd9caf75880be49ec2e639b1b2c81508c0a9626fab`). `node tool/brand-icons.mjs` erzeugt daraus lediglich passend skalierte Plattformicons auf weißen Flächen. Anmeldung, App-Kopf, Infoansicht und Plattformicons verwenden dieses Logo.
+
+## Termine, Rollen und Abstimmungen (0.4.0)
+
+Die Administration ist als eigener Navigationseintrag sichtbar. Auf breiten Bildschirmen steht die Navigation links; Formulare und Texte bleiben in einer begrenzten Lesebreite. Der Monatskalender zeigt am Desktop auch Termintitel.
+
+Termine haben eine Beschreibung (bis 5.000 Zeichen), die auch in die Kalenderdatei übernommen wird. Zur Auswahl stehen Probe, Leseprobe, Technikprobe, Kostümprobe, Generalprobe, Aufführung, Besprechung, Workshop, Aufbau, Abbau, Feier / Ausflug und Sonstiges.
+
+Unter „Administration → Rollen verwalten“ lassen sich Ensemble-Rollen anlegen und umbenennen. Jede Person kann mehrere davon haben; die Zuordnung erfolgt beim Bearbeiten der Person. Eine verwendete Rolle lässt sich erst nach dem Entfernen ihrer Zuordnungen löschen. Diese Aufgabenrollen ändern keine Kontoberechtigungen. Rollen im Drehbuch und Besetzungen bleiben mit der jeweiligen Produktion verbunden.
+
+Allgemeine Abstimmungen stehen unter „Mein Bereich → Abstimmungen“ und in der Administration. Admins legen Frage, Beschreibung, zwei bis zwölf Antworten und optional eine Frist an. Jede Person hat eine veränderbare Stimme. Die Ergebnisse zeigen die Anzahl je Antwort; fremde Einzelstimmen werden nicht übertragen. Admins können beenden und wieder öffnen. Nach der ersten Stimme bleiben die Antworttexte erhalten. Terminabstimmungen werden nicht erzeugt.
+
+Beim ersten Öffnen nach der Freigabe fragt die App nach Benachrichtigungen. Im Browser erscheint zuerst ein kurzer Dialog, dessen „Erlauben“-Schaltfläche die Browserberechtigung anfordert. Eine bestehende Ablehnung oder ausdrücklich deaktivierte Push-Einstellung wird respektiert. Ein neuer Versuch ist in den Erinnerungseinstellungen möglich.
+
+Immich-Cover verwenden das explizite Album-Titelbild in Preview-Auflösung. Ist kein passendes Titelbild verfügbar, wird ein Foto des Albums verwendet. `tool/version-web.mjs` bricht das Deployment ab, wenn die Web-Implementierung des Bildpickers im kompilierten JavaScript fehlt. Nach Änderungen an Flutter-Plugins einen sauberen Webbuild erzeugen; Web- und Android-Builds nacheinander ausführen.

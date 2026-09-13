@@ -11,7 +11,7 @@ export function scheduleReminders(theater, now = new Date()) {
       const key = `${event.id}:${event.startsAt}:${a.personId}:${kind}`;
       if (s.get('reminderSent', key)) continue;
       s.transaction(() => {
-        theater.enqueuePush({ title: kind === 'twoHours' ? 'Deine Probe beginnt bald' : 'Dein nächster Theatertermin', body: event.title, data: { eventId: event.id }, recipientPersonIds: [a.personId] });
+        theater.enqueuePush({ title: kind === 'twoHours' ? 'Dein Termin beginnt bald' : 'Dein nächster Theatertermin', body: event.title, data: { eventId: event.id }, recipientPersonIds: [a.personId] });
         s.put('reminderSent', key, { at: now.toISOString() });
       });
     }
