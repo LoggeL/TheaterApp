@@ -37,3 +37,92 @@ jobs:
         with:
           name: theater-web
           path: build/web
+  google-play:
+    name: Publish internal Google Play release
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: google-play-internal
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.6'
+          channel: stable
+          cache: true
+      - run: npm ci --ignore-scripts
+        working-directory: server
+      - name: Check that this commit is still main
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$latest" = "$GITHUB_SHA" ]; then
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'A newer commit is on main; skip this superseded release.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Restore private release credentials
+        if: steps.current.outputs.publish == 'true'
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_SIGNING_JSON: ${{ secrets.ANDROID_SIGNING_JSON }}
+        run: |
+          python3 - <<'PY'
+          import base64, json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          for name in ['PLAY_SERVICE_ACCOUNT_JSON', 'ANDROID_UPLOAD_KEYSTORE_BASE64', 'ANDROID_SIGNING_JSON']:
+              if not os.environ.get(name):
+                  raise SystemExit(f'Missing GitHub secret: {name}')
+          account = root / 'play-service-account.json'
+          account.write_text(os.environ['PLAY_SERVICE_ACCOUNT_JSON'])
+          account.chmod(0o600)
+          keystore = root / 'theater-upload.jks'
+          keystore.write_bytes(base64.b64decode(os.environ['ANDROID_UPLOAD_KEYSTORE_BASE64'], validate=True))
+          keystore.chmod(0o600)
+          signing = json.loads(os.environ['ANDROID_SIGNING_JSON'])
+          def prop(value):
+              return str(value).replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r')
+          props = {'storeFile': str(keystore), **{k: signing[k] for k in ['storePassword', 'keyPassword', 'keyAlias']}}
+          path = Path('android/key.properties')
+          path.write_text(''.join(f'{k}={prop(v)}\n' for k, v in props.items()))
+          path.chmod(0o600)
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f'GOOGLE_APPLICATION_CREDENTIALS={account}\n')
+          PY
+      - name: Allocate the next Play version code
+        if: steps.current.outputs.publish == 'true'
+        id: play
+        run: node server/scripts/play-release.mjs prepare "$RUNNER_TEMP/play-release.json"
+      - name: Build signed app bundle
+        if: steps.current.outputs.publish == 'true'
+        run: flutter build appbundle --release --dart-define-from-file=config/production.android.json --build-number=${{ steps.play.outputs.version_code }}
+      - name: Publish and verify internal release
+        if: steps.current.outputs.publish == 'true'
+        run: |
+          node server/scripts/play-release.mjs publish "$RUNNER_TEMP/play-release.json" build/app/outputs/bundle/release/app-release.aab
+          node server/scripts/play-release.mjs verify "$RUNNER_TEMP/play-release.json"
+          cp "$RUNNER_TEMP/play-release.json" build/app/outputs/bundle/release/play-release.json
+      - uses: actions/upload-artifact@v4
+        if: steps.current.outputs.publish == 'true'
+        with:
+          name: theater-google-play
+          path: build/app/outputs/bundle/release/
+      - name: Remove release credentials
+        if: always()
+        run: rm -f android/key.properties "$RUNNER_TEMP/theater-upload.jks" "$RUNNER_TEMP/play-service-account.json"
