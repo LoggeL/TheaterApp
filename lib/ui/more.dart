@@ -1,3 +1,4 @@
+import 'privacy_links.dart';
 import 'polls.dart';
 import 'responsive.dart';
 import 'brand_logo.dart';
@@ -192,6 +193,7 @@ class MoreScreen extends StatelessWidget {
             ],
           ),
         ),
+        const PrivacyLinks(),
         const SizedBox(height: 26),
         OutlinedButton.icon(
           onPressed: () async {

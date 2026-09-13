@@ -1,3 +1,4 @@
+import 'privacy_links.dart';
 import 'brand_logo.dart';
 import 'package:flutter/material.dart';
 import '../core/app_controller.dart';
@@ -316,6 +317,7 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                             : 'Noch kein Konto? Registrieren',
                       ),
                     ),
+                    const PrivacyLinks(),
                   ],
                 ),
               ),
@@ -477,6 +479,7 @@ class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
                   onPressed: _busy ? null : () => _run(c.logout),
                   child: const Text('Abmelden'),
                 ),
+                const PrivacyLinks(),
               ],
             ),
           ),
