@@ -82,6 +82,13 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
           _startupError = null;
         });
         _startTimer();
+        final target = _pendingTarget;
+        if (target != null) {
+          _pendingTarget = null;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _handleTarget(target);
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -117,8 +124,6 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
         _navigator.currentState?.popUntil((route) => route.isFirst);
         if (current != null) {
           if (widget.enableDeviceServices) _devices.restorePush();
-          final target = _pendingTarget;
-          if (target != null) _handleTarget(target);
         }
       });
     }
@@ -141,6 +146,9 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
       return;
     }
     _pendingTarget = null;
+    if (target.attendance != null && target.recipientUid != null) {
+      unawaited(_respondToTarget(target));
+    }
     if (target.kind == 'events') {
       _navigator.currentState!.push(
         MaterialPageRoute(
@@ -168,6 +176,22 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
           ),
         ),
       );
+    }
+  }
+
+  Future<void> _respondToTarget(AppTarget target) async {
+    String message;
+    try {
+      message = await widget.controller.respondFromNotification(
+        target.id,
+        target.attendance!,
+        target.recipientUid!,
+      );
+    } catch (error) {
+      message = error.toString();
+    }
+    if (mounted) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -277,15 +301,37 @@ class _AppShellState extends State<AppShell> {
     final c = widget.controller;
     final wide = MediaQuery.sizeOf(context).width >= 900;
     final admin = c.user?.isAdmin == true;
+    final now = DateTime.now();
+    final unanswered = c.events
+        .where(
+          (event) =>
+              event.needsResponse &&
+              (event.startsAt == null ||
+                  (event.endsAt ?? event.startsAt!).isAfter(now)),
+        )
+        .length;
+    final unread = c.messages
+        .where((message) => message['read'] != true)
+        .length;
+    Widget eventIcon(IconData icon) => Tooltip(
+      message: unanswered == 0
+          ? 'Termine'
+          : '$unanswered offene Rückmeldungen zu Terminen',
+      child: Badge(
+        isLabelVisible: unanswered > 0,
+        label: Text('$unanswered'),
+        child: Icon(icon),
+      ),
+    );
     final destinations = <NavigationDestination>[
       const NavigationDestination(
         icon: Icon(Icons.wb_sunny_outlined),
         selectedIcon: Icon(Icons.wb_sunny),
         label: 'Heute',
       ),
-      const NavigationDestination(
-        icon: Icon(Icons.calendar_month_outlined),
-        selectedIcon: Icon(Icons.calendar_month),
+      NavigationDestination(
+        icon: eventIcon(Icons.calendar_month_outlined),
+        selectedIcon: eventIcon(Icons.calendar_month),
         label: 'Termine',
       ),
       const NavigationDestination(
@@ -299,13 +345,9 @@ class _AppShellState extends State<AppShell> {
         label: 'Mein Bereich',
       ),
       if (admin)
-        NavigationDestination(
-          icon: Badge(
-            isLabelVisible: c.pendingAccounts.isNotEmpty,
-            label: Text('${c.pendingAccounts.length}'),
-            child: const Icon(Icons.admin_panel_settings_outlined),
-          ),
-          selectedIcon: const Icon(Icons.admin_panel_settings),
+        const NavigationDestination(
+          icon: Icon(Icons.admin_panel_settings_outlined),
+          selectedIcon: Icon(Icons.admin_panel_settings),
           label: 'Admin',
         ),
     ];
@@ -330,13 +372,16 @@ class _AppShellState extends State<AppShell> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Mitteilungen',
+            tooltip: unread == 0
+                ? 'Mitteilungen'
+                : '$unread ungelesene Mitteilungen',
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => MessagesScreen(controller: c)),
             ),
             icon: Badge(
-              isLabelVisible: c.messages.any((m) => m['read'] != true),
+              isLabelVisible: unread > 0,
+              label: Text('$unread'),
               child: const Icon(Icons.notifications_outlined),
             ),
           ),

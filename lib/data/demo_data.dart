@@ -135,7 +135,7 @@ class DemoData {
       ].map((e) => e.toJson()).toList(),
       'checkinsByEvent': <String, dynamic>{},
       'memberAttendanceByEvent': <String, dynamic>{},
-      'reminders': {'dayBefore': true, 'twoHours': true, 'changes': true},
+      'reminders': {'dayBefore': false, 'twoHours': true, 'changes': true},
       'productions': [
         Production(
           id: mainProductionId,

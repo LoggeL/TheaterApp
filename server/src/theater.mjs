@@ -1,3 +1,4 @@
+import { defaultReminders, eventNotificationBody } from './event-notification.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 
 export class AppError extends Error {
@@ -66,7 +67,7 @@ export class Theater {
       }
     }
     const receipts = this.store.all('receipts').filter(r => r.personId === a.personId);
-    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions'), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: this.store.get('reminders', a.personId) ?? { dayBefore: true, twoHours: true, changes: true }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true }, serverTime: now() };
+    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions'), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true }, serverTime: now() };
   }
   polls(a) {
     const votes = this.store.all('pollVotes');
@@ -218,7 +219,7 @@ export class Theater {
         s.put('events', eventId, e);
         for (const r of s.all('responses').filter(r => r.eventId === eventId && r.expectedArrivalAt && (r.expectedArrivalAt <= startsAt || r.expectedArrivalAt >= endsAt))) s.put('responses', `${eventId}:${r.personId}`, { ...r, expectedArrivalAt: null });
         for (const absence of s.all('absences')) if (absence.from <= day(startsAt) && absence.to >= day(startsAt) && !s.get('responses', `${eventId}:${absence.personId}`)) s.put('responses', `${eventId}:${absence.personId}`, { eventId, personId: absence.personId, status: 'no', expectedArrivalAt: null, reason: absence.reason, updatedAt: now() });
-        if (old) this.enqueuePush({ title: 'Termin aktualisiert', body: e.title, data: { eventId }, change: true });
+        if (old) this.enqueuePush({ title: `Termin aktualisiert: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, change: true });
         return { id: eventId };
       }
       case 'event.delete': {
@@ -310,11 +311,11 @@ export class Theater {
     const cue = doc.cues.find(c => c.id === body.cueId);
     return { ...this.store.put('focus', productionId, { productionId, revision: doc.revision, sequence: current.sequence + 1, cueId: body.cueId ?? null, cueOrdinal: cue?.ordinal ?? null, sceneId: cue?.sceneId ?? null, updatedBy: uid, director: { id: uid, name: this.profile(a).displayName }, updatedAt: now() }), canDirect };
   }
-  device(uid, token, platform, remove = false) {
+  device(uid, token, platform, remove = false, notificationActions = false) {
     this.account(uid); if (typeof token !== 'string' || token.length < 20 || token.length > 4096) fail(400, 'Ungültiges Gerätetoken.');
     const key = createHash('sha256').update(token).digest('hex');
     if (remove) { if (this.store.get('devices', key)?.uid === uid) this.store.delete('devices', key); }
-    else { if (!['android', 'ios', 'web'].includes(platform)) fail(400, 'Ungültige Plattform.'); this.store.put('devices', key, { id: key, uid, token, platform, updatedAt: now() }); }
+    else { if (!['android', 'ios', 'web'].includes(platform)) fail(400, 'Ungültige Plattform.'); this.store.put('devices', key, { id: key, uid, token, platform, notificationActions: platform === 'android' && notificationActions === true, updatedAt: now() }); }
     return { ok: true, pushEnabled: this.pushEnabled };
   }
   enqueuePush(message) {

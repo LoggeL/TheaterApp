@@ -102,7 +102,7 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, scriptS
         const data = req.method === 'GET' ? null : req.method === 'DELETE' ? { cueId: null, revision: theater.store.get('scripts', focus[1])?.revision } : body;
         return json(res, 200, focusBridge ? await focusBridge.focus(identity.uid, focus[1], data) : theater.focus(identity.uid, focus[1], data));
       }
-      if (route === '/devices' && ['POST', 'DELETE'].includes(req.method)) return json(res, 200, theater.device(identity.uid, body.token, body.platform, req.method === 'DELETE'));
+      if (route === '/devices' && ['POST', 'DELETE'].includes(req.method)) return json(res, 200, theater.device(identity.uid, body.token, body.platform, req.method === 'DELETE', body.notificationActions));
       throw new AppError(404, 'Diese Funktion ist nicht verfügbar.');
     } catch (e) {
       const status = e.status && e.status >= 400 && e.status < 600 ? e.status : 500;

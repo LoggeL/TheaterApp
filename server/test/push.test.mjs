@@ -49,3 +49,65 @@ test('web push opens the exact message with an encoded target', async t => {
   assert.equal(new URL(link).origin, 'https://theater.example');
   assert.equal(new URL(link).searchParams.get('target'), 'theaterapp://app/messages/m-42');
 });
+
+test('one-day reminder defaults off, two-hour reminder defaults on, opt-in survives', t => {
+  const { store, theater, a } = setup(t);
+  const now = new Date('2026-09-14T12:00:00Z');
+  store.put('events', 'e', { id: 'e', title: 'Abbau', startsAt: '2026-09-15T11:00:00Z', place: 'Kolpingheim' });
+  assert.deepEqual(theater.snapshot('admin').reminders, { dayBefore: false, twoHours: true, changes: true });
+  scheduleReminders(theater, now);
+  assert.equal(store.all('pushJobs').length, 0);
+  store.put('events', 'e', { ...store.get('events', 'e'), startsAt: '2026-09-14T13:30:00Z' });
+  scheduleReminders(theater, now);
+  const job = store.all('pushJobs')[0];
+  assert.equal(job.title, 'Abbau');
+  assert.equal(job.body, 'Mo., 14.09.2026, 15:30 Uhr · Kolpingheim');
+  store.put('reminders', a.personId, { dayBefore: true });
+  assert.equal(theater.snapshot('admin').reminders.dayBefore, true);
+  assert.equal(theater.snapshot('admin').reminders.twoHours, true);
+});
+
+test('Berlin event time handles winter and summer even when the server uses UTC', async () => {
+  const { eventNotificationBody } = await import('../src/event-notification.mjs');
+  assert.equal(eventNotificationBody({ startsAt: '2026-12-14T18:00:00Z' }), 'Mo., 14.12.2026, 19:00 Uhr');
+  assert.equal(eventNotificationBody({ startsAt: '2026-09-14T17:00:00Z' }), 'Mo., 14.09.2026, 19:00 Uhr');
+});
+
+test('upgraded Android receives an account-bound action payload, old Android and web keep OS notifications', async t => {
+  const { store, theater } = setup(t);
+  theater.device('admin', 'new-android-device-token', 'android', false, true);
+  const future = new Date(Date.now() + 3600000).toISOString();
+  store.put('events', 'e', { id: 'e', title: 'Abbau', startsAt: future, endsAt: future, place: 'Saal' });
+  theater.enqueuePush({ title: 'Abbau', body: 'Old generic body', data: { eventId: 'e' } });
+  const calls = [];
+  await deliverPush(theater, { sendEachForMulticast: async p => {
+    calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) };
+  } });
+  const custom = calls.find(p => p.tokens.includes('new-android-device-token'));
+  assert.equal(custom.notification, undefined);
+  assert.equal(custom.android.notification, undefined);
+  assert.equal(custom.android.priority, 'high');
+  assert.equal(custom.data.attendanceActions, 'true');
+  assert.equal(custom.data.recipientUid, 'admin');
+  assert.equal(custom.data.eventId, 'e');
+  assert.match(custom.data.body, /Uhr · Saal$/);
+  assert.ok(custom.data.notificationId);
+  const legacy = calls.find(p => p.tokens.includes('token-a'));
+  assert.deepEqual(legacy.tokens, ['token-a', 'token-b']);
+  assert.equal(legacy.notification.body, custom.data.body);
+  assert.equal(legacy.data.recipientUid, undefined);
+  assert.equal(store.all('pushJobs')[0].accepted, 3);
+});
+
+test('locked and expired events have no response actions', async t => {
+  const { store, theater } = setup(t);
+  store.put('devices', 'a', { ...store.get('devices', 'a'), notificationActions: true });
+  for (const locked of [false, true]) {
+    store.put('events', 'e', { id: 'e', title: 'Probe', startsAt: '2020-01-01T12:00:00Z', locked });
+    theater.enqueuePush({ title: 'Probe', body: 'Probe', data: { eventId: 'e' } });
+    await deliverPush(theater, { sendEachForMulticast: async p => {
+      assert.equal(p.data.attendanceActions, undefined);
+      return { responses: p.tokens.map(() => ({ success: true })) };
+    } });
+  }
+});

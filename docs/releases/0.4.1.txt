@@ -1,0 +1,1 @@
+Termin-Pushs zeigen Datum, Uhrzeit und Ort. Unter Android direkt mit „Komme“ oder „Komme nicht“ antworten. Die Erinnerung einen Tag vorher ist standardmäßig aus. Offene Rückmeldungen und ungelesene Mitteilungen haben passende Zähler. Für die neuen Push-Buttons die aktualisierte App einmal öffnen.

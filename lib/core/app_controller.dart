@@ -82,7 +82,7 @@ class AppController extends ChangeNotifier {
   final Set<String> _loadingScripts = {};
   JsonMap _preferences = {};
   Map<String, bool> _reminders = {
-    'dayBefore': true,
+    'dayBefore': false,
     'twoHours': true,
     'changes': true,
   };
@@ -631,7 +631,7 @@ class AppController extends ChangeNotifier {
     _checkinVersions = {};
     _capabilities = {};
     _mutationVersion = 0;
-    _reminders = {'dayBefore': true, 'twoHours': true, 'changes': true};
+    _reminders = {'dayBefore': false, 'twoHours': true, 'changes': true};
   }
 
   Future<void> refresh() {
@@ -702,6 +702,50 @@ class AppController extends ChangeNotifier {
         _notify();
       }
     }
+  }
+
+  Future<String> respondFromNotification(
+    String eventId,
+    String status,
+    String recipientUid,
+  ) async {
+    final generation = _generation;
+    void checkAccount() {
+      if (!_current(generation) ||
+          !hasAccess ||
+          _isDemo ||
+          _user?.id != recipientUid) {
+        throw const ApiException(
+          'Diese Mitteilung gehört zu einem anderen oder abgemeldeten Konto.',
+          statusCode: 403,
+        );
+      }
+    }
+
+    checkAccount();
+    if (!const {'yes', 'no'}.contains(status)) {
+      throw const ApiException('Ungültige Rückmeldung.', statusCode: 400);
+    }
+    await refresh();
+    checkAccount();
+    final event = _events.where((e) => e.id == eventId).firstOrNull;
+    if (event?.endsAt?.isBefore(_clock()) == true) {
+      throw const ApiException(
+        'Der Termin ist bereits vorbei.',
+        statusCode: 409,
+      );
+    }
+    await respond(eventId, status);
+    checkAccount();
+    if (_outbox.any(
+      (a) =>
+          !a.failed &&
+          a.payload['action'] == 'attendance' &&
+          a.payload['eventId'] == eventId,
+    )) {
+      return 'Rückmeldung vorgemerkt. Sie wird bei Verbindung gesendet.';
+    }
+    return status == 'yes' ? 'Zusage gespeichert.' : 'Absage gespeichert.';
   }
 
   Future<void> respond(
@@ -1325,7 +1369,11 @@ class AppController extends ChangeNotifier {
     await refresh();
   }
 
-  Future<void> registerDevice(String token, String platform) async {
+  Future<void> registerDevice(
+    String token,
+    String platform, {
+    bool notificationActions = false,
+  }) async {
     if (_isDemo || _user == null) return;
     final generation = _generation;
     final response = await _api.request(
@@ -1333,7 +1381,11 @@ class AppController extends ChangeNotifier {
       'POST',
       '/devices',
       token: _token,
-      body: {'token': token, 'platform': platform},
+      body: {
+        'token': token,
+        'platform': platform,
+        'notificationActions': notificationActions,
+      },
     );
     if (!_current(generation)) return;
     _deviceToken = token;

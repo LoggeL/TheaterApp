@@ -42,10 +42,12 @@ try {
         headers: { 'Content-Type': 'application/octet-stream' }, timeout: 600000,
       });
       if (Number(bundle.versionCode) !== state.versionCode) throw new Error('Uploaded version code differs from prepared version');
+      const releaseNotes = await readFile(new URL(`../../docs/releases/${state.versionName}.txt`, import.meta.url), 'utf8').then(text => text.trim()).catch(error => { if (error.code === 'ENOENT') return `Testversion ${state.versionName}. Verbesserungen und Fehlerbehebungen für die Theater-App.`; throw error; });
+      if ([...releaseNotes].length > 500) throw new Error('Play release notes exceed 500 characters');
       const release = {
         name: `${state.versionName} (${state.versionCode})`, status: 'completed',
         versionCodes: [String(state.versionCode)],
-        releaseNotes: [{ language: 'de-DE', text: `Testversion ${state.versionName}. Verbesserungen und Fehlerbehebungen für die Theater-App.` }],
+        releaseNotes: [{ language: 'de-DE', text: releaseNotes }],
       };
       await request(`${base}/edits/${state.editId}/tracks/internal`, 'PUT', { track: 'internal', releases: [release] });
       await request(`${base}/edits/${state.editId}:validate`, 'POST');

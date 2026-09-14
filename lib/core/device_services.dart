@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:app_links/app_links.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'app_controller.dart';
 import 'brand.dart';
@@ -11,8 +13,37 @@ import 'identity.dart';
 
 /// Validated navigation targets; push payloads never execute external URLs.
 class AppTarget {
-  const AppTarget(this.kind, this.id);
+  const AppTarget(this.kind, this.id, {this.attendance, this.recipientUid});
   final String kind, id;
+  final String? attendance, recipientUid;
+
+  static AppTarget? fromNotificationResponse(NotificationResponse response) {
+    try {
+      final data = Map<String, dynamic>.from(
+        jsonDecode(response.payload ?? '{}') as Map,
+      );
+      final target = fromData(data);
+      if (target == null) return null;
+      final uid = data['recipientUid'];
+      final action = response.actionId;
+      if (target.kind == 'events' &&
+          data['attendanceActions'] == 'true' &&
+          uid is String &&
+          uid.isNotEmpty &&
+          const {'yes', 'no'}.contains(action)) {
+        return AppTarget(
+          'events',
+          target.id,
+          attendance: action,
+          recipientUid: uid,
+        );
+      }
+      return target;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static AppTarget? fromUri(Uri uri) {
     if (uri.scheme != 'theaterapp' ||
         uri.host != 'app' ||
@@ -52,9 +83,75 @@ class AppTarget {
 
 @pragma('vm:entry-point')
 Future<void> firebaseBackgroundMessage(RemoteMessage message) async {
-  // Native notification payloads are displayed by the OS. No credentials or
-  // member data are persisted by this background handler.
   if (Firebase.apps.isEmpty) await FirebaseConfiguration.initialize();
+  if (message.notification == null &&
+      message.data['notificationId'] is String) {
+    await AndroidPushNotifications.initialize();
+    await AndroidPushNotifications.show(message.data);
+  }
+}
+
+abstract final class AndroidPushNotifications {
+  static final plugin = FlutterLocalNotificationsPlugin();
+  static bool get supported =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  static Future<void> initialize({
+    void Function(NotificationResponse)? onResponse,
+  }) async {
+    if (!supported) return;
+    await plugin.initialize(
+      settings: const InitializationSettings(
+        android: AndroidInitializationSettings('ic_notification'),
+      ),
+      onDidReceiveNotificationResponse: onResponse,
+    );
+  }
+
+  static Future<void> show(Map<String, dynamic> data) async {
+    if (!supported) return;
+    final title = data['title'];
+    final body = data['body'];
+    if (title is! String || body is! String) return;
+    final actions =
+        data['attendanceActions'] == 'true' &&
+        AppTarget.fromData(data)?.kind == 'events';
+    // Stable across isolates, so duplicate deliveries replace the same card.
+    final key = '${data['notificationId']}';
+    final id = key.codeUnits.fold(
+      0,
+      (int hash, unit) => (hash * 31 + unit) & 0x7fffffff,
+    );
+    await plugin.show(
+      id: id,
+      title: title,
+      body: body,
+      payload: jsonEncode(data),
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          'theater_updates',
+          'Theatertermine und Mitteilungen',
+          importance: Importance.high,
+          priority: Priority.high,
+          styleInformation: BigTextStyleInformation(body),
+          actions: actions
+              ? const [
+                  AndroidNotificationAction(
+                    'yes',
+                    'Komme',
+                    showsUserInterface: true,
+                  ),
+                  AndroidNotificationAction(
+                    'no',
+                    'Komme nicht',
+                    showsUserInterface: true,
+                  ),
+                ]
+              : null,
+        ),
+      ),
+    );
+  }
 }
 
 class DeviceServices {
@@ -80,6 +177,23 @@ class DeviceServices {
       );
       if (target != null) onTarget(target);
       return;
+    }
+    if (AndroidPushNotifications.supported) {
+      await AndroidPushNotifications.initialize(
+        onResponse: (response) {
+          final target = AppTarget.fromNotificationResponse(response);
+          if (target != null) onTarget(target);
+        },
+      );
+      final launch = await AndroidPushNotifications.plugin
+          .getNotificationAppLaunchDetails();
+      if (launch?.didNotificationLaunchApp == true &&
+          launch?.notificationResponse != null) {
+        final target = AppTarget.fromNotificationResponse(
+          launch!.notificationResponse!,
+        );
+        if (target != null) onTarget(target);
+      }
     }
     final links = AppLinks();
     try {
@@ -126,8 +240,14 @@ class DeviceServices {
     );
     _subscriptions.add(
       FirebaseMessaging.onMessage.listen((message) {
+        if (message.notification == null &&
+            message.data['notificationId'] is String) {
+          unawaited(AndroidPushNotifications.show(message.data));
+        }
         onForegroundMessage(
-          message.notification?.title ?? 'Neues aus deinem Theater',
+          message.notification?.title ??
+              message.data['title'] as String? ??
+              'Neues aus deinem Theater',
         );
       }),
     );
@@ -174,6 +294,7 @@ class DeviceServices {
           : defaultTargetPlatform == TargetPlatform.iOS
           ? 'ios'
           : 'android',
+      notificationActions: AndroidPushNotifications.supported,
     );
     if (controller.sessionEpoch != session) return 'Bitte erneut anmelden.';
     _registeredToken = token;
@@ -193,6 +314,7 @@ class DeviceServices {
               : defaultTargetPlatform == TargetPlatform.iOS
               ? 'ios'
               : 'android',
+          notificationActions: AndroidPushNotifications.supported,
         );
         if (controller.sessionEpoch == session) _registeredToken = next;
       } catch (_) {
