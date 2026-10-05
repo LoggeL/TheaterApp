@@ -76,111 +76,122 @@ class RehearsalCalendar extends StatelessWidget {
           ],
         ),
         LayoutBuilder(
-          builder: (context, constraints) => GridView.count(
-            crossAxisCount: 7,
-            childAspectRatio:
-                constraints.maxWidth /
-                7 /
-                (constraints.maxWidth >= 700 ? 96 : 52),
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              for (final day in calendarDays(selected))
-                Builder(
-                  builder: (context) {
-                    final count = events
-                        .where((e) => eventOnDay(e, day))
-                        .length;
-                    final chosen = DateUtils.isSameDay(day, selected),
-                        today = DateUtils.isSameDay(day, DateTime.now());
-                    final foreground = chosen
-                        ? scheme.onPrimary
-                        : day.month == selected.month
-                        ? scheme.onSurface
-                        : scheme.onSurfaceVariant.withValues(alpha: .55);
-                    return Semantics(
-                      button: true,
-                      selected: chosen,
-                      label:
-                          '${DateFormat.yMMMMEEEEd('de').format(day)}, $count Termine',
-                      excludeSemantics: true,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(14),
-                        onTap: () => onSelected(day),
-                        child: Container(
-                          margin: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            color: chosen ? scheme.primary : null,
-                            borderRadius: BorderRadius.circular(14),
-                            border: today && !chosen
-                                ? Border.all(color: scheme.primary)
-                                : null,
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                '${day.day}',
-                                style: TextStyle(
-                                  color: foreground,
-                                  fontWeight: chosen || today
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                              if (constraints.maxWidth >= 700)
-                                for (final event
-                                    in events
-                                        .where((e) => eventOnDay(e, day))
-                                        .take(2))
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 2,
-                                    ),
-                                    child: Text(
-                                      event.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: foreground,
-                                      ),
+          builder: (context, constraints) {
+            final textScaler = MediaQuery.textScalerOf(context);
+            final wide = constraints.maxWidth >= 700;
+            final height =
+                (26 +
+                        textScaler.scale(14) * 1.5 +
+                        (wide ? textScaler.scale(11) * 3 + 8 : 0))
+                    .clamp(wide ? 96.0 : 52.0, double.infinity);
+            return GridView.count(
+              crossAxisCount: 7,
+              childAspectRatio: constraints.maxWidth / 7 / height,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              children: [
+                for (final day in calendarDays(selected))
+                  Builder(
+                    builder: (context) {
+                      final count = events
+                          .where((e) => eventOnDay(e, day))
+                          .length;
+                      final chosen = DateUtils.isSameDay(day, selected),
+                          today = DateUtils.isSameDay(day, DateTime.now());
+                      final foreground = chosen
+                          ? scheme.onPrimary
+                          : day.month == selected.month
+                          ? scheme.onSurface
+                          : scheme.onSurfaceVariant.withValues(alpha: .55);
+                      return Semantics(
+                        button: true,
+                        selected: chosen,
+                        label:
+                            '${DateFormat.yMMMMEEEEd('de').format(day)}, $count Termine',
+                        excludeSemantics: true,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(14),
+                          onTap: () => onSelected(day),
+                          child: Container(
+                            margin: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: chosen ? scheme.primary : null,
+                              borderRadius: BorderRadius.circular(14),
+                              border: today && !chosen
+                                  ? Border.all(color: scheme.primary)
+                                  : null,
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '${day.day}',
+                                    style: TextStyle(
+                                      color: foreground,
+                                      fontSize: 14,
+                                      fontWeight: chosen || today
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
                                     ),
                                   ),
-                              const SizedBox(height: 3),
-                              SizedBox(
-                                height: 5,
-                                child: count == 0
-                                    ? null
-                                    : Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: List.generate(
-                                          count.clamp(1, 3),
-                                          (_) => Container(
-                                            width: 4,
-                                            height: 4,
-                                            margin: const EdgeInsets.symmetric(
-                                              horizontal: 1,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: foreground,
-                                              shape: BoxShape.circle,
+                                ),
+                                if (constraints.maxWidth >= 700)
+                                  for (final event
+                                      in events
+                                          .where((e) => eventOnDay(e, day))
+                                          .take(2))
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      child: Text(
+                                        event.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: foreground,
+                                        ),
+                                      ),
+                                    ),
+                                const SizedBox(height: 3),
+                                SizedBox(
+                                  height: 5,
+                                  child: count == 0
+                                      ? null
+                                      : Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: List.generate(
+                                            count.clamp(1, 3),
+                                            (_) => Container(
+                                              width: 4,
+                                              height: 4,
+                                              margin:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 1,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: foreground,
+                                                shape: BoxShape.circle,
+                                              ),
                                             ),
                                           ),
                                         ),
-                                      ),
-                              ),
-                            ],
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  },
-                ),
-            ],
-          ),
+                      );
+                    },
+                  ),
+              ],
+            );
+          },
         ),
         Align(
           alignment: Alignment.centerRight,

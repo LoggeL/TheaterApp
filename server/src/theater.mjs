@@ -1,4 +1,5 @@
 import { defaultReminders, eventNotificationBody } from './event-notification.mjs';
+import { compareProductionsNewestFirst } from './production-order.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 
 export class AppError extends Error {
@@ -24,12 +25,23 @@ export class Theater {
       store.put('settings', 'personRolesInitialized', { at: now() });
     });
   }
-  session(identity) {
+  session(identity, registrationName) {
     return this.store.transaction(() => {
       let a = this.store.account(identity.uid);
       const provider = identity.firebase?.sign_in_provider ?? 'password';
       const identityReady = provider !== 'password' || identity.email_verified === true;
-      const fields = { name: text(identity.name) || text(identity.email).split('@')[0] || 'Neues Konto', email: text(identity.email), emailVerified: identity.email_verified === true, identityReady, provider, lastSeenAt: now() };
+      const identityName = text(identity.name, 120);
+      let suppliedName;
+      if (registrationName !== undefined) {
+        if (a && a.status !== 'pending') fail(403, 'Der Name zur Zuordnung kann nur vor der Freigabe geändert werden.');
+        if (typeof registrationName !== 'string' || !registrationName.trim() || registrationName.trim().length > 120 || /[\u0000-\u001f\u007f]/.test(registrationName)) fail(400, 'Bitte deinen Namen mit höchstens 120 Zeichen eingeben.');
+        suppliedName = registrationName.trim();
+      }
+      // Keep the association name independent of later provider profile changes.
+      const nameProvided = suppliedName !== undefined || a?.nameProvided === true || (a?.nameProvided === undefined && provider === 'password' && !!identityName);
+      const name = suppliedName ?? (a?.nameProvided ? a.name : identityName || a?.name || text(identity.email).split('@')[0] || 'Neues Konto');
+      const version = a ? a.version + (suppliedName !== undefined && (a.name !== name || !a.nameProvided) ? 1 : 0) : 1;
+      const fields = { name, nameProvided, version, email: text(identity.email), emailVerified: identity.email_verified === true, identityReady, provider, lastSeenAt: now() };
       a = a ? { ...a, ...fields } : { uid: identity.uid, personId: null, status: 'pending', role: 'member', createdAt: now(), version: 1, ...fields };
       if (!this.store.get('settings', 'bootstrap') && this.bootstrapEmail && a.email.toLowerCase() === this.bootstrapEmail && a.emailVerified && this.store.accounts().every(x => x.role !== 'admin')) {
         const personId = this.nextPersonId();
@@ -44,7 +56,7 @@ export class Theater {
   }
   profile(a) {
     const m = a.personId == null ? null : this.store.get('members', a.personId);
-    return { userId: a.uid, displayName: m?.name ?? a.name, email: a.email, avatarId: m?.avatarId ?? null, roleIds: list(m?.roleIds), profileVersion: m?.profileVersion ?? 0, role: a.role, group: m?.group ?? '', personId: a.personId, status: a.status, emailVerified: a.emailVerified, identityReady: a.identityReady, provider: a.provider, mustChangePassword: false, directorProductionIds: this.store.all('productions').filter(p => list(p.directorMemberIds).includes(a.personId)).map(p => p.id) };
+    return { userId: a.uid, displayName: m?.name ?? a.name, email: a.email, needsRegistrationName: a.status === 'pending' && a.nameProvided === false, avatarId: m?.avatarId ?? null, roleIds: list(m?.roleIds), profileVersion: m?.profileVersion ?? 0, role: a.role, group: m?.group ?? '', personId: a.personId, status: a.status, emailVerified: a.emailVerified, identityReady: a.identityReady, provider: a.provider, mustChangePassword: false, directorProductionIds: this.store.all('productions').filter(p => list(p.directorMemberIds).includes(a.personId)).map(p => p.id) };
   }
   account(uid, admin = false) {
     const a = this.store.account(uid);
@@ -67,14 +79,18 @@ export class Theater {
       }
     }
     const receipts = this.store.all('receipts').filter(r => r.personId === a.personId);
-    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions'), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true }, serverTime: now() };
+    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true }, serverTime: now() };
   }
   polls(a) {
     const votes = this.store.all('pollVotes');
     return this.store.all('polls').filter(p => !p.deleted).map(p => {
       const own = votes.find(v => v.pollId === p.id && v.personId === a.personId);
       const responses = votes.filter(v => v.pollId === p.id);
-      return { ...p, closed: p.closed || (!!p.closesAt && Date.parse(p.closesAt) <= +this.clock()), choice: own?.optionId ?? null, totalVotes: responses.length, options: p.options.map(o => ({ ...o, votes: responses.filter(v => v.optionId === o.id).length })) };
+      const anonymous = p.anonymous !== false;
+      return { ...p, anonymous, closed: p.closed || (!!p.closesAt && Date.parse(p.closesAt) <= +this.clock()), choice: own?.optionId ?? null, totalVotes: responses.length, options: p.options.map(o => {
+        const selected = responses.filter(v => v.optionId === o.id);
+        return { id: o.id, label: o.label, votes: selected.length, ...(!anonymous ? { voters: selected.map(v => ({ personId: v.personId, name: this.store.get('members', v.personId)?.name ?? 'Ehemaliges Mitglied' })).sort((a, b) => a.name.localeCompare(b.name, 'de')) } : {}) };
+      }) };
     }).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
   }
   canReadMessage(a, m) { return a.role === 'admin' || m.audience === 'all' || list(m.recipientPersonIds).includes(a.personId); }
@@ -84,7 +100,7 @@ export class Theater {
     if (!p || !doc) fail(404, 'Das Drehbuch ist nicht verfügbar.');
     return { ...doc, roles: doc.roles.map(r => { const personId = p.casting?.[r.id]; const member = this.store.get('members', personId); return { ...r, personId: personId ?? null, actor: member?.name ?? r.actor ?? '' }; }), fetchedAt: now(), stale: false };
   }
-  adminData(uid) { this.account(uid, true); return { accounts: this.store.accounts(), members: this.store.all('members'), productions: this.store.all('productions') }; }
+  adminData(uid) { this.account(uid, true); return { accounts: this.store.accounts(), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst) }; }
   eventDetails(uid, eventId) {
     this.account(uid, true);
     if (!this.store.get('events', eventId)) fail(404, 'Termin nicht gefunden.');
@@ -129,6 +145,7 @@ export class Theater {
         admin(); const target = s.account(required(b.uid, 'Konto')); const member = s.get('members', Number(b.personId));
         if (!target || target.status !== 'pending' || target.version !== b.version) fail(409, 'Die Kontoanfrage hat sich geändert. Bitte neu laden.');
         if (!target.identityReady) fail(409, 'Die E-Mail-Adresse muss zuerst bestätigt werden.');
+        if (target.nameProvided === false) fail(409, 'Das Konto muss zuerst einen Namen zur Zuordnung angeben.');
         if (!member?.active) fail(400, 'Bitte eine aktive Person auswählen.');
         if (s.accounts().some(x => x.personId === member.id && x.uid !== target.uid)) fail(409, 'Diese Person ist bereits mit einem Konto verknüpft.');
         if (!['member', 'admin'].includes(b.role)) fail(400, 'Ungültige Berechtigung.');
@@ -142,6 +159,13 @@ export class Theater {
         if (b.status === 'approved' && (!target.personId || !target.identityReady)) fail(409, 'Das Konto benötigt erst eine bestätigte Identität und Personenzuordnung.');
         if (target.role === 'admin' && target.status === 'approved' && s.accounts().filter(x => x.status === 'approved' && x.role === 'admin').length <= 1) fail(409, 'Der letzte Admin muss erhalten bleiben.');
         s.saveAccount({ ...target, status: b.status, version: target.version + 1 }); return {};
+      }
+      case 'account.reconsider': {
+        admin(); const target = s.account(b.uid);
+        if (!target || target.version !== b.version) fail(409, 'Das Konto hat sich geändert.');
+        if (target.status !== 'rejected') fail(409, 'Nur abgelehnte Konten können erneut geprüft werden.');
+        const { approvedAt, approvedBy, ...pending } = target;
+        s.saveAccount({ ...pending, status: 'pending', personId: null, role: 'member', version: target.version + 1 }); return {};
       }
       case 'profile.save': {
         const m = s.get('members', a.personId);
@@ -185,11 +209,15 @@ export class Theater {
         if (old && old.version !== b.version) fail(409, 'Die Abstimmung wurde inzwischen geändert.');
         const labels = list(b.options).map(o => required(o.label, 'Antwort', 200));
         if (labels.length < 2 || labels.length > 12 || new Set(labels.map(x => x.toLocaleLowerCase('de'))).size !== labels.length) fail(400, 'Bitte 2 bis 12 unterschiedliche Antworten eingeben.');
-        if (old && s.all('pollVotes').some(v => v.pollId === pollId) && JSON.stringify(old.options.map(o => o.label)) !== JSON.stringify(labels)) fail(409, 'Nach der ersten Stimme können die Antworten nicht mehr geändert werden.');
-        const closesAt = b.closesAt ? date(b.closesAt) : null;
-        if (closesAt && Date.parse(closesAt) <= +this.clock()) fail(400, 'Das Abstimmungsende muss in der Zukunft liegen.');
+        const hasVotes = old && s.all('pollVotes').some(v => v.pollId === pollId);
+        if (hasVotes && JSON.stringify(old.options.map(o => o.label)) !== JSON.stringify(labels)) fail(409, 'Nach der ersten Stimme können die Antworten nicht mehr geändert werden.');
+        if (b.anonymous !== undefined && typeof b.anonymous !== 'boolean') fail(400, 'Bitte anonym oder namentlich auswählen.');
+        const anonymous = b.anonymous ?? old?.anonymous ?? true;
+        if (hasVotes && anonymous !== (old.anonymous !== false)) fail(409, 'Nach der ersten Stimme bleibt die Abstimmung anonym oder namentlich.');
+        const closesAt = b.closesAt === undefined ? old?.closesAt ?? null : b.closesAt ? date(b.closesAt) : null;
+        if (closesAt && Date.parse(closesAt) <= +this.clock() && Date.parse(closesAt) !== Date.parse(old?.closesAt)) fail(400, 'Das Abstimmungsende muss in der Zukunft liegen.');
         const options = labels.map((label, i) => ({ id: old?.options[i]?.label === label ? old.options[i].id : id(), label }));
-        s.put('polls', pollId, { id: pollId, title: required(b.title, 'Frage'), description: text(b.description, 3000), options, closesAt, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 });
+        s.put('polls', pollId, { id: pollId, title: required(b.title, 'Frage'), description: text(b.description, 3000), anonymous, options, closesAt, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 });
         return { id: pollId };
       }
       case 'poll.vote': {
@@ -242,11 +270,21 @@ export class Theater {
       }
       case 'event.script': {
         admin(); const e = s.get('events', b.eventId); if (!e) fail(404, 'Termin nicht gefunden.');
+        // Installed older clients do not yet send an event version.
+        if (b.version !== undefined && (e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.');
         const doc = b.productionId ? s.get('scripts', b.productionId) : null;
         if (b.productionId && !doc) fail(400, 'Drehbuch nicht gefunden.');
         const sceneIds = [...new Set(list(b.sceneIds).map(String))];
         if (doc && sceneIds.some(x => !doc.scenes.some(scene => scene.id === x))) fail(400, 'Szene nicht gefunden.');
         s.put('events', e.id, { ...e, productionId: b.productionId || null, sceneIds: doc ? sceneIds : [], version: (e.version ?? 1) + 1 }); return {};
+      }
+      case 'production.archive': {
+        admin(); const p = s.get('productions', b.id);
+        if (!p) fail(404, 'Produktion nicht gefunden.');
+        if ((p.version ?? 1) !== b.version) fail(409, 'Die Produktion wurde zwischenzeitlich geändert.');
+        if (typeof b.archived !== 'boolean') fail(400, 'Bitte einen gültigen Archivstatus wählen.');
+        s.put('productions', p.id, { ...p, archived: b.archived, version: (p.version ?? 1) + 1 });
+        return {};
       }
       case 'production.save': {
         admin(); const productionId = b.id || id(), old = s.get('productions', productionId);
@@ -260,7 +298,8 @@ export class Theater {
         }
         const directors = list(b.directorMemberIds).map(Number);
         if (directors.some(m => !s.get('members', m)?.active)) fail(400, 'Regieperson nicht verfügbar.');
-        s.put('productions', productionId, { ...old, id: productionId, title: required(b.title, 'Titel'), subtitle: text(b.subtitle), roles: old?.roles ?? [], sceneCount: old?.sceneCount ?? 0, revision: old?.revision ?? '', casting, directorMemberIds: [...new Set(directors)], version: (old?.version ?? 0) + 1 });
+        const premiereAt = b.premiereAt === undefined ? old?.premiereAt ?? null : b.premiereAt ? date(b.premiereAt) : null;
+        s.put('productions', productionId, { ...old, id: productionId, title: required(b.title, 'Titel'), subtitle: text(b.subtitle), premiereAt, createdAt: old?.createdAt ?? now(), roles: old?.roles ?? [], sceneCount: old?.sceneCount ?? 0, revision: old?.revision ?? '', casting, directorMemberIds: [...new Set(directors)], version: (old?.version ?? 0) + 1 });
         return { id: productionId };
       }
       case 'message.send': {
@@ -291,7 +330,7 @@ export class Theater {
     if (!production?.id || !document?.revision || !Array.isArray(document.cues) || !Array.isArray(document.scenes) || !Array.isArray(document.roles)) fail(400, 'Ungültiges Drehbuch.');
     return this.store.transaction(() => {
       const old = this.store.get('productions', production.id);
-      this.store.put('productions', production.id, { ...production, roles: document.roles, sceneCount: document.scenes.length, revision: document.revision, casting: Object.fromEntries(Object.entries(old?.casting ?? {}).filter(([role]) => document.roles.some(r => r.id === role))), directorMemberIds: old?.directorMemberIds ?? [], version: (old?.version ?? 0) + 1 });
+      this.store.put('productions', production.id, { ...production, archived: old?.archived === true, premiereAt: old?.premiereAt ?? (production.premiereAt ? date(production.premiereAt) : null), createdAt: old?.createdAt ?? now(), roles: document.roles, sceneCount: document.scenes.length, revision: document.revision, casting: Object.fromEntries(Object.entries(old?.casting ?? {}).filter(([role]) => document.roles.some(r => r.id === role))), directorMemberIds: old?.directorMemberIds ?? [], version: (old?.version ?? 0) + 1 });
       this.store.put('scripts', production.id, document);
       this.store.delete('focus', production.id);
       this.store.audit(uid, 'script.import', production.id);

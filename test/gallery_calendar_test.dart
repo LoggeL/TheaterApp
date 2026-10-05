@@ -123,8 +123,10 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Kalender'));
-        await tester.pumpAndSettle();
+        if (width < 1000) {
+          await tester.tap(find.text('Kalender'));
+          await tester.pumpAndSettle();
+        }
         expect(find.byType(RehearsalCalendar), findsOneWidget);
         expect(find.byTooltip('Datum auswählen'), findsNothing);
         await tester.tap(find.byTooltip('Vorheriger Monat'));

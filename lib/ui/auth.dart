@@ -1,4 +1,5 @@
 import 'brand_logo.dart';
+import 'pwa_install.dart';
 import 'package:flutter/material.dart';
 
 import '../core/app_controller.dart';
@@ -84,21 +85,20 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               ),
               const SizedBox(height: 28),
               Container(
-                height: _showLogin ? 120 : 240,
+                constraints: BoxConstraints(minHeight: _showLogin ? 120 : 240),
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: StageTheme.ink,
                   borderRadius: BorderRadius.circular(32),
                 ),
                 child: Stack(
+                  alignment: Alignment.bottomLeft,
                   children: [
                     Positioned.fill(
                       child: CustomPaint(painter: _SpotlightPainter()),
                     ),
-                    Positioned(
-                      left: 24,
-                      bottom: 24,
-                      right: 24,
+                    Padding(
+                      padding: const EdgeInsets.all(24),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -253,6 +253,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
+              const PwaInstallCard(),
             ],
           ),
         ),

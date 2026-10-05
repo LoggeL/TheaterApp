@@ -25,6 +25,12 @@ Eine Sperrung gilt für den nächsten geschützten Serverzugriff. Bereits offlin
 
 ## Aktualisieren
 
+### Drehbucharchiv
+
+Unter "Drehbücher" stehen die aktuellen Produktionen. "Drehbucharchiv" öffnet ältere Stücke, ebenfalls mit dem neuesten zuerst. Die Theaterleitung kann in "Produktionen & Besetzung" eine Produktion öffnen und über "Ins Archiv verschieben" oder "Aus Archiv zurückholen" ihren Status ändern. Der Status bleibt beim erneuten Drehbuchimport erhalten. Rollen, Besetzungen, Kommentare, lokale Markierungen, Offline-Drehbücher und Terminverknüpfungen bleiben bestehen; das Archiv ändert die Sichtbarkeit in der aktuellen Übersicht.
+
+### Web-Build veröffentlichen
+
 ```sh
 git pull --ff-only
 flutter pub get
@@ -64,7 +70,19 @@ Die Firebase-iOS-Datei, Google-URL-Scheme, Push-Entitlement und Background-Modus
 
 Der Client unterstützt außerdem Apple, Microsoft, GitHub und Facebook. Sie werden erst sichtbar, wenn der jeweilige Anbieter in Firebase korrekt eingerichtet und in `AUTH_PROVIDERS` sowohl beim Backend als auch beim Client eingetragen wird. Dafür sind die jeweiligen OAuth-/Apple-Schlüssel und Callback-Konfigurationen erforderlich. Aktuell werden nur die eingerichteten Anbieter E-Mail/Passwort und Google angezeigt.
 
-## Push
+## Installierbare Web-App (PWA)
+
+Die Web-App bietet auf der Anmeldeseite und unter "Mein Bereich" die Installation oder eine zum Gerät passende Anleitung an. Chrome und Edge können ihren Installationsdialog direkt öffnen. Auf iPhone und iPad erfolgt die Installation über Teilen → Zum Home-Bildschirm, auf macOS in Safari über Ablage → Zum Dock hinzufügen. Nach dem Start im eigenen App-Fenster wird die Installationskarte ausgeblendet.
+
+Das Manifest hat die stabile App-ID `/`, Startadresse und Geltungsbereich `/`, deutsche Sprache und den Anzeigemodus `standalone`. Die vorhandenen offiziellen Icons enthalten normale und maskierbare Varianten mit 192 und 512 Pixeln. Die Apple-Metadaten und das Touch-Icon stehen in `web/index.html`.
+
+`tool/version-web.mjs` erzeugt zusätzlich zum versionierten Einstieg den eigenen Service Worker `theater-service-worker.js`. Alle Web-Builds verwenden `--pwa-strategy=none` und führen danach dieses Werkzeug aus. Der Worker speichert ausschließlich die explizite Liste öffentlicher App-Dateien und die fest versionierten Firebase-JavaScript-Bibliotheken. API-Antworten, angemeldete Anfragen und private Medien werden nicht im Service Worker gespeichert. Die bereits vorhandene lokale Datenspeicherung der Flutter-App bleibt für Offline-Inhalte zuständig; Anmeldung und Synchronisierung benötigen eine Verbindung.
+
+Nach dem ersten vollständigen Laden lässt sich die Oberfläche offline öffnen. Die Standardschrift Roboto mit ihren Schriftschnitten und ihrer Lizenz liegt im App-Paket. Navigation fragt zuerst den Server nach der aktuellen Version. Neue Builds ersetzen den App-Cache, ohne ein offenes Formular neu zu laden. Der Push-Worker `firebase-messaging-sw.js` bleibt unter seinem separaten Firebase-Geltungsbereich. Manifest und Worker werden ohne HTTP-Cache ausgeliefert, fehlende Dateien liefern HTTP 404.
+
+Auch Schriften, Bilder und CanvasKit erhalten Verzeichnisadressen mit einem Hash ihres Inhalts. Der Flutter-Einstieg und der Offline-Cache verwenden dieselben Adressen. So können Browser und vorgeschaltete Web-Caches keine Dateien einer früheren Version in einen neuen Build mischen. Die ursprünglichen Dateipfade bleiben für noch offene ältere App-Sitzungen vorhanden.
+
+## Push aktivieren
 
 „Mein Bereich → Darstellung & Erinnerungen → Push auf diesem Gerät aktivieren“. Danach unter Probenleitung die Push-Diagnose öffnen und einen Test senden. `accepted_by_provider` bedeutet, dass FCM die Nachricht angenommen hat. Es bestätigt weder sichtbare Zustellung noch das Lesen einer Mitteilung. Ungültige Gerätetokens werden entfernt, Wiederholungen senden nicht erneut an bereits akzeptierte Geräte.
 
@@ -78,6 +96,8 @@ Beim Öffnen der Regiesitzung verbindet sich die App mit dem gleichnamigen Stüc
 
 
 ## Personen, Rollen und Login-Verknüpfungen
+
+Neue Konten geben einen Namen zur Zuordnung an. Bei E-Mail/Passwort steht das Pflichtfeld im Registrierungsformular, bei Google auf der Seite vor der Freigabe. Der Hinweis erklärt, dass dieser Name nur zur Kontozuordnung dient. Die Theaterleitung sieht ihn neben der Login-Adresse. Vor der Freigabe kann die Person ihn korrigieren; eine Korrektur macht bereits geöffnete Freigabeanfragen ungültig. Nach der Verknüpfung verwendet die App den Namen der Ensembleperson.
 
 Unter „Probenleitung → Konten & Verknüpfungen“ zeigt „Personen“ auch Mitglieder ohne Login. Die E-Mail-Adresse gehört zum tatsächlich verknüpften Firebase-Konto. Eine gesperrte oder inaktive Person bleibt als verknüpft erkennbar; der Zugangsstatus steht daneben. Mehrere Theaterrollen hängen an derselben Person. Über „Konten“ lassen sich ausstehende, freigegebene, gesperrte und abgelehnte Registrierungen filtern. „Rollen“ zeigt die Besetzung je Produktion. Die Suche berücksichtigt Namen, Login-Adressen, Rollen und Produktionen.
 
@@ -123,7 +143,7 @@ Termine haben eine Beschreibung (bis 5.000 Zeichen), die auch in die Kalenderdat
 
 Unter „Administration → Rollen verwalten“ lassen sich Ensemble-Rollen anlegen und umbenennen. Jede Person kann mehrere davon haben; die Zuordnung erfolgt beim Bearbeiten der Person. Eine verwendete Rolle lässt sich erst nach dem Entfernen ihrer Zuordnungen löschen. Diese Aufgabenrollen ändern keine Kontoberechtigungen. Rollen im Drehbuch und Besetzungen bleiben mit der jeweiligen Produktion verbunden.
 
-Allgemeine Abstimmungen stehen unter „Mein Bereich → Abstimmungen“ und in der Administration. Admins legen Frage, Beschreibung, zwei bis zwölf Antworten und optional eine Frist an. Jede Person hat eine veränderbare Stimme. Die Ergebnisse zeigen die Anzahl je Antwort; fremde Einzelstimmen werden nicht übertragen. Admins können beenden und wieder öffnen. Nach der ersten Stimme bleiben die Antworttexte erhalten. Terminabstimmungen werden nicht erzeugt.
+Allgemeine Abstimmungen stehen unter „Mein Bereich → Abstimmungen“ und in der Administration. Admins legen Frage, Beschreibung, zwei bis zwölf Antworten, die Abstimmungsart und optional ein Enddatum mit Uhrzeit fest. Anonyme Abstimmungen zeigen nur Stimmenzahlen; namentliche zeigen allen freigegebenen Mitgliedern die Namen bei der gewählten Antwort. Bestehende Abstimmungen bleiben anonym. Nach der ersten Stimme bleiben die Abstimmungsart und die Antworttexte erhalten. Jede Person hat eine veränderbare Stimme. Mit Erreichen der Frist endet die Abstimmung automatisch, auch wenn eine verspätete Stimme aus der Offline-Warteschlange ankommt. Admins können beenden und wieder öffnen; beim Wiederöffnen wird eine abgelaufene Frist entfernt. Terminabstimmungen werden nicht erzeugt.
 
 Beim ersten Öffnen nach der Freigabe fragt die App nach Benachrichtigungen. Im Browser erscheint zuerst ein kurzer Dialog, dessen „Erlauben“-Schaltfläche die Browserberechtigung anfordert. Eine bestehende Ablehnung oder ausdrücklich deaktivierte Push-Einstellung wird respektiert. Ein neuer Versuch ist in den Erinnerungseinstellungen möglich.
 

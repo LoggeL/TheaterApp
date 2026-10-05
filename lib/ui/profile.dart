@@ -135,7 +135,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late String? _avatar;
   late int _version;
   Uint8List? _selected;
-  bool _busy = false;
+  String? _uploadedAvatar;
+  bool _busy = false, _hasDraft = false, _conflict = false;
   String? _error;
   @override
   void initState() {
@@ -161,6 +162,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (mounted) {
         setState(() {
           _selected = bytes;
+          _uploadedAvatar = null;
+          _hasDraft = true;
           _error = null;
         });
       }
@@ -181,17 +184,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _error = null;
     });
     try {
-      if (_selected != null) {
+      if (_selected != null && _uploadedAvatar == null) {
         final upload = await widget.controller.remote(
           '/media',
           method: 'POST',
           body: {'kind': 'profile', 'content': base64Encode(_selected!)},
         );
-        _avatar = textValue(upload['id']);
-        _selected = null;
+        _uploadedAvatar = textValue(upload['id']);
       }
-      await widget.controller.saveProfile(avatarId: _avatar, version: _version);
+      await widget.controller.saveProfile(
+        avatarId: _selected != null ? _uploadedAvatar : _avatar,
+        version: _version,
+      );
       if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _conflict = e is ApiException && e.statusCode == 409;
+          _error = _conflict
+              ? 'Dein Profil wurde inzwischen geändert. Lade den aktuellen '
+                    'Stand, bevor du erneut speicherst. Dein Bildentwurf bleibt erhalten.'
+              : e.toString();
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _reload() async {
+    setState(() => _busy = true);
+    try {
+      await widget.controller.refresh();
+      if (!mounted) return;
+      final user = widget.controller.user;
+      if (widget.controller.error != null || user == null) {
+        throw ApiException(
+          widget.controller.error ?? 'Das Profil konnte nicht geladen werden.',
+        );
+      }
+      setState(() {
+        _version = user.profileVersion;
+        if (!_hasDraft) _avatar = user.avatarId;
+        _conflict = false;
+        _error = null;
+      });
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -234,7 +271,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ? null
                     : () => setState(() {
                         _selected = null;
+                        _uploadedAvatar = null;
                         _avatar = null;
+                        _hasDraft = true;
                       }),
                 child: const Text('Entfernen'),
               ),
@@ -256,9 +295,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
+        if (_conflict)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : _reload,
+              icon: const Icon(Icons.refresh),
+              label: Text(_busy ? 'Wird geladen …' : 'Aktuellen Stand laden'),
+            ),
+          ),
         FilledButton(
-          onPressed: _busy || widget.controller.isDemo ? null : _save,
-          child: Text(_busy ? 'Wird gespeichert …' : 'Speichern'),
+          onPressed: _busy || _conflict || widget.controller.isDemo
+              ? null
+              : _save,
+          child: Text(
+            _busy
+                ? _conflict
+                      ? 'Profil wird geladen …'
+                      : 'Wird gespeichert …'
+                : 'Speichern',
+          ),
         ),
         if (widget.controller.isDemo)
           const Padding(

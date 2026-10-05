@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'responsive.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -10,8 +12,8 @@ class PollsScreen extends StatelessWidget {
   const PollsScreen({super.key, required this.controller});
   final AppController controller;
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: controller,
+  Widget build(BuildContext context) => _PollUpdates(
+    controller: controller,
     builder: (context, _) => Scaffold(
       appBar: AppBar(
         title: const Text('Abstimmungen'),
@@ -55,7 +57,7 @@ class PollsScreen extends StatelessWidget {
                       subtitle: Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
-                          '${p.totalVotes} Stimmen${p.selectedOptionId != null ? ' · Du hast abgestimmt' : ''}${p.closesAt == null ? '' : '\nBis ${DateFormat('d. MMMM · HH:mm', 'de').format(p.closesAt!.toLocal())}'}',
+                          '${p.privacyLabel} · ${p.voteCountLabel}${p.selectedOptionId != null ? ' · Du hast abgestimmt' : ''}${p.closesAt == null ? '' : '\nBis ${DateFormat('d. MMMM · HH:mm', 'de').format(p.closesAt!.toLocal())}'}',
                         ),
                       ),
                       leading: Icon(
@@ -112,8 +114,8 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: widget.controller,
+  Widget build(BuildContext context) => _PollUpdates(
+    controller: widget.controller,
     builder: (context, _) {
       final poll = widget.controller.polls
           .where((p) => p.id == widget.pollId)
@@ -129,6 +131,25 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                     poll.title,
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Icon(
+                        poll.anonymous
+                            ? Icons.visibility_off_outlined
+                            : Icons.people_outline,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(poll.privacyLabel),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    poll.anonymous
+                        ? 'Die Antworten werden ohne Namen angezeigt.'
+                        : 'Alle Mitglieder sehen, wer welche Antwort gewählt hat.',
+                  ),
                   if (poll.description.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 16),
@@ -137,8 +158,8 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                   const SizedBox(height: 12),
                   Text(
                     poll.isClosed
-                        ? 'Abgeschlossen · ${poll.totalVotes} Stimmen'
-                        : '${poll.totalVotes} Stimmen${poll.closesAt == null ? '' : ' · Bis ${DateFormat('d. MMMM · HH:mm', 'de').format(poll.closesAt!.toLocal())}'}',
+                        ? 'Abgeschlossen · ${poll.voteCountLabel}'
+                        : '${poll.voteCountLabel}${poll.closesAt == null ? '' : ' · Bis ${DateFormat('d. MMMM · HH:mm', 'de').format(poll.closesAt!.toLocal())}'}',
                   ),
                   const SizedBox(height: 24),
                   for (final option in poll.options)
@@ -179,6 +200,18 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                                   borderRadius: BorderRadius.circular(8),
                                   minHeight: 5,
                                 ),
+                                if (!poll.anonymous &&
+                                    option.voters.isNotEmpty) ...[
+                                  const SizedBox(height: 12),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 6,
+                                    children: [
+                                      for (final voter in option.voters)
+                                        Chip(label: Text(voter.name)),
+                                    ],
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -186,7 +219,12 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                       ),
                     ),
                   if (_busy) const LinearProgressIndicator(),
-                  if (widget.controller.pendingCount > 0)
+                  if (widget.controller.outbox.any(
+                    (action) =>
+                        !action.failed &&
+                        action.payload['action'] == 'poll.vote' &&
+                        action.payload['pollId'] == poll.id,
+                  ))
                     const Text(
                       'Deine Stimme wird synchronisiert, sobald eine Verbindung besteht.',
                     ),
@@ -242,6 +280,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
   late final TextEditingController _title, _description;
   late final List<TextEditingController> _options;
   DateTime? _closes;
+  late bool _anonymous;
   bool _busy = false;
   final _form = GlobalKey<FormState>();
   bool get _fixed => (widget.poll?.totalVotes ?? 0) > 0;
@@ -256,6 +295,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
             .toList() ??
         [TextEditingController(), TextEditingController()];
     _closes = widget.poll?.closesAt?.toLocal();
+    _anonymous = widget.poll?.anonymous ?? true;
   }
 
   @override
@@ -270,6 +310,15 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
 
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
+    if (_closes != null &&
+        !_closes!.isAfter(DateTime.now()) &&
+        widget.poll?.closesAt?.isAtSameMomentAs(_closes!) != true) {
+      showProblem(
+        context,
+        'Enddatum und Uhrzeit müssen in der Zukunft liegen.',
+      );
+      return;
+    }
     setState(() => _busy = true);
     try {
       await widget.controller.performAction({
@@ -278,6 +327,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
         'version': widget.poll?.version,
         'title': _title.text,
         'description': _description.text,
+        'anonymous': _anonymous,
         'options': _options.map((o) => {'label': o.text}).toList(),
         'closesAt': _closes?.toUtc().toIso8601String(),
       });
@@ -317,6 +367,38 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
               maxLength: 3000,
               decoration: const InputDecoration(labelText: 'Beschreibung'),
             ),
+            const SectionTitle('Abstimmungsart'),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(
+                  value: true,
+                  label: Text('Anonym'),
+                  icon: Icon(Icons.visibility_off_outlined),
+                ),
+                ButtonSegment(
+                  value: false,
+                  label: Text('Namentlich'),
+                  icon: Icon(Icons.people_outline),
+                ),
+              ],
+              selected: {_anonymous},
+              onSelectionChanged: _fixed || _busy
+                  ? null
+                  : (selection) =>
+                        setState(() => _anonymous = selection.single),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              _anonymous
+                  ? 'Nur die Stimmenzahlen werden angezeigt.'
+                  : 'Alle Mitglieder sehen die Namen bei der gewählten Antwort.',
+            ),
+            if (_fixed) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Die Abstimmungsart bleibt nach der ersten Stimme erhalten.',
+              ),
+            ],
             const SectionTitle('Antworten'),
             for (var i = 0; i < _options.length; i++)
               Padding(
@@ -367,51 +449,72 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
                 'Die Antworten bleiben nach der ersten Stimme erhalten.',
               ),
             const SizedBox(height: 16),
-            ListTile(
+            SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Abstimmungsende'),
-              subtitle: Text(
-                _closes == null
-                    ? 'Ohne Frist'
-                    : DateFormat('d. MMMM yyyy · HH:mm', 'de').format(_closes!),
-              ),
-              trailing: _closes == null
-                  ? const Icon(Icons.calendar_month)
-                  : IconButton(
-                      tooltip: 'Frist entfernen',
-                      onPressed: () => setState(() => _closes = null),
-                      icon: const Icon(Icons.close),
-                    ),
-              onTap: () async {
-                final now = DateTime.now();
-                final day = await showDatePicker(
-                  context: context,
-                  initialDate: _closes?.isAfter(now) == true
-                      ? _closes!
-                      : now.add(const Duration(days: 7)),
-                  firstDate: now,
-                  lastDate: DateTime(2100),
-                );
-                if (day == null || !context.mounted) return;
-                final time = await showTimePicker(
-                  context: context,
-                  initialTime: TimeOfDay.fromDateTime(
-                    _closes ?? DateTime(2026, 1, 1, 20),
-                  ),
-                );
-                if (time != null && mounted) {
-                  setState(
-                    () => _closes = DateTime(
-                      day.year,
-                      day.month,
-                      day.day,
-                      time.hour,
-                      time.minute,
-                    ),
-                  );
-                }
-              },
+              title: const Text('Enddatum festlegen'),
+              value: _closes != null,
+              onChanged: _busy
+                  ? null
+                  : (enabled) {
+                      final now = DateTime.now();
+                      setState(
+                        () => _closes = enabled
+                            ? DateTime(now.year, now.month, now.day + 7, 20)
+                            : null,
+                      );
+                    },
             ),
+            if (_closes != null)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Enddatum und Uhrzeit'),
+                subtitle: Text(
+                  _closes == null
+                      ? 'Ohne Frist'
+                      : DateFormat(
+                          'd. MMMM yyyy · HH:mm',
+                          'de',
+                        ).format(_closes!),
+                ),
+                trailing: _closes == null
+                    ? const Icon(Icons.calendar_month)
+                    : IconButton(
+                        tooltip: 'Frist entfernen',
+                        onPressed: () => setState(() => _closes = null),
+                        icon: const Icon(Icons.close),
+                      ),
+                onTap: _busy
+                    ? null
+                    : () async {
+                        final now = DateTime.now();
+                        final day = await showDatePicker(
+                          context: context,
+                          initialDate: _closes?.isAfter(now) == true
+                              ? _closes!
+                              : now.add(const Duration(days: 7)),
+                          firstDate: now,
+                          lastDate: DateTime(2100),
+                        );
+                        if (day == null || !context.mounted) return;
+                        final time = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay.fromDateTime(
+                            _closes ?? DateTime(2026, 1, 1, 20),
+                          ),
+                        );
+                        if (time != null && mounted) {
+                          setState(
+                            () => _closes = DateTime(
+                              day.year,
+                              day.month,
+                              day.day,
+                              time.hour,
+                              time.minute,
+                            ),
+                          );
+                        }
+                      },
+              ),
             const SizedBox(height: 24),
             FilledButton(
               onPressed: _busy ? null : _save,
@@ -422,4 +525,66 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
       ),
     ],
   );
+}
+
+class _PollUpdates extends StatefulWidget {
+  const _PollUpdates({required this.controller, required this.builder});
+  final AppController controller;
+  final TransitionBuilder builder;
+  @override
+  State<_PollUpdates> createState() => _PollUpdatesState();
+}
+
+class _PollUpdatesState extends State<_PollUpdates> {
+  Timer? _deadline;
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_changed);
+    _scheduleDeadline();
+  }
+
+  @override
+  void didUpdateWidget(_PollUpdates oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_changed);
+      widget.controller.addListener(_changed);
+    }
+    _scheduleDeadline();
+  }
+
+  void _scheduleDeadline() {
+    _deadline?.cancel();
+    final now = DateTime.now();
+    final deadlines =
+        widget.controller.polls
+            .where(
+              (poll) => !poll.closed && poll.closesAt?.isAfter(now) == true,
+            )
+            .map((poll) => poll.closesAt!)
+            .toList()
+          ..sort();
+    if (deadlines.isNotEmpty) {
+      _deadline = Timer(
+        deadlines.first.difference(now) + const Duration(milliseconds: 25),
+        _changed,
+      );
+    }
+  }
+
+  void _changed() {
+    _scheduleDeadline();
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _deadline?.cancel();
+    widget.controller.removeListener(_changed);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, null);
 }

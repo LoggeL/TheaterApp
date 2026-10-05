@@ -1,3 +1,4 @@
+import 'package:theater_app/ui/calendar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -102,8 +103,11 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('Termine'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Kalender'));
-      await tester.pumpAndSettle();
+      if (width < 1250) {
+        await tester.tap(find.text('Kalender'));
+        await tester.pumpAndSettle();
+      }
+      expect(find.byType(RehearsalCalendar), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       c.dispose();

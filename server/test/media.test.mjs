@@ -16,7 +16,7 @@ async function setup(t) {
   const app = new Theater(store, { bootstrapEmail: 'admin@example.com' });
   app.session({ uid: 'admin', email: 'admin@example.com', email_verified: true });
   const personId = app.action('admin', { action: 'member.save', name: 'Sam' }, 'member').id;
-  app.session({ uid: 'sam', email: 'sam@example.com', email_verified: true });
+  app.session({ uid: 'sam', name: 'Sam', email: 'sam@example.com', email_verified: true });
   app.action('admin', { action: 'account.approve', uid: 'sam', personId, role: 'member', version: 1 }, 'approve');
   app.session({ uid: 'pending', email: 'pending@example.com', email_verified: true });
   const media = new MediaService(app, { directory });

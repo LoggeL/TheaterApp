@@ -17,6 +17,7 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
   late Future<JsonMap> _data;
   String _view = 'people', _filter = 'all', _query = '';
   final _search = TextEditingController();
+  final _reconsidering = <String>{};
   @override
   void initState() {
     super.initState();
@@ -86,6 +87,32 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
     }
   }
 
+  Future<void> _reconsider(JsonMap a) async {
+    final uid = textValue(a['uid']);
+    if (_reconsidering.contains(uid)) return;
+    setState(() => _reconsidering.add(uid));
+    try {
+      await widget.controller.performAction({
+        'action': 'account.reconsider',
+        'uid': a['uid'],
+        'version': a['version'],
+      });
+      if (!mounted) return;
+      setState(() {
+        _view = 'accounts';
+        _filter = 'pending';
+        _load();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Erneute Prüfung vorgemerkt.')),
+      );
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    } finally {
+      if (mounted) setState(() => _reconsidering.remove(uid));
+    }
+  }
+
   Future<void> _chooseAccount(JsonMap m, AccountRoster roster) async {
     final pending = roster.accounts
         .where((a) => a['status'] == 'pending' && a['personId'] == null)
@@ -152,6 +179,15 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
       return TextButton(
         onPressed: () => _approve(a, roster),
         child: const Text('Prüfen & verknüpfen'),
+      );
+    }
+    if (a['status'] == 'rejected') {
+      return TextButton.icon(
+        onPressed: _reconsidering.contains(textValue(a['uid']))
+            ? null
+            : () => _reconsider(a),
+        icon: const Icon(Icons.undo, size: 18),
+        label: const Text('Erneut prüfen'),
       );
     }
     if (a['uid'] == widget.controller.user?.id ||

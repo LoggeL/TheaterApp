@@ -31,7 +31,7 @@ jobs:
       - run: npm audit --omit=dev
         working-directory: server
       - run: node tool/configure.mjs config/production.web.json
-      - run: flutter build web --release --dart-define-from-file=config/production.web.json
+      - run: flutter build web --release --dart-define-from-file=config/production.web.json --pwa-strategy=none
       - run: node tool/version-web.mjs
       - uses: actions/upload-artifact@v4
         with:
@@ -105,6 +105,9 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as f:
               f.write(f'GOOGLE_APPLICATION_CREDENTIALS={account}\n')
           PY
+      - name: Remove test plugin from Android release dependencies
+        if: steps.current.outputs.publish == 'true'
+        run: flutter pub remove integration_test
       - name: Allocate the next Play version code
         if: steps.current.outputs.publish == 'true'
         id: play

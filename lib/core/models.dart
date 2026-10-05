@@ -25,6 +25,7 @@ class AppUser {
     this.personId,
     this.emailVerified = true,
     this.identityReady = true,
+    this.needsRegistrationName = false,
     this.avatarId,
     this.roleIds = const [],
     this.profileVersion = 0,
@@ -35,6 +36,7 @@ class AppUser {
   final String status;
   final int? personId;
   final bool emailVerified, identityReady;
+  final bool needsRegistrationName;
   final String? avatarId;
   final List<String> roleIds;
   final int profileVersion;
@@ -59,6 +61,7 @@ class AppUser {
     personId: json['personId'] == null ? null : intValue(json['personId']),
     emailVerified: json['emailVerified'] != false,
     identityReady: json['identityReady'] != false,
+    needsRegistrationName: json['needsRegistrationName'] == true,
     avatarId: json['avatarId'] as String?,
     roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
     profileVersion: intValue(json['profileVersion']),
@@ -77,6 +80,7 @@ class AppUser {
     'personId': personId,
     'emailVerified': emailVerified,
     'identityReady': identityReady,
+    'needsRegistrationName': needsRegistrationName,
     'avatarId': avatarId,
     'roleIds': roleIds,
     'profileVersion': profileVersion,
@@ -125,6 +129,8 @@ class TheaterEvent {
   final DateTime? expectedArrivalAt;
   final int version;
   bool get needsResponse => response == 'open' && !locked;
+  bool acceptsResponsesAt(DateTime now) =>
+      !locked && !((endsAt ?? startsAt)?.isBefore(now) ?? false);
   factory TheaterEvent.fromJson(JsonMap json) => TheaterEvent(
     id: textValue(json['id']),
     title: textValue(json['title']),
@@ -224,22 +230,47 @@ String dateOnly(DateTime date) =>
     '${date.year.toString().padLeft(4, '0')}-'
     '${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
+class PollVoter {
+  const PollVoter({required this.personId, required this.name});
+  final int personId;
+  final String name;
+  factory PollVoter.fromJson(JsonMap json) => PollVoter(
+    personId: intValue(json['personId']),
+    name: textValue(json['name']),
+  );
+  JsonMap toJson() => {'personId': personId, 'name': name};
+}
+
 class PollOption {
   const PollOption({
     required this.id,
     required this.label,
     this.time = '',
     this.votes = 0,
+    this.voters = const [],
   });
   final String id, label, time;
   final int votes;
-  factory PollOption.fromJson(JsonMap json) => PollOption(
-    id: textValue(json['id']),
-    label: textValue(json['day'] ?? json['label']),
-    time: textValue(json['time']),
-    votes: intValue(json['votes']),
-  );
-  JsonMap toJson() => {'id': id, 'label': label, 'time': time, 'votes': votes};
+  final List<PollVoter> voters;
+  factory PollOption.fromJson(JsonMap json, {bool anonymous = true}) =>
+      PollOption(
+        id: textValue(json['id']),
+        label: textValue(json['day'] ?? json['label']),
+        time: textValue(json['time']),
+        votes: intValue(json['votes']),
+        voters: anonymous
+            ? const []
+            : jsonList(
+                json['voters'],
+              ).map((e) => PollVoter.fromJson(jsonMap(e))).toList(),
+      );
+  JsonMap toJson({bool anonymous = true}) => {
+    'id': id,
+    'label': label,
+    'time': time,
+    'votes': votes,
+    if (!anonymous) 'voters': voters.map((v) => v.toJson()).toList(),
+  };
 }
 
 class Poll {
@@ -251,16 +282,20 @@ class Poll {
     this.selectedOptionId,
     this.confirmedOptionId,
     this.closed = false,
+    this.anonymous = true,
     this.closesAt,
     this.version = 1,
   });
   final String id, title, description;
   final List<PollOption> options;
   final String? selectedOptionId, confirmedOptionId;
-  final bool closed;
+  final bool closed, anonymous;
+  String get privacyLabel => anonymous ? 'Anonym' : 'Namentlich';
   final DateTime? closesAt;
   final int version;
   int get totalVotes => options.fold(0, (n, o) => n + o.votes);
+  String get voteCountLabel =>
+      totalVotes == 1 ? '1 Stimme' : '$totalVotes Stimmen';
   bool get isClosed =>
       closed ||
       confirmedOptionId != null ||
@@ -269,16 +304,22 @@ class Poll {
     id: textValue(json['id']),
     title: textValue(json['title']),
     description: textValue(json['description']),
-    options: jsonList(
-      json['options'],
-    ).map((e) => PollOption.fromJson(jsonMap(e))).toList(),
+    options: jsonList(json['options'])
+        .map(
+          (e) => PollOption.fromJson(
+            jsonMap(e),
+            anonymous: json['anonymous'] != false,
+          ),
+        )
+        .toList(),
     selectedOptionId: (json['choice'] ?? json['selectedOptionId']) as String?,
     confirmedOptionId: json['confirmedOptionId'] as String?,
     closed: json['closed'] == true,
+    anonymous: json['anonymous'] != false,
     closesAt: dateValue(json['closesAt']),
     version: intValue(json['version'], 1),
   );
-  Poll withChoice(String optionId) => Poll(
+  Poll withChoice(String optionId, {PollVoter? voter}) => Poll(
     id: id,
     title: title,
     description: description,
@@ -292,12 +333,22 @@ class Poll {
                 e.votes +
                 (e.id == optionId ? 1 : 0) -
                 (e.id == selectedOptionId ? 1 : 0),
+            voters: anonymous
+                ? const []
+                : [
+                    ...e.voters.where(
+                      (existing) =>
+                          voter == null || existing.personId != voter.personId,
+                    ),
+                    if (voter != null && e.id == optionId) voter,
+                  ],
           ),
         )
         .toList(),
     selectedOptionId: optionId,
     confirmedOptionId: confirmedOptionId,
     closed: closed,
+    anonymous: anonymous,
     closesAt: closesAt,
     version: version,
   );
@@ -305,10 +356,11 @@ class Poll {
     'id': id,
     'title': title,
     'description': description,
-    'options': options.map((e) => e.toJson()).toList(),
+    'options': options.map((e) => e.toJson(anonymous: anonymous)).toList(),
     'choice': selectedOptionId,
     'confirmedOptionId': confirmedOptionId,
     'closed': closed,
+    'anonymous': anonymous,
     'closesAt': closesAt?.toUtc().toIso8601String(),
     'version': version,
   };
@@ -383,16 +435,56 @@ class Production {
     this.revision = '',
     this.roles = const [],
     this.sceneCount = 0,
+    this.premiereAt,
+    this.createdAt,
+    this.archived = false,
+    this.version = 1,
   });
   final String id, title, subtitle, revision;
   final List<ScriptRole> roles;
   final int sceneCount;
+  final DateTime? premiereAt, createdAt;
+  final bool archived;
+  final int version;
+
+  DateTime get sortDate {
+    if (premiereAt != null) return premiereAt!.toUtc();
+    final label = '$title $id'.toLowerCase();
+    final years = RegExp(
+      r'(?:^|\D)((?:19|20)\d{2})(?=\D|$)',
+    ).allMatches(label).map((match) => int.parse(match.group(1)!)).toList();
+    if (years.isNotEmpty) {
+      years.sort();
+      final month = label.contains('winter')
+          ? 12
+          : label.contains('sommer')
+          ? 7
+          : 1;
+      return DateTime.utc(years.last, month);
+    }
+    return createdAt?.toUtc() ??
+        DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+  }
+
+  static int compareNewestFirst(Production left, Production right) {
+    final chronology = right.sortDate.compareTo(left.sortDate);
+    if (chronology != 0) return chronology;
+    final titleOrder = right.title.toLowerCase().compareTo(
+      left.title.toLowerCase(),
+    );
+    return titleOrder != 0 ? titleOrder : left.id.compareTo(right.id);
+  }
+
   factory Production.fromJson(JsonMap json) => Production(
     id: textValue(json['id']),
     title: textValue(json['title'] ?? json['name']),
     subtitle: textValue(json['subtitle']),
     revision: textValue(json['revision']),
     sceneCount: intValue(json['sceneCount']),
+    premiereAt: dateValue(json['premiereAt']),
+    createdAt: dateValue(json['createdAt']),
+    archived: json['archived'] == true,
+    version: intValue(json['version'] ?? 1),
     roles: jsonList(
       json['roles'],
     ).map((e) => ScriptRole.fromJson(jsonMap(e))).toList(),
@@ -404,6 +496,10 @@ class Production {
     revision: doc.revision,
     roles: doc.roles,
     sceneCount: doc.scenes.length,
+    premiereAt: premiereAt,
+    createdAt: createdAt,
+    archived: archived,
+    version: version,
   );
   JsonMap toJson() => {
     'id': id,
@@ -412,6 +508,10 @@ class Production {
     'revision': revision,
     'roles': roles.map((e) => e.toJson()).toList(),
     'sceneCount': sceneCount,
+    'premiereAt': premiereAt?.toUtc().toIso8601String(),
+    'createdAt': createdAt?.toUtc().toIso8601String(),
+    'archived': archived,
+    'version': version,
   };
 }
 

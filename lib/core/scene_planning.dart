@@ -1,5 +1,28 @@
 import 'models.dart';
 
+/// Places a selected clock time on the event's first matching calendar day.
+/// Earlier clock times belong to the following day for overnight events.
+DateTime scenePlanningTime({
+  required DateTime startsAt,
+  DateTime? endsAt,
+  required int hour,
+  required int minute,
+}) {
+  DateTime onDay(int day) => startsAt.isUtc
+      ? DateTime.utc(startsAt.year, startsAt.month, day, hour, minute)
+      : DateTime(startsAt.year, startsAt.month, day, hour, minute);
+  final selected = onDay(startsAt.day);
+  final hasLaterEndDate =
+      endsAt != null &&
+      endsAt.isAfter(startsAt) &&
+      (endsAt.year != startsAt.year ||
+          endsAt.month != startsAt.month ||
+          endsAt.day != startsAt.day);
+  return selected.isBefore(startsAt) && hasLaterEndDate
+      ? onDay(startsAt.day + 1)
+      : selected;
+}
+
 class SceneAvailability {
   const SceneAvailability(this.status, this.details);
   final String status;

@@ -10,6 +10,7 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../core/app_controller.dart';
 import '../core/models.dart';
 import 'annotations.dart';
+import 'app_navigation.dart';
 
 const _accent = Color(0xFFED6B36);
 const _ink = Color(0xFF242628);
@@ -21,121 +22,238 @@ class ProductionsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
-    builder: (context, _) => CustomScrollView(
-      key: const PageStorageKey('productions'),
-      slivers: [
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(24, 26, 24, 24),
-          sliver: SliverToBoxAdapter(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'DEINE BÜHNE',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    letterSpacing: 2.4,
-                    color: _accent,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Drehbücher',
-                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    height: 1.08,
-                    letterSpacing: -1.3,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  'Deine Produktionen',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-                const SizedBox(height: 24),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _Pill(
-                      icon: Icons.menu_book_rounded,
-                      label: '${controller.productions.length} Produktionen',
+    builder: (context, _) {
+      final productions = controller.activeProductions;
+      final archived = controller.archivedProductions;
+      return CustomScrollView(
+        key: const PageStorageKey('productions'),
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(24, 26, 24, 24),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'DEINE BÜHNE',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      letterSpacing: 2.4,
+                      color: _accent,
+                      fontWeight: FontWeight.w800,
                     ),
-                    _Pill(
-                      icon: Icons.offline_pin_outlined,
-                      label: '${controller.scripts.length} offline verfügbar',
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Drehbücher',
+                    style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      height: 1.08,
+                      letterSpacing: -1.3,
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Aktuelle Produktionen',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 24),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _Pill(
+                        icon: Icons.menu_book_rounded,
+                        label:
+                            '${productions.length} ${productions.length == 1 ? 'Produktion' : 'Produktionen'}',
+                      ),
+                      _Pill(
+                        icon: Icons.offline_pin_outlined,
+                        label:
+                            '${productions.where((p) => controller.scripts.containsKey(p.id)).length} offline verfügbar',
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        if (controller.productions.isEmpty)
-          SliverFillRemaining(
-            hasScrollBody: false,
-            child: _ReaderEmpty(
-              icon: Icons.theater_comedy_outlined,
-              title: 'Die Bühne wartet.',
-              message:
-                  controller.error ??
-                  'Sobald eine Produktion freigegeben ist, findest du hier dein Drehbuch.',
-            ),
-          )
-        else
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 110),
-            sliver: SliverList.builder(
-              itemCount: controller.productions.length,
-              itemBuilder: (context, index) {
-                final production = controller.productions[index];
-                final cached = controller.scripts.containsKey(production.id);
-                final role =
-                    controller.preferences['reader.${production.id}.role']
-                        as String?;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: _ProductionCard(
-                    production: production,
-                    number: index + 1,
-                    cached: cached,
-                    role: role,
-                    onTap: () => Navigator.of(context).push(
+          if (archived.isNotEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+              sliver: SliverToBoxAdapter(
+                child: Card(
+                  child: ListTile(
+                    key: const ValueKey('production-archive-link'),
+                    leading: const Icon(Icons.inventory_2_outlined),
+                    title: const Text('Drehbucharchiv'),
+                    subtitle: Text(
+                      '${archived.length} ${archived.length == 1 ? 'älteres Stück' : 'ältere Stücke'}',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(
+                      context,
                       MaterialPageRoute<void>(
-                        builder: (_) => ScriptReaderScreen(
-                          controller: controller,
-                          productionId: production.id,
-                        ),
+                        builder: (_) =>
+                            ProductionArchiveScreen(controller: controller),
                       ),
                     ),
                   ),
-                );
-              },
+                ),
+              ),
             ),
-          ),
-      ],
+          if (productions.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _ReaderEmpty(
+                icon: Icons.theater_comedy_outlined,
+                title: 'Kein aktuelles Stück.',
+                message:
+                    controller.error ??
+                    (archived.isNotEmpty
+                        ? 'Ältere Drehbücher findest du im Archiv.'
+                        : 'Sobald eine Produktion freigegeben ist, findest du hier dein Drehbuch.'),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 110),
+              sliver: SliverList.builder(
+                itemCount: productions.length,
+                itemBuilder: (context, index) {
+                  final production = productions[index];
+                  final cached = controller.scripts.containsKey(production.id);
+                  final role =
+                      controller.preferences['reader.${production.id}.role']
+                          as String?;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: _ProductionCard(
+                      key: ValueKey('production.${production.id}'),
+                      production: production,
+                      number: index + 1,
+                      cached: cached,
+                      role: role,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ScriptReaderScreen(
+                            controller: controller,
+                            productionId: production.id,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      );
+    },
+  );
+}
+
+class ProductionArchiveScreen extends StatelessWidget {
+  const ProductionArchiveScreen({super.key, required this.controller});
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Drehbucharchiv')),
+    body: AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final productions = controller.archivedProductions;
+        return CustomScrollView(
+          slivers: [
+            const SliverPadding(
+              padding: EdgeInsets.fromLTRB(24, 22, 24, 24),
+              sliver: SliverToBoxAdapter(
+                child: Text(
+                  'Hier findest du die Drehbücher älterer Stücke. Deine Rollen und Markierungen bleiben erhalten.',
+                ),
+              ),
+            ),
+            if (productions.isEmpty)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: _ReaderEmpty(
+                  icon: Icons.inventory_2_outlined,
+                  title: 'Das Archiv ist leer.',
+                  message: 'Archivierte Drehbücher erscheinen hier.',
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 30),
+                sliver: SliverList.builder(
+                  itemCount: productions.length,
+                  itemBuilder: (context, index) {
+                    final production = productions[index];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: _ProductionCard(
+                        key: ValueKey('production.${production.id}'),
+                        production: production,
+                        number: index + 1,
+                        highlightLatest: false,
+                        cached: controller.scripts.containsKey(production.id),
+                        role:
+                            controller
+                                    .preferences['reader.${production.id}.role']
+                                as String?,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => ScriptReaderScreen(
+                              controller: controller,
+                              productionId: production.id,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        );
+      },
     ),
   );
 }
 
 class _ProductionCard extends StatelessWidget {
   const _ProductionCard({
+    super.key,
     required this.production,
     required this.number,
     required this.cached,
     required this.role,
     required this.onTap,
+    this.highlightLatest = true,
   });
   final Production production;
   final int number;
   final bool cached;
   final String? role;
   final VoidCallback onTap;
+  final bool highlightLatest;
+  bool get latest => highlightLatest && number == 1;
 
   @override
   Widget build(BuildContext context) => Card(
     clipBehavior: Clip.antiAlias,
-    color: number.isOdd ? _ink : const Color(0xFF394642),
+    color: latest
+        ? const Color(0xFF3D2B23)
+        : number.isOdd
+        ? _ink
+        : const Color(0xFF394642),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(24),
+      side: latest
+          ? const BorderSide(color: _accent, width: 2)
+          : BorderSide.none,
+    ),
     child: InkWell(
       onTap: onTap,
       child: Padding(
@@ -150,7 +268,35 @@ class _ProductionCard extends StatelessWidget {
                   color: Color(0xFFFFA37A),
                   size: 32,
                 ),
-                const Spacer(),
+                if (latest) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _accent,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Text(
+                          'Neuestes Stück',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                if (!latest) const Spacer(),
                 Text(
                   number.toString().padLeft(2, '0'),
                   style: const TextStyle(
@@ -349,6 +495,7 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   String? _firstVisibleCueId;
   String? _loadError;
   String _sceneLabel = '';
+  String? _visibleSceneId;
   double _fontScale = 1;
   int _contextLines = 2;
   int _searchResultIndex = 0;
@@ -743,7 +890,12 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
           break;
         }
       }
-      if (_sceneLabel != label && mounted) setState(() => _sceneLabel = label);
+      if ((_sceneLabel != label || _visibleSceneId != cue.sceneId) && mounted) {
+        setState(() {
+          _sceneLabel = label;
+          _visibleSceneId = cue.sceneId;
+        });
+      }
       _saveTimer?.cancel();
       _saveTimer = Timer(
         const Duration(milliseconds: 650),
@@ -756,14 +908,23 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   Future<void> _jumpToCue(String cueId, {bool animate = true}) async {
     if (!mounted) return;
     if (!_cueIndices.containsKey(cueId)) {
+      final cue = _document?.cues.where((cue) => cue.id == cueId).firstOrNull;
+      if (cue == null || cue.kind == 'scene' || cue.kind == 'role') {
+        _notice('Diese Textstelle ist in dieser Fassung nicht vorhanden.');
+        return;
+      }
       setState(() {
         _mode = 'read';
-        _showDirections = true;
-        _showTechnical = true;
+        if (cue.kind == 'direction') _showDirections = true;
+        if (_isTechnical(cue)) _showTechnical = true;
+        if (cue.kind != 'dialogue') _categories.add(cueCategory(cue));
         _rebuildEntries();
       });
       await _preference('mode', 'read');
-      await Future<void>.delayed(Duration.zero);
+      await _preference('categories', _categories.toList());
+      await _preference('showDirections', _showDirections);
+      await _preference('showTechnical', _showTechnical);
+      await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
     }
     final index = _cueIndices[cueId];
@@ -771,7 +932,12 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
       _notice('Diese Textstelle ist in dieser Fassung nicht vorhanden.');
       return;
     }
-    setState(() => _activeCueId = cueId);
+    setState(() {
+      _activeCueId = cueId;
+      _visibleSceneId = _document!.cues
+          .firstWhere((cue) => cue.id == cueId)
+          .sceneId;
+    });
     if (_itemScroll.isAttached) {
       if (animate && !MediaQuery.disableAnimationsOf(context)) {
         await _itemScroll.scrollTo(
@@ -828,6 +994,9 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
 
   @override
   Widget build(BuildContext context) {
+    final desktopHeader =
+        MediaQuery.sizeOf(context).width >= 1250 &&
+        _desktopReader(context, MediaQuery.sizeOf(context).width);
     final parentTheme = Theme.of(context);
     final readerTheme = _stage
         ? ThemeData(
@@ -842,161 +1011,195 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     return Theme(
       data: readerTheme,
       child: Builder(
-        builder: (context) => Scaffold(
-          backgroundColor: _stage
-              ? const Color(0xFF151719)
-              : readerTheme.scaffoldBackgroundColor,
-          appBar: AppBar(
-            titleSpacing: 0,
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                if (_sceneLabel.isNotEmpty)
+        builder: (context) => DesktopRouteFrame(
+          controller: widget.controller,
+          selectedIndex: 2,
+          enabled: !_stage,
+          child: Scaffold(
+            backgroundColor: _stage
+                ? const Color(0xFF151719)
+                : readerTheme.scaffoldBackgroundColor,
+            appBar: AppBar(
+              titleSpacing: 0,
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    _sceneLabel,
+                    _title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 12,
-                      color: readerTheme.colorScheme.onSurfaceVariant,
+                      fontSize: desktopHeader ? 20 : 16,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-              ],
-            ),
-            actions: [
-              IconButton(
-                tooltip: 'Im Drehbuch suchen',
-                onPressed: () {
-                  setState(() => _searching = !_searching);
-                  if (_searching) {
-                    _searchFocus.requestFocus();
-                  } else {
-                    _searchController.clear();
-                    _search('');
-                  }
-                },
-                icon: Icon(
-                  _searching ? Icons.search_off_rounded : Icons.search_rounded,
-                ),
-              ),
-              PopupMenuButton<String>(
-                tooltip: 'Weitere Aktionen',
-                onSelected: (value) {
-                  switch (value) {
-                    case 'settings':
-                      _showSettings();
-                    case 'notes':
-                      _showNotes();
-                    case 'bookmarks':
-                      _showBookmarks();
-                    case 'export':
-                      _exportPdf();
-                    case 'refresh':
-                      _load();
-                    case 'focus':
-                      _showLive();
-                  }
-                },
-                itemBuilder: (_) => [
-                  const PopupMenuItem(
-                    value: 'settings',
-                    child: Text('Leseeinstellungen'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'notes',
-                    child: Text('Private Notizen'),
-                  ),
-                  PopupMenuItem(
-                    value: 'focus',
-                    enabled: _document != null,
-                    child: const Text('Gemeinsamer Fokus'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'bookmarks',
-                    child: Text('Lesezeichen'),
-                  ),
-                  PopupMenuItem(
-                    value: 'export',
-                    enabled: _document != null && !_printing,
-                    child: Text(
-                      _printing ? 'PDF wird erstellt …' : 'Drucken / PDF',
+                  if (_sceneLabel.isNotEmpty)
+                    Text(
+                      _sceneLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: readerTheme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'refresh',
-                    child: Text('Fassung aktualisieren'),
-                  ),
                 ],
               ),
-            ],
-          ),
-          body: Column(
-            children: [
-              if (_searching) _buildSearch(context),
-              if (_document != null) _buildToolbar(context),
-              if (_following || _directing)
-                Material(
-                  color: _accent.withValues(alpha: 0.12),
-                  child: ListTile(
-                    dense: true,
-                    visualDensity: VisualDensity.compact,
-                    leading: Icon(
-                      _directing ? Icons.cell_tower : Icons.sync,
-                      color: _accent,
-                      size: 19,
+              actions: [
+                if (desktopHeader && _document != null) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.offline_pin_outlined,
+                          size: 18,
+                          color: readerTheme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Offline verfügbar',
+                          style: readerTheme.textTheme.labelMedium,
+                        ),
+                      ],
                     ),
-                    title: Text(
-                      _liveError ??
-                          (widget.controller.isDemo
-                              ? 'Demo-Fokus · nur dieses Gerät'
-                              : _directing
-                              ? 'Du führst · Text antippen, um den Fokus zu teilen'
-                              : _liveFocus?.cueId == null
-                              ? 'Warte auf den gemeinsamen Fokus'
-                              : 'Du folgst dem gemeinsamen Fokus'),
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    trailing: IconButton(
-                      tooltip: 'Fokus beenden',
-                      icon: const Icon(Icons.close, size: 19),
-                      onPressed: () {
-                        setState(() {
-                          _following = false;
-                          _directing = false;
-                        });
-                        _focusTimer?.cancel();
-                      },
-                    ),
+                  ),
+                  TextButton.icon(
+                    key: const ValueKey('reader-desktop-pdf'),
+                    onPressed: _printing ? null : _exportPdf,
+                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 20),
+                    label: Text(_printing ? 'PDF wird erstellt …' : 'PDF'),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                IconButton(
+                  tooltip: 'Im Drehbuch suchen',
+                  onPressed: () {
+                    setState(() => _searching = !_searching);
+                    if (_searching) {
+                      _searchFocus.requestFocus();
+                    } else {
+                      _searchController.clear();
+                      _search('');
+                    }
+                  },
+                  icon: Icon(
+                    _searching
+                        ? Icons.search_off_rounded
+                        : Icons.search_rounded,
                   ),
                 ),
-              if (_document?.stale == true)
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 6,
-                  ),
-                  child: Text(
-                    'Gespeicherte Fassung · Aktualisierung zurzeit nicht möglich',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
+                PopupMenuButton<String>(
+                  tooltip: 'Weitere Aktionen',
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'settings':
+                        _showSettings();
+                      case 'notes':
+                        _showNotes();
+                      case 'bookmarks':
+                        _showBookmarks();
+                      case 'export':
+                        _exportPdf();
+                      case 'refresh':
+                        _load();
+                      case 'focus':
+                        _showLive();
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'settings',
+                      child: Text('Leseeinstellungen'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'notes',
+                      child: Text('Private Notizen'),
+                    ),
+                    PopupMenuItem(
+                      value: 'focus',
+                      enabled: _document != null,
+                      child: const Text('Gemeinsamer Fokus'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'bookmarks',
+                      child: Text('Lesezeichen'),
+                    ),
+                    PopupMenuItem(
+                      value: 'export',
+                      enabled: _document != null && !_printing,
+                      child: Text(
+                        _printing ? 'PDF wird erstellt …' : 'Drucken / PDF',
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'refresh',
+                      child: Text('Fassung aktualisieren'),
+                    ),
+                  ],
                 ),
-              if (_loading && _document != null)
-                const LinearProgressIndicator(minHeight: 2),
-              Expanded(child: _buildAdaptiveContent(context)),
-            ],
+              ],
+            ),
+            body: Column(
+              children: [
+                if (_searching) _buildSearch(context),
+                if (_document != null) _buildToolbar(context),
+                if (_following || _directing)
+                  Material(
+                    color: _accent.withValues(alpha: 0.12),
+                    child: ListTile(
+                      dense: true,
+                      visualDensity: VisualDensity.compact,
+                      leading: Icon(
+                        _directing ? Icons.cell_tower : Icons.sync,
+                        color: _accent,
+                        size: 19,
+                      ),
+                      title: Text(
+                        _liveError ??
+                            (widget.controller.isDemo
+                                ? 'Demo-Fokus · nur dieses Gerät'
+                                : _directing
+                                ? 'Du führst · Text antippen, um den Fokus zu teilen'
+                                : _liveFocus?.cueId == null
+                                ? 'Warte auf den gemeinsamen Fokus'
+                                : 'Du folgst dem gemeinsamen Fokus'),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Fokus beenden',
+                        icon: const Icon(Icons.close, size: 19),
+                        onPressed: () {
+                          setState(() {
+                            _following = false;
+                            _directing = false;
+                          });
+                          _focusTimer?.cancel();
+                        },
+                      ),
+                    ),
+                  ),
+                if (_document?.stale == true)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 6,
+                    ),
+                    child: Text(
+                      'Gespeicherte Fassung · Aktualisierung zurzeit nicht möglich',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  ),
+                if (_loading && _document != null)
+                  const LinearProgressIndicator(minHeight: 2),
+                Expanded(child: _buildAdaptiveContent(context)),
+              ],
+            ),
+            bottomNavigationBar: _document == null
+                ? null
+                : _buildBottomBar(context),
           ),
-          bottomNavigationBar: _document == null
-              ? null
-              : _buildBottomBar(context),
         ),
       ),
     );
@@ -1092,7 +1295,50 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     if ((mode == 'practice' || mode == 'actor') && !_hasRoles) _showRoles();
   }
 
-  Widget _buildToolbar(BuildContext context) => Padding(
+  bool _desktopReader(BuildContext context, double width) =>
+      width >= 1000 &&
+      MediaQuery.textScalerOf(context).scale(16) <= 22 &&
+      _fontScale <= 1.5;
+
+  Widget _buildToolbar(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      if (_desktopReader(context, constraints.maxWidth)) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final mode in _modes.entries)
+                      ChoiceChip(
+                        key: ValueKey('reader-mode-${mode.key}'),
+                        label: Text(mode.value),
+                        selected: _mode == mode.key,
+                        onSelected: (_) => _changeMode(mode.key),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              TextButton.icon(
+                onPressed: _showRoles,
+                icon: const Icon(Icons.person_outline, size: 18),
+                label: Text(
+                  _roles.isEmpty ? 'Meine Rollen' : '${_roles.length} Rollen',
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+      return _buildMobileToolbar(context);
+    },
+  );
+
+  Widget _buildMobileToolbar(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
     child: Row(
       children: [
@@ -1143,9 +1389,25 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     ),
   );
 
+  Widget _sideCard(BuildContext context, String title, List<Widget> children) =>
+      Card(
+        margin: const EdgeInsets.only(bottom: 16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              ...children,
+            ],
+          ),
+        ),
+      );
+
   Widget _buildAdaptiveContent(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      if (constraints.maxWidth < 1100 || _document == null) {
+      if (!_desktopReader(context, constraints.maxWidth) || _document == null) {
         return Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 800),
@@ -1156,7 +1418,12 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
       final focus = _document!.cues
           .where((c) => c.id == _liveFocus?.cueId)
           .firstOrNull;
+      final sceneNotes = _notes.entries.where(
+        (entry) =>
+            textValue(jsonMap(entry.value)['sceneId']) == _visibleSceneId,
+      );
       return Row(
+        key: const ValueKey('reader-desktop-workspace'),
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SizedBox(
@@ -1164,83 +1431,131 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                const Padding(
-                  padding: EdgeInsets.all(12),
+                Padding(
+                  padding: const EdgeInsets.all(12),
                   child: Text(
                     'Szenen',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
                 for (final scene in _document!.scenes)
-                  ListTile(
-                    title: Text('${scene.id} · ${scene.title}'),
-                    selected: _document!.cues.any(
-                      (c) => c.sceneId == scene.id && _own(c),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: ListTile(
+                      key: ValueKey('reader-scene-${scene.id}'),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      title: Text(scene.title),
+                      selected: _visibleSceneId == scene.id,
+                      selectedColor: _accent,
+                      selectedTileColor: _accent.withValues(alpha: 0.1),
+                      onTap: () {
+                        final cue = _document!.cues
+                            .where(
+                              (c) =>
+                                  c.sceneId == scene.id &&
+                                  c.kind != 'scene' &&
+                                  c.kind != 'role',
+                            )
+                            .firstOrNull;
+                        if (cue != null) _jumpToCue(cue.id);
+                      },
                     ),
-                    selectedColor: _accent,
-                    selectedTileColor: _accent.withValues(alpha: 0.08),
-                    onTap: () {
-                      final cue = _document!.cues
-                          .where(
-                            (c) =>
-                                c.sceneId == scene.id &&
-                                _cueIndices.containsKey(c.id),
-                          )
-                          .firstOrNull;
-                      if (cue != null) _jumpToCue(cue.id);
-                    },
                   ),
               ],
             ),
           ),
           const VerticalDivider(width: 1),
-          Expanded(child: _buildContent(context)),
+          Expanded(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 18, 12, 0),
+                  child: _buildContent(context),
+                ),
+              ),
+            ),
+          ),
           const VerticalDivider(width: 1),
           SizedBox(
-            width: 260,
+            width: 290,
             child: ListView(
-              padding: const EdgeInsets.all(22),
+              padding: const EdgeInsets.all(16),
               children: [
-                Text('Regie', style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 20),
-                OutlinedButton.icon(
-                  onPressed: _showLive,
-                  icon: const Icon(Icons.cell_tower),
-                  label: Text(
-                    _directing
-                        ? 'Du führst'
-                        : _following
-                        ? 'Du folgst'
-                        : 'Sitzung öffnen',
+                _sideCard(context, 'Regie & Besetzung', [
+                  for (final role in _document!.roles)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: Text(role.name),
+                      subtitle: Text(
+                        role.actor.isEmpty ? 'Noch nicht besetzt' : role.actor,
+                      ),
+                      trailing: _roles.contains(role.id)
+                          ? const Tooltip(
+                              message: 'Eigene Rolle',
+                              child: Icon(Icons.person, size: 18),
+                            )
+                          : null,
+                    ),
+                  TextButton(
+                    onPressed: _showRoles,
+                    child: const Text('Meine Rollen wählen'),
                   ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  focus == null
-                      ? 'Keine Regiemarkierung'
-                      : 'Szene ${focus.sceneId} · ${focus.role}',
-                ),
-                if (focus != null) ...[
-                  const SizedBox(height: 12),
+                ]),
+                _sideCard(context, 'Private Notizen', [
+                  if (sceneNotes.isEmpty)
+                    const Text(
+                      'Noch keine Notizen zu dieser Szene. Eine Textstelle lange drücken, um eine Notiz hinzuzufügen.',
+                    ),
+                  for (final entry in sceneNotes)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        textValue(jsonMap(entry.value)['text']),
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () => _jumpToCue(entry.key),
+                    ),
+                  TextButton(
+                    onPressed: _showNotes,
+                    child: const Text('Alle Notizen öffnen'),
+                  ),
+                ]),
+                _sideCard(context, 'Gemeinsamer Fokus', [
                   Text(
-                    focus.text,
-                    style: Theme.of(context).textTheme.bodyLarge,
+                    focus == null
+                        ? 'Keine aktuelle Textstelle geteilt.'
+                        : 'Szene ${focus.sceneId} · ${focus.role}',
                   ),
-                ],
-                const SizedBox(height: 28),
-                const Text(
-                  'Besetzung',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 12),
-                for (final role in _document!.roles)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(role.name),
-                    subtitle: Text(
-                      role.actor.isEmpty ? 'Noch nicht besetzt' : role.actor,
+                  if (focus != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      focus.text,
+                      maxLines: 6,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    TextButton(
+                      onPressed: () => _jumpToCue(focus.id),
+                      child: const Text('Zur Textstelle'),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _showLive,
+                    icon: const Icon(Icons.cell_tower, size: 18),
+                    label: Text(
+                      _directing
+                          ? 'Du führst'
+                          : _following
+                          ? 'Du folgst'
+                          : 'Sitzung öffnen',
                     ),
                   ),
+                ]),
               ],
             ),
           ),

@@ -19,14 +19,20 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, scriptS
       if (path === '/api/healthz') return json(res, 200, { ok: true, service: 'theater-app', firebase: true, release: process.env.RELEASE_SHA ?? 'development' });
       if (req.method === 'OPTIONS') { if (origin && !origins.has(origin)) throw new AppError(403, 'Diese App-Adresse ist nicht freigegeben.'); res.writeHead(204); res.end(); return; }
       if (!path.startsWith('/api/mobile/v1')) {
-        if (webDir && req.method === 'GET') {
+        if (webDir && ['GET', 'HEAD'].includes(req.method)) {
           const root = resolve(webDir), requested = resolve(root, `.${path}`);
           if (!requested.startsWith(root + sep) && requested !== root) throw new AppError(404, 'Nicht gefunden.');
           let file = requested;
-          try { if (!(await stat(file)).isFile()) file = resolve(root, 'index.html'); } catch { file = resolve(root, 'index.html'); }
+          const fallback = () => {
+            if (extname(path) || /^\/(?:api|assets|icons|canvaskit|web-assets|web-renderer)(?:\/|$)/.test(path)) throw new AppError(404, 'Nicht gefunden.');
+            return resolve(root, 'index.html');
+          };
+          try { if (!(await stat(file)).isFile()) file = fallback(); } catch (error) { if (error instanceof AppError) throw error; file = fallback(); }
           const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png', '.svg': 'image/svg+xml', '.ttf': 'font/ttf', '.woff2': 'font/woff2' };
           const content = await readFile(file);
-          res.writeHead(200, { 'Content-Type': types[extname(file)] ?? 'application/octet-stream', 'Cache-Control': ['.html', '.js', '.json'].includes(extname(file)) ? 'private, no-store, max-age=0, must-revalidate' : 'public, max-age=3600' }); res.end(content); return;
+          const manifest = /\/manifest(?:\.[a-f0-9]{16})?\.json$/.test(file);
+          if (path === '/theater-service-worker.js') res.setHeader('Service-Worker-Allowed', '/');
+          res.writeHead(200, { 'Content-Type': manifest ? 'application/manifest+json; charset=utf-8' : types[extname(file)] ?? 'application/octet-stream', 'Content-Length': content.length, 'Cache-Control': ['.html', '.js', '.json'].includes(extname(file)) ? 'private, no-store, max-age=0, must-revalidate' : 'public, max-age=3600' }); res.end(req.method === 'HEAD' ? undefined : content); return;
         }
         throw new AppError(404, 'Nicht gefunden.');
       }
@@ -49,7 +55,7 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, scriptS
         if (length) { try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new AppError(400, 'Ungültiges JSON.'); } }
         if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AppError(400, 'Ungültige Anfrage.');
       }
-      if (route === '/auth/session' && ['GET', 'POST'].includes(req.method)) return json(res, 200, { user: theater.session(identity) });
+      if (route === '/auth/session' && ['GET', 'POST'].includes(req.method)) return json(res, 200, { user: theater.session(identity, req.method === 'POST' ? body.registrationName : undefined) });
       if (route === '/auth/logout' && req.method === 'POST') {
         for (const d of theater.store.all('devices').filter(d => d.uid === identity.uid && d.token === body.deviceToken)) theater.store.delete('devices', d.id);
         return json(res, 200, { ok: true });

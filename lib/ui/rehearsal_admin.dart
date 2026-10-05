@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../core/app_controller.dart';
 import '../core/models.dart';
 import '../core/scene_planning.dart';
+import '../data/api_client.dart';
 import 'admin.dart';
 import 'events.dart';
 import 'reader.dart';
@@ -42,40 +43,23 @@ class ResponsesAdminScreen extends StatelessWidget {
         const SizedBox(height: 10),
         Text('${eventDate(event)} · ${eventTime(event)}'),
         const SizedBox(height: 24),
-        LayoutBuilder(
-          builder: (context, constraints) => Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              for (final status in ['yes', 'late', 'no', 'open'])
-                SizedBox(
-                  width: (constraints.maxWidth - 10) / 2,
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: statusColor(status).withValues(alpha: .12),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Column(
-                      children: [
-                        Text(
-                          '${people.where((m) => textValue(responses[m.id.toString()], 'open') == status).length}',
-                          style: Theme.of(context).textTheme.headlineMedium,
-                        ),
-                        Text(
-                          const {
-                            'yes': 'Dabei',
-                            'late': 'Später',
-                            'no': 'Abgesagt',
-                            'open': 'Offen',
-                          }[status]!,
-                        ),
-                      ],
-                    ),
+        Wrap(
+          spacing: 16,
+          runSpacing: 8,
+          children: [
+            for (final status in ['yes', 'late', 'no', 'open'])
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  RsvpStatusBadge(status: status),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${people.where((m) => textValue(responses[m.id.toString()], 'open') == status).length} ${statusText(status)}',
+                    style: Theme.of(context).textTheme.labelLarge,
                   ),
-                ),
-            ],
-          ),
+                ],
+              ),
+          ],
         ),
         const SizedBox(height: 24),
         for (final m in people)
@@ -90,13 +74,11 @@ class ResponsesAdminScreen extends StatelessWidget {
                 ),
                 title: Text(m.name),
                 subtitle: Text(m.group),
-                trailing: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 170),
-                  child: StatePill(
-                    memberResponseLabel(controller, event.id, m.id),
-                    color: statusColor(
-                      textValue(responses[m.id.toString()], 'open'),
-                    ),
+                trailing: RsvpStatusBadge(
+                  status: textValue(responses[m.id.toString()], 'open'),
+                  expectedArrivalAt: dateValue(
+                    jsonMap(controller.arrivalsByEvent[event.id])[m.id
+                        .toString()],
                   ),
                 ),
               ),
@@ -147,21 +129,23 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
       : jsonMap(widget.controller.checkinsByEvent[widget.event.id])[id
                 .toString()]
             as bool?;
-  Future<void> _save() async {
+  Future<void> _save({bool openScenes = false}) async {
     setState(() => _busy = true);
     try {
-      await widget.controller.performAction({
-        'action': 'checkin.save',
-        'eventId': widget.event.id,
-        'members': [
-          for (final item in _changes.entries)
-            {
-              'id': item.key,
-              'present': item.value,
-              'version': _versions[item.key] ?? 0,
-            },
-        ],
-      });
+      if (_changes.isNotEmpty) {
+        await widget.controller.performAction({
+          'action': 'checkin.save',
+          'eventId': widget.event.id,
+          'members': [
+            for (final item in _changes.entries)
+              {
+                'id': item.key,
+                'present': item.value,
+                'version': _versions[item.key] ?? 0,
+              },
+          ],
+        });
+      }
       if (mounted) {
         setState(() {
           _changes.clear();
@@ -176,6 +160,19 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
             ),
           ),
         );
+        if (openScenes) {
+          openPage(
+            context,
+            ScenePlannerScreen(
+              controller: widget.controller,
+              event:
+                  widget.controller.events
+                      .where((e) => e.id == widget.event.id)
+                      .firstOrNull ??
+                  widget.event,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) showProblem(context, e);
@@ -303,15 +300,13 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
         ),
         const SizedBox(height: 14),
         OutlinedButton.icon(
-          onPressed: () => openPage(
-            context,
-            ScenePlannerScreen(
-              controller: widget.controller,
-              event: widget.event,
-            ),
-          ),
+          onPressed: _busy ? null : () => _save(openScenes: true),
           icon: const Icon(Icons.playlist_add_check),
-          label: const Text('Spielbare Szenen ansehen'),
+          label: Text(
+            _changes.isEmpty
+                ? 'Spielbare Szenen ansehen'
+                : 'Speichern und Szenen ansehen',
+          ),
         ),
       ];
     },
@@ -333,17 +328,29 @@ class ScenePlannerScreen extends StatefulWidget {
 class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
   String? _production;
   bool _useCheckins = true, _loading = false, _saving = false;
+  bool _conflict = false;
+  late int _version;
+  final Set<String> _failedSaves = {};
   late DateTime _at;
   final Set<String> _selected = {};
   @override
   void initState() {
     super.initState();
+    final event =
+        widget.controller.events
+            .where((e) => e.id == widget.event.id)
+            .firstOrNull ??
+        widget.event;
+    _version = event.version;
     _production =
-        widget.event.productionId ??
-        widget.controller.productions.firstOrNull?.id;
-    _at = widget.event.startsAt ?? DateTime.now();
-    _selected.addAll(widget.event.sceneIds);
-    if (_production != null) _load();
+        event.productionId ?? widget.controller.productions.firstOrNull?.id;
+    _at = event.startsAt ?? DateTime.now();
+    _selected.addAll(event.sceneIds);
+    if (_production != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _load();
+      });
+    }
   }
 
   Future<void> _load() async {
@@ -353,15 +360,85 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
   }
 
   Future<void> _save() async {
+    final previous = widget.controller.outbox.map((a) => a.id).toSet();
     setState(() => _saving = true);
     try {
       await widget.controller.performAction({
         'action': 'event.script',
         'eventId': widget.event.id,
+        'version': _version,
         'productionId': _production,
         'sceneIds': _selected.toList(),
       });
       if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        if (e is ApiException && e.statusCode == 409) {
+          setState(() {
+            _conflict = true;
+            _failedSaves.addAll(
+              widget.controller.outbox
+                  .where((a) => a.failed && !previous.contains(a.id))
+                  .map((a) => a.id),
+            );
+          });
+        }
+        showProblem(context, e);
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _resolveConflict({required bool keepDraft}) async {
+    setState(() => _saving = true);
+    try {
+      await widget.controller.refresh();
+      if (widget.controller.isOffline) {
+        throw const ApiException(
+          'Der aktuelle Stand ist offline nicht verfügbar. Dein Entwurf bleibt erhalten.',
+        );
+      }
+      if (widget.controller.error != null) {
+        throw const ApiException(
+          'Der aktuelle Stand konnte nicht geladen werden. Dein Entwurf bleibt erhalten.',
+        );
+      }
+      final latest = widget.controller.events
+          .where((e) => e.id == widget.event.id)
+          .firstOrNull;
+      if (latest == null) {
+        throw const ApiException('Der Termin ist nicht mehr verfügbar.');
+      }
+      for (final id in _failedSaves) {
+        await widget.controller.discardAction(id);
+      }
+      if (!mounted) return;
+      setState(() {
+        _version = latest.version;
+        _conflict = false;
+        _failedSaves.clear();
+        if (!keepDraft) {
+          _production =
+              latest.productionId ??
+              widget.controller.productions.firstOrNull?.id;
+          _selected
+            ..clear()
+            ..addAll(latest.sceneIds);
+        }
+      });
+      if (_production != null) await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              keepDraft
+                  ? 'Aktueller Stand geladen. Prüfe deinen Entwurf und speichere erneut.'
+                  : 'Aktuelle Szenenauswahl übernommen.',
+            ),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
@@ -378,8 +455,12 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
       final production = widget.controller.productionRecords
           .where((p) => p['id'] == _production)
           .firstOrNull;
+      final currentEvent = widget.controller.events
+          .where((e) => e.id == widget.event.id)
+          .firstOrNull;
       return [
         DropdownButtonFormField<String>(
+          key: ValueKey(_production),
           initialValue: _production,
           isExpanded: true,
           decoration: const InputDecoration(labelText: 'Produktion'),
@@ -390,13 +471,15 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
                 child: Text(p.title, overflow: TextOverflow.ellipsis),
               ),
           ],
-          onChanged: (v) {
-            setState(() {
-              _production = v;
-              _selected.clear();
-            });
-            _load();
-          },
+          onChanged: _saving || _loading
+              ? null
+              : (v) {
+                  setState(() {
+                    _production = v;
+                    _selected.clear();
+                  });
+                  if (v != null) _load();
+                },
         ),
         const SizedBox(height: 24),
         SegmentedButton<bool>(
@@ -417,7 +500,9 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.schedule),
-            title: Text('Planen ab ${DateFormat.Hm('de').format(_at)}'),
+            title: Text(
+              'Planen ab ${DateFormat('EEE, dd.MM. · HH:mm', 'de').format(_at)}',
+            ),
             trailing: const Icon(Icons.edit_outlined),
             onTap: () async {
               final time = await showTimePicker(
@@ -426,12 +511,11 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
               );
               if (time != null && mounted) {
                 setState(
-                  () => _at = DateTime(
-                    _at.year,
-                    _at.month,
-                    _at.day,
-                    time.hour,
-                    time.minute,
+                  () => _at = scenePlanningTime(
+                    startsAt: widget.event.startsAt ?? _at,
+                    endsAt: widget.event.endsAt,
+                    hour: time.hour,
+                    minute: time.minute,
                   ),
                 );
               }
@@ -499,13 +583,15 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
                           ],
                         ),
                       ),
-                      onChanged: (v) => setState(() {
-                        if (v == true) {
-                          _selected.add(scene.id);
-                        } else {
-                          _selected.remove(scene.id);
-                        }
-                      }),
+                      onChanged: _saving
+                          ? null
+                          : (v) => setState(() {
+                              if (v == true) {
+                                _selected.add(scene.id);
+                              } else {
+                                _selected.remove(scene.id);
+                              }
+                            }),
                     ),
                   ),
                 );
@@ -529,8 +615,52 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
           label: const Text('Ausgewählte Szene öffnen'),
         ),
         const SizedBox(height: 16),
+        if (_conflict) ...[
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Szenenauswahl prüfen',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Die Zuordnung wurde inzwischen geändert oder abgelehnt. Dein Entwurf bleibt erhalten. Lade den aktuellen Stand, bevor du erneut speicherst.',
+                  ),
+                  if (currentEvent != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      currentEvent.sceneIds.isEmpty
+                          ? 'Aktuell gespeichert: keine Szenen ausgewählt.'
+                          : 'Aktuell gespeichert: Szenen ${currentEvent.sceneIds.join(', ')}.',
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  OutlinedButton(
+                    onPressed: _saving
+                        ? null
+                        : () => _resolveConflict(keepDraft: true),
+                    child: const Text('Entwurf behalten und Stand prüfen'),
+                  ),
+                  TextButton(
+                    onPressed: _saving
+                        ? null
+                        : () => _resolveConflict(keepDraft: false),
+                    child: const Text('Aktuelle Auswahl übernehmen'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         FilledButton(
-          onPressed: _saving || _production == null ? null : _save,
+          onPressed: _saving || _loading || _conflict || _production == null
+              ? null
+              : _save,
           child: const Text('Für diese Probe speichern'),
         ),
       ];

@@ -64,12 +64,16 @@ void main() {
   late MemoryCredentialStore credentials;
   late AppController c;
   late String status;
+  late String registrationName;
+  late bool needsRegistrationName;
+  late List<JsonMap> registrationRequests;
   late List<String> paths, tokens;
   Completer<http.Response>? snapshotGate;
   Completer<void>? snapshotRequested;
   JsonMap user() => {
     'userId': identity.uid,
-    'displayName': 'QA',
+    'displayName': registrationName,
+    'needsRegistrationName': needsRegistrationName,
     'email': identity.email,
     'status': status,
     'identityReady': true,
@@ -98,7 +102,13 @@ void main() {
     identity = FakeIdentity();
     store = MemoryLocalStore();
     credentials = MemoryCredentialStore();
+    await store.write('_device', 'settings', {
+      'baseUrl': 'https://theater.example.invalid',
+    });
     status = 'pending';
+    registrationName = 'QA';
+    needsRegistrationName = false;
+    registrationRequests = [];
     paths = [];
     tokens = [];
     snapshotGate = null;
@@ -114,6 +124,12 @@ void main() {
           if (request.url.path
               .replaceFirst(RegExp(r'/$'), '')
               .endsWith('/auth/session')) {
+            if (request.method == 'POST') {
+              final body = jsonMap(jsonDecode(request.body));
+              registrationRequests.add(body);
+              registrationName = textValue(body['registrationName']);
+              needsRegistrationName = false;
+            }
             return response({'user': user()});
           }
           if (request.url.path
@@ -133,6 +149,49 @@ void main() {
     email: email,
     password: 'Long password!2026',
     baseUrl: 'https://theater.example.invalid',
+  );
+  test(
+    'registration saves the supplied association name before requesting approval',
+    () async {
+      await c.register(
+        '  Sam Beispiel  ',
+        'r8x@example.invalid',
+        'Long password!2026',
+      );
+      expect(registrationRequests, [
+        {'registrationName': 'Sam Beispiel'},
+      ]);
+      expect(c.user!.name, 'Sam Beispiel');
+      expect(c.hasAccess, isFalse);
+      expect(paths.where((x) => x.endsWith('/snapshot')), isEmpty);
+    },
+  );
+  test(
+    'pending provider accounts can supply their name without gaining theater access',
+    () async {
+      needsRegistrationName = true;
+      identity.uid = 'google-user';
+      identity.email = 'r8x@example.invalid';
+      await c.loginWithProvider('google.com');
+      expect(c.user!.needsRegistrationName, isTrue);
+      await expectLater(
+        c.saveRegistrationName('  '),
+        throwsA(isA<ApiException>()),
+      );
+      expect(registrationRequests, isEmpty);
+      await c.saveRegistrationName('Sam Beispiel');
+      expect(c.user!.needsRegistrationName, isFalse);
+      expect(c.user!.name, 'Sam Beispiel');
+      expect(c.hasAccess, isFalse);
+      expect(paths.where((x) => x.endsWith('/snapshot')), isEmpty);
+      expect(AppUser.fromJson(c.user!.toJson()).needsRegistrationName, isFalse);
+      status = 'approved';
+      await c.refreshAccess();
+      await expectLater(
+        c.saveRegistrationName('Anderer Name'),
+        throwsA(isA<ApiException>()),
+      );
+    },
   );
   test(
     'pending identity receives no snapshot; approval opens data and tokens refresh per request',

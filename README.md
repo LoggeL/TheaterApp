@@ -53,7 +53,8 @@ flutter analyze
 flutter test
 npm --prefix server test
 node tool/configure.mjs config/production.web.json
-flutter build web --release --dart-define-from-file=config/production.web.json
+flutter build web --release --dart-define-from-file=config/production.web.json --pwa-strategy=none
+node tool/version-web.mjs
 flutter build apk --release --dart-define-from-file=config/production.android.json
 flutter build appbundle --release --dart-define-from-file=config/production.android.json
 ```

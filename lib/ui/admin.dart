@@ -260,8 +260,39 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
   }
 
   Future<void> _save(bool approve) async {
+    if (_busy) return;
     setState(() => _busy = true);
     try {
+      if (!approve) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            scrollable: true,
+            title: const Text('Anfrage ablehnen?'),
+            content: Text(
+              'Die Anfrage von ${textValue(widget.account['name'])} '
+              '(${textValue(widget.account['email'])}) wird abgelehnt. '
+              'Das Konto erhält keinen Zugang. Du kannst es später in der '
+              'Kontenverwaltung erneut prüfen.',
+            ),
+            actions: [
+              TextButton(
+                autofocus: true,
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Abbrechen'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.error,
+                ),
+                child: const Text('Ablehnen'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true || !mounted) return;
+      }
       await widget.controller.performAction(
         approve
             ? {
@@ -310,6 +341,8 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
                   textValue(a['name']),
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
+                const SizedBox(height: 4),
+                const Text('Name zur Zuordnung des Kontos'),
                 const SizedBox(height: 8),
                 Text(textValue(a['email'])),
                 const SizedBox(height: 12),
@@ -397,8 +430,19 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
             padding: EdgeInsets.only(bottom: 16),
             child: Text('Die E-Mail-Adresse muss zuerst bestätigt werden.'),
           ),
+        if (a['nameProvided'] == false)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: Text(
+              'Diese Person muss noch einen Namen zur Zuordnung angeben.',
+            ),
+          ),
         FilledButton(
-          onPressed: _busy || _person == null || a['identityReady'] != true
+          onPressed:
+              _busy ||
+                  _person == null ||
+                  a['identityReady'] != true ||
+                  a['nameProvided'] == false
               ? null
               : () => _save(true),
           child: const Text('Verknüpfen & freigeben'),
@@ -942,11 +986,23 @@ class _ProductionsAdminScreenState extends State<ProductionsAdminScreen> {
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: Card(
+            color:
+                p['id'] == widget.controller.activeProductions.firstOrNull?.id
+                ? Theme.of(context).colorScheme.primaryContainer
+                : null,
             child: ListTile(
-              leading: const Icon(Icons.auto_stories_outlined),
+              leading: Icon(
+                p['archived'] == true
+                    ? Icons.inventory_2_outlined
+                    : Icons.auto_stories_outlined,
+              ),
               title: Text(textValue(p['title'])),
               subtitle: Text(
-                '${intValue(p['sceneCount'])} Szenen · ${jsonList(p['roles']).length} Rollen',
+                '${p['archived'] == true
+                    ? 'Archiv · '
+                    : p['id'] == widget.controller.activeProductions.firstOrNull?.id
+                    ? 'Neuestes Stück · '
+                    : ''}${intValue(p['sceneCount'])} Szenen · ${jsonList(p['roles']).length} Rollen',
               ),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => openPage(
@@ -1025,6 +1081,23 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
     }
   }
 
+  Future<void> _archive() async {
+    final production = widget.production;
+    if (production == null) return;
+    setState(() => _busy = true);
+    try {
+      await widget.controller.setProductionArchived(
+        textValue(production['id']),
+        production['archived'] != true,
+      );
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AdminPage(
     controller: widget.controller,
@@ -1088,6 +1161,22 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
         onPressed: _busy ? null : _save,
         child: const Text('Speichern'),
       ),
+      if (widget.production != null) ...[
+        const SizedBox(height: 20),
+        TextButton.icon(
+          onPressed: _busy ? null : _archive,
+          icon: Icon(
+            widget.production!['archived'] == true
+                ? Icons.unarchive_outlined
+                : Icons.inventory_2_outlined,
+          ),
+          label: Text(
+            widget.production!['archived'] == true
+                ? 'Aus Archiv zurückholen'
+                : 'Ins Archiv verschieben',
+          ),
+        ),
+      ],
     ],
   );
 }

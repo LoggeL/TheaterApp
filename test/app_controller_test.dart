@@ -399,6 +399,8 @@ void main() {
           'id': 'midnight',
           'title': 'Night rehearsal',
           'startsAt': '2026-09-11T23:30:00Z',
+          // Keep the response window open at the fixed test clock.
+          'endsAt': '2026-09-12T12:30:00Z',
           'eventDate': '2026-09-12',
         },
       ];

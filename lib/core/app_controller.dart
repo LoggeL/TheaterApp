@@ -48,7 +48,24 @@ class AppController extends ChangeNotifier {
   JsonMap get checkinVersions => cloneJson(_checkinVersions);
   JsonMap _checkinVersions = {};
   List<JsonMap> get productionRecords =>
-      jsonList(_baseSnapshot['productions']).map(jsonMap).toList();
+      jsonList(_baseSnapshot['productions']).map((item) {
+        final record = jsonMap(item);
+        final projected = _productions
+            .where((p) => p.id == record['id'])
+            .firstOrNull;
+        return projected == null
+            ? record
+            : {
+                ...record,
+                'archived': projected.archived,
+                'version': projected.version,
+              };
+      }).toList()..sort(
+        (left, right) => Production.compareNewestFirst(
+          Production.fromJson(left),
+          Production.fromJson(right),
+        ),
+      );
   List<JsonMap> get memberRecords =>
       jsonList(_baseSnapshot['members']).map(jsonMap).toList();
   List<JsonMap> get personRoles =>
@@ -81,6 +98,33 @@ class AppController extends ChangeNotifier {
   final Map<String, FocusState> _demoFocus = {};
   final Set<String> _loadingScripts = {};
   JsonMap _preferences = {};
+  Future<void> _identityTransition = Future<void>.value();
+
+  Future<T> _withIdentityTransition<T>(Future<T> Function() operation) {
+    final previous = _identityTransition;
+    final finished = Completer<void>();
+    _identityTransition = finished.future;
+    return () async {
+      await previous;
+      try {
+        return await operation();
+      } finally {
+        finished.complete();
+      }
+    }();
+  }
+
+  bool canRespondTo(TheaterEvent event) => event.acceptsResponsesAt(_clock());
+
+  String? _versionedEventId(JsonMap payload) {
+    final id = switch (payload['action']) {
+      'event.script' => textValue(payload['eventId']),
+      'event.save' || 'event.delete' => textValue(payload['id']),
+      _ => '',
+    };
+    return id.isEmpty ? null : id;
+  }
+
   Map<String, bool> _reminders = {
     'dayBefore': false,
     'twoHours': true,
@@ -103,6 +147,10 @@ class AppController extends ChangeNotifier {
   List<Absence> get absences => List.unmodifiable(_absences);
   List<Poll> get polls => List.unmodifiable(_polls);
   List<Production> get productions => List.unmodifiable(_productions);
+  List<Production> get activeProductions =>
+      _productions.where((p) => !p.archived).toList();
+  List<Production> get archivedProductions =>
+      _productions.where((p) => p.archived).toList();
   List<TheaterMember> get members => List.unmodifiable(_members);
   List<PendingAction> get outbox => List.unmodifiable(_outbox);
   Map<String, ScriptDocument> get scripts => Map.unmodifiable(_scripts);
@@ -239,13 +287,15 @@ class AppController extends ChangeNotifier {
     if (_identity != null) {
       final origin = ApiClient.normalizeBaseUrl(baseUrl);
       if (!_storeReady) await _ensureStore();
-      await _identity.initialize();
-      await _identity.signIn(email, password);
-      _apiBaseUrl = origin;
-      await _write(
-        () => _store.write('_device', 'settings', {'baseUrl': origin}),
-      );
-      await _adoptFirebase();
+      await _withIdentityTransition(() async {
+        await _identity.initialize();
+        await _identity.signIn(email, password);
+        _apiBaseUrl = origin;
+        await _write(
+          () => _store.write('_device', 'settings', {'baseUrl': origin}),
+        );
+        await _adoptFirebase();
+      });
       return;
     }
     if (!_storeReady) await _ensureStore();
@@ -364,7 +414,7 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> _adoptFirebase() async {
+  Future<void> _adoptFirebase({String? registrationName}) async {
     if (!_storeReady) await _ensureStore();
     final previousAccount = _account;
     ++_generation;
@@ -374,37 +424,75 @@ class AppController extends ChangeNotifier {
     if (previousAccount != null && previousAccount != _account) {
       await _store.clearAccount(previousAccount);
     }
-    await refreshAccess();
+    await refreshAccess(registrationName: registrationName);
   }
 
   Future<void> register(String name, String email, String password) async {
     if (_identity == null) {
       throw const ApiException('Die Registrierung benötigt Firebase Auth.');
     }
-    if (name.trim().isEmpty || password.length < 12) {
+    if (name.trim().isEmpty ||
+        name.trim().length > 120 ||
+        password.length < 12) {
       throw const ApiException(
         'Bitte Name und ein Passwort mit mindestens 12 Zeichen eingeben.',
       );
     }
-    await _identity.initialize();
-    await _identity.register(name, email, password);
-    await _adoptFirebase();
+    await _withIdentityTransition(() async {
+      await _identity.initialize();
+      await _identity.register(name, email, password);
+      await _adoptFirebase(registrationName: name.trim());
+    });
   }
 
   Future<void> loginWithProvider(String provider) async {
-    await _identity!.initialize();
-    await _identity.social(provider);
-    await _adoptFirebase();
+    await _withIdentityTransition(() async {
+      await _identity!.initialize();
+      await _identity.social(provider);
+      await _adoptFirebase();
+    });
   }
 
-  Future<void> refreshAccess({bool refreshData = true}) async {
+  Future<void> refreshIdentityAccess() async {
+    if (_identity == null || _isDemo || _user == null) return;
+    final generation = _generation, uid = _identity.uid;
+    if (uid == null) return;
+    await _withIdentityTransition(() async {
+      if (!_current(generation) || _identity.uid != uid) return;
+      await _identity.reload();
+      if (!_current(generation) || _identity.uid != uid) return;
+      await refreshAccess();
+    });
+  }
+
+  Future<void> saveRegistrationName(String name) async {
+    if (_isDemo || _user?.status != 'pending') {
+      throw const ApiException(
+        'Der Name kann nur vor der Freigabe geändert werden.',
+      );
+    }
+    if (name.trim().isEmpty || name.trim().length > 120) {
+      throw const ApiException(
+        'Bitte deinen Namen mit höchstens 120 Zeichen eingeben.',
+      );
+    }
+    await refreshAccess(registrationName: name.trim());
+  }
+
+  Future<void> refreshAccess({
+    bool refreshData = true,
+    String? registrationName,
+  }) async {
     if (_identity == null || _identity.uid == null || _isDemo) return;
     var generation = _generation;
     final result = await _api.request(
       _apiBaseUrl,
-      'GET',
+      registrationName == null ? 'GET' : 'POST',
       '/auth/session',
       token: _token,
+      body: registrationName == null
+          ? null
+          : {'registrationName': registrationName},
     );
     if (!_current(generation)) return;
     final previous = _user;
@@ -550,17 +638,43 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  Future<void> setProductionArchived(String productionId, bool archived) async {
+    if (_user?.isAdmin != true) {
+      throw const ApiException(
+        'Nur die Theaterleitung kann Drehbücher archivieren.',
+        statusCode: 403,
+      );
+    }
+    final production = _productions
+        .where((p) => p.id == productionId)
+        .firstOrNull;
+    if (production == null) {
+      throw const ApiException(
+        'Die Produktion ist nicht verfügbar.',
+        statusCode: 404,
+      );
+    }
+    await performAction({
+      'action': 'production.archive',
+      'id': productionId,
+      'version': production.version,
+      'archived': archived,
+    });
+  }
+
   Future<void> Function()? beforeLogout;
 
   Future<void> logout() async {
+    final exitingGeneration = _generation;
     try {
       await beforeLogout?.call();
     } catch (_) {
       /* Local logout must remain possible offline. */
     }
+    if (!_current(exitingGeneration)) return;
     final token = _token, origin = _apiBaseUrl, account = _account;
     final deviceToken = _deviceToken;
-    ++_generation;
+    final generation = ++_generation;
     _resetMemory();
     _error = null;
     _notify();
@@ -592,14 +706,18 @@ class AppController extends ChangeNotifier {
           body: {'deviceToken': deviceToken},
         );
       } catch (_) {
-        if (_user == null) {
+        if (_current(generation) && _user == null) {
           _error =
               'Lokal abgemeldet. Die Sitzung konnte am Server wegen der fehlenden Verbindung noch nicht widerrufen werden.';
           _notify();
         }
       }
     }
-    if (_identity != null) await _identity.signOut();
+    if (_identity != null) {
+      await _withIdentityTransition(() async {
+        if (_current(generation)) await _identity.signOut();
+      });
+    }
   }
 
   void _resetMemory() {
@@ -761,7 +879,7 @@ class AppController extends ChangeNotifier {
         statusCode: 404,
       );
     }
-    if (event.locked) {
+    if (!canRespondTo(event)) {
       throw const ApiException(
         'Die Rückmeldefrist ist abgelaufen.',
         statusCode: 409,
@@ -896,15 +1014,17 @@ class AppController extends ChangeNotifier {
   Future<void> linkEventScript(
     String eventId,
     String? productionId,
-    List<String> sceneIds,
-  ) async {
+    List<String> sceneIds, {
+    int? expectedVersion,
+  }) async {
     if (_user?.isAdmin != true) {
       throw const ApiException(
         'Für die Zuordnung ist eine Adminrolle erforderlich.',
         statusCode: 403,
       );
     }
-    if (!_events.any((e) => e.id == eventId)) {
+    final event = _events.where((e) => e.id == eventId).firstOrNull;
+    if (event == null) {
       throw const ApiException(
         'Der Termin ist nicht verfügbar.',
         statusCode: 404,
@@ -917,9 +1037,10 @@ class AppController extends ChangeNotifier {
         statusCode: 404,
       );
     }
-    await _enqueue({
+    await performAction({
       'action': 'event.script',
       'eventId': eventId,
+      'version': expectedVersion ?? event.version,
       'productionId': productionId,
       'sceneIds': productionId == null ? <String>[] : sceneIds.toSet().toList(),
     });
@@ -928,8 +1049,14 @@ class AppController extends ChangeNotifier {
   Future<void> linkEventToScript(
     String eventId,
     String? productionId,
-    List<String> sceneIds,
-  ) => linkEventScript(eventId, productionId, sceneIds);
+    List<String> sceneIds, {
+    int? expectedVersion,
+  }) => linkEventScript(
+    eventId,
+    productionId,
+    sceneIds,
+    expectedVersion: expectedVersion,
+  );
 
   Future<void> _enqueue(JsonMap payload) async {
     if (_user == null) {
@@ -1051,9 +1178,41 @@ class AppController extends ChangeNotifier {
         }
         // Invalid/forbidden/conflicting actions are visible and rolled back,
         // rather than retried forever or shown as successfully synchronized.
-        _outbox = _outbox
-            .map((e) => e.id == action.id ? e.withStatus('failed', _error) : e)
-            .toList();
+        var afterRejectedAction = false;
+        final rejectedEventId = _versionedEventId(action.payload);
+        _outbox = _outbox.map((pending) {
+          if (pending.id == action.id) {
+            afterRejectedAction = true;
+            return pending.withStatus('failed', _error);
+          }
+          if (afterRejectedAction &&
+              !pending.failed &&
+              rejectedEventId != null &&
+              _versionedEventId(pending.payload) == rejectedEventId) {
+            // Later projected versions depend on the preceding save succeeding.
+            // Keep the original base version for explicit retry as well, so a
+            // coincidentally matching foreign version cannot be overwritten.
+            return PendingAction(
+              id: pending.id,
+              payload: {
+                ...pending.payload,
+                'version':
+                    action.payload['version'] ??
+                    jsonList(_baseSnapshot['events'])
+                        .map(jsonMap)
+                        .where((e) => e['id'] == rejectedEventId)
+                        .map((e) => intValue(e['version'], 1))
+                        .firstOrNull ??
+                    1,
+              },
+              createdAt: pending.createdAt,
+              status: 'failed',
+              lastError:
+                  'Eine frühere Terminänderung wurde abgelehnt. Lade den aktuellen Termin und prüfe deinen Entwurf vor dem Speichern.',
+            );
+          }
+          return pending;
+        }).toList();
         await _persistCore(generation);
       }
       if (_current(generation)) {
@@ -1141,7 +1300,7 @@ class AppController extends ChangeNotifier {
       return _scripts[production.id] == null
           ? production
           : production.withScript(_scripts[production.id]!);
-    }).toList();
+    }).toList()..sort(Production.compareNewestFirst);
     _members = jsonList(
       view['members'],
     ).map((e) => TheaterMember.fromJson(jsonMap(e))).toList();
@@ -1161,6 +1320,17 @@ class AppController extends ChangeNotifier {
   }) {
     final view = cloneJson(original), body = action.payload;
     switch (body['action']) {
+      case 'production.archive':
+        view['productions'] = jsonList(view['productions']).map((item) {
+          final production = jsonMap(item);
+          return production['id'] == body['id']
+              ? {
+                  ...production,
+                  'archived': body['archived'] == true,
+                  'version': intValue(production['version'] ?? 1) + 1,
+                }
+              : item;
+        }).toList();
       case 'attendance':
         final attendance = jsonMap(view['attendanceByEvent']),
             reasons = jsonMap(view['declineReasons']);
@@ -1176,7 +1346,17 @@ class AppController extends ChangeNotifier {
         view['polls'] = jsonList(view['polls']).map((e) {
           final poll = Poll.fromJson(jsonMap(e));
           return poll.id == body['pollId']
-              ? poll.withChoice(textValue(body['optionId'])).toJson()
+              ? poll
+                    .withChoice(
+                      textValue(body['optionId']),
+                      voter: _user?.personId == null
+                          ? null
+                          : PollVoter(
+                              personId: _user!.personId!,
+                              name: _user!.name,
+                            ),
+                    )
+                    .toJson()
               : e;
         }).toList();
       case 'absence.create':
@@ -1190,9 +1370,16 @@ class AppController extends ChangeNotifier {
           },
         ];
         final attendance = jsonMap(view['attendanceByEvent']),
-            reasons = jsonMap(view['declineReasons']);
+            reasons = jsonMap(view['declineReasons']),
+            arrivals = jsonMap(view['expectedArrivals']);
         for (final item in jsonList(view['events'])) {
           final event = jsonMap(item);
+          final end = dateValue(event['endsAt']);
+          if (event['locked'] == true ||
+              end == null ||
+              end.isBefore(_clock())) {
+            continue;
+          }
           final explicitDay = textValue(event['eventDate']);
           final sourceTimestamp = textValue(event['startsAt']);
           if (explicitDay.isEmpty && sourceTimestamp.length < 10) continue;
@@ -1205,10 +1392,12 @@ class AppController extends ChangeNotifier {
               day.compareTo(textValue(body['to'])) <= 0) {
             attendance[textValue(event['id'])] = 'no';
             reasons[textValue(event['id'])] = body['reason'];
+            arrivals[textValue(event['id'])] = null;
           }
         }
         view['attendanceByEvent'] = attendance;
         view['declineReasons'] = reasons;
+        view['expectedArrivals'] = arrivals;
       case 'absence.delete':
         view['absences'] = jsonList(
           view['absences'],
@@ -1246,8 +1435,23 @@ class AppController extends ChangeNotifier {
                   ...event,
                   'productionId': body['productionId'],
                   'sceneIds': body['sceneIds'],
+                  'version': intValue(event['version'], 1) + 1,
                 }
               : event;
+        }).toList();
+      case 'account.reconsider':
+        view['pendingAccounts'] = jsonList(view['pendingAccounts']).map((item) {
+          final account = jsonMap(item);
+          return account['uid'] == body['uid'] &&
+                  account['status'] == 'rejected'
+              ? {
+                  ...account,
+                  'status': 'pending',
+                  'role': 'member',
+                  'personId': null,
+                  'version': intValue(account['version'], 1) + 1,
+                }
+              : account;
         }).toList();
     }
     return view;

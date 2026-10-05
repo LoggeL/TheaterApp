@@ -1,7 +1,7 @@
-import 'polls.dart';
-import 'responsive.dart';
+export 'today.dart' show TodayScreen;
 import '../core/event_types.dart';
 import 'calendar.dart';
+import 'app_navigation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -14,7 +14,6 @@ import '../core/models.dart';
 import 'theme.dart';
 import 'reader.dart';
 import 'rehearsal_admin.dart';
-import 'messages.dart';
 
 String eventDate(TheaterEvent event) => event.startsAt == null
     ? 'Datum noch offen'
@@ -25,10 +24,10 @@ String eventTime(TheaterEvent event) => event.time.isNotEmpty
     ? 'Uhrzeit offen'
     : '${DateFormat.Hm('de').format(event.startsAt!)}${event.endsAt == null ? '' : '–${DateFormat.Hm('de').format(event.endsAt!)}'} Uhr';
 String statusText(String status) => switch (status) {
-  'yes' => 'Du bist dabei',
-  'late' => 'Du kommst später',
-  'no' => 'Du hast abgesagt',
-  _ => 'Rückmeldung offen',
+  'yes' => 'Dabei',
+  'late' => 'Später',
+  'no' => 'Abwesend',
+  _ => 'Offen',
 };
 Color statusColor(String status) => switch (status) {
   'yes' => StageTheme.green,
@@ -36,6 +35,83 @@ Color statusColor(String status) => switch (status) {
   'no' => const Color(0xFFB34343),
   _ => const Color(0xFF657168),
 };
+
+class RsvpStatusBadge extends StatelessWidget {
+  const RsvpStatusBadge({
+    super.key,
+    required this.status,
+    this.expectedArrivalAt,
+    this.locked = false,
+    this.onDark = false,
+  });
+
+  final String status;
+  final DateTime? expectedArrivalAt;
+  final bool locked, onDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final arrival = status == 'late' && expectedArrivalAt != null
+        ? DateFormat.Hm('de').format(expectedArrivalAt!.toLocal())
+        : null;
+    final label = [
+      status == 'open' ? 'Rückmeldung offen' : statusText(status),
+      if (status == 'late') arrival ?? 'Uhrzeit offen',
+      if (locked) 'Rückmeldung geschlossen',
+    ].join(' · ');
+    final icon = switch (status) {
+      'yes' => Icons.thumb_up_alt,
+      'no' => Icons.thumb_down_alt,
+      'late' => Icons.schedule,
+      _ => Icons.help_outline,
+    };
+    final color = onDark || Theme.of(context).brightness == Brightness.dark
+        ? switch (status) {
+            'yes' => const Color(0xFFA8D6B6),
+            'no' => const Color(0xFFFFB3AB),
+            'late' => const Color(0xFFFFB18A),
+            _ => const Color(0xFFBFC8C0),
+          }
+        : statusColor(status);
+    return Tooltip(
+      message: label,
+      excludeFromSemantics: true,
+      child: Semantics(
+        label: label,
+        excludeSemantics: true,
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: .12),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: color),
+              if (arrival != null) ...[
+                const SizedBox(width: 5),
+                Text(
+                  arrival,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+              if (locked) ...[
+                const SizedBox(width: 4),
+                Icon(Icons.lock_outline, size: 12, color: color),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 Future<void> runAction(
   BuildContext context,
@@ -61,382 +137,6 @@ Future<void> runAction(
   }
 }
 
-class TodayScreen extends StatelessWidget {
-  const TodayScreen({
-    super.key,
-    required this.controller,
-    required this.onPlan,
-    required this.onScripts,
-  });
-  final AppController controller;
-  final VoidCallback onPlan, onScripts;
-  @override
-  Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final upcoming =
-        controller.events
-            .where(
-              (e) =>
-                  e.startsAt == null || (e.endsAt ?? e.startsAt!).isAfter(now),
-            )
-            .toList()
-          ..sort(
-            (a, b) => (a.startsAt ?? DateTime(9999)).compareTo(
-              b.startsAt ?? DateTime(9999),
-            ),
-          );
-    final next = upcoming.isEmpty ? null : upcoming.first;
-    final unanswered = upcoming.where((e) => e.needsResponse).length;
-    return RefreshIndicator(
-      onRefresh: controller.refresh,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(22, 20, 22, 28),
-        physics: const AlwaysScrollableScrollPhysics(),
-        children: [
-          Text(
-            'Hallo, ${controller.user?.firstName ?? 'Ensemble'}.',
-            style: Theme.of(context).textTheme.headlineLarge,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            DateFormat('EEEE, d. MMMM', 'de').format(now),
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 26),
-          if (next != null)
-            _NextRehearsal(event: next, controller: controller)
-          else
-            const Card(
-              child: EmptyState(
-                icon: Icons.event_available_outlined,
-                title: 'Keine anstehenden Termine',
-                message: 'Aktuell stehen keine kommenden Termine an.',
-              ),
-            ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _QuickTile(
-                  icon: Icons.mark_email_unread_outlined,
-                  value: '$unanswered',
-                  label: 'Rückmeldungen offen',
-                  onTap: onPlan,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _QuickTile(
-                  icon: Icons.auto_stories_outlined,
-                  value: '${controller.productions.length}',
-                  label: 'Drehbücher für dich',
-                  onTap: onScripts,
-                ),
-              ),
-            ],
-          ),
-          if (controller.polls.any((p) => !p.isClosed)) ...[
-            const SectionTitle('Abstimmungen'),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.poll_outlined),
-                title: Text(
-                  controller.polls.firstWhere((p) => !p.isClosed).title,
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PollsScreen(controller: controller),
-                  ),
-                ),
-              ),
-            ),
-          ],
-          SectionTitle(
-            'Dein Drehbuch',
-            trailing: TextButton(
-              onPressed: onScripts,
-              child: const Text('Alle ansehen'),
-            ),
-          ),
-          if (controller.productions.isEmpty)
-            const Card(
-              child: EmptyState(
-                icon: Icons.menu_book_outlined,
-                title: 'Noch kein Stück hinterlegt',
-                message:
-                    'Sobald eure Drehbuchquelle angebunden ist, findest du hier eure Produktionen.',
-              ),
-            )
-          else
-            _ScriptShortcut(
-              production: controller.productions.first,
-              controller: controller,
-            ),
-          SectionTitle(
-            'Als Nächstes',
-            trailing: TextButton(
-              onPressed: onPlan,
-              child: const Text('Zum Plan'),
-            ),
-          ),
-          ...upcoming
-              .skip(1)
-              .take(3)
-              .map(
-                (event) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: EventCard(event: event, controller: controller),
-                ),
-              ),
-          if (upcoming.length <= 1)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Text(
-                'Weitere Termine erscheinen hier, sobald sie geplant sind.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ),
-          if (controller.messages.isNotEmpty) ...[
-            const SectionTitle('Mitteilungen'),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.chat_bubble_outline),
-                title: Text(textValue(controller.messages.first['title'])),
-                subtitle: Text(
-                  textValue(controller.messages.first['body']),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => MessagesScreen(controller: controller),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _NextRehearsal extends StatelessWidget {
-  const _NextRehearsal({required this.event, required this.controller});
-  final TheaterEvent event;
-  final AppController controller;
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(23),
-    decoration: BoxDecoration(
-      color: StageTheme.ink,
-      borderRadius: BorderRadius.circular(28),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Eyebrow('Dein nächster Termin', color: Color(0xFFFFB18A)),
-            ),
-            if (event.startsAt != null)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: .08),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  DateFormat('dd.MM.').format(event.startsAt!),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 21),
-        Text(
-          event.title,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 27,
-            height: 1.16,
-            letterSpacing: -.6,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 20),
-        _HeroMeta(Icons.schedule, eventTime(event)),
-        const SizedBox(height: 9),
-        _HeroMeta(
-          Icons.location_on_outlined,
-          event.place.isEmpty ? 'Ort folgt' : event.place,
-        ),
-        const SizedBox(height: 20),
-        StatePill(
-          statusText(event.response),
-          color: event.response == 'yes'
-              ? const Color(0xFFA8D6B6)
-              : event.response == 'no'
-              ? const Color(0xFFFFB3AB)
-              : const Color(0xFFFFB18A),
-        ),
-        const SizedBox(height: 20),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: StageTheme.orange,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => openEvent(context, controller, event.id),
-            icon: const Icon(Icons.arrow_forward, size: 19),
-            label: const Text('Termin ansehen'),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _HeroMeta extends StatelessWidget {
-  const _HeroMeta(this.icon, this.label);
-  final IconData icon;
-  final String label;
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Icon(icon, color: const Color(0xFFBFC8C0), size: 17),
-      const SizedBox(width: 9),
-      Expanded(
-        child: Text(
-          label,
-          style: const TextStyle(color: Color(0xFFDAE0D9), fontSize: 13),
-        ),
-      ),
-    ],
-  );
-}
-
-class _QuickTile extends StatelessWidget {
-  const _QuickTile({
-    required this.icon,
-    required this.value,
-    required this.label,
-    required this.onTap,
-  });
-  final IconData icon;
-  final String value, label;
-  final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) => Card(
-    child: InkWell(
-      borderRadius: BorderRadius.circular(24),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.all(17),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  icon,
-                  size: 21,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const Spacer(),
-                Text(
-                  value,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Text(
-              label,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-class _ScriptShortcut extends StatelessWidget {
-  const _ScriptShortcut({required this.production, required this.controller});
-  final Production production;
-  final AppController controller;
-  @override
-  Widget build(BuildContext context) => Card(
-    child: InkWell(
-      borderRadius: BorderRadius.circular(24),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ScriptReaderScreen(
-            controller: controller,
-            productionId: production.id,
-          ),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Row(
-          children: [
-            Container(
-              width: 58,
-              height: 72,
-              decoration: BoxDecoration(
-                color: const Color(0xFFEBE4D9),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.auto_stories_outlined,
-                size: 28,
-                color: StageTheme.ink,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    production.title,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 7),
-                  Text(
-                    controller.scripts.containsKey(production.id)
-                        ? 'Offline bereit · Weiterlesen'
-                        : 'Öffnen & offline speichern',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.arrow_forward, size: 20),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key, required this.controller});
   final AppController controller;
@@ -448,15 +148,30 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   int _filter = 0;
   bool _calendar = false;
   DateTime _day = DateTime.now();
+  String? _selectedEventId;
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: widget.controller,
+    builder: (context, _) => LayoutBuilder(
+      builder: (context, constraints) => _buildSchedule(
+        context,
+        constraints.maxWidth >= 1000 &&
+            MediaQuery.textScalerOf(context).scale(14) <= 21,
+      ),
+    ),
+  );
+
+  Widget _buildSchedule(BuildContext context, bool desktop) {
     final now = DateTime.now();
     final events =
         widget.controller.events.where((e) {
           final future =
               e.startsAt == null || (e.endsAt ?? e.startsAt!).isAfter(now);
           final filter = switch (_filter) {
-            1 => future && e.needsResponse,
+            1 =>
+              future &&
+                  e.response == 'open' &&
+                  widget.controller.canRespondTo(e),
             2 => future && const {'yes', 'late'}.contains(e.response),
             3 => !future,
             _ => future,
@@ -467,6 +182,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             b.startsAt ?? DateTime(9999),
           ),
         );
+    if (desktop) return _desktop(context, events);
     return RefreshIndicator(
       onRefresh: widget.controller.refresh,
       child: CustomScrollView(
@@ -489,22 +205,49 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     ],
                   ),
                   const SizedBox(height: 18),
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(
-                        value: false,
-                        label: Text('Agenda'),
-                        icon: Icon(Icons.view_agenda_outlined),
-                      ),
-                      ButtonSegment(
-                        value: true,
-                        label: Text('Kalender'),
-                        icon: Icon(Icons.calendar_month_outlined),
-                      ),
-                    ],
-                    selected: {_calendar},
-                    onSelectionChanged: (value) =>
-                        setState(() => _calendar = value.first),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final largeText =
+                          MediaQuery.textScalerOf(context).scale(14) > 20;
+                      if (constraints.maxWidth < 360 || largeText) {
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final calendar in [false, true])
+                              ChoiceChip(
+                                avatar: Icon(
+                                  calendar
+                                      ? Icons.calendar_month_outlined
+                                      : Icons.view_agenda_outlined,
+                                  size: 18,
+                                ),
+                                label: Text(calendar ? 'Kalender' : 'Agenda'),
+                                selected: _calendar == calendar,
+                                onSelected: (_) =>
+                                    setState(() => _calendar = calendar),
+                              ),
+                          ],
+                        );
+                      }
+                      return SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment(
+                            value: false,
+                            label: Text('Agenda'),
+                            icon: Icon(Icons.view_agenda_outlined),
+                          ),
+                          ButtonSegment(
+                            value: true,
+                            label: Text('Kalender'),
+                            icon: Icon(Icons.calendar_month_outlined),
+                          ),
+                        ],
+                        selected: {_calendar},
+                        onSelectionChanged: (value) =>
+                            setState(() => _calendar = value.first),
+                      );
+                    },
                   ),
                   const SizedBox(height: 12),
                   if (_calendar) ...[
@@ -518,31 +261,27 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ],
-                  if (!_calendar)
-                    SizedBox(
-                      height: 44,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [
-                          for (var i = 0; i < 4; i++)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: ChoiceChip(
-                                label: Text(
-                                  [
-                                    'Kommend',
-                                    'Offen',
-                                    'Zugesagt',
-                                    'Vergangen',
-                                  ][i],
-                                ),
-                                selected: _filter == i,
-                                onSelected: (_) => setState(() => _filter = i),
-                              ),
+                  if (!_calendar) ...[
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (var i = 0; i < 4; i++)
+                          ChoiceChip(
+                            label: Text(
+                              ['Kommend', 'Offen', 'Zugesagt', 'Vergangen'][i],
                             ),
-                        ],
-                      ),
+                            selected: _filter == i,
+                            onSelected: (_) => setState(() => _filter = i),
+                          ),
+                      ],
                     ),
+                    const SizedBox(height: 10),
+                    Text(
+                      '${['Kommend', 'Offen', 'Zugesagt', 'Vergangen'][_filter]} · ${events.length} ${events.length == 1 ? 'Termin' : 'Termine'}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -594,6 +333,150 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           const SliverToBoxAdapter(child: SizedBox(height: 26)),
         ],
       ),
+    );
+  }
+
+  Widget _desktop(BuildContext context, List<TheaterEvent> events) {
+    final selected =
+        events.where((event) => event.id == _selectedEventId).firstOrNull ??
+        events.firstOrNull;
+    if (_selectedEventId == null && !_calendar && selected?.startsAt != null) {
+      _day = selected!.startsAt!.toLocal();
+    }
+    // Keep identity across controller refreshes, including replacement objects.
+    _selectedEventId = selected?.id;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
+          child: Text(
+            'Dein Probenplan.',
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(22, 0, 22, 22),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  width: 350,
+                  child: Card(
+                    child: RefreshIndicator(
+                      onRefresh: widget.controller.refresh,
+                      child: ListView(
+                        key: const PageStorageKey('schedule-agenda'),
+                        primary: false,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.all(14),
+                        children: [
+                          RehearsalCalendar(
+                            selected: _day,
+                            onSelected: (day) => setState(() {
+                              _day = day;
+                              _calendar = true;
+                              _selectedEventId = null;
+                            }),
+                            events: widget.controller.events,
+                          ),
+                          const Divider(height: 24),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              for (var i = 0; i < 4; i++)
+                                ChoiceChip(
+                                  label: Text(
+                                    [
+                                      'Kommend',
+                                      'Offen',
+                                      'Zugesagt',
+                                      'Vergangen',
+                                    ][i],
+                                  ),
+                                  selected: !_calendar && _filter == i,
+                                  onSelected: (_) => setState(() {
+                                    _filter = i;
+                                    _calendar = false;
+                                  }),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                          Text(
+                            _calendar
+                                ? DateFormat.yMMMMEEEEd('de').format(_day)
+                                : 'Termine · ${events.length}',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 12),
+                          if (events.isEmpty)
+                            const EmptyState(
+                              icon: Icons.event_available_outlined,
+                              title: 'Hier ist alles ruhig.',
+                              message:
+                                  'Für diese Auswahl gibt es keine Termine.',
+                            ),
+                          for (final event in events)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Material(
+                                color: selected?.id == event.id
+                                    ? Theme.of(
+                                        context,
+                                      ).colorScheme.primaryContainer
+                                    : Theme.of(context).colorScheme.surface,
+                                borderRadius: BorderRadius.circular(14),
+                                child: ListTile(
+                                  key: ValueKey('schedule-event-${event.id}'),
+                                  selected: selected?.id == event.id,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  title: Text(event.title),
+                                  subtitle: Text(
+                                    '${eventDate(event)}\n${eventTime(event)} · ${event.place}',
+                                  ),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: () => setState(() {
+                                    _selectedEventId = event.id;
+                                    if (event.startsAt != null) {
+                                      _day = event.startsAt!.toLocal();
+                                    }
+                                  }),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Card(
+                    clipBehavior: Clip.antiAlias,
+                    child: selected == null
+                        ? const EmptyState(
+                            icon: Icons.event_available_outlined,
+                            title: 'Kein Termin ausgewählt',
+                            message: 'Wähle einen anderen Tag oder Filter.',
+                          )
+                        : EventDetailContent(
+                            key: ValueKey(selected.id),
+                            controller: widget.controller,
+                            event: selected,
+                            embedded: true,
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -675,17 +558,14 @@ class EventCard extends StatelessWidget {
                     event.place,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
-                  const SizedBox(height: 11),
-                  StatePill(
-                    event.locked
-                        ? 'Rückmeldung geschlossen'
-                        : statusText(event.response),
-                    color: event.locked
-                        ? StageTheme.violet
-                        : statusColor(event.response),
-                  ),
                 ],
               ),
+            ),
+            const SizedBox(width: 8),
+            RsvpStatusBadge(
+              status: event.response,
+              expectedArrivalAt: event.expectedArrivalAt,
+              locked: !controller.canRespondTo(event),
             ),
           ],
         ),
@@ -708,174 +588,215 @@ class EventDetailScreen extends StatelessWidget {
     builder: (context, _) {
       final matches = controller.events.where((e) => e.id == eventId);
       if (matches.isEmpty) {
-        return Scaffold(
-          appBar: AppBar(),
-          body: const EmptyState(
-            icon: Icons.event_busy,
-            title: 'Termin nicht verfügbar',
-            message:
-                'Der Termin wurde entfernt oder ist für dein Konto nicht sichtbar.',
+        return DesktopRouteFrame(
+          controller: controller,
+          selectedIndex: 1,
+          child: Scaffold(
+            appBar: AppBar(),
+            body: const EmptyState(
+              icon: Icons.event_busy,
+              title: 'Termin nicht verfügbar',
+              message:
+                  'Der Termin wurde entfernt oder ist für dein Konto nicht sichtbar.',
+            ),
           ),
         );
       }
       final event = matches.first;
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Termin'),
-          actions: [
-            IconButton(
-              tooltip: 'Kalenderdatei teilen',
-              onPressed: event.startsAt == null
-                  ? null
-                  : () => runAction(context, () => exportEvent(context, event)),
-              icon: const Icon(Icons.ios_share),
-            ),
-          ],
-        ),
-        body: ListView(
-          padding: pagePadding(context, top: 16, bottom: 36),
-          children: [
-            Eyebrow(
-              event.group.isEmpty ? 'Kolpingtheater Ramsen' : event.group,
-            ),
-            const SizedBox(height: 12),
-            Text(event.title, style: Theme.of(context).textTheme.headlineLarge),
-            const SizedBox(height: 8),
-            Text(
-              eventTypeLabel(event.kind),
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-            if (event.description.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              SelectableText(event.description),
-            ],
-            const SizedBox(height: 24),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(19),
-                child: Column(
-                  children: [
-                    _DetailMeta(
-                      Icons.calendar_today_outlined,
-                      eventDate(event),
-                    ),
-                    const SizedBox(height: 17),
-                    _DetailMeta(Icons.schedule, eventTime(event)),
-                    const SizedBox(height: 17),
-                    _DetailMeta(
-                      Icons.location_on_outlined,
-                      event.place.isEmpty
-                          ? 'Ort wird noch bekannt gegeben'
-                          : event.place,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            RsvpPanel(controller: controller, event: event),
-            if (event.declineReason.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text('Dein Absagegrund: ${event.declineReason}'),
-              ),
-            if (controller.pendingCount > 0)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  '${controller.pendingCount} Änderung(en) warten auf Übertragung.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
-            if (event.productionId != null) ...[
-              const SectionTitle('Für diese Probe'),
-              Card(
-                child: ListTile(
-                  contentPadding: const EdgeInsets.all(18),
-                  leading: const Icon(Icons.menu_book_outlined),
-                  title: const Text('Zum Drehbuch'),
-                  subtitle: Text(
-                    event.sceneIds.isEmpty
-                        ? 'Die verknüpfte Produktion öffnen'
-                        : 'Szenen ${event.sceneIds.join(', ')}',
-                  ),
-                  trailing: const Icon(Icons.arrow_forward),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ScriptReaderScreen(
-                        controller: controller,
-                        productionId: event.productionId!,
-                        initialSceneId: event.sceneIds.firstOrNull,
-                      ),
-                    ),
-                  ),
-                ),
+      return DesktopRouteFrame(
+        controller: controller,
+        selectedIndex: 1,
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Termin'),
+            actions: [
+              IconButton(
+                tooltip: 'Kalenderdatei teilen',
+                onPressed: event.startsAt == null
+                    ? null
+                    : () =>
+                          runAction(context, () => exportEvent(context, event)),
+                icon: const Icon(Icons.ios_share),
               ),
             ],
-            if (controller.user?.isAdmin == true) ...[
-              const SectionTitle('Probenleitung'),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ResponsesAdminScreen(
-                      controller: controller,
-                      event: event,
-                    ),
-                  ),
-                ),
-                icon: const Icon(Icons.people_outline),
-                label: const Text('Rückmeldungen ansehen'),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AttendanceEditorScreen(
-                      controller: controller,
-                      event: event,
-                    ),
-                  ),
-                ),
-                icon: const Icon(Icons.fact_check_outlined),
-                label: const Text('Anwesenheit erfassen'),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ScenePlannerScreen(
-                      controller: controller,
-                      event: event,
-                    ),
-                  ),
-                ),
-                icon: const Icon(Icons.link),
-                label: const Text('Szenen planen'),
-              ),
-            ],
-            const SizedBox(height: 24),
-            OutlinedButton.icon(
-              onPressed: event.startsAt == null
-                  ? null
-                  : () => runAction(context, () => exportEvent(context, event)),
-              icon: const Icon(Icons.calendar_month_outlined),
-              label: const Text('Für den Kalender exportieren'),
-            ),
-          ],
+          ),
+          body: EventDetailContent(controller: controller, event: event),
         ),
       );
     },
   );
 }
 
-class RsvpPanel extends StatefulWidget {
-  const RsvpPanel({super.key, required this.controller, required this.event});
+/// The same event controls used by the route and desktop selection.
+class EventDetailContent extends StatelessWidget {
+  const EventDetailContent({
+    super.key,
+    required this.controller,
+    required this.event,
+    this.embedded = false,
+  });
   final AppController controller;
   final TheaterEvent event;
+  final bool embedded;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final side = constraints.maxWidth > 840
+          ? (constraints.maxWidth - 840) / 2 + 24
+          : 24.0;
+      return ListView(
+        primary: false,
+        padding: EdgeInsets.fromLTRB(side, 16, side, 36),
+        children: [
+          Eyebrow(event.group.isEmpty ? 'Kolpingtheater Ramsen' : event.group),
+          const SizedBox(height: 12),
+          Text(
+            event.title,
+            style: embedded
+                ? Theme.of(context).textTheme.headlineMedium
+                : Theme.of(context).textTheme.headlineLarge,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            eventTypeLabel(event.kind),
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+          if (event.description.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            SelectableText(event.description),
+          ],
+          SizedBox(height: embedded ? 16 : 24),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(19),
+              child: Column(
+                children: [
+                  _DetailMeta(Icons.calendar_today_outlined, eventDate(event)),
+                  SizedBox(height: embedded ? 10 : 17),
+                  _DetailMeta(Icons.schedule, eventTime(event)),
+                  SizedBox(height: embedded ? 10 : 17),
+                  _DetailMeta(
+                    Icons.location_on_outlined,
+                    event.place.isEmpty
+                        ? 'Ort wird noch bekannt gegeben'
+                        : event.place,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SizedBox(height: embedded ? 16 : 24),
+          RsvpPanel(
+            key: ValueKey(event.id),
+            controller: controller,
+            event: event,
+            compact: embedded,
+          ),
+          if (event.declineReason.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text('Dein Absagegrund: ${event.declineReason}'),
+            ),
+          if (controller.pendingCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                '${controller.pendingCount} Änderung(en) warten auf Übertragung.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          if (event.productionId != null) ...[
+            const SectionTitle('Für diese Probe'),
+            Card(
+              child: ListTile(
+                contentPadding: const EdgeInsets.all(18),
+                leading: const Icon(Icons.menu_book_outlined),
+                title: const Text('Zum Drehbuch'),
+                subtitle: Text(
+                  event.sceneIds.isEmpty
+                      ? 'Die verknüpfte Produktion öffnen'
+                      : 'Szenen ${event.sceneIds.join(', ')}',
+                ),
+                trailing: const Icon(Icons.arrow_forward),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ScriptReaderScreen(
+                      controller: controller,
+                      productionId: event.productionId!,
+                      initialSceneId: event.sceneIds.firstOrNull,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          if (controller.user?.isAdmin == true) ...[
+            const SectionTitle('Probenleitung'),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ResponsesAdminScreen(
+                    controller: controller,
+                    event: event,
+                  ),
+                ),
+              ),
+              icon: const Icon(Icons.people_outline),
+              label: const Text('Rückmeldungen ansehen'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => AttendanceEditorScreen(
+                    controller: controller,
+                    event: event,
+                  ),
+                ),
+              ),
+              icon: const Icon(Icons.fact_check_outlined),
+              label: const Text('Anwesenheit erfassen'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      ScenePlannerScreen(controller: controller, event: event),
+                ),
+              ),
+              icon: const Icon(Icons.link),
+              label: const Text('Szenen planen'),
+            ),
+          ],
+          SizedBox(height: embedded ? 16 : 24),
+          OutlinedButton.icon(
+            onPressed: event.startsAt == null
+                ? null
+                : () => runAction(context, () => exportEvent(context, event)),
+            icon: const Icon(Icons.calendar_month_outlined),
+            label: const Text('Für den Kalender exportieren'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+class RsvpPanel extends StatefulWidget {
+  const RsvpPanel({
+    super.key,
+    required this.controller,
+    required this.event,
+    this.compact = false,
+  });
+  final AppController controller;
+  final TheaterEvent event;
+  final bool compact;
   @override
   State<RsvpPanel> createState() => _RsvpPanelState();
 }
@@ -938,6 +859,31 @@ class _RsvpPanelState extends State<RsvpPanel> {
         ? status == 'late'
         : widget.event.response == status;
     final color = statusColor(status);
+    if (widget.compact) {
+      return Semantics(
+        selected: selected,
+        child: OutlinedButton.icon(
+          onPressed: _busy || !widget.controller.canRespondTo(widget.event)
+              ? null
+              : action,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: color,
+            backgroundColor: selected ? color.withValues(alpha: .11) : null,
+            minimumSize: const Size(0, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          icon: Icon(icon, size: 18),
+          label: Text(label),
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(
@@ -956,7 +902,9 @@ class _RsvpPanelState extends State<RsvpPanel> {
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: _busy || widget.event.locked ? null : action,
+          onTap: _busy || !widget.controller.canRespondTo(widget.event)
+              ? null
+              : action,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
             child: Row(
@@ -991,6 +939,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
   @override
   Widget build(BuildContext context) {
     final e = widget.event;
+    final canRespond = widget.controller.canRespondTo(e);
     final pending = widget.controller.outbox.any(
       (a) =>
           !a.failed &&
@@ -1000,35 +949,86 @@ class _RsvpPanelState extends State<RsvpPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Bist du dabei?', style: Theme.of(context).textTheme.titleLarge),
+        Text(
+          canRespond ? 'Bist du dabei?' : 'Deine Rückmeldung',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
         const SizedBox(height: 16),
-        _choice(
-          'yes',
-          'Bin dabei',
-          Icons.check_circle_outline,
-          () => _save('yes'),
-        ),
-        _choice(
-          'late',
-          'Komme später',
-          Icons.schedule,
-          () => setState(() {
-            _editingLate = true;
-            _arrival = e.expectedArrivalAt;
-          }),
-        ),
-        _choice(
-          'no',
-          'Kann nicht',
-          Icons.close,
-          () => _decline(context, widget.controller, e),
-        ),
-        if (e.locked)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 10),
-            child: Text('Rückmeldungen sind geschlossen.'),
+        if (canRespond)
+          if (widget.compact)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _choice(
+                  'yes',
+                  'Bin dabei',
+                  Icons.thumb_up_alt_outlined,
+                  () => _save('yes'),
+                ),
+                _choice(
+                  'late',
+                  'Komme später',
+                  Icons.schedule,
+                  () => setState(() {
+                    _editingLate = true;
+                    _arrival = e.expectedArrivalAt;
+                  }),
+                ),
+                _choice(
+                  'no',
+                  'Kann nicht',
+                  Icons.thumb_down_alt_outlined,
+                  () => _decline(context, widget.controller, e),
+                ),
+              ],
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _choice(
+                  'yes',
+                  'Bin dabei',
+                  Icons.thumb_up_alt_outlined,
+                  () => _save('yes'),
+                ),
+                _choice(
+                  'late',
+                  'Komme später',
+                  Icons.schedule,
+                  () => setState(() {
+                    _editingLate = true;
+                    _arrival = e.expectedArrivalAt;
+                  }),
+                ),
+                _choice(
+                  'no',
+                  'Kann nicht',
+                  Icons.thumb_down_alt_outlined,
+                  () => _decline(context, widget.controller, e),
+                ),
+              ],
+            )
+        else
+          Align(
+            alignment: Alignment.centerLeft,
+            child: RsvpStatusBadge(
+              status: e.response,
+              expectedArrivalAt: e.expectedArrivalAt,
+              locked: true,
+            ),
           ),
-        if (_editingLate && !e.locked) ...[
+        if (!canRespond)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Text(
+              e.locked
+                  ? 'Rückmeldungen sind geschlossen.'
+                  : 'Der Termin ist vorbei. Rückmeldungen sind geschlossen.',
+            ),
+          ),
+        if (_editingLate && canRespond) ...[
           const SizedBox(height: 12),
           const Text('Voraussichtlich da ab'),
           const SizedBox(height: 8),
@@ -1106,7 +1106,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
-        if (!_editingLate && e.response != 'open' && !e.locked)
+        if (!_editingLate && e.response != 'open' && canRespond)
           TextButton(
             onPressed: _busy ? null : () => _save('open'),
             child: const Text('Rückmeldung zurücknehmen'),

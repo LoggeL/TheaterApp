@@ -376,6 +376,7 @@ class GalleryScreen extends StatefulWidget {
 class _GalleryScreenState extends State<GalleryScreen> {
   final _scroll = ScrollController();
   final _assets = <JsonMap>[];
+  Future<String?>? _loadTask;
   late JsonMap _gallery;
   int? _next = 0;
   int _total = 0, _loadGeneration = 0;
@@ -397,8 +398,16 @@ class _GalleryScreenState extends State<GalleryScreen> {
     super.dispose();
   }
 
-  Future<void> _load({bool refresh = false}) async {
-    if (_loading && !refresh || _next == null && !refresh) return;
+  Future<void> _load({bool refresh = false, bool reportError = false}) async {
+    if (_next == null && !refresh && !_loading) return;
+    final task = _loading && !refresh
+        ? _loadTask!
+        : _loadTask = _fetchPage(refresh: refresh);
+    final error = await task;
+    if (reportError && error != null) throw ApiException(error);
+  }
+
+  Future<String?> _fetchPage({required bool refresh}) async {
     if (refresh) {
       _next = 0;
       _loadGeneration++;
@@ -412,7 +421,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
       final page = await widget.controller.remote(
         '/galleries/${_gallery['id']}?offset=$offset&limit=60&includeHidden=$_hidden',
       );
-      if (!mounted || generation != _loadGeneration) return;
+      if (!mounted || generation != _loadGeneration) return null;
       setState(() {
         if (refresh) _assets.clear();
         final ids = _assets.map((a) => a['id']).toSet();
@@ -429,12 +438,14 @@ class _GalleryScreenState extends State<GalleryScreen> {
     } catch (e) {
       if (mounted && generation == _loadGeneration) {
         setState(() => _error = e.toString());
+        return e.toString();
       }
     } finally {
       if (mounted && generation == _loadGeneration) {
         setState(() => _loading = false);
       }
     }
+    return null;
   }
 
   Future<void> _upload() async {
@@ -491,7 +502,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
           assets: _assets,
           initialIndex: index,
           total: _total,
-          loadMore: _load,
+          loadMore: () => _load(reportError: true),
         ),
       ),
     );
@@ -723,12 +734,15 @@ class _GalleryLightboxState extends State<GalleryLightbox> {
   late final PageController _pages;
   late int _index;
   bool _saving = false, _paging = false;
+  String? _pageError;
   @override
   void initState() {
     super.initState();
     _index = widget.initialIndex;
     _pages = PageController(initialPage: _index);
-    _more();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _more();
+    });
   }
 
   @override
@@ -737,18 +751,30 @@ class _GalleryLightboxState extends State<GalleryLightbox> {
     super.dispose();
   }
 
-  Future<void> _more() async {
+  Future<void> _more({bool retry = false}) async {
     if (_paging ||
-        _index < widget.assets.length - 8 ||
+        !mounted ||
+        (_pageError != null && !retry) ||
+        (!retry && _index < widget.assets.length - 8) ||
         widget.assets.length >= widget.total) {
       return;
     }
-    _paging = true;
+    setState(() {
+      _paging = true;
+      _pageError = null;
+    });
     try {
       await widget.loadMore();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _pageError = e is ApiException
+              ? e.message
+              : 'Weitere Bilder konnten nicht geladen werden.';
+        });
+      }
     } finally {
-      _paging = false;
-      if (mounted) setState(() {});
+      if (mounted) setState(() => _paging = false);
     }
   }
 
@@ -880,6 +906,31 @@ class _GalleryLightboxState extends State<GalleryLightbox> {
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
                 child: Column(
                   children: [
+                    if (_paging)
+                      Semantics(
+                        liveRegion: true,
+                        child: const Column(
+                          children: [
+                            LinearProgressIndicator(),
+                            SizedBox(height: 8),
+                            Text('Weitere Bilder werden geladen …'),
+                          ],
+                        ),
+                      ),
+                    if (_pageError != null)
+                      Semantics(
+                        liveRegion: true,
+                        child: Column(
+                          children: [
+                            Text(_pageError!, textAlign: TextAlign.center),
+                            TextButton.icon(
+                              onPressed: () => _more(retry: true),
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Erneut versuchen'),
+                            ),
+                          ],
+                        ),
+                      ),
                     if (video)
                       TextButton.icon(
                         onPressed: () async {
@@ -942,10 +993,12 @@ class _GalleryLightboxState extends State<GalleryLightbox> {
                                   duration: const Duration(milliseconds: 180),
                                   curve: Curves.easeOut,
                                 )
-                              : _index + 1 < widget.total
+                              : _index + 1 < widget.total && !_paging
                               ? () async {
-                                  await _more();
+                                  final requestedIndex = _index;
+                                  await _more(retry: true);
                                   if (mounted &&
+                                      _index == requestedIndex &&
                                       _index + 1 < widget.assets.length) {
                                     _pages.nextPage(
                                       duration: const Duration(

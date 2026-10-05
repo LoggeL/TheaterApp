@@ -1,3 +1,4 @@
+import 'ui/app_navigation.dart';
 import 'ui/admin.dart';
 import 'ui/responsive.dart';
 import 'ui/push_prompt.dart';
@@ -46,12 +47,14 @@ class TheaterApp extends StatefulWidget {
 class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
   final _navigator = GlobalKey<NavigatorState>();
   final _messenger = GlobalKey<ScaffoldMessengerState>();
+  final _navigationTab = ValueNotifier<int>(0);
   late final DeviceServices _devices;
   AppTarget? _pendingTarget;
   String? _identity;
   bool _starting = true;
   String? _startupError;
   Timer? _syncTimer;
+  Future<void>? _automaticRefresh;
   @override
   void initState() {
     super.initState();
@@ -104,12 +107,31 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
   void _startTimer() {
     _syncTimer?.cancel();
     _syncTimer = Timer.periodic(const Duration(seconds: 45), (_) {
-      if (widget.controller.user != null &&
-          !widget.controller.isDemo &&
-          !widget.controller.busy) {
-        widget.controller.refresh();
-      }
+      unawaited(_refreshSession());
     });
+  }
+
+  Future<void> _refreshSession() async {
+    final controller = widget.controller;
+    if (_starting ||
+        controller.user == null ||
+        controller.isDemo ||
+        controller.busy ||
+        _automaticRefresh != null) {
+      return;
+    }
+    final task = controller.usesFirebase && !controller.hasAccess
+        ? controller.refreshIdentityAccess()
+        : controller.refresh();
+    _automaticRefresh = task;
+    try {
+      await task;
+    } catch (_) {
+      // Retain the current screen when an automatic status check is offline.
+      // The next check or the manual refresh can retry it.
+    } finally {
+      if (identical(_automaticRefresh, task)) _automaticRefresh = null;
+    }
   }
 
   String? get _sessionIdentity => widget.controller.user == null
@@ -121,6 +143,8 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     if (current != _identity) {
       _identity = current;
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _navigationTab.value = 0;
         _navigator.currentState?.popUntil((route) => route.isFirst);
         if (current != null) {
           if (widget.enableDeviceServices) _devices.restorePush();
@@ -199,7 +223,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _startTimer();
-      if (widget.controller.user != null) widget.controller.refresh();
+      unawaited(_refreshSession());
     } else {
       _syncTimer?.cancel();
     }
@@ -211,6 +235,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_accountChanged);
     _devices.dispose();
+    _navigationTab.dispose();
     super.dispose();
   }
 
@@ -219,52 +244,55 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     animation: widget.controller,
     builder: (context, _) {
       final controller = widget.controller;
-      return MaterialApp(
-        title: Brand.name,
-        debugShowCheckedModeBanner: false,
-        navigatorKey: _navigator,
-        scaffoldMessengerKey: _messenger,
-        locale: const Locale('de'),
-        supportedLocales: const [Locale('de')],
-        localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        theme: StageTheme.build(Brightness.light),
-        darkTheme: StageTheme.build(Brightness.dark),
-        themeMode: switch (controller.preferences['themeMode']) {
-          'dark' => ThemeMode.dark,
-          'light' => ThemeMode.light,
-          _ => ThemeMode.system,
-        },
-        home: _starting
-            ? const Scaffold(
-                body: Center(child: CircularProgressIndicator.adaptive()),
-              )
-            : _startupError != null
-            ? Scaffold(
-                body: SafeArea(
-                  child: EmptyState(
-                    icon: Icons.storage_outlined,
-                    title: 'Start gerade nicht möglich',
-                    message: _startupError!,
-                    action: FilledButton(
-                      onPressed: _start,
-                      child: const Text('Erneut versuchen'),
+      return AppNavigationScope(
+        selection: _navigationTab,
+        child: MaterialApp(
+          title: Brand.name,
+          debugShowCheckedModeBanner: false,
+          navigatorKey: _navigator,
+          scaffoldMessengerKey: _messenger,
+          locale: const Locale('de'),
+          supportedLocales: const [Locale('de')],
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          theme: StageTheme.build(Brightness.light),
+          darkTheme: StageTheme.build(Brightness.dark),
+          themeMode: switch (controller.preferences['themeMode']) {
+            'dark' => ThemeMode.dark,
+            'light' => ThemeMode.light,
+            _ => ThemeMode.system,
+          },
+          home: _starting
+              ? const Scaffold(
+                  body: Center(child: CircularProgressIndicator.adaptive()),
+                )
+              : _startupError != null
+              ? Scaffold(
+                  body: SafeArea(
+                    child: EmptyState(
+                      icon: Icons.storage_outlined,
+                      title: 'Start gerade nicht möglich',
+                      message: _startupError!,
+                      action: FilledButton(
+                        onPressed: _start,
+                        child: const Text('Erneut versuchen'),
+                      ),
                     ),
                   ),
+                )
+              : controller.user == null
+              ? controller.usesFirebase
+                    ? FirebaseWelcomeScreen(controller: controller)
+                    : WelcomeScreen(controller: controller)
+              : !controller.hasAccess
+              ? ApprovalPendingScreen(controller: controller)
+              : controller.user!.mustChangePassword
+              ? PasswordScreen(controller: controller, requiredChange: true)
+              : AppShell(
+                  controller: controller,
+                  devices: _devices,
+                  promptForPush: widget.enableDeviceServices,
                 ),
-              )
-            : controller.user == null
-            ? controller.usesFirebase
-                  ? FirebaseWelcomeScreen(controller: controller)
-                  : WelcomeScreen(controller: controller)
-            : !controller.hasAccess
-            ? ApprovalPendingScreen(controller: controller)
-            : controller.user!.mustChangePassword
-            ? PasswordScreen(controller: controller, requiredChange: true)
-            : AppShell(
-                controller: controller,
-                devices: _devices,
-                promptForPush: widget.enableDeviceServices,
-              ),
+        ),
       );
     },
   );
@@ -301,57 +329,23 @@ class _AppShellState extends State<AppShell> {
     final c = widget.controller;
     final wide = MediaQuery.sizeOf(context).width >= 900;
     final admin = c.user?.isAdmin == true;
-    final now = DateTime.now();
-    final unanswered = c.events
-        .where(
-          (event) =>
-              event.needsResponse &&
-              (event.startsAt == null ||
-                  (event.endsAt ?? event.startsAt!).isAfter(now)),
-        )
-        .length;
+    final destinations = appNavigationDestinations(c);
     final unread = c.messages
         .where((message) => message['read'] != true)
         .length;
-    Widget eventIcon(IconData icon) => Tooltip(
-      message: unanswered == 0
-          ? 'Termine'
-          : '$unanswered offene Rückmeldungen zu Terminen',
-      child: Badge(
-        isLabelVisible: unanswered > 0,
-        label: Text('$unanswered'),
-        child: Icon(icon),
-      ),
+    final navigation = AppNavigationScope.maybeOf(context);
+    final selectedTab = (navigation?.value ?? _tab).clamp(
+      0,
+      destinations.length - 1,
     );
-    final destinations = <NavigationDestination>[
-      const NavigationDestination(
-        icon: Icon(Icons.wb_sunny_outlined),
-        selectedIcon: Icon(Icons.wb_sunny),
-        label: 'Heute',
-      ),
-      NavigationDestination(
-        icon: eventIcon(Icons.calendar_month_outlined),
-        selectedIcon: eventIcon(Icons.calendar_month),
-        label: 'Termine',
-      ),
-      const NavigationDestination(
-        icon: Icon(Icons.auto_stories_outlined),
-        selectedIcon: Icon(Icons.auto_stories),
-        label: 'Drehbücher',
-      ),
-      const NavigationDestination(
-        icon: Icon(Icons.person_outline),
-        selectedIcon: Icon(Icons.person),
-        label: 'Mein Bereich',
-      ),
-      if (admin)
-        const NavigationDestination(
-          icon: Icon(Icons.admin_panel_settings_outlined),
-          selectedIcon: Icon(Icons.admin_panel_settings),
-          label: 'Admin',
-        ),
-    ];
-    final selectedTab = _tab.clamp(0, destinations.length - 1);
+    void selectTab(int index) {
+      if (navigation != null) {
+        navigation.value = index;
+      } else {
+        setState(() => _tab = index);
+      }
+    }
+
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 65,
@@ -408,21 +402,10 @@ class _AppShellState extends State<AppShell> {
       body: Row(
         children: [
           if (wide) ...[
-            NavigationRail(
-              labelType: MediaQuery.sizeOf(context).width >= 1250
-                  ? NavigationRailLabelType.none
-                  : NavigationRailLabelType.all,
-              extended: MediaQuery.sizeOf(context).width >= 1250,
+            AppNavigationRail(
+              controller: c,
               selectedIndex: selectedTab,
-              onDestinationSelected: (i) => setState(() => _tab = i),
-              destinations: [
-                for (final d in destinations)
-                  NavigationRailDestination(
-                    icon: d.icon,
-                    selectedIcon: d.selectedIcon,
-                    label: Text(d.label),
-                  ),
-              ],
+              onSelected: selectTab,
             ),
             const VerticalDivider(width: 1),
           ],
@@ -492,14 +475,15 @@ class _AppShellState extends State<AppShell> {
                     index: selectedTab,
                     children: [
                       ContentWidth(
+                        maxWidth: 1360,
                         child: TodayScreen(
                           controller: c,
-                          onPlan: () => setState(() => _tab = 1),
-                          onScripts: () => setState(() => _tab = 2),
+                          onPlan: () => selectTab(1),
+                          onScripts: () => selectTab(2),
                         ),
                       ),
                       ContentWidth(
-                        maxWidth: 1050,
+                        maxWidth: 1360,
                         child: ScheduleScreen(controller: c),
                       ),
                       ContentWidth(
@@ -525,7 +509,7 @@ class _AppShellState extends State<AppShell> {
           ? null
           : NavigationBar(
               selectedIndex: selectedTab,
-              onDestinationSelected: (i) => setState(() => _tab = i),
+              onDestinationSelected: selectTab,
               destinations: destinations,
             ),
     );

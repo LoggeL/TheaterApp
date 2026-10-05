@@ -1,12 +1,15 @@
 {
   "name": "Theater-App",
   "short_name": "Theater-App",
-  "start_url": ".",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "lang": "de",
   "display": "standalone",
   "background_color": "#F8F6F0",
   "theme_color": "#E96131",
-  "description": "Die App des Kolpingtheaters Ramsen – Flutter-Vorschau",
-  "orientation": "portrait-primary",
+  "description": "Termine, Drehbücher und Abstimmungen für das Kolpingtheater Ramsen.",
+  "orientation": "any",
   "prefer_related_applications": false,
   "icons": [
     {

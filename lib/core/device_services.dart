@@ -45,19 +45,36 @@ class AppTarget {
   }
 
   static AppTarget? fromUri(Uri uri) {
-    if (uri.scheme != 'theaterapp' ||
-        uri.host != 'app' ||
-        uri.userInfo.isNotEmpty) {
+    try {
+      if (uri.scheme != 'theaterapp' ||
+          uri.host != 'app' ||
+          uri.userInfo.isNotEmpty) {
+        return null;
+      }
+      final path = uri.pathSegments;
+      if (path.length != 2 ||
+          !const {'events', 'productions', 'messages'}.contains(path[0]) ||
+          path[1].isEmpty ||
+          path[1].length > 200) {
+        return null;
+      }
+      return AppTarget(path[0], path[1]);
+    } on FormatException {
+      // A syntactically valid URI can still contain invalid UTF-8 segments.
       return null;
     }
-    final path = uri.pathSegments;
-    if (path.length != 2 ||
-        !const {'events', 'productions', 'messages'}.contains(path[0]) ||
-        path[1].isEmpty ||
-        path[1].length > 200) {
+  }
+
+  static AppTarget? fromWebUri(Uri uri) {
+    try {
+      final link = uri.queryParameters['target'];
+      if (link == null) return null;
+      final target = Uri.tryParse(link);
+      return target == null ? null : fromUri(target);
+    } on FormatException {
+      // Optional query parameters must not prevent the app from starting.
       return null;
     }
-    return AppTarget(path[0], path[1]);
   }
 
   static AppTarget? fromData(Map<String, dynamic> data) {
@@ -172,9 +189,7 @@ class DeviceServices {
   Future<void>? _pushInitialization;
   Future<void> start() async {
     if (kIsWeb) {
-      final target = AppTarget.fromUri(
-        Uri.tryParse(Uri.base.queryParameters['target'] ?? '') ?? Uri(),
-      );
+      final target = AppTarget.fromWebUri(Uri.base);
       if (target != null) onTarget(target);
       return;
     }

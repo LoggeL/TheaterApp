@@ -1,4 +1,5 @@
 import 'privacy_links.dart';
+import 'pwa_install.dart';
 import 'brand_logo.dart';
 import 'package:flutter/material.dart';
 import '../core/app_controller.dart';
@@ -131,11 +132,13 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                       children: [
                         BrandLogo(size: 37),
                         SizedBox(width: 12),
-                        Text(
-                          Brand.name,
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
+                        Expanded(
+                          child: Text(
+                            Brand.name,
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
                       ],
@@ -196,9 +199,15 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                         child: Row(
                           children: [
                             Expanded(child: Divider()),
-                            Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 18),
-                              child: Text('oder per E-Mail'),
+                            Flexible(
+                              flex: 3,
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 12),
+                                child: Text(
+                                  'oder per E-Mail',
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
                             ),
                             Expanded(child: Divider()),
                           ],
@@ -207,9 +216,17 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                     if (_register) ...[
                       TextFormField(
                         controller: _name,
+                        maxLength: 120,
                         autofillHints: const [AutofillHints.name],
                         textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(labelText: 'Name'),
+                        decoration: const InputDecoration(
+                          labelText: 'Name zur Zuordnung',
+                          hintText: 'Vor- und Nachname',
+                          helperText:
+                              'Nur zur Zuordnung deines Kontos zur richtigen Person im Ensemble.',
+                          helperMaxLines: 5,
+                          counterText: '',
+                        ),
                         validator: (s) => s?.trim().isNotEmpty == true
                             ? null
                             : 'Bitte deinen Namen eingeben.',
@@ -318,6 +335,7 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                       ),
                     ),
                     const PrivacyLinks(),
+                    const PwaInstallCard(),
                   ],
                 ),
               ),
@@ -337,8 +355,35 @@ class ApprovalPendingScreen extends StatefulWidget {
 }
 
 class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
+  final _nameForm = GlobalKey<FormState>();
+  late final TextEditingController _name;
   bool _busy = false;
   String? _error, _info;
+  @override
+  void initState() {
+    super.initState();
+    final user = widget.controller.user!;
+    _name = TextEditingController(
+      text: user.needsRegistrationName ? '' : user.name,
+    );
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveName() async {
+    if (!_nameForm.currentState!.validate()) return;
+    await _run(() async {
+      await widget.controller.saveRegistrationName(_name.text);
+      if (mounted) {
+        setState(() => _info = 'Dein Name zur Zuordnung ist gespeichert.');
+      }
+    });
+  }
+
   Future<void> _run(Future<void> Function() action) async {
     setState(() {
       _busy = true;
@@ -361,6 +406,8 @@ class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
     final verify = !user.identityReady;
     final title = blocked
         ? 'Zugang nicht freigegeben'
+        : user.needsRegistrationName
+        ? 'Namen angeben'
         : verify
         ? 'E-Mail bestätigen'
         : 'Freigabe ausstehend';
@@ -397,8 +444,10 @@ class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
                 Text(
                   blocked
                       ? 'Bitte wende dich an die Theaterleitung.'
+                      : user.needsRegistrationName
+                      ? 'Bitte gib deinen Namen an, damit die Theaterleitung dein Konto der richtigen Person im Ensemble zuordnen kann.'
                       : verify
-                      ? 'Öffne den Link in deiner E-Mail. Danach kann die Theaterleitung deinen Zugang freigeben.'
+                      ? 'Öffne den Link in deiner E-Mail und kehre zur App zurück. Die Bestätigung wird automatisch geprüft. Danach kann die Theaterleitung deinen Zugang freigeben.'
                       : 'Dein Konto ist erstellt. Die Theaterleitung ordnet dich einer Person zu und gibt deinen Zugang frei.',
                   textAlign: TextAlign.center,
                 ),
@@ -410,9 +459,14 @@ class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          user.name,
+                          user.needsRegistrationName ? 'Dein Konto' : user.name,
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
+                        if (!user.needsRegistrationName &&
+                            user.status == 'pending') ...[
+                          const SizedBox(height: 4),
+                          const Text('Name zur Zuordnung'),
+                        ],
                         const SizedBox(height: 6),
                         Text(user.email),
                         const SizedBox(height: 12),
@@ -433,6 +487,38 @@ class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
                     ),
                   ),
                 ),
+                if (user.status == 'pending') ...[
+                  const SizedBox(height: 20),
+                  Form(
+                    key: _nameForm,
+                    child: TextFormField(
+                      controller: _name,
+                      enabled: !_busy,
+                      maxLength: 120,
+                      autofillHints: const [AutofillHints.name],
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'Name zur Zuordnung',
+                        hintText: 'Vor- und Nachname',
+                        helperText:
+                            'Nur zur Zuordnung deines Kontos zur richtigen Person im Ensemble.',
+                        helperMaxLines: 5,
+                        counterText: '',
+                      ),
+                      validator: (value) => value?.trim().isNotEmpty == true
+                          ? null
+                          : 'Bitte deinen Namen eingeben.',
+                      onFieldSubmitted: (_) {
+                        if (!_busy) _saveName();
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  FilledButton(
+                    onPressed: _busy ? null : _saveName,
+                    child: const Text('Namen speichern'),
+                  ),
+                ],
                 const SizedBox(height: 28),
                 if (_error != null)
                   Padding(
@@ -450,12 +536,7 @@ class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
                     child: Text(_info!),
                   ),
                 OutlinedButton.icon(
-                  onPressed: _busy
-                      ? null
-                      : () => _run(() async {
-                          await c.identity!.reload();
-                          await c.refreshAccess();
-                        }),
+                  onPressed: _busy ? null : () => _run(c.refreshIdentityAccess),
                   icon: const Icon(Icons.refresh),
                   label: const Text('Status aktualisieren'),
                 ),
