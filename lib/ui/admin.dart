@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:intl/intl.dart';
 import '../core/app_controller.dart';
+import '../core/event_series.dart';
 import '../core/identity.dart';
 import '../core/models.dart';
 import 'event_style.dart';
@@ -19,6 +20,8 @@ import 'rehearsal_admin.dart';
 import 'messages.dart';
 import 'theme.dart';
 import 'audience.dart';
+import 'casting.dart';
+import '../core/casting.dart';
 
 void openPage(BuildContext context, Widget screen) =>
     Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
@@ -725,6 +728,130 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
     }
   }
 
+  /// Everyone but the own person can be deleted.
+  bool get _deletable =>
+      widget.member != null &&
+      intValue(widget.member!['id'], -1) != widget.controller.user?.personId;
+
+  Future<void> _delete() async {
+    final member = widget.member!, name = textValue(member['name']).trim();
+    final personId = intValue(member['id'], -1);
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    setState(() => _busy = true);
+    try {
+      // The server only deletes unlinked people: linked logins go first via
+      // the account endpoint, which also removes the Firebase identity.
+      final data = await widget.controller.remote('/admin/accounts');
+      final accounts = jsonList(data['accounts'])
+          .map(jsonMap)
+          .where((a) => intValue(a['personId'], -1) == personId)
+          .toList();
+      if (!mounted) return;
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (_) => _DeleteMemberDialog(
+          name: name,
+          active: member['active'] != false,
+          accounts: accounts,
+        ),
+      );
+      if (!mounted || choice == null) return;
+      if (choice == 'deactivate') {
+        setState(() => _active = false);
+        await _save();
+        return;
+      }
+      for (final a in accounts) {
+        await widget.controller.remote(
+          '/admin/accounts/${Uri.encodeComponent(textValue(a['uid']))}',
+          method: 'DELETE',
+          body: {'version': a['version']},
+        );
+      }
+      await widget.controller.performAction({
+        'action': 'member.delete',
+        'id': personId,
+        'version': member['version'] ?? 1,
+      });
+      final queued = widget.controller.outbox.any(
+        (a) => !a.failed && a.payload['action'] == 'member.delete',
+      );
+      if (!mounted) return;
+      navigator.pop();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            queued
+                ? 'Löschen von $name ist vorgemerkt und wird übertragen, sobald die Verbindung steht.'
+                : '$name wurde gelöscht.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _dangerZone(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final inactive = widget.member?['active'] == false;
+    final style = inactive
+        ? FilledButton.styleFrom(
+            backgroundColor: scheme.error,
+            foregroundColor: scheme.onError,
+          )
+        : OutlinedButton.styleFrom(
+            foregroundColor: scheme.error,
+            side: BorderSide(color: scheme.error),
+          );
+    const icon = Icon(Icons.delete_forever_outlined);
+    const label = Text('Person löschen');
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border.all(color: scheme.error.withValues(alpha: .6)),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Gefahrenbereich',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(color: scheme.error),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            inactive
+                ? 'Diese Person ist nicht mehr aktiv. Hat sie das Theater '
+                      'dauerhaft verlassen, kannst du sie mit allen ihren Daten '
+                      'endgültig löschen.'
+                : 'Wer nur pausiert, wird besser deaktiviert. Löschen entfernt '
+                      'die Person mit allen ihren Daten endgültig.',
+          ),
+          const SizedBox(height: 12),
+          inactive
+              ? FilledButton.icon(
+                  style: style,
+                  onPressed: _busy ? null : _delete,
+                  icon: icon,
+                  label: label,
+                )
+              : OutlinedButton.icon(
+                  style: style,
+                  onPressed: _busy ? null : _delete,
+                  icon: icon,
+                  label: label,
+                ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => AdminPage(
     controller: widget.controller,
@@ -774,8 +901,122 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
         onPressed: _busy ? null : _save,
         child: const Text('Speichern'),
       ),
+      if (widget.member != null)
+        PersonProductions(
+          controller: widget.controller,
+          personId: intValue(widget.member!['id']),
+        ),
+      if (_deletable) ...[const SizedBox(height: 48), _dangerZone(context)],
     ],
   );
+}
+
+/// Asks for the person's name before deleting; offers deactivation instead.
+/// Pops 'delete', 'deactivate' or null.
+class _DeleteMemberDialog extends StatefulWidget {
+  const _DeleteMemberDialog({
+    required this.name,
+    required this.active,
+    required this.accounts,
+  });
+  final String name;
+  final bool active;
+  final List<JsonMap> accounts;
+  @override
+  State<_DeleteMemberDialog> createState() => _DeleteMemberDialogState();
+}
+
+class _DeleteMemberDialogState extends State<_DeleteMemberDialog> {
+  final _confirmation = TextEditingController();
+
+  @override
+  void dispose() {
+    _confirmation.dispose();
+    super.dispose();
+  }
+
+  bool get _confirmed =>
+      _confirmation.text.trim().toLowerCase() == widget.name.toLowerCase();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final accounts = widget.accounts
+        .map((a) => textValue(a['email'], textValue(a['name'])))
+        .join(', ');
+    const items = [
+      'Rückmeldungen, Absagegründe und Abwesenheiten',
+      'Anwesenheiten und Teilnahmeübersicht',
+      'Besetzungen, Regie und Mitwirkung in Stücken',
+      'Einladungen, gebuchte Zeitfenster und Lesebestätigungen',
+      'Kommentare im Drehbuch und namentliche Stimmen; anonyme Stimmen zählen ohne Namen weiter',
+      'Termine, Abstimmungen, Terminfinder und Mitteilungen, die nur an diese Person gingen',
+    ];
+    return AlertDialog(
+      title: Text('${widget.name} endgültig löschen?'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Die Person wird mit ihren Daten dauerhaft entfernt. '
+              'Das lässt sich nicht rückgängig machen. Gelöscht werden:',
+            ),
+            const SizedBox(height: 8),
+            for (final item in [
+              ...items,
+              widget.accounts.isEmpty
+                  ? 'Es ist kein App-Konto verknüpft.'
+                  : 'Verknüpfte App-Konten samt Anmeldung und Geräten: $accounts',
+            ])
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text('• $item'),
+              ),
+            const SizedBox(height: 12),
+            Text(
+              widget.active
+                  ? 'Sanfter: Person nur deaktivieren. Dann bleibt alles '
+                        'erhalten, sie erscheint nicht mehr in Auswahllisten und '
+                        'ihr App-Zugang ist gesperrt.'
+                  : 'Wenn du die Daten noch brauchst, lass die Person einfach '
+                        'deaktiviert.',
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _confirmation,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Zur Bestätigung „${widget.name}“ eingeben',
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Abbrechen'),
+        ),
+        if (widget.active)
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'deactivate'),
+            child: const Text('Nur deaktivieren'),
+          ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: scheme.error,
+            foregroundColor: scheme.onError,
+          ),
+          onPressed: _confirmed ? () => Navigator.pop(context, 'delete') : null,
+          child: const Text('Endgültig löschen'),
+        ),
+      ],
+    );
+  }
 }
 
 class EventsAdminScreen extends StatefulWidget {
@@ -838,7 +1079,19 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
     padding: const EdgeInsets.only(bottom: 10),
     child: Card(
       child: ListTile(
-        title: Text(e.title),
+        title: Row(
+          children: [
+            Flexible(child: Text(e.title)),
+            if (e.inSeries)
+              const Padding(
+                padding: EdgeInsets.only(left: 6),
+                child: Tooltip(
+                  message: 'Serientermin',
+                  child: Icon(Icons.repeat, size: 16),
+                ),
+              ),
+          ],
+        ),
         subtitle: Text(
           '${eventDate(e)} · ${eventTime(e)}'
           '${e.fromSlotPool ? ' · Terminfinder' : ''}',
@@ -1001,10 +1254,31 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
   late bool _locked;
   late String _kind;
   String? _production;
+
+  /// The play an event belongs to (scenes, script) follows the chosen
+  /// ensemble; without one an existing link is kept, e.g. a premiere for all.
+  String? get _linkedProduction {
+    if (_productionIds.isEmpty || _productionIds.contains(_production)) {
+      return _production;
+    }
+    return widget.controller.productions
+            .where((p) => _productionIds.contains(p.id))
+            .firstOrNull
+            ?.id ??
+        _production;
+  }
+
   late Set<String> _roleIds;
   late Set<int> _personIds;
   late Set<String> _productionIds;
   bool _busy = false;
+
+  /// Repetition of a new event; null creates a single event.
+  SeriesRhythm? _repeat;
+  late DateTime _until;
+  SeriesPlan? get _series => widget.event == null && _repeat != null
+      ? planSeries(_start, _end, _repeat!, _until)
+      : null;
 
   /// New events notify their invitees by default; edits only on request.
   late bool _push = widget.event == null;
@@ -1035,6 +1309,8 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         widget.initialDay ?? DateTime.now().add(const Duration(days: 1));
     _start = e?.startsAt ?? DateTime(next.year, next.month, next.day, 19);
     _end = e?.endsAt ?? _start.add(const Duration(hours: 2));
+    // Eight weeks; calendar arithmetic, as a Duration would shift at DST.
+    _until = DateTime(_start.year, _start.month, _start.day + 56);
     _locked = e?.locked ?? false;
     _kind = e?.kind ?? 'rehearsal';
     _production = e?.productionId;
@@ -1074,9 +1350,27 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     });
   }
 
+  Future<void> _pickUntil() async {
+    final first = DateUtils.dateOnly(_start);
+    final last = DateTime(_start.year + 1, _start.month, _start.day);
+    final d = await showDatePicker(
+      context: context,
+      // The start may have moved since the end of the series was picked.
+      initialDate: _until.isBefore(first)
+          ? first
+          : _until.isAfter(last)
+          ? last
+          : _until,
+      firstDate: first,
+      lastDate: last,
+    );
+    if (d != null && mounted) setState(() => _until = d);
+  }
+
   Future<void> _save() async {
     setState(() => _busy = true);
     final push = _push && widget.controller.pushConfigured && _changeIsNear;
+    final series = _series;
     try {
       await widget.controller.performAction({
         'action': 'event.save',
@@ -1089,23 +1383,26 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         'place': _place.text,
         'locked': _locked,
         'type': _kind,
-        'productionId': _production,
+        'productionId': _linkedProduction,
         'roleIds': _roleIds.toList(),
         'personIds': _personIds.toList(),
         'productionIds': _productionIds.toList(),
-        'sceneIds': _production == widget.event?.productionId
+        'sceneIds': _linkedProduction == widget.event?.productionId
             ? widget.event?.sceneIds ?? []
             : [],
         'push': push,
+        if (series != null)
+          'repeat': {'every': _repeat!.wire, 'until': seriesUntilValue(_until)},
       });
       if (mounted) {
         if (push) {
+          final what = series == null ? 'Termin' : 'Terminserie';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
                 widget.controller.pendingCount > 0
-                    ? 'Termin vorgemerkt, Benachrichtigung folgt nach der Übertragung.'
-                    : 'Termin gespeichert, Benachrichtigung wird verschickt.',
+                    ? '$what vorgemerkt, Benachrichtigung folgt nach der Übertragung.'
+                    : '$what gespeichert, Benachrichtigung wird verschickt.',
               ),
             ),
           );
@@ -1120,32 +1417,43 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
   }
 
   Future<void> _delete() async {
-    final yes = await showDialog<bool>(
+    final series = widget.event!.inSeries;
+    // 'single' or, for a series, 'following'.
+    final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Termin löschen?'),
-        content: const Text(
-          'Der Termin und seine Rückmeldungen werden entfernt.',
+        title: Text(series ? 'Serientermin löschen?' : 'Termin löschen?'),
+        content: Text(
+          series
+              ? 'Der Termin gehört zu einer Serie. Gelöschte Termine verlieren '
+                    'ihre Rückmeldungen.'
+              : 'Der Termin und seine Rückmeldungen werden entfernt.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            onPressed: () => Navigator.pop(ctx),
             child: const Text('Abbrechen'),
           ),
+          if (series)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'following'),
+              child: const Text('Diesen und alle folgenden'),
+            ),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Löschen'),
+            onPressed: () => Navigator.pop(ctx, 'single'),
+            child: Text(series ? 'Nur diesen Termin' : 'Löschen'),
           ),
         ],
       ),
     );
-    if (yes != true || !mounted) return;
+    if (choice == null || !mounted) return;
     setState(() => _busy = true);
     try {
       await widget.controller.performAction({
         'action': 'event.delete',
         'id': widget.event!.id,
         'version': widget.event!.version,
+        if (choice == 'following') 'series': 'following',
       });
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -1193,6 +1501,49 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
               ),
               onTap: () => _pick(false),
             ),
+            if (widget.event == null) ...[
+              const Divider(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: DropdownButtonFormField<SeriesRhythm?>(
+                  key: const ValueKey('event-repeat'),
+                  initialValue: _repeat,
+                  decoration: const InputDecoration(
+                    labelText: 'Wiederholen',
+                    prefixIcon: Icon(Icons.repeat),
+                  ),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('Nie')),
+                    for (final r in SeriesRhythm.values)
+                      DropdownMenuItem(value: r, child: Text(r.label)),
+                  ],
+                  onChanged: (r) => setState(() => _repeat = r),
+                ),
+              ),
+              if (_series case final series?) ...[
+                ListTile(
+                  key: const ValueKey('event-repeat-until'),
+                  leading: const Icon(Icons.event_repeat),
+                  title: const Text('bis'),
+                  subtitle: Text(
+                    DateFormat('EEEE, d. MMMM yyyy', 'de').format(_until),
+                  ),
+                  onTap: _pickUntil,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                  child: Text(
+                    series.problem ?? series.summary,
+                    key: const ValueKey('event-repeat-summary'),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: series.problem == null
+                          ? null
+                          : Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ],
         ),
       ),
@@ -1236,21 +1587,6 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
             .toList(),
         onChanged: (s) => setState(() => _kind = s!),
       ),
-      const SizedBox(height: 20),
-      DropdownButtonFormField<String>(
-        initialValue: _production ?? '',
-        isExpanded: true,
-        decoration: const InputDecoration(labelText: 'Produktion'),
-        items: [
-          const DropdownMenuItem(value: '', child: Text('Keine Zuordnung')),
-          for (final p in widget.controller.productions)
-            DropdownMenuItem(
-              value: p.id,
-              child: Text(p.title, overflow: TextOverflow.ellipsis),
-            ),
-        ],
-        onChanged: (s) => setState(() => _production = s == '' ? null : s),
-      ),
       const SizedBox(height: 14),
       SwitchListTile(
         value: _locked,
@@ -1271,7 +1607,8 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
                     'Tagen vorher gepusht.'
               : widget.controller.pushConfigured
               ? widget.event == null
-                    ? 'Geht an: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}'
+                    ? '${_series == null ? '' : 'Eine Benachrichtigung für die ganze Serie. '}'
+                          'Geht an: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}'
                     // Changes only reach people who already answered.
                     : 'Geht an alle, die schon zu- oder abgesagt haben '
                           '(${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)})'
@@ -1280,8 +1617,10 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       ),
       const SizedBox(height: 24),
       FilledButton(
-        onPressed: _busy ? null : _save,
-        child: const Text('Termin speichern'),
+        onPressed: _busy || _series?.problem != null ? null : _save,
+        child: Text(
+          _series == null ? 'Termin speichern' : 'Terminserie speichern',
+        ),
       ),
       if (widget.event != null)
         Padding(
@@ -1386,9 +1725,20 @@ class _ProductionsAdminScreenState extends State<ProductionsAdminScreen> {
                     ? 'Archiv · '
                     : p['id'] == widget.controller.activeProductions.firstOrNull?.id
                     ? 'Neuestes Stück · '
-                    : ''}${intValue(p['sceneCount'])} Szenen · ${jsonList(p['roles']).length} Rollen',
+                    : ''}${intValue(p['sceneCount'])} Szenen · ${jsonList(p['roles']).isEmpty ? '0 Rollen' : '${ProductionCast.fromRecord(p).castCount} von ${jsonList(p['roles']).length} Rollen besetzt'}',
               ),
-              trailing: const Icon(Icons.chevron_right),
+              trailing: IconButton(
+                key: ValueKey('production-casting-${p['id']}'),
+                tooltip: 'Besetzung & Team',
+                icon: const Icon(Icons.groups_outlined),
+                onPressed: () => openPage(
+                  context,
+                  CastingScreen(
+                    controller: widget.controller,
+                    productionId: textValue(p['id']),
+                  ),
+                ),
+              ),
               onTap: () => openPage(
                 context,
                 ProductionEditorScreen(
@@ -1417,8 +1767,8 @@ class ProductionEditorScreen extends StatefulWidget {
 
 class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
   late final TextEditingController _title, _subtitle;
-  late JsonMap _casting;
-  late Set<int> _directors, _crew;
+  // Casting changes elsewhere raise the version; it is re-read on return.
+  late int _version;
   bool _busy = false;
   @override
   void initState() {
@@ -1429,13 +1779,26 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
     _subtitle = TextEditingController(
       text: textValue(widget.production?['subtitle']),
     );
-    _casting = jsonMap(widget.production?['casting']);
-    _directors = jsonList(
-      widget.production?['directorMemberIds'],
-    ).map((v) => intValue(v)).toSet();
-    _crew = jsonList(
-      widget.production?['memberIds'],
-    ).map((v) => intValue(v)).toSet();
+    _version = intValue(widget.production?['version'] ?? 1);
+  }
+
+  JsonMap? get _current => widget.controller.productionRecords
+      .where((p) => p['id'] == widget.production?['id'])
+      .firstOrNull;
+
+  Future<void> _openCasting() async {
+    final id = textValue(widget.production?['id']);
+    final before = intValue(_current?['version'] ?? _version);
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            CastingScreen(controller: widget.controller, productionId: id),
+      ),
+    );
+    final after = intValue(_current?['version'] ?? _version);
+    // Only casting changes made meanwhile are adopted; other edits still conflict.
+    if (mounted && before == _version) setState(() => _version = after);
   }
 
   @override
@@ -1451,12 +1814,9 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
       await widget.controller.performAction({
         'action': 'production.save',
         'id': widget.production?['id'],
-        'version': widget.production?['version'] ?? 1,
+        'version': _version,
         'title': _title.text,
         'subtitle': _subtitle.text,
-        'casting': _casting,
-        'directorMemberIds': _directors.toList(),
-        'memberIds': _crew.toList(),
       });
       if (widget.production?['id'] != null) {
         await widget.controller.loadScript(textValue(widget.production!['id']));
@@ -1500,79 +1860,45 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
         controller: _subtitle,
         decoration: const InputDecoration(labelText: 'Untertitel'),
       ),
-      const SectionTitle('Besetzung'),
-      for (final r in jsonList(widget.production?['roles']).map(jsonMap))
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: DropdownButtonFormField<int>(
-            initialValue: _casting[textValue(r['id'])] == null
-                ? 0
-                : intValue(_casting[textValue(r['id'])]),
-            isExpanded: true,
-            decoration: InputDecoration(labelText: textValue(r['name'])),
-            items: [
-              const DropdownMenuItem(
-                value: 0,
-                child: Text('Noch nicht besetzt'),
+      const SectionTitle('Besetzung & Team'),
+      if (widget.production == null)
+        Text(
+          'Nach dem Speichern kannst du Rollen besetzen sowie Regie und Team '
+          'zuordnen.',
+          style: Theme.of(context).textTheme.bodyMedium,
+        )
+      else
+        Builder(
+          builder: (context) {
+            final cast = ProductionCast.fromRecord(
+              _current ?? widget.production!,
+            );
+            final open = cast.roles.length - cast.castCount;
+            return Card(
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                key: const ValueKey('production-editor-casting'),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
+                leading: const Icon(Icons.groups_outlined),
+                title: Text(
+                  cast.roles.isEmpty
+                      ? 'Regie und Team zuordnen'
+                      : '${cast.castCount} von ${cast.roles.length} Rollen besetzt',
+                ),
+                subtitle: Text(
+                  '${open > 0 ? '$open offen · ' : ''}Ensemble: '
+                  '${cast.ensemble.length} '
+                  '${cast.ensemble.length == 1 ? 'Person' : 'Personen'}',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _busy ? null : _openCasting,
               ),
-              for (final m in widget.controller.members.where(
-                (m) => m.active || m.id == _casting[textValue(r['id'])],
-              ))
-                DropdownMenuItem(value: m.id, child: Text(m.name)),
-            ],
-            onChanged: (id) => setState(() {
-              if (id == 0) {
-                _casting.remove(textValue(r['id']));
-              } else {
-                _casting[textValue(r['id'])] = id;
-              }
-            }),
-          ),
+            );
+          },
         ),
-      if (jsonList(widget.production?['roles']).isEmpty)
-        const Text('Rollen erscheinen nach dem Drehbuchimport.'),
-      const SectionTitle('Regie'),
-      for (final m in widget.controller.members.where((m) => m.active))
-        CheckboxListTile(
-          value: _directors.contains(m.id),
-          title: Text(m.name),
-          onChanged: (v) => setState(() {
-            if (v == true) {
-              _directors.add(m.id);
-            } else {
-              _directors.remove(m.id);
-            }
-          }),
-        ),
-      const SectionTitle('Weitere Mitwirkende'),
-      Text(
-        'Technik, Maske, Souffleuse … Zusammen mit Besetzung und Regie bilden '
-        'sie das Ensemble des Stücks, das man bei Terminen, Push und '
-        'Mitteilungen als Empfänger wählen kann.',
-        style: Theme.of(context).textTheme.bodySmall,
-      ),
-      const SizedBox(height: 12),
-      PersonPicker(
-        controller: widget.controller,
-        label: 'Ohne Rolle im Drehbuch',
-        selected: _crew,
-        onChanged: (value) => setState(() => _crew = value),
-      ),
-      const SizedBox(height: 8),
-      Builder(
-        builder: (context) {
-          final ensemble = {
-            ..._casting.values.where((v) => v != null).map(intValue),
-            ..._directors,
-            ..._crew,
-          };
-          return Text(
-            'Ensemble des Stücks: ${ensemble.length} '
-            '${ensemble.length == 1 ? 'Person' : 'Personen'}',
-            style: Theme.of(context).textTheme.titleSmall,
-          );
-        },
-      ),
       const SizedBox(height: 24),
       FilledButton(
         onPressed: _busy ? null : _save,

@@ -110,6 +110,7 @@ class TheaterEvent {
     this.personIds = const [],
     this.productionIds = const [],
     this.slotPoolId,
+    this.seriesId,
   });
   final String id,
       title,
@@ -141,6 +142,11 @@ class TheaterEvent {
   /// attendance follows the booking instead of a response.
   final String? slotPoolId;
   bool get fromSlotPool => slotPoolId != null;
+
+  /// Shared by the events created together as a recurring series; each one is
+  /// still edited on its own.
+  final String? seriesId;
+  bool get inSeries => seriesId != null;
   bool get needsResponse => response == 'open' && !locked && !fromSlotPool;
   bool acceptsResponsesAt(DateTime now) =>
       !locked &&
@@ -180,6 +186,7 @@ class TheaterEvent {
     slotPoolId: json['slotPoolId'] == null
         ? null
         : textValue(json['slotPoolId']),
+    seriesId: json['seriesId'] == null ? null : textValue(json['seriesId']),
   );
   TheaterEvent copyWith({
     String? response,
@@ -211,6 +218,7 @@ class TheaterEvent {
     personIds: personIds,
     productionIds: productionIds,
     slotPoolId: slotPoolId,
+    seriesId: seriesId,
   );
   JsonMap toJson() => {
     'id': id,
@@ -235,6 +243,7 @@ class TheaterEvent {
     'productionId': productionId,
     'sceneIds': sceneIds,
     if (slotPoolId != null) 'slotPoolId': slotPoolId,
+    if (seriesId != null) 'seriesId': seriesId,
   };
 }
 

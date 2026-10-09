@@ -114,7 +114,7 @@ jobs:
         run: node server/scripts/play-release.mjs prepare "$RUNNER_TEMP/play-release.json"
       - name: Build signed app bundle
         if: steps.current.outputs.publish == 'true'
-        run: flutter build appbundle --release --dart-define-from-file=config/production.android.json --build-number=${{ steps.play.outputs.version_code }}
+        run: flutter build appbundle --release --dart-define-from-file=config/production.android.json --build-number=${{ steps.play.outputs.version_code }} --dart-define=APP_BUILD=${{ steps.play.outputs.version_code }}
       - name: Publish and verify internal release
         if: steps.current.outputs.publish == 'true'
         run: |

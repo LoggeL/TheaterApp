@@ -4,6 +4,7 @@ import '../core/app_controller.dart';
 import '../core/identity.dart';
 import '../core/models.dart';
 import 'admin.dart';
+import 'casting.dart';
 import 'theme.dart';
 
 class AccountsAdminScreen extends StatefulWidget {
@@ -405,9 +406,9 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
             await Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => ProductionEditorScreen(
+                builder: (_) => CastingScreen(
                   controller: widget.controller,
-                  production: production,
+                  productionId: textValue(production['id']),
                 ),
               ),
             );

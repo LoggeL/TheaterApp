@@ -16,7 +16,8 @@ export function importRoster(store, input, { apply = false } = {}) {
       return { ...done.report, alreadyApplied: true };
     }
     const allMembers = store.all('members'), changes = new Map(), bySource = new Map();
-    let nextId = Math.max(0, ...allMembers.map(m => m.id)) + 1;
+    // Ids of deleted people are never reused.
+    let nextId = Math.max(0, store.get('settings', 'lastPersonId')?.id ?? 0, ...allMembers.map(m => m.id)) + 1;
     for (const m of members) {
       const sourceId = String(m.sourceId), ref = `${source}:${sourceId}`;
       if (!m.name?.trim() || bySource.has(sourceId)) throw Error(`Invalid or duplicate source person: ${sourceId}`);

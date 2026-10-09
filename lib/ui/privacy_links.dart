@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../core/app_version.dart';
 
 class PrivacyLinks extends StatelessWidget {
-  const PrivacyLinks({super.key});
+  const PrivacyLinks({super.key, this.showVersion = true});
+
+  /// The sign-in footers show the version; Mein Bereich has its own footer.
+  final bool showVersion;
 
   Future<void> _open(BuildContext context, String fragment) async {
     final uri = Uri.parse(
@@ -32,17 +36,28 @@ class PrivacyLinks extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Wrap(
-    alignment: WrapAlignment.center,
+  Widget build(BuildContext context) => Column(
     children: [
-      TextButton(
-        onPressed: () => _open(context, ''),
-        child: const Text('Datenschutz'),
+      Wrap(
+        alignment: WrapAlignment.center,
+        children: [
+          TextButton(
+            onPressed: () => _open(context, ''),
+            child: const Text('Datenschutz'),
+          ),
+          TextButton(
+            onPressed: () => _open(context, '#konto-loeschen'),
+            child: const Text('Konto und Daten löschen'),
+          ),
+        ],
       ),
-      TextButton(
-        onPressed: () => _open(context, '#konto-loeschen'),
-        child: const Text('Konto und Daten löschen'),
-      ),
+      if (showVersion)
+        Text(
+          appVersionLabel,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: Theme.of(context).colorScheme.outline,
+          ),
+        ),
     ],
   );
 }

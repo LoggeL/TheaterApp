@@ -112,15 +112,18 @@ bool invitedToSlotPool(AppController controller, SlotPool pool) {
 }
 
 /// Open pools in which the signed-in person still has to choose a slot.
-int slotPoolsAwaitingChoice(AppController controller) => slotPoolsOf(controller)
-    .where(
-      (p) =>
-          !p.closed &&
-          p.myBooking == null &&
-          invitedToSlotPool(controller, p) &&
-          p.hasFreeSlotAt(controller.now),
-    )
-    .length;
+List<SlotPool> slotPoolsToChoose(AppController controller) =>
+    slotPoolsOf(controller)
+        .where(
+          (p) =>
+              !p.closed &&
+              p.myBooking == null &&
+              invitedToSlotPool(controller, p) &&
+              p.hasFreeSlotAt(controller.now),
+        )
+        .toList();
+int slotPoolsAwaitingChoice(AppController controller) =>
+    slotPoolsToChoose(controller).length;
 
 String slotDay(DateTime day) =>
     '${DateFormat.E('de').format(day).replaceAll('.', '')} '

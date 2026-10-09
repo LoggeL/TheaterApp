@@ -154,15 +154,19 @@ class RehearsalCalendar extends StatelessWidget {
                           child: Container(
                             margin: const EdgeInsets.all(2),
                             decoration: BoxDecoration(
+                              // Days with events stand out from empty ones;
+                              // performances tint stronger in their colour.
                               color: chosen
                                   ? scheme.primary
-                                  : today
-                                  ? scheme.primary.withValues(alpha: .1)
                                   : highlight != null
                                   ? eventKindColor(
                                       highlight.kind,
                                       dark: dark,
-                                    ).withValues(alpha: .12)
+                                    ).withValues(alpha: .22)
+                                  : count > 0
+                                  ? scheme.primary.withValues(
+                                      alpha: past ? .05 : (dark ? .16 : .1),
+                                    )
                                   : null,
                               borderRadius: BorderRadius.circular(14),
                               border: today && !chosen
@@ -179,8 +183,11 @@ class RehearsalCalendar extends StatelessWidget {
                                     style: TextStyle(
                                       color: foreground,
                                       fontSize: 14,
-                                      fontWeight: chosen || today
-                                          ? FontWeight.bold
+                                      fontWeight:
+                                          chosen ||
+                                              today ||
+                                              (count > 0 && !past)
+                                          ? FontWeight.w800
                                           : FontWeight.normal,
                                     ),
                                   ),
@@ -224,7 +231,7 @@ class RehearsalCalendar extends StatelessWidget {
                                     ),
                                 const SizedBox(height: 3),
                                 SizedBox(
-                                  height: 6,
+                                  height: 7,
                                   child: count == 0
                                       ? null
                                       : Row(
@@ -235,8 +242,8 @@ class RehearsalCalendar extends StatelessWidget {
                                               3,
                                             ))
                                               Container(
-                                                width: 6,
-                                                height: 6,
+                                                width: 7,
+                                                height: 7,
                                                 margin:
                                                     const EdgeInsets.symmetric(
                                                       horizontal: 1,

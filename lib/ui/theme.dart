@@ -205,17 +205,26 @@ class SectionTitle extends StatelessWidget {
   final String title;
   final Widget? trailing;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 28, bottom: 14),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(title, style: Theme.of(context).textTheme.titleLarge),
-        ),
-        ?trailing,
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    final text = Text(title, style: Theme.of(context).textTheme.titleLarge);
+    // With very large text the action no longer fits beside the title.
+    final stacked =
+        trailing != null && MediaQuery.textScalerOf(context).scale(10) > 15;
+    return Padding(
+      padding: const EdgeInsets.only(top: 28, bottom: 14),
+      child: stacked
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [text, trailing!],
+            )
+          : Row(
+              children: [
+                Expanded(child: text),
+                ?trailing,
+              ],
+            ),
+    );
+  }
 }
 
 class StatePill extends StatelessWidget {

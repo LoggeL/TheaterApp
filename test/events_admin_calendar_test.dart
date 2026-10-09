@@ -265,6 +265,9 @@ void main() {
       (b) => b['action'] == 'event.save',
     );
     expect(body['productionIds'], ['winter']);
+    // The ensemble also links the play; there is no second production field.
+    expect(body['productionId'], 'winter');
+    expect(find.text('Keine Zuordnung'), findsNothing);
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });

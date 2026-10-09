@@ -4,7 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/ui/theme.dart';
 import 'package:theater_app/ui/today.dart';
 
-import 'app_controller_test.dart' show TestServer, signIn;
+import 'app_controller_test.dart' show TestServer, fixedNow, signIn;
 
 void main() {
   setUpAll(() => initializeDateFormatting('de'));
@@ -12,13 +12,13 @@ void main() {
   for (final answered in [false, true]) {
     testWidgets(
       answered
-          ? 'answered events keep their status on the start page'
+          ? 'answered events collapse to a compact row on the start page'
           : 'open events can be answered on the start page',
       (tester) async {
         tester.view.physicalSize = const Size(390, 1400);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
-        final start = DateTime.now().add(const Duration(days: 2));
+        final start = fixedNow.add(const Duration(days: 2));
         final server = TestServer();
         server.data['events'] = [
           {
@@ -52,9 +52,13 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
+        final compact = find.byKey(const ValueKey('today-next-compact'));
         if (answered) {
           expect(find.text('Bist du dabei?'), findsNothing);
+          expect(compact, findsOneWidget);
+          expect(find.text('Du bist dabei'), findsOneWidget);
         } else {
+          expect(compact, findsNothing);
           expect(find.text('Bist du dabei?'), findsOneWidget);
           await tester.tap(find.text('Kann nicht'));
           await tester.pumpAndSettle();
@@ -69,6 +73,8 @@ void main() {
             ['attendance', 'next', 'yes'],
           );
           expect(find.text('Bist du dabei?'), findsNothing);
+          expect(compact, findsOneWidget);
+          expect(find.text('Du bist dabei'), findsOneWidget);
         }
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());

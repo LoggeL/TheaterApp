@@ -805,6 +805,15 @@ class EventDetailContent extends StatelessWidget {
                 children: [
                   EventKindPill(event.kind),
                   if (marker != null) EventMarker(marker),
+                  if (event.inSeries)
+                    Tooltip(
+                      message: 'Serientermin',
+                      child: StatePill(
+                        'Serie',
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        icon: Icons.repeat,
+                      ),
+                    ),
                   if (eventIsPast(event, now))
                     StatePill(
                       'Vorbei',

@@ -10,8 +10,12 @@ import 'messages.dart';
 import 'polls.dart';
 import 'pwa_install.dart';
 import 'reader.dart';
+import 'slots.dart';
 import 'theme.dart';
 
+/// The start page, ordered by urgency: things still waiting for the person
+/// (an open response, unread messages, an open poll, a slot to choose) come
+/// first, answered and informational things follow in compact form.
 class TodayScreen extends StatelessWidget {
   const TodayScreen({
     super.key,
@@ -35,18 +39,12 @@ class TodayScreen extends StatelessWidget {
           ),
         );
 
-  void _latestMessage(BuildContext context) => Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => MessageDetailScreen(
-        controller: controller,
-        message: controller.messages.first,
-      ),
-    ),
-  );
+  void _open(BuildContext context, Widget screen) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
+    final now = controller.now;
     final upcoming =
         controller.events
             .where(
@@ -59,15 +57,56 @@ class TodayScreen extends StatelessWidget {
               b.startsAt ?? DateTime(9999),
             ),
           );
-    final next = upcoming.isEmpty ? null : upcoming.first;
-    final unanswered = upcoming
-        .where((e) => e.response == 'open' && controller.canRespondTo(e))
-        .length;
+    final next = upcoming.firstOrNull;
+    // Only a still answerable next event keeps the large card with quick
+    // answers; otherwise it shrinks to one compact row further down.
+    final nextOpen =
+        next != null && next.needsResponse && controller.canRespondTo(next);
+    final nextCard = next == null
+        ? const Card(
+            child: EmptyState(
+              icon: Icons.event_available_outlined,
+              title: 'Keine anstehenden Termine',
+              message: 'Aktuell stehen keine kommenden Termine an.',
+            ),
+          )
+        : nextOpen
+        ? _NextRehearsal(event: next, controller: controller, now: now)
+        : _NextCompact(event: next, controller: controller, now: now);
+    final unread = controller.messages.where((m) => m['read'] != true).toList();
+    final polls = controller.polls.where((p) => !p.isClosed).toList();
+    final pollToVote = polls.where((p) => p.selectedOptionId == null);
+    final pending = _pending(
+      context,
+      unread: unread,
+      poll: pollToVote.firstOrNull,
+      pools: slotPoolsToChoose(controller),
+    );
+    final events = _upcoming(context, upcoming);
+    final rest = [
+      ..._script(),
+      ..._done(
+        context,
+        poll: pollToVote.isEmpty ? polls.firstOrNull : null,
+        allRead: unread.isEmpty,
+      ),
+    ];
+    final header = [
+      Text(
+        'Hallo, ${controller.user?.firstName ?? 'Ensemble'}.',
+        style: Theme.of(context).textTheme.headlineLarge,
+      ),
+      const SizedBox(height: 8),
+      Text(
+        DateFormat('EEEE, d. MMMM', 'de').format(now),
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
+    ];
     return LayoutBuilder(
       builder: (context, constraints) {
         final scale = MediaQuery.textScalerOf(context).scale(16) / 16;
         if (constraints.maxWidth >= 900 && scale <= 1.35) {
-          return _desktop(context, now, upcoming, next, unanswered);
+          return _desktop(header, nextCard, events, [...pending, ...rest]);
         }
         return RefreshIndicator(
           onRefresh: controller.refresh,
@@ -75,135 +114,17 @@ class TodayScreen extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(22, 20, 22, 28),
             physics: const AlwaysScrollableScrollPhysics(),
             children: [
-              Text(
-                'Hallo, ${controller.user?.firstName ?? 'Ensemble'}.',
-                style: Theme.of(context).textTheme.headlineLarge,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                DateFormat('EEEE, d. MMMM', 'de').format(now),
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
+              ...header,
               const SizedBox(height: 26),
               if (!controller.isDemo) const PwaInstallCard(homeHint: true),
-              if (next != null)
-                _NextRehearsal(event: next, controller: controller)
-              else
-                const Card(
-                  child: EmptyState(
-                    icon: Icons.event_available_outlined,
-                    title: 'Keine anstehenden Termine',
-                    message: 'Aktuell stehen keine kommenden Termine an.',
-                  ),
-                ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _QuickTile(
-                      icon: Icons.mark_email_unread_outlined,
-                      value: '$unanswered',
-                      label: 'Rückmeldungen offen',
-                      onTap: onPlan,
-                      highlight: unanswered > 0,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _QuickTile(
-                      icon: Icons.auto_stories_outlined,
-                      value: '${controller.activeProductions.length}',
-                      label: 'Drehbücher für dich',
-                      onTap: onScripts,
-                    ),
-                  ),
-                ],
-              ),
-              if (controller.polls.any((p) => !p.isClosed)) ...[
-                const SectionTitle('Abstimmungen'),
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.poll_outlined),
-                    title: Text(
-                      controller.polls.firstWhere((p) => !p.isClosed).title,
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => PollsScreen(controller: controller),
-                      ),
-                    ),
-                  ),
-                ),
+              if (nextOpen) nextCard,
+              ...pending,
+              if (!nextOpen) ...[
+                if (pending.isNotEmpty) const SizedBox(height: 28),
+                nextCard,
               ],
-              SectionTitle(
-                'Dein Drehbuch',
-                trailing: TextButton(
-                  onPressed: onScripts,
-                  child: const Text('Alle ansehen'),
-                ),
-              ),
-              if (controller.activeProductions.isEmpty)
-                const Card(
-                  child: EmptyState(
-                    icon: Icons.menu_book_outlined,
-                    title: 'Kein aktuelles Stück',
-                    message:
-                        'Aktuelle Produktionen erscheinen hier. Ältere Stücke findest du im Drehbucharchiv.',
-                  ),
-                )
-              else
-                _ScriptShortcut(
-                  production: controller.activeProductions.first,
-                  controller: controller,
-                ),
-              SectionTitle(
-                'Als Nächstes',
-                trailing: TextButton(
-                  onPressed: onPlan,
-                  child: const Text('Zum Plan'),
-                ),
-              ),
-              ...upcoming
-                  .skip(1)
-                  .take(3)
-                  .map(
-                    (event) => Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: EventCard(event: event, controller: controller),
-                    ),
-                  ),
-              if (upcoming.length <= 1)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Text(
-                    'Weitere Termine erscheinen hier, sobald sie geplant sind.',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ),
-              if (controller.messages.isNotEmpty) ...[
-                SectionTitle(
-                  'Mitteilungen',
-                  trailing: TextButton(
-                    onPressed: () => _allMessages(context),
-                    child: const Text('Alle ansehen'),
-                  ),
-                ),
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.chat_bubble_outline),
-                    title: Text(textValue(controller.messages.first['title'])),
-                    subtitle: Text(
-                      textValue(controller.messages.first['body']),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _latestMessage(context),
-                  ),
-                ),
-              ],
+              ...events,
+              ...rest,
             ],
           ),
         );
@@ -211,14 +132,14 @@ class TodayScreen extends StatelessWidget {
     );
   }
 
+  /// Wide windows: events on the left, everything else on the right, each
+  /// column again ordered by urgency.
   Widget _desktop(
-    BuildContext context,
-    DateTime now,
-    List<TheaterEvent> upcoming,
-    TheaterEvent? next,
-    int unanswered,
+    List<Widget> header,
+    Widget nextCard,
+    List<Widget> events,
+    List<Widget> secondary,
   ) {
-    final poll = controller.polls.where((p) => !p.isClosed).firstOrNull;
     return RefreshIndicator(
       onRefresh: controller.refresh,
       child: SingleChildScrollView(
@@ -237,46 +158,10 @@ class TodayScreen extends StatelessWidget {
                     key: const ValueKey('today-primary-column'),
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        'Hallo, ${controller.user?.firstName ?? 'Ensemble'}.',
-                        style: Theme.of(context).textTheme.headlineLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        DateFormat('EEEE, d. MMMM', 'de').format(now),
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
+                      ...header,
                       const SizedBox(height: 24),
-                      if (next != null)
-                        _NextRehearsal(event: next, controller: controller)
-                      else
-                        const Card(
-                          child: EmptyState(
-                            icon: Icons.event_available_outlined,
-                            title: 'Keine anstehenden Termine',
-                            message:
-                                'Aktuell stehen keine kommenden Termine an.',
-                          ),
-                        ),
-                      SectionTitle(
-                        'Als Nächstes',
-                        trailing: TextButton(
-                          onPressed: onPlan,
-                          child: const Text('Zum Plan'),
-                        ),
-                      ),
-                      for (final event in upcoming.skip(1).take(3))
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: EventCard(
-                            event: event,
-                            controller: controller,
-                          ),
-                        ),
-                      if (upcoming.length <= 1)
-                        const Text(
-                          'Weitere Termine erscheinen hier, sobald sie geplant sind.',
-                        ),
+                      nextCard,
+                      ...events,
                     ],
                   ),
                 ),
@@ -286,77 +171,7 @@ class TodayScreen extends StatelessWidget {
                   child: Column(
                     key: const ValueKey('today-secondary-column'),
                     crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SectionTitle(
-                        'Dein Drehbuch',
-                        trailing: TextButton(
-                          onPressed: onScripts,
-                          child: const Text('Alle ansehen'),
-                        ),
-                      ),
-                      if (controller.activeProductions.isEmpty)
-                        const Card(
-                          child: EmptyState(
-                            icon: Icons.menu_book_outlined,
-                            title: 'Kein aktuelles Stück',
-                            message:
-                                'Aktuelle Produktionen erscheinen hier. Ältere Stücke findest du im Drehbucharchiv.',
-                          ),
-                        )
-                      else
-                        _ScriptShortcut(
-                          production: controller.activeProductions.first,
-                          controller: controller,
-                        ),
-                      const SizedBox(height: 16),
-                      _QuickTile(
-                        icon: Icons.mark_email_unread_outlined,
-                        value: '$unanswered',
-                        label: 'Rückmeldungen offen',
-                        onTap: onPlan,
-                        highlight: unanswered > 0,
-                      ),
-                      if (poll != null) ...[
-                        SectionTitle(
-                          'Abstimmung',
-                          trailing: TextButton(
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    PollsScreen(controller: controller),
-                              ),
-                            ),
-                            child: const Text('Alle ansehen'),
-                          ),
-                        ),
-                        _PollPreview(poll: poll, controller: controller),
-                      ],
-                      if (controller.messages.isNotEmpty) ...[
-                        SectionTitle(
-                          'Mitteilungen',
-                          trailing: TextButton(
-                            onPressed: () => _allMessages(context),
-                            child: const Text('Alle ansehen'),
-                          ),
-                        ),
-                        Card(
-                          child: ListTile(
-                            leading: const Icon(Icons.chat_bubble_outline),
-                            title: Text(
-                              textValue(controller.messages.first['title']),
-                            ),
-                            subtitle: Text(
-                              textValue(controller.messages.first['body']),
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => _latestMessage(context),
-                          ),
-                        ),
-                      ],
-                    ],
+                    children: secondary,
                   ),
                 ),
               ],
@@ -365,6 +180,151 @@ class TodayScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Everything still waiting for the person, most urgent first.
+  List<Widget> _pending(
+    BuildContext context, {
+    required List<JsonMap> unread,
+    required Poll? poll,
+    required List<SlotPool> pools,
+  }) => [
+    if (unread.isNotEmpty) ...[
+      SectionTitle(
+        'Neue Mitteilungen',
+        trailing: TextButton(
+          onPressed: () => _allMessages(context),
+          child: const Text('Alle ansehen'),
+        ),
+      ),
+      for (final (i, m) in unread.take(3).indexed) ...[
+        if (i > 0) const SizedBox(height: 10),
+        _CompactTile(
+          key: ValueKey('today-unread-${m['id']}'),
+          icon: Icons.chat_bubble_outline,
+          title: textValue(m['title']),
+          subtitle: textValue(m['body']),
+          highlight: true,
+          onTap: () => _open(
+            context,
+            MessageDetailScreen(controller: controller, message: m),
+          ),
+        ),
+      ],
+      if (unread.length > 3)
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text(
+            '+ ${unread.length - 3} weitere ungelesene',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+    ],
+    if (poll != null) ...[
+      SectionTitle(
+        'Abstimmung',
+        trailing: TextButton(
+          onPressed: () => _open(context, PollsScreen(controller: controller)),
+          child: const Text('Alle ansehen'),
+        ),
+      ),
+      _PollPreview(poll: poll, controller: controller),
+    ],
+    if (pools.isNotEmpty) ...[
+      const SectionTitle('Terminfinder'),
+      for (final (i, pool) in pools.indexed) ...[
+        if (i > 0) const SizedBox(height: 10),
+        _CompactTile(
+          icon: Icons.edit_calendar_outlined,
+          title: pool.title,
+          subtitle: 'Wähle noch ein Zeitfenster · ${slotPoolRange(pool)}',
+          highlight: true,
+          onTap: () => openSlotPool(context, controller, pool.id),
+        ),
+      ],
+    ],
+  ];
+
+  /// The events after the next one.
+  List<Widget> _upcoming(BuildContext context, List<TheaterEvent> upcoming) => [
+    SectionTitle(
+      'Als Nächstes',
+      trailing: TextButton(onPressed: onPlan, child: const Text('Zum Plan')),
+    ),
+    for (final event in upcoming.skip(1).take(3))
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: EventCard(event: event, controller: controller),
+      ),
+    if (upcoming.length <= 1)
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Text(
+          'Weitere Termine erscheinen hier, sobald sie geplant sind.',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      ),
+  ];
+
+  List<Widget> _script() => [
+    SectionTitle(
+      'Dein Drehbuch',
+      trailing: TextButton(
+        onPressed: onScripts,
+        child: const Text('Alle ansehen'),
+      ),
+    ),
+    if (controller.activeProductions.isEmpty)
+      const Card(
+        child: EmptyState(
+          icon: Icons.menu_book_outlined,
+          title: 'Kein aktuelles Stück',
+          message:
+              'Aktuelle Produktionen erscheinen hier. Ältere Stücke findest du im Drehbucharchiv.',
+        ),
+      )
+    else
+      _ScriptShortcut(
+        production: controller.activeProductions.first,
+        controller: controller,
+      ),
+  ];
+
+  /// Already handled things, collapsed to one row each.
+  List<Widget> _done(
+    BuildContext context, {
+    required Poll? poll,
+    required bool allRead,
+  }) {
+    final latest = controller.messages.firstOrNull;
+    final tiles = [
+      if (poll != null)
+        _CompactTile(
+          key: const ValueKey('today-poll-voted'),
+          icon: Icons.how_to_vote_outlined,
+          title: poll.title,
+          subtitle: 'Abstimmung · Du hast abgestimmt',
+          onTap: () => _open(
+            context,
+            PollDetailScreen(controller: controller, pollId: poll.id),
+          ),
+        ),
+      if (allRead && latest != null)
+        _CompactTile(
+          key: const ValueKey('today-messages-read'),
+          icon: Icons.mark_chat_read_outlined,
+          title: 'Mitteilungen',
+          subtitle: 'Alles gelesen · zuletzt „${textValue(latest['title'])}“',
+          onTap: () => _allMessages(context),
+        ),
+    ];
+    return [
+      if (tiles.isNotEmpty) const SectionTitle('Erledigt'),
+      for (final (i, tile) in tiles.indexed) ...[
+        if (i > 0) const SizedBox(height: 10),
+        tile,
+      ],
+    ];
   }
 }
 
@@ -437,13 +397,19 @@ class _PollPreview extends StatelessWidget {
   );
 }
 
+/// The next event while it still waits for an answer, with quick answers.
 class _NextRehearsal extends StatelessWidget {
-  const _NextRehearsal({required this.event, required this.controller});
+  const _NextRehearsal({
+    required this.event,
+    required this.controller,
+    required this.now,
+  });
   final TheaterEvent event;
   final AppController controller;
+  final DateTime now;
   @override
   Widget build(BuildContext context) {
-    final marker = eventMarker(event, DateTime.now());
+    final marker = eventMarker(event, now);
     final accent = eventKindColor(event.kind, dark: true);
     return Container(
       padding: const EdgeInsets.all(23),
@@ -518,16 +484,7 @@ class _NextRehearsal extends StatelessWidget {
             event.place.isEmpty ? 'Ort folgt' : event.place,
           ),
           const SizedBox(height: 20),
-          if (event.needsResponse && controller.canRespondTo(event))
-            _QuickRsvp(event: event, controller: controller)
-          else
-            RsvpStatusBadge(
-              status: event.response,
-              expectedArrivalAt: event.expectedArrivalAt,
-              locked: responsesClosed(controller, event),
-              onDark: true,
-              emphasizeOpen: !event.fromSlotPool,
-            ),
+          _QuickRsvp(event: event, controller: controller),
           const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
@@ -542,6 +499,119 @@ class _NextRehearsal extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The next event once it is answered (or can no longer be answered): one
+/// compact, tappable row with the essentials, leaving room for open items.
+class _NextCompact extends StatelessWidget {
+  const _NextCompact({
+    required this.event,
+    required this.controller,
+    required this.now,
+  });
+  final TheaterEvent event;
+  final AppController controller;
+  final DateTime now;
+
+  String get _summary => switch (event.response) {
+    'yes' => 'Du bist dabei',
+    'late' => 'Du kommst später',
+    'no' => 'Du bist nicht dabei',
+    _ when event.fromSlotPool => 'Zeitfenster gebucht',
+    _ when !controller.canRespondTo(event) => 'Rückmeldung geschlossen',
+    _ => 'Rückmeldung offen',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final marker = eventMarker(event, now);
+    return Material(
+      key: const ValueKey('today-next-compact'),
+      color: StageTheme.ink,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(
+          color: marker != null
+              ? StageTheme.orange
+              : Colors.white.withValues(alpha: .1),
+          width: marker != null ? 2 : 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: () => openEvent(context, controller, event.id),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Eyebrow(
+                            'Dein nächster Termin',
+                            color: Color(0xFFFFB18A),
+                          ),
+                        ),
+                        if (marker != null) EventMarker(marker, onDark: true),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      event.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        height: 1.2,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${eventDate(event)} · ${eventTime(event)}',
+                      style: const TextStyle(
+                        color: Color(0xFFDAE0D9),
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        RsvpStatusBadge(
+                          status: event.response,
+                          expectedArrivalAt: event.expectedArrivalAt,
+                          locked: responsesClosed(controller, event),
+                          onDark: true,
+                        ),
+                        Text(
+                          _summary,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right, color: Colors.white),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -770,64 +840,50 @@ class _HeroMeta extends StatelessWidget {
   );
 }
 
-class _QuickTile extends StatelessWidget {
-  const _QuickTile({
+/// One compact, tappable row; tinted while it still needs attention.
+class _CompactTile extends StatelessWidget {
+  const _CompactTile({
+    super.key,
     required this.icon,
-    required this.value,
-    required this.label,
+    required this.title,
+    required this.subtitle,
     required this.onTap,
     this.highlight = false,
   });
   final IconData icon;
-  final String value, label;
+  final String title, subtitle;
   final VoidCallback onTap;
   final bool highlight;
   @override
-  Widget build(BuildContext context) => Card(
-    color: highlight
-        ? Color.alphaBlend(
-            Theme.of(context).colorScheme.primary.withValues(alpha: .09),
-            Theme.of(context).cardTheme.color ??
-                Theme.of(context).colorScheme.surfaceContainerLow,
-          )
-        : null,
-    child: InkWell(
-      borderRadius: BorderRadius.circular(24),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.all(17),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  icon,
-                  size: 21,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const Spacer(),
-                Text(
-                  value,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: highlight
-                        ? Theme.of(context).colorScheme.primary
-                        : null,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Text(
-              label,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-          ],
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      color: highlight
+          ? theme.colorScheme.primaryContainer.withValues(alpha: .35)
+          : null,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+        leading: Badge(
+          isLabelVisible: highlight,
+          smallSize: 10,
+          backgroundColor: StageTheme.orange,
+          child: Icon(icon),
         ),
+        title: Text(
+          title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontWeight: highlight ? FontWeight.w800 : FontWeight.w600,
+          ),
+        ),
+        subtitle: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: onTap,
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _ScriptShortcut extends StatelessWidget {

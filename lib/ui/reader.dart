@@ -11,6 +11,7 @@ import '../core/app_controller.dart';
 import '../core/models.dart';
 import 'annotations.dart';
 import 'app_navigation.dart';
+import 'casting.dart';
 
 const _accent = Color(0xFFED6B36);
 const _ink = Color(0xFF242628);
@@ -1139,6 +1140,16 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
                         _load();
                       case 'focus':
                         _showLive();
+                      case 'casting':
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => CastingScreen(
+                              controller: widget.controller,
+                              productionId: widget.productionId,
+                            ),
+                          ),
+                        );
                     }
                   },
                   itemBuilder: (_) => [
@@ -1170,6 +1181,11 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
                       value: 'refresh',
                       child: Text('Fassung aktualisieren'),
                     ),
+                    if (widget.controller.user?.isAdmin == true)
+                      const PopupMenuItem(
+                        value: 'casting',
+                        child: Text('Besetzung & Team'),
+                      ),
                   ],
                 ),
               ],

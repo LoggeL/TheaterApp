@@ -1,4 +1,5 @@
 import 'privacy_links.dart';
+import '../core/app_version.dart';
 import 'participation.dart';
 import 'pwa_install.dart';
 import 'polls.dart';
@@ -232,7 +233,7 @@ class MoreScreen extends StatelessWidget {
             ),
           ],
         ),
-        const PrivacyLinks(),
+        const PrivacyLinks(showVersion: false),
         const PwaInstallCard(),
         const SizedBox(height: 26),
         OutlinedButton.icon(
@@ -272,7 +273,7 @@ class MoreScreen extends StatelessWidget {
         ),
         const SizedBox(height: 25),
         const Text(
-          '${Brand.name} · 0.3.0\n${Brand.subtitle}',
+          '${Brand.name} · $appVersionLabel\n${Brand.subtitle}',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 12, height: 1.6),
         ),
@@ -281,7 +282,7 @@ class MoreScreen extends StatelessWidget {
           onPressed: () => showAboutDialog(
             context: context,
             applicationName: Brand.name,
-            applicationVersion: '0.3.0',
+            applicationVersion: appVersionLabel,
             applicationIcon: const BrandLogo(size: 41),
             children: const [
               Text(

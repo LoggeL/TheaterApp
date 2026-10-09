@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../data/api_client.dart';
 import '../data/demo_data.dart';
 import '../data/local_store.dart';
+import 'casting.dart';
 import 'models.dart';
 import 'identity.dart';
 
@@ -179,6 +180,10 @@ class AppController extends ChangeNotifier {
   bool canRespondTo(TheaterEvent event) => event.acceptsResponsesAt(_clock());
   bool canDecline(TheaterEvent event) => event.acceptsDeclineAt(_clock());
 
+  // `event.save` and `event.delete` are not projected optimistically: a queued
+  // new event (or a whole series, `repeat`) and a queued deletion (also
+  // `series: 'following'`) show up once the server confirmed them and the
+  // snapshot is refreshed, so the server alone computes series occurrences.
   String? _versionedEventId(JsonMap payload) {
     final id = switch (payload['action']) {
       'event.script' => textValue(payload['eventId']),
@@ -1430,6 +1435,16 @@ class AppController extends ChangeNotifier {
                 }
               : item;
         }).toList();
+      case 'production.cast':
+        view['productions'] = jsonList(view['productions']).map((item) {
+          final production = jsonMap(item);
+          return production['id'] == body['id']
+              ? applyCastChanges(
+                  production,
+                  jsonList(body['changes']).map(jsonMap),
+                )
+              : item;
+        }).toList();
       case 'attendance':
         final attendance = jsonMap(view['attendanceByEvent']),
             reasons = jsonMap(view['declineReasons']);
@@ -1552,6 +1567,14 @@ class AppController extends ChangeNotifier {
         view['messages'] = jsonList(
           view['messages'],
         ).where((m) => jsonMap(m)['id'] != body['id']).toList();
+      case 'member.delete':
+        // Only the person disappears optimistically; the references the server
+        // cleans up (casting, invitations, responses …) arrive with the refresh.
+        view['members'] = jsonList(view['members'])
+            .where(
+              (m) => intValue(jsonMap(m)['id'], -1) != intValue(body['id'], -2),
+            )
+            .toList();
       case 'event.script':
         view['events'] = jsonList(view['events']).map((item) {
           final event = jsonMap(item);

@@ -4,6 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/ui/polls.dart';
+import 'package:theater_app/ui/theme.dart';
 import 'package:theater_app/ui/today.dart';
 import 'app_controller_test.dart' show TestServer, signIn;
 
@@ -59,7 +60,12 @@ void main() {
     );
     await tester.tap(find.text('Zum Plan'));
     expect(plans, 1);
-    await tester.tap(find.text('Alle ansehen').first);
+    await tester.tap(
+      find.descendant(
+        of: find.widgetWithText(SectionTitle, 'Dein Drehbuch'),
+        matching: find.text('Alle ansehen'),
+      ),
+    );
     expect(scripts, 1);
     final poll = controller.polls.firstWhere((p) => !p.isClosed);
     expect(find.text(poll.title), findsOneWidget);
