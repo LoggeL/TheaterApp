@@ -131,6 +131,13 @@ class TheaterEvent {
   bool get needsResponse => response == 'open' && !locked;
   bool acceptsResponsesAt(DateTime now) =>
       !locked && !((endsAt ?? startsAt)?.isBefore(now) ?? false);
+
+  /// Shortly before the start, members may still confirm or report a late
+  /// arrival, but can no longer decline or withdraw. Mirrors the server.
+  static const declineCutoff = Duration(hours: 1);
+  bool acceptsDeclineAt(DateTime now) =>
+      acceptsResponsesAt(now) &&
+      (startsAt == null || startsAt!.subtract(declineCutoff).isAfter(now));
   factory TheaterEvent.fromJson(JsonMap json) => TheaterEvent(
     id: textValue(json['id']),
     title: textValue(json['title']),

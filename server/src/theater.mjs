@@ -13,6 +13,8 @@ const day = value => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin
 const date = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : fail(400, 'Ungültige Zeitangabe.');
 const id = () => randomUUID();
 const list = value => Array.isArray(value) ? value : [];
+// Members can still confirm or report a late arrival, but no longer decline.
+const declineCutoffMs = 60 * 60 * 1000;
 export const eventTypes = ['rehearsal', 'readthrough', 'technical', 'costume', 'dress', 'performance', 'meeting', 'workshop', 'setup', 'teardown', 'social', 'other'];
 const initialRoles = ['Schauspiel', 'Regie', 'Technik', 'Kostüm', 'Maske', 'Bühnenbau', 'Organisation'];
 const initials = name => name.split(/\s+/).filter(Boolean).slice(0, 2).map(n => n[0]).join('').toUpperCase();
@@ -127,6 +129,7 @@ export class Theater {
         if (!e) fail(404, 'Termin nicht gefunden.');
         if (e.locked || Date.parse(e.endsAt) < +this.clock()) fail(409, 'Die Rückmeldefrist ist vorbei.');
         if (!['yes', 'late', 'no', 'open'].includes(b.status)) fail(400, 'Ungültige Rückmeldung.');
+        if (['no', 'open'].includes(b.status) && Date.parse(e.startsAt) - declineCutoffMs <= +this.clock()) fail(409, 'Ab einer Stunde vor Beginn ist keine Absage mehr möglich.');
         const expectedArrivalAt = b.status === 'late' && b.expectedArrivalAt ? date(b.expectedArrivalAt) : null;
         if (expectedArrivalAt && (expectedArrivalAt <= e.startsAt || expectedArrivalAt >= e.endsAt)) fail(400, 'Die Ankunft muss zwischen Beginn und Ende der Probe liegen.');
         const r = { eventId: e.id, personId: a.personId, status: b.status, expectedArrivalAt, reason: b.status === 'no' ? text(b.reason, 600) : '', updatedAt: now() };
@@ -136,7 +139,7 @@ export class Theater {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(b.from ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(b.to ?? '') || b.from > b.to || day(`${b.from}T12:00:00Z`) !== b.from || day(`${b.to}T12:00:00Z`) !== b.to) fail(400, 'Bitte einen gültigen Zeitraum angeben.');
         const entry = { id: id(), personId: a.personId, from: b.from, to: b.to, reason: text(b.reason, 600) };
         s.put('absences', entry.id, entry);
-        for (const e of s.all('events')) if (!e.locked && Date.parse(e.endsAt) >= +this.clock() && day(e.startsAt) >= b.from && day(e.startsAt) <= b.to) s.put('responses', `${e.id}:${a.personId}`, { eventId: e.id, personId: a.personId, status: 'no', reason: entry.reason, expectedArrivalAt: null, updatedAt: now() });
+        for (const e of s.all('events')) if (!e.locked && Date.parse(e.startsAt) - declineCutoffMs > +this.clock() && day(e.startsAt) >= b.from && day(e.startsAt) <= b.to) s.put('responses', `${e.id}:${a.personId}`, { eventId: e.id, personId: a.personId, status: 'no', reason: entry.reason, expectedArrivalAt: null, updatedAt: now() });
         return { id: entry.id };
       }
       case 'absence.delete': { const x = s.get('absences', b.id); if (!x || x.personId !== a.personId) fail(404, 'Abwesenheit nicht gefunden.'); s.delete('absences', b.id); return {}; }

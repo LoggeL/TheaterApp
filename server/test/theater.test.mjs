@@ -157,3 +157,14 @@ test('general polls accept one replaceable vote per person and enforce closure a
   assert.equal(app.snapshot('sam').polls[0].closed, true);
   assert.equal(store.all('events').length, 0);
 });
+test('declining and withdrawing close one hour before start, confirming stays open', t => {
+  const { action, approve, store } = setup(t); approve();
+  const eventId = action({ action: 'event.save', title: 'Hauptprobe', startsAt: '2026-09-12T13:00:00Z', endsAt: '2026-09-12T15:00:00Z' }).id;
+  for (const status of ['no', 'open']) assert.throws(() => action({ action: 'attendance', eventId, status }, 'sam'), { status: 409 });
+  action({ action: 'attendance', eventId, status: 'yes' }, 'sam');
+  action({ action: 'attendance', eventId, status: 'late' }, 'sam');
+  action({ action: 'absence.create', from: '2026-09-12', to: '2026-09-12' }, 'sam');
+  assert.equal(store.get('responses', `${eventId}:${store.account('sam').personId}`).status, 'late');
+  const later = action({ action: 'event.save', title: 'Abendprobe', startsAt: '2026-09-12T13:00:01Z', endsAt: '2026-09-12T15:00:00Z' }).id;
+  action({ action: 'attendance', eventId: later, status: 'no' }, 'sam');
+});

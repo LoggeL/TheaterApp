@@ -398,18 +398,18 @@ void main() {
         {
           'id': 'midnight',
           'title': 'Night rehearsal',
-          'startsAt': '2026-09-11T23:30:00Z',
-          // Keep the response window open at the fixed test clock.
-          'endsAt': '2026-09-12T12:30:00Z',
-          'eventDate': '2026-09-12',
+          // UTC date is still the 12th; the German calendar date is the 13th.
+          'startsAt': '2026-09-12T23:30:00Z',
+          'endsAt': '2026-09-13T01:30:00Z',
+          'eventDate': '2026-09-13',
         },
       ];
       final controller = server.controller();
       await signIn(controller);
       server.offline = true;
       await controller.addAbsence(
-        DateTime(2026, 9, 12),
-        DateTime(2026, 9, 12),
+        DateTime(2026, 9, 13),
+        DateTime(2026, 9, 13),
         'Away',
       );
       expect(controller.events.single.response, 'no');

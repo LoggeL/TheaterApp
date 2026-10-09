@@ -115,6 +115,7 @@ class AppController extends ChangeNotifier {
   }
 
   bool canRespondTo(TheaterEvent event) => event.acceptsResponsesAt(_clock());
+  bool canDecline(TheaterEvent event) => event.acceptsDeclineAt(_clock());
 
   String? _versionedEventId(JsonMap payload) {
     final id = switch (payload['action']) {
@@ -888,6 +889,12 @@ class AppController extends ChangeNotifier {
     if (!const {'open', 'yes', 'late', 'no'}.contains(status)) {
       throw const ApiException('Ungültige Rückmeldung.', statusCode: 400);
     }
+    if (const {'open', 'no'}.contains(status) && !canDecline(event)) {
+      throw const ApiException(
+        'Ab einer Stunde vor Beginn ist keine Absage mehr möglich.',
+        statusCode: 409,
+      );
+    }
     if (reason.trim().length > 500) {
       throw const ApiException(
         'Der Absagegrund darf höchstens 500 Zeichen haben.',
@@ -1374,10 +1381,15 @@ class AppController extends ChangeNotifier {
             arrivals = jsonMap(view['expectedArrivals']);
         for (final item in jsonList(view['events'])) {
           final event = jsonMap(item);
-          final end = dateValue(event['endsAt']);
+          final end = dateValue(event['endsAt']),
+              start = dateValue(event['startsAt']);
           if (event['locked'] == true ||
               end == null ||
-              end.isBefore(_clock())) {
+              end.isBefore(_clock()) ||
+              (start != null &&
+                  !start
+                      .subtract(TheaterEvent.declineCutoff)
+                      .isAfter(_clock()))) {
             continue;
           }
           final explicitDay = textValue(event['eventDate']);

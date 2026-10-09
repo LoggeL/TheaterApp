@@ -858,14 +858,17 @@ class _RsvpPanelState extends State<RsvpPanel> {
     final selected = _editingLate
         ? status == 'late'
         : widget.event.response == status;
+    final enabled =
+        !_busy &&
+        (status == 'no'
+            ? widget.controller.canDecline(widget.event)
+            : widget.controller.canRespondTo(widget.event));
     final color = statusColor(status);
     if (widget.compact) {
       return Semantics(
         selected: selected,
         child: OutlinedButton.icon(
-          onPressed: _busy || !widget.controller.canRespondTo(widget.event)
-              ? null
-              : action,
+          onPressed: enabled ? action : null,
           style: OutlinedButton.styleFrom(
             foregroundColor: color,
             backgroundColor: selected ? color.withValues(alpha: .11) : null,
@@ -902,9 +905,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: _busy || !widget.controller.canRespondTo(widget.event)
-              ? null
-              : action,
+          onTap: enabled ? action : null,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
             child: Row(
@@ -940,6 +941,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
   Widget build(BuildContext context) {
     final e = widget.event;
     final canRespond = widget.controller.canRespondTo(e);
+    final canDecline = widget.controller.canDecline(e);
     final pending = widget.controller.outbox.any(
       (a) =>
           !a.failed &&
@@ -1028,6 +1030,15 @@ class _RsvpPanelState extends State<RsvpPanel> {
                   : 'Der Termin ist vorbei. Rückmeldungen sind geschlossen.',
             ),
           ),
+        if (canRespond && !canDecline)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text(
+              'Ab einer Stunde vor Beginn ist keine Absage mehr möglich. '
+              'Bitte melde dich direkt bei der Probenleitung.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
         if (_editingLate && canRespond) ...[
           const SizedBox(height: 12),
           const Text('Voraussichtlich da ab'),
@@ -1106,7 +1117,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
-        if (!_editingLate && e.response != 'open' && canRespond)
+        if (!_editingLate && e.response != 'open' && canDecline)
           TextButton(
             onPressed: _busy ? null : () => _save('open'),
             child: const Text('Rückmeldung zurücknehmen'),

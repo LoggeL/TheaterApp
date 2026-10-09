@@ -355,6 +355,31 @@ void main() {
     },
   );
 
+  test('declining closes one hour before start like on the server', () {
+    final server = TestServer();
+    final controller = server.controller();
+    addTearDown(controller.dispose);
+    TheaterEvent startingIn(Duration offset) => TheaterEvent(
+      id: 'soon',
+      title: 'Soon',
+      startsAt: fixedNow.add(offset),
+      endsAt: fixedNow.add(const Duration(hours: 3)),
+    );
+    final edge = startingIn(const Duration(hours: 1));
+    expect(controller.canRespondTo(edge), isTrue);
+    expect(controller.canDecline(edge), isFalse);
+    expect(
+      controller.canDecline(
+        startingIn(const Duration(hours: 1, milliseconds: 1)),
+      ),
+      isTrue,
+    );
+    expect(
+      controller.canDecline(const TheaterEvent(id: 'unknown', title: 'U')),
+      isTrue,
+    );
+  });
+
   test(
     'sequential offline scene edits carry increasing expected versions',
     () async {
