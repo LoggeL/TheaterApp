@@ -16,7 +16,7 @@
   "dependencies": {
     "firebase-admin": "^14.4.0",
     "google-auth-library": "^10.9.1",
-    "sharp": "^0.35.4",
+    "sharp": "^0.35.5",
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
