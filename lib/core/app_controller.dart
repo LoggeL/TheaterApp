@@ -40,6 +40,8 @@ class AppController extends ChangeNotifier {
   bool get hasAccess => _user?.isApproved == true;
   List<JsonMap> get messages =>
       jsonList(_baseSnapshot['messages']).map(jsonMap).toList();
+  List<JsonMap> get notes =>
+      jsonList(_baseSnapshot['notes']).map(jsonMap).toList();
   List<JsonMap> get pendingAccounts =>
       jsonList(_baseSnapshot['pendingAccounts']).map(jsonMap).toList();
 
@@ -80,6 +82,17 @@ class AppController extends ChangeNotifier {
       jsonList(_baseSnapshot['members']).map(jsonMap).toList();
   List<JsonMap> get personRoles =>
       jsonList(_baseSnapshot['personRoles']).map(jsonMap).toList();
+
+  /// Readable target audience; no roles means everyone.
+  String audienceLabel(Iterable<String> roleIds) {
+    final names = roleNames(roleIds);
+    return roleIds.isEmpty
+        ? 'Alle'
+        : names.isEmpty
+        ? 'Gelöschte Rolle'
+        : names;
+  }
+
   String roleNames(Iterable<String> ids) => personRoles
       .where((r) => ids.contains(r['id']))
       .map((r) => textValue(r['name']))
@@ -1393,7 +1406,12 @@ class AppController extends ChangeNotifier {
           final event = jsonMap(item);
           final end = dateValue(event['endsAt']),
               start = dateValue(event['startsAt']);
+          final audience = jsonList(event['roleIds']).map((e) => '$e');
           if (event['locked'] == true ||
+              (audience.isNotEmpty &&
+                  !audience.any(
+                    jsonList(jsonMap(view['user'])['roleIds']).contains,
+                  )) ||
               end == null ||
               end.isBefore(_clock()) ||
               (start != null &&

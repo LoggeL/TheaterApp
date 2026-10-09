@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'audience.dart';
 
 import 'responsive.dart';
 import 'package:flutter/material.dart';
@@ -150,6 +151,13 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                         ? 'Die Antworten werden ohne Namen angezeigt.'
                         : 'Alle Mitglieder sehen, wer welche Antwort gewählt hat.',
                   ),
+                  if (poll.roleIds.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    AudienceBadge(
+                      controller: widget.controller,
+                      roleIds: poll.roleIds,
+                    ),
+                  ],
                   if (poll.description.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 16),
@@ -281,6 +289,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
   late final List<TextEditingController> _options;
   DateTime? _closes;
   late bool _anonymous;
+  late Set<String> _roleIds;
   bool _busy = false;
   final _form = GlobalKey<FormState>();
   bool get _fixed => (widget.poll?.totalVotes ?? 0) > 0;
@@ -296,6 +305,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
         [TextEditingController(), TextEditingController()];
     _closes = widget.poll?.closesAt?.toLocal();
     _anonymous = widget.poll?.anonymous ?? true;
+    _roleIds = {...?widget.poll?.roleIds};
   }
 
   @override
@@ -328,6 +338,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
         'title': _title.text,
         'description': _description.text,
         'anonymous': _anonymous,
+        'roleIds': _roleIds.toList(),
         'options': _options.map((o) => {'label': o.text}).toList(),
         'closesAt': _closes?.toUtc().toIso8601String(),
       });
@@ -366,6 +377,13 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
               maxLines: 6,
               maxLength: 3000,
               decoration: const InputDecoration(labelText: 'Beschreibung'),
+            ),
+            const SizedBox(height: 8),
+            AudiencePicker(
+              controller: widget.controller,
+              label: 'Wer darf abstimmen?',
+              selected: _roleIds,
+              onChanged: (value) => setState(() => _roleIds = value),
             ),
             const SectionTitle('Abstimmungsart'),
             SegmentedButton<bool>(

@@ -16,6 +16,7 @@ import 'auth.dart';
 import 'admin.dart';
 import 'firebase_auth.dart';
 import 'messages.dart';
+import 'notes.dart';
 import 'events.dart';
 import 'theme.dart';
 
@@ -118,6 +119,15 @@ class MoreScreen extends StatelessWidget {
         Card(
           child: Column(
             children: [
+              _MenuItem(
+                Icons.sticky_note_2_outlined,
+                'Notizen',
+                controller.notes.length == 1
+                    ? '1 Notiz'
+                    : '${controller.notes.length} Notizen',
+                () => _open(context, NotesScreen(controller: controller)),
+              ),
+              const Divider(indent: 60),
               _MenuItem(
                 Icons.beach_access_outlined,
                 'Abwesenheiten',

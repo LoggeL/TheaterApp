@@ -681,6 +681,13 @@ class EventDetailContent extends StatelessWidget {
                         ? 'Ort wird noch bekannt gegeben'
                         : event.place,
                   ),
+                  if (event.roleIds.isNotEmpty) ...[
+                    SizedBox(height: embedded ? 10 : 17),
+                    _DetailMeta(
+                      Icons.group_outlined,
+                      'Für ${controller.audienceLabel(event.roleIds)}',
+                    ),
+                  ],
                 ],
               ),
             ),

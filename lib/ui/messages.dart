@@ -4,6 +4,7 @@ import '../core/app_controller.dart';
 import '../core/models.dart';
 import '../core/identity.dart';
 import 'admin.dart';
+import 'audience.dart';
 import 'theme.dart';
 
 class MessagesScreen extends StatelessWidget {
@@ -175,6 +176,15 @@ class _MessageDetailScreenState extends State<MessageDetailScreen> {
                 '${textValue(m['authorName'])}${date == null ? '' : ' · ${DateFormat('d. MMMM · HH:mm', 'de').format(date.toLocal())}'}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
+              if (m['audience'] == 'roles') ...[
+                const SizedBox(height: 8),
+                AudienceBadge(
+                  controller: widget.controller,
+                  roleIds: [
+                    for (final id in jsonList(m['roleIds'])) id.toString(),
+                  ],
+                ),
+              ],
               const SizedBox(height: 28),
               SelectableText(
                 textValue(m['body']),
@@ -197,7 +207,9 @@ class MessageComposerScreen extends StatefulWidget {
 
 class _MessageComposerScreenState extends State<MessageComposerScreen> {
   final _title = TextEditingController(), _body = TextEditingController();
-  bool _all = true, _push = true, _busy = false;
+  bool _push = true, _busy = false;
+  String _audience = 'all';
+  Set<String> _roleIds = {};
   final Set<int> _recipients = {};
   @override
   void dispose() {
@@ -213,7 +225,8 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
         'action': 'message.send',
         'title': _title.text,
         'body': _body.text,
-        'audience': _all ? 'all' : 'selected',
+        'audience': _audience,
+        'roleIds': _roleIds.toList(),
         'recipientPersonIds': _recipients.toList(),
         'push': _push && widget.controller.pushConfigured,
       });
@@ -258,15 +271,26 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
         maxLength: 10000,
       ),
       const SectionTitle('Empfänger'),
-      SegmentedButton<bool>(
+      SegmentedButton<String>(
         segments: const [
-          ButtonSegment(value: true, label: Text('Alle Mitglieder')),
-          ButtonSegment(value: false, label: Text('Auswählen')),
+          ButtonSegment(value: 'all', label: Text('Alle')),
+          ButtonSegment(value: 'roles', label: Text('Rollen')),
+          ButtonSegment(value: 'selected', label: Text('Personen')),
         ],
-        selected: {_all},
-        onSelectionChanged: (s) => setState(() => _all = s.single),
+        selected: {_audience},
+        onSelectionChanged: (s) => setState(() => _audience = s.single),
       ),
-      if (!_all) ...[
+      if (_audience == 'roles') ...[
+        const SizedBox(height: 16),
+        AudiencePicker(
+          controller: widget.controller,
+          label: 'An alle mit diesen Rollen',
+          allowEveryone: false,
+          selected: _roleIds,
+          onChanged: (value) => setState(() => _roleIds = value),
+        ),
+      ],
+      if (_audience == 'selected') ...[
         const SizedBox(height: 16),
         for (final m in widget.controller.members.where((m) => m.active))
           CheckboxListTile(

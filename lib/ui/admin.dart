@@ -13,6 +13,7 @@ import 'accounts_admin.dart';
 import 'rehearsal_admin.dart';
 import 'messages.dart';
 import 'theme.dart';
+import 'audience.dart';
 
 void openPage(BuildContext context, Widget screen) =>
     Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
@@ -705,11 +706,13 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
   late bool _locked;
   late String _kind;
   String? _production;
+  late Set<String> _roleIds;
   bool _busy = false;
   @override
   void initState() {
     super.initState();
     final e = widget.event;
+    _roleIds = {...?e?.roleIds};
     _title = TextEditingController(text: e?.title);
     _description = TextEditingController(text: e?.description);
     _place = TextEditingController(text: e?.place ?? 'Kolpingheim');
@@ -773,6 +776,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         'locked': _locked,
         'type': _kind,
         'productionId': _production,
+        'roleIds': _roleIds.toList(),
         'sceneIds': _production == widget.event?.productionId
             ? widget.event?.sceneIds ?? []
             : [],
@@ -871,6 +875,13 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       TextField(
         controller: _group,
         decoration: const InputDecoration(labelText: 'Gruppe'),
+      ),
+      const SizedBox(height: 20),
+      AudiencePicker(
+        controller: widget.controller,
+        label: 'Eingeladen',
+        selected: _roleIds,
+        onChanged: (value) => setState(() => _roleIds = value),
       ),
       const SizedBox(height: 20),
       DropdownButtonFormField<String>(

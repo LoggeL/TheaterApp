@@ -110,6 +110,7 @@ class TheaterEvent {
     this.isCustom = false,
     this.expectedArrivalAt,
     this.version = 1,
+    this.roleIds = const [],
   });
   final String id,
       title,
@@ -128,6 +129,9 @@ class TheaterEvent {
   final List<String> sceneIds;
   final DateTime? expectedArrivalAt;
   final int version;
+
+  /// Person roles addressed by this event; empty means everyone.
+  final List<String> roleIds;
   bool get needsResponse => response == 'open' && !locked;
   bool acceptsResponsesAt(DateTime now) =>
       !locked && !((endsAt ?? startsAt)?.isBefore(now) ?? false);
@@ -158,6 +162,7 @@ class TheaterEvent {
     version: intValue(json['version'], 1),
     productionId: json['productionId'] as String?,
     sceneIds: jsonList(json['sceneIds']).map((e) => e.toString()).toList(),
+    roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
   );
   TheaterEvent copyWith({
     String? response,
@@ -186,6 +191,7 @@ class TheaterEvent {
         ? null
         : expectedArrivalAt ?? this.expectedArrivalAt,
     version: version,
+    roleIds: roleIds,
   );
   JsonMap toJson() => {
     'id': id,
@@ -205,6 +211,7 @@ class TheaterEvent {
     'declineReason': declineReason,
     'expectedArrivalAt': expectedArrivalAt?.toUtc().toIso8601String(),
     'version': version,
+    'roleIds': roleIds,
     'productionId': productionId,
     'sceneIds': sceneIds,
   };
@@ -292,9 +299,13 @@ class Poll {
     this.anonymous = true,
     this.closesAt,
     this.version = 1,
+    this.roleIds = const [],
   });
   final String id, title, description;
   final List<PollOption> options;
+
+  /// Person roles that may see and vote; empty means everyone.
+  final List<String> roleIds;
   final String? selectedOptionId, confirmedOptionId;
   final bool closed, anonymous;
   String get privacyLabel => anonymous ? 'Anonym' : 'Namentlich';
@@ -325,6 +336,7 @@ class Poll {
     anonymous: json['anonymous'] != false,
     closesAt: dateValue(json['closesAt']),
     version: intValue(json['version'], 1),
+    roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
   );
   Poll withChoice(String optionId, {PollVoter? voter}) => Poll(
     id: id,
@@ -358,11 +370,13 @@ class Poll {
     anonymous: anonymous,
     closesAt: closesAt,
     version: version,
+    roleIds: roleIds,
   );
   JsonMap toJson() => {
     'id': id,
     'title': title,
     'description': description,
+    'roleIds': roleIds,
     'options': options.map((e) => e.toJson(anonymous: anonymous)).toList(),
     'choice': selectedOptionId,
     'confirmedOptionId': confirmedOptionId,
@@ -389,6 +403,10 @@ class TheaterMember {
   final String? avatar, avatarId;
   final List<String> roleIds;
   final bool active;
+
+  /// Whether this member belongs to an audience of roles (empty = everyone).
+  bool inAudience(List<String> audience) =>
+      audience.isEmpty || audience.any(roleIds.contains);
   factory TheaterMember.fromJson(JsonMap json) => TheaterMember(
     id: intValue(json['id']),
     name: textValue(json['name']),

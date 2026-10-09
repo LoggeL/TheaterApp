@@ -168,3 +168,28 @@ test('declining and withdrawing close one hour before start, confirming stays op
   const later = action({ action: 'event.save', title: 'Abendprobe', startsAt: '2026-09-12T13:00:01Z', endsAt: '2026-09-12T15:00:00Z' }).id;
   action({ action: 'attendance', eventId: later, status: 'no' }, 'sam');
 });
+test('role audiences limit events, polls, messages and notes for members', t => {
+  const { app, action, approve, memberId } = setup(t); approve();
+  const tech = action({ action: 'personRole.save', name: 'Licht' }).id;
+  const cast = action({ action: 'personRole.save', name: 'Chor' }).id;
+  assert.throws(() => action({ action: 'note.save', title: 'X', roleIds: ['missing'] }), { status: 400 });
+  const eventId = action({ action: 'event.save', title: 'Lichtprobe', startsAt: '2026-09-17T17:00:00Z', endsAt: '2026-09-17T19:00:00Z', roleIds: [tech] }).id;
+  const pollId = action({ action: 'poll.save', title: 'Farbe?', options: [{ label: 'Rot' }, { label: 'Blau' }], roleIds: [tech] }).id;
+  assert.throws(() => action({ action: 'message.send', title: 'Kabel', body: 'Niemand hat die Rolle', audience: 'roles', roleIds: [tech] }), { status: 400 });
+  const draft = action({ action: 'note.save', title: 'Packliste', body: 'Kabel', roleIds: [tech], published: false }).id;
+  action({ action: 'note.save', title: 'Chorplan', body: 'Lieder', roleIds: [cast], published: true });
+  let sam = app.snapshot('sam');
+  assert.equal(sam.events.length, 0); assert.equal(sam.polls.length, 0); assert.equal(sam.messages.length, 0); assert.equal(sam.notes.length, 0);
+  assert.throws(() => action({ action: 'attendance', eventId, status: 'yes' }, 'sam'), { status: 404 });
+  assert.throws(() => action({ action: 'poll.vote', pollId, optionId: app.snapshot('admin').polls[0].options[0].id }, 'sam'), { status: 404 });
+  assert.equal(app.snapshot('admin').notes.length, 2);
+  action({ action: 'member.save', id: memberId, name: 'Sam', group: 'Ensemble', roleIds: [tech], version: app.snapshot('admin').members.find(m => m.id === memberId).version });
+  action({ action: 'message.send', title: 'Kabel', body: 'Bitte mitbringen', audience: 'roles', roleIds: [tech] });
+  sam = app.snapshot('sam');
+  assert.deepEqual(sam.events.map(e => e.id), [eventId]);
+  assert.equal(sam.polls.length, 1); assert.equal(sam.messages.length, 1);
+  assert.equal(sam.notes.length, 0, 'drafts stay hidden');
+  action({ action: 'note.save', id: draft, version: 1, title: 'Packliste', body: 'Kabel', roleIds: [tech], published: true });
+  assert.deepEqual(app.snapshot('sam').notes.map(n => n.title), ['Packliste']);
+  action({ action: 'attendance', eventId, status: 'yes' }, 'sam');
+});

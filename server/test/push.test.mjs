@@ -140,3 +140,14 @@ test('new registrations notify admins once, only when ready to link', async t =>
   assert.ok(calls.some(p => new URL(p.webpush.fcmOptions.link).searchParams.get('target') === 'theaterapp://app/accounts/neu'));
   assert.equal(calls.find(p => p.data.accountUid === 'neu').notification.title, 'Neue Registrierung');
 });
+
+test('role audiences limit reminders and pushes to invited members', async t => {
+  const { store, theater, a } = setup(t); const now = new Date('2026-09-14T12:00:00Z');
+  store.put('events', 'e', { id: 'e', title: 'Lichtprobe', startsAt: '2026-09-14T13:30:00Z', roleIds: ['role-light'] });
+  scheduleReminders(theater, now); assert.equal(store.all('pushJobs').length, 0);
+  theater.enqueuePush({ title: 'Termin aktualisiert', body: 'Licht', roleIds: ['role-light'] });
+  await deliverPush(theater, { sendEachForMulticast: async () => assert.fail('admin is not invited') });
+  assert.equal(store.all('pushJobs').find(j => j.title === 'Termin aktualisiert').status, 'no_devices');
+  store.put('members', a.personId, { ...store.get('members', a.personId), roleIds: ['role-light'] });
+  scheduleReminders(theater, now); assert.equal(store.all('pushJobs').filter(j => j.title === 'Lichtprobe').length, 1);
+});

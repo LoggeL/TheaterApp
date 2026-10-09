@@ -1,4 +1,5 @@
 import { defaultReminders, eventNotificationBody } from './event-notification.mjs';
+import { inRoles } from './theater.mjs';
 
 export function scheduleReminders(theater, now = new Date()) {
   if (!theater.pushEnabled) return;
@@ -7,7 +8,7 @@ export function scheduleReminders(theater, now = new Date()) {
     const until = Date.parse(event.startsAt) - +now;
     if (until <= 0 || until > 24 * 3600000) continue;
     const kind = until <= 2 * 3600000 ? 'twoHours' : 'dayBefore';
-    for (const a of s.accounts().filter(x => x.status === 'approved' && x.personId)) {
+    for (const a of s.accounts().filter(x => x.status === 'approved' && x.personId && inRoles(s.get('members', x.personId), event.roleIds))) {
       const preferences = { ...defaultReminders, ...s.get('reminders', a.personId) };
       if (preferences[kind] !== true || s.get('responses', `${event.id}:${a.personId}`)?.status === 'no') continue;
       const key = `${event.id}:${event.startsAt}:${a.personId}:${kind}`;
@@ -24,7 +25,7 @@ export async function deliverPush(theater, messaging, appOrigin = process.env.AP
   if (!theater.pushEnabled || !messaging) return;
   const s = theater.store;
   for (const job of s.all('pushJobs').filter(j => j.status === 'pending' && Date.parse(j.nextAttemptAt) <= Date.now()).slice(0, 20)) {
-    const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && s.get('members', a.personId)?.active && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId)) && (!job.adminsOnly || a.role === 'admin') && (!job.change || (s.get('reminders', a.personId)?.changes ?? true)));
+    const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && s.get('members', a.personId)?.active && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId)) && (!job.adminsOnly || a.role === 'admin') && inRoles(s.get('members', a.personId), job.roleIds) && (!job.change || (s.get('reminders', a.personId)?.changes ?? true)));
     const uids = new Set(accounts.map(a => a.uid));
     const devices = s.all('devices').filter(d => uids.has(d.uid));
     if (!devices.length) { s.put('pushJobs', job.id, { ...job, status: 'no_devices', finishedAt: new Date().toISOString() }); continue; }
