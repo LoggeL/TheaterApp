@@ -48,17 +48,7 @@ class AdminPage extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) => Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-        actions:
-            actions ??
-            const [
-              Padding(
-                padding: EdgeInsets.only(right: 20),
-                child: StatePill('Admin', color: StageTheme.orange),
-              ),
-            ],
-      ),
+      appBar: AppBar(title: Text(title), actions: actions),
       body: controller.user?.isAdmin != true
           ? const Center(child: Text('Admin-Zugang erforderlich.'))
           : Center(
@@ -81,194 +71,302 @@ class AdminPage extends StatelessWidget {
 }
 
 class ManagementScreen extends StatelessWidget {
-  const ManagementScreen({super.key, required this.controller});
+  const ManagementScreen({
+    super.key,
+    required this.controller,
+    this.embedded = false,
+  });
   final AppController controller;
-  Widget tile(
-    BuildContext context,
-    IconData icon,
-    String title,
-    Widget target, [
-    String? subtitle,
-  ]) => Card(
-    child: ListTile(
-      leading: Icon(icon),
-      title: Text(title),
-      subtitle: subtitle == null ? null : Text(subtitle),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () => openPage(context, target),
-    ),
-  );
+
+  /// Shown as a main section below the app bar instead of its own page.
+  final bool embedded;
+
+  List<Widget> _content(BuildContext ctx) {
+    final theme = Theme.of(ctx);
+    final next = controller.events
+        .where((e) => e.endsAt?.isAfter(controller.now) ?? false)
+        .firstOrNull;
+    final registrations = controller.openRegistrationCount;
+    GroupTile tile(
+      IconData icon,
+      String title,
+      Widget target, [
+      String? subtitle,
+      Color? subtitleColor,
+    ]) => GroupTile(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      subtitleColor: subtitleColor,
+      onTap: () => openPage(ctx, target),
+    );
+    return [
+      if (next != null) ...[
+        _NextEventCard(controller: controller, event: next),
+        const SizedBox(height: 28),
+      ],
+      ResponsiveGroups(
+        children: [
+          TileGroup(
+            title: 'Personen',
+            tiles: [
+              tile(
+                Icons.person_add_alt,
+                'Konten & Verknüpfungen',
+                AccountsAdminScreen(
+                  controller: controller,
+                  initialView: registrations > 0 ? 'accounts' : 'people',
+                  initialFilter: registrations > 0 ? 'pending' : 'all',
+                ),
+                registrations == 0
+                    ? 'Personen, Rollen und E-Mail-Adressen'
+                    : registrations == 1
+                    ? '1 neue Registrierung wartet auf Zuordnung'
+                    : '$registrations neue Registrierungen warten auf Zuordnung',
+                registrations == 0 ? null : theme.colorScheme.primary,
+              ),
+              tile(
+                Icons.groups_outlined,
+                'Ensemble verwalten',
+                MembersAdminScreen(controller: controller),
+                'Personen anlegen, Rollen zuordnen',
+              ),
+              tile(
+                Icons.badge_outlined,
+                'Rollen verwalten',
+                RolesAdminScreen(controller: controller),
+                'Eigene Rollen und Mehrfachzuordnung',
+              ),
+              tile(
+                Icons.event_available_outlined,
+                'Teilnahme im Ensemble',
+                ParticipationScreen(controller: controller, ensemble: true),
+                'Rückmeldungen und Anwesenheit der letzten sechs Monate',
+              ),
+            ],
+          ),
+          TileGroup(
+            title: 'Planung',
+            tiles: [
+              tile(
+                Icons.calendar_month_outlined,
+                'Termine verwalten',
+                EventsAdminScreen(controller: controller),
+                'Anlegen, ändern, Kalender',
+              ),
+              tile(
+                Icons.edit_calendar_outlined,
+                'Terminfinder',
+                SlotPoolsScreen(controller: controller),
+                'Zeitfenster zum Buchen, z. B. für Fototermine',
+              ),
+              tile(
+                Icons.auto_stories_outlined,
+                'Produktionen & Besetzung',
+                ProductionsAdminScreen(controller: controller),
+                'Stücke, Rollen im Drehbuch, Regie',
+              ),
+              if (next != null)
+                tile(
+                  Icons.playlist_add_check,
+                  'Szenen planen',
+                  ScenePlannerScreen(controller: controller, event: next),
+                  'Für ${next.title}',
+                ),
+            ],
+          ),
+          TileGroup(
+            title: 'Kommunikation',
+            tiles: [
+              tile(
+                Icons.chat_bubble_outline,
+                'Mitteilung schreiben',
+                MessageComposerScreen(controller: controller),
+                'An alle, Rollen oder einzelne Personen',
+              ),
+              tile(
+                Icons.poll_outlined,
+                'Abstimmungen',
+                PollsScreen(controller: controller),
+                'Fragen stellen und auswerten',
+              ),
+              tile(
+                Icons.notifications_outlined,
+                'Push-Versand',
+                PushAdminScreen(controller: controller),
+                'Benachrichtigungen prüfen',
+              ),
+            ],
+          ),
+          TileGroup(
+            title: 'Medien',
+            tiles: [
+              tile(
+                Icons.photo_library_outlined,
+                'Galerien verwalten',
+                GalleryListScreen(controller: controller),
+                'Alben und Freigaben',
+              ),
+            ],
+          ),
+        ],
+      ),
+    ];
+  }
+
   @override
-  Widget build(BuildContext context) => AdminPage(
-    controller: controller,
-    title: 'Administration',
-    children: (ctx) {
-      final next = controller.events
-          .where((e) => e.endsAt?.isAfter(DateTime.now()) ?? false)
-          .firstOrNull;
-      final registrations = controller.openRegistrationCount;
-      return [
-        if (next != null) ...[
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: StageTheme.ink,
-              borderRadius: BorderRadius.circular(22),
+  Widget build(BuildContext context) {
+    if (!embedded) {
+      return AdminPage(
+        controller: controller,
+        title: 'Administration',
+        children: _content,
+      );
+    }
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1100),
+        child: RefreshIndicator(
+          onRefresh: controller.refresh,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(22, 20, 22, 30),
+            children: [
+              const PageHeader(
+                'Administration.',
+                subtitle: 'Alles für die Theaterleitung an einem Ort.',
+              ),
+              ..._content(context),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Dark stage card for the next event with the two most common actions.
+class _NextEventCard extends StatelessWidget {
+  const _NextEventCard({required this.controller, required this.event});
+  final AppController controller;
+  final TheaterEvent event;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final responded = controller.events
+        .where((e) => e.id == event.id)
+        .firstOrNull;
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [StageTheme.ink, Color(0xFF2C3530)],
+        ),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Eyebrow('Nächster Termin', color: Color(0xFFFFA584)),
+          const SizedBox(height: 12),
+          Text(
+            event.title,
+            style: theme.textTheme.headlineMedium?.copyWith(
+              color: Colors.white,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'NÄCHSTER TERMIN',
-                  style: TextStyle(
-                    color: Color(0xFFFFA584),
-                    letterSpacing: 1.5,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 18,
+            runSpacing: 6,
+            children: [
+              _Fact(Icons.event_outlined, eventDate(event)),
+              _Fact(Icons.schedule, eventTime(event)),
+              if (event.place.isNotEmpty)
+                _Fact(Icons.place_outlined, event.place),
+              if (responded != null && responded.attendeeCount > 0)
+                _Fact(
+                  Icons.how_to_reg_outlined,
+                  '${responded.attendeeCount} dabei',
+                ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final buttons = <Widget>[
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: StageTheme.orange,
+                    foregroundColor: Colors.white,
                   ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  next.title,
-                  style: const TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  '${eventDate(next)} · ${eventTime(next)}',
-                  style: const TextStyle(color: Colors.white),
-                ),
-                const SizedBox(height: 8),
-                Text(next.place, style: const TextStyle(color: Colors.white70)),
-                const SizedBox(height: 22),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: () => openPage(
-                      ctx,
-                      AttendanceEditorScreen(
-                        controller: controller,
-                        event: next,
-                      ),
+                  onPressed: () => openPage(
+                    context,
+                    AttendanceEditorScreen(
+                      controller: controller,
+                      event: event,
                     ),
-                    icon: const Icon(Icons.fact_check_outlined),
-                    label: const Text('Anwesenheit erfassen'),
                   ),
+                  icon: const Icon(Icons.fact_check_outlined),
+                  label: const Text('Anwesenheit erfassen'),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-        ],
-        tile(
-          ctx,
-          Icons.person_add_alt,
-          'Konten & Verknüpfungen',
-          AccountsAdminScreen(
-            controller: controller,
-            initialView: registrations > 0 ? 'accounts' : 'people',
-            initialFilter: registrations > 0 ? 'pending' : 'all',
-          ),
-          registrations == 0
-              ? 'Personen, Rollen und E-Mail-Adressen'
-              : registrations == 1
-              ? '1 neue Registrierung wartet auf Zuordnung'
-              : '$registrations neue Registrierungen warten auf Zuordnung',
-        ),
-        const SizedBox(height: 10),
-        tile(
-          ctx,
-          Icons.calendar_month_outlined,
-          'Termine verwalten',
-          EventsAdminScreen(controller: controller),
-        ),
-        const SizedBox(height: 10),
-        tile(
-          ctx,
-          Icons.groups_outlined,
-          'Ensemble verwalten',
-          MembersAdminScreen(controller: controller),
-        ),
-        const SizedBox(height: 10),
-        tile(
-          ctx,
-          Icons.event_available_outlined,
-          'Teilnahme im Ensemble',
-          ParticipationScreen(controller: controller, ensemble: true),
-          'Rückmeldungen und Anwesenheit der letzten sechs Monate',
-        ),
-        const SizedBox(height: 10),
-        tile(
-          ctx,
-          Icons.badge_outlined,
-          'Rollen verwalten',
-          RolesAdminScreen(controller: controller),
-          'Eigene Rollen und Mehrfachzuordnung',
-        ),
-        const SizedBox(height: 10),
-        tile(
-          ctx,
-          Icons.poll_outlined,
-          'Abstimmungen',
-          PollsScreen(controller: controller),
-        ),
-        const SizedBox(height: 10),
-        tile(
-          ctx,
-          Icons.edit_calendar_outlined,
-          'Terminfinder',
-          SlotPoolsScreen(controller: controller),
-          'Zeitfenster zum Buchen, z. B. für Fototermine',
-        ),
-        const SizedBox(height: 10),
-        tile(
-          ctx,
-          Icons.photo_library_outlined,
-          'Galerien verwalten',
-          GalleryListScreen(controller: controller),
-        ),
-        const SizedBox(height: 10),
-        tile(
-          ctx,
-          Icons.auto_stories_outlined,
-          'Produktionen & Besetzung',
-          ProductionsAdminScreen(controller: controller),
-        ),
-        const SizedBox(height: 10),
-        tile(
-          ctx,
-          Icons.chat_bubble_outline,
-          'Mitteilung schreiben',
-          MessageComposerScreen(controller: controller),
-        ),
-        const SizedBox(height: 10),
-        tile(
-          ctx,
-          Icons.notifications_outlined,
-          'Push-Versand',
-          PushAdminScreen(controller: controller),
-        ),
-        if (next != null) ...[
-          const SectionTitle('Für die nächste Probe'),
-          tile(
-            ctx,
-            Icons.how_to_reg_outlined,
-            'Rückmeldungen',
-            ResponsesAdminScreen(controller: controller, event: next),
-          ),
-          const SizedBox(height: 10),
-          tile(
-            ctx,
-            Icons.playlist_add_check,
-            'Szenen planen',
-            ScenePlannerScreen(controller: controller, event: next),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white38),
+                    minimumSize: const Size(48, 52),
+                  ),
+                  onPressed: () => openPage(
+                    context,
+                    ResponsesAdminScreen(controller: controller, event: event),
+                  ),
+                  icon: const Icon(Icons.how_to_reg_outlined),
+                  label: const Text('Rückmeldungen'),
+                ),
+              ];
+              // Equal halves side by side, full-width stack on phones.
+              if (constraints.maxWidth < 440) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    buttons[0],
+                    const SizedBox(height: 10),
+                    buttons[1],
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: buttons[0]),
+                  const SizedBox(width: 10),
+                  Expanded(child: buttons[1]),
+                ],
+              );
+            },
           ),
         ],
-      ];
-    },
+      ),
+    );
+  }
+}
+
+class _Fact extends StatelessWidget {
+  const _Fact(this.icon, this.text);
+  final IconData icon;
+  final String text;
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, size: 16, color: const Color(0xFFFFA584)),
+      const SizedBox(width: 6),
+      Flexible(
+        child: Text(text, style: const TextStyle(color: Colors.white)),
+      ),
+    ],
   );
 }
 
@@ -902,13 +1000,18 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
   String? _production;
   late Set<String> _roleIds;
   late Set<int> _personIds;
+  late Set<String> _productionIds;
   bool _busy = false;
+
+  /// New events notify their invitees by default; edits only on request.
+  late bool _push = widget.event == null;
   @override
   void initState() {
     super.initState();
     final e = widget.event;
     _roleIds = {...?e?.roleIds};
     _personIds = {...?e?.personIds};
+    _productionIds = {...?e?.productionIds};
     _title = TextEditingController(text: e?.title);
     _description = TextEditingController(text: e?.description);
     _place = TextEditingController(text: e?.place ?? 'Kolpingheim');
@@ -957,6 +1060,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
 
   Future<void> _save() async {
     setState(() => _busy = true);
+    final push = _push && widget.controller.pushConfigured;
     try {
       await widget.controller.performAction({
         'action': 'event.save',
@@ -972,11 +1076,26 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         'productionId': _production,
         'roleIds': _roleIds.toList(),
         'personIds': _personIds.toList(),
+        'productionIds': _productionIds.toList(),
         'sceneIds': _production == widget.event?.productionId
             ? widget.event?.sceneIds ?? []
             : [],
+        'push': push,
       });
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        if (push) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                widget.controller.pendingCount > 0
+                    ? 'Termin vorgemerkt, Benachrichtigung folgt nach der Übertragung.'
+                    : 'Termin gespeichert, Benachrichtigung wird verschickt.',
+              ),
+            ),
+          );
+        }
+        Navigator.pop(context);
+      }
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
@@ -1070,9 +1189,15 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       AudiencePicker(
         controller: widget.controller,
         label: 'Eingeladene Rollen',
-        allowEveryone: _personIds.isEmpty,
+        allowEveryone: _personIds.isEmpty && _productionIds.isEmpty,
         selected: _roleIds,
         onChanged: (value) => setState(() => _roleIds = value),
+      ),
+      const SizedBox(height: 16),
+      ProductionAudiencePicker(
+        controller: widget.controller,
+        selected: _productionIds,
+        onChanged: (value) => setState(() => _productionIds = value),
       ),
       const SizedBox(height: 16),
       PersonPicker(
@@ -1082,7 +1207,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       ),
       const SizedBox(height: 8),
       Text(
-        'Eingeladen: ${widget.controller.audienceLabel(_roleIds, _personIds)}',
+        'Eingeladen: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}',
         style: Theme.of(context).textTheme.bodySmall,
       ),
       const SizedBox(height: 20),
@@ -1115,6 +1240,19 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         value: _locked,
         onChanged: (v) => setState(() => _locked = v),
         title: const Text('Rückmeldungen geschlossen'),
+      ),
+      SwitchListTile(
+        key: const ValueKey('event-push'),
+        value: _push && widget.controller.pushConfigured,
+        onChanged: widget.controller.pushConfigured
+            ? (v) => setState(() => _push = v)
+            : null,
+        title: const Text('Eingeladene per Push benachrichtigen'),
+        subtitle: Text(
+          widget.controller.pushConfigured
+              ? 'Geht an: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}'
+              : 'Push ist noch nicht eingerichtet.',
+        ),
       ),
       const SizedBox(height: 24),
       FilledButton(
@@ -1256,7 +1394,7 @@ class ProductionEditorScreen extends StatefulWidget {
 class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
   late final TextEditingController _title, _subtitle;
   late JsonMap _casting;
-  late Set<int> _directors;
+  late Set<int> _directors, _crew;
   bool _busy = false;
   @override
   void initState() {
@@ -1270,6 +1408,9 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
     _casting = jsonMap(widget.production?['casting']);
     _directors = jsonList(
       widget.production?['directorMemberIds'],
+    ).map((v) => intValue(v)).toSet();
+    _crew = jsonList(
+      widget.production?['memberIds'],
     ).map((v) => intValue(v)).toSet();
   }
 
@@ -1291,6 +1432,7 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
         'subtitle': _subtitle.text,
         'casting': _casting,
         'directorMemberIds': _directors.toList(),
+        'memberIds': _crew.toList(),
       });
       if (widget.production?['id'] != null) {
         await widget.controller.loadScript(textValue(widget.production!['id']));
@@ -1378,6 +1520,35 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
             }
           }),
         ),
+      const SectionTitle('Weitere Mitwirkende'),
+      Text(
+        'Technik, Maske, Souffleuse … Zusammen mit Besetzung und Regie bilden '
+        'sie das Ensemble des Stücks, das man bei Terminen, Push und '
+        'Mitteilungen als Empfänger wählen kann.',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+      const SizedBox(height: 12),
+      PersonPicker(
+        controller: widget.controller,
+        label: 'Ohne Rolle im Drehbuch',
+        selected: _crew,
+        onChanged: (value) => setState(() => _crew = value),
+      ),
+      const SizedBox(height: 8),
+      Builder(
+        builder: (context) {
+          final ensemble = {
+            ..._casting.values.where((v) => v != null).map(intValue),
+            ..._directors,
+            ..._crew,
+          };
+          return Text(
+            'Ensemble des Stücks: ${ensemble.length} '
+            '${ensemble.length == 1 ? 'Person' : 'Personen'}',
+            style: Theme.of(context).textTheme.titleSmall,
+          );
+        },
+      ),
       const SizedBox(height: 24),
       FilledButton(
         onPressed: _busy ? null : _save,

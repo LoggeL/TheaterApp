@@ -170,22 +170,102 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     ),
   );
 
+  static const _filters = ['Kommend', 'Offen', 'Zugesagt', 'Vergangen'];
+
+  bool _matches(TheaterEvent e, int filter, DateTime now) {
+    final future = e.startsAt == null || (e.endsAt ?? e.startsAt!).isAfter(now);
+    return switch (filter) {
+      1 => future && e.response == 'open' && widget.controller.canRespondTo(e),
+      2 => future && const {'yes', 'late'}.contains(e.response),
+      3 => !future,
+      _ => future,
+    };
+  }
+
+  int _count(int filter, DateTime now) =>
+      widget.controller.events.where((e) => _matches(e, filter, now)).length;
+
+  /// Filter chips with counts: one swipeable line on phones, wrapping with
+  /// large text so every option stays reachable.
+  Widget _filterChips(BuildContext context, DateTime now, {bool wrap = false}) {
+    final chips = [
+      for (var i = 0; i < _filters.length; i++)
+        ChoiceChip(
+          label: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(_filters[i], overflow: TextOverflow.ellipsis),
+              ),
+              if (i < 3 && _count(i, now) > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withValues(alpha: .14),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${_count(i, now)}',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          selected: !_calendar && _filter == i,
+          onSelected: (_) => setState(() {
+            _filter = i;
+            _calendar = false;
+          }),
+        ),
+    ];
+    if (wrap) return Wrap(spacing: 8, runSpacing: 8, children: chips);
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      clipBehavior: Clip.none,
+      child: Row(
+        children: [
+          for (final (i, c) in chips.indexed) ...[
+            if (i > 0) const SizedBox(width: 8),
+            c,
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _viewToggle() => SegmentedButton<bool>(
+    showSelectedIcon: false,
+    segments: const [
+      ButtonSegment(
+        value: false,
+        tooltip: 'Agenda',
+        icon: Icon(Icons.view_agenda_outlined),
+      ),
+      ButtonSegment(
+        value: true,
+        tooltip: 'Kalender',
+        icon: Icon(Icons.calendar_month_outlined),
+      ),
+    ],
+    selected: {_calendar},
+    onSelectionChanged: (value) => setState(() => _calendar = value.first),
+  );
+
   Widget _buildSchedule(BuildContext context, bool desktop) {
     final now = DateTime.now();
     final events =
         widget.controller.events.where((e) {
-          final future =
-              e.startsAt == null || (e.endsAt ?? e.startsAt!).isAfter(now);
-          final filter = switch (_filter) {
-            1 =>
-              future &&
-                  e.response == 'open' &&
-                  widget.controller.canRespondTo(e),
-            2 => future && const {'yes', 'late'}.contains(e.response),
-            3 => !future,
-            _ => future,
-          };
-          return _calendar ? eventOnDay(e, _day) : filter;
+          return _calendar ? eventOnDay(e, _day) : _matches(e, _filter, now);
         }).toList()..sort(
           (a, b) => (a.startsAt ?? DateTime(9999)).compareTo(
             b.startsAt ?? DateTime(9999),
@@ -219,54 +299,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           style: Theme.of(context).textTheme.headlineMedium,
                         ),
                       ),
+                      const SizedBox(width: 12),
+                      _viewToggle(),
                     ],
                   ),
-                  const SizedBox(height: 18),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final largeText =
-                          MediaQuery.textScalerOf(context).scale(14) > 20;
-                      if (constraints.maxWidth < 360 || largeText) {
-                        return Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final calendar in [false, true])
-                              ChoiceChip(
-                                avatar: Icon(
-                                  calendar
-                                      ? Icons.calendar_month_outlined
-                                      : Icons.view_agenda_outlined,
-                                  size: 18,
-                                ),
-                                label: Text(calendar ? 'Kalender' : 'Agenda'),
-                                selected: _calendar == calendar,
-                                onSelected: (_) =>
-                                    setState(() => _calendar = calendar),
-                              ),
-                          ],
-                        );
-                      }
-                      return SegmentedButton<bool>(
-                        segments: const [
-                          ButtonSegment(
-                            value: false,
-                            label: Text('Agenda'),
-                            icon: Icon(Icons.view_agenda_outlined),
-                          ),
-                          ButtonSegment(
-                            value: true,
-                            label: Text('Kalender'),
-                            icon: Icon(Icons.calendar_month_outlined),
-                          ),
-                        ],
-                        selected: {_calendar},
-                        onSelectionChanged: (value) =>
-                            setState(() => _calendar = value.first),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                   if (_calendar) ...[
                     RehearsalCalendar(
                       selected: _day,
@@ -277,28 +314,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       DateFormat.yMMMMEEEEd('de').format(_day),
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
-                  ],
-                  if (!_calendar) ...[
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (var i = 0; i < 4; i++)
-                          ChoiceChip(
-                            label: Text(
-                              ['Kommend', 'Offen', 'Zugesagt', 'Vergangen'][i],
-                            ),
-                            selected: _filter == i,
-                            onSelected: (_) => setState(() => _filter = i),
-                          ),
-                      ],
+                  ] else
+                    _filterChips(
+                      context,
+                      now,
+                      wrap: MediaQuery.textScalerOf(context).scale(14) > 20,
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      '${['Kommend', 'Offen', 'Zugesagt', 'Vergangen'][_filter]} · ${events.length} ${events.length == 1 ? 'Termin' : 'Termine'}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -404,28 +425,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                             events: widget.controller.events,
                           ),
                           const Divider(height: 24),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: [
-                              for (var i = 0; i < 4; i++)
-                                ChoiceChip(
-                                  label: Text(
-                                    [
-                                      'Kommend',
-                                      'Offen',
-                                      'Zugesagt',
-                                      'Vergangen',
-                                    ][i],
-                                  ),
-                                  selected: !_calendar && _filter == i,
-                                  onSelected: (_) => setState(() {
-                                    _filter = i;
-                                    _calendar = false;
-                                  }),
-                                ),
-                            ],
-                          ),
+                          _filterChips(context, DateTime.now(), wrap: true),
                           const SizedBox(height: 18),
                           Text(
                             _calendar
@@ -840,7 +840,7 @@ class EventDetailContent extends StatelessWidget {
                     SizedBox(height: embedded ? 10 : 17),
                     _DetailMeta(
                       Icons.group_outlined,
-                      'Für ${controller.audienceLabel(event.roleIds, event.personIds)}',
+                      'Für ${controller.audienceLabel(event.roleIds, event.personIds, event.productionIds)}',
                     ),
                   ],
                 ],
@@ -1039,7 +1039,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
             backgroundColor: selected ? color.withValues(alpha: .11) : null,
             minimumSize: const Size(0, 48),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
-            textStyle: const TextStyle(
+            textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
               fontSize: 13,
               fontWeight: FontWeight.w700,
             ),

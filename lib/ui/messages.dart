@@ -186,6 +186,10 @@ class _MessageDetailScreenState extends State<MessageDetailScreen> {
                   personIds: jsonList(
                     m['recipientPersonIds'],
                   ).map(intValue).toList(),
+                  productionIds: [
+                    for (final id in jsonList(m['productionIds']))
+                      id.toString(),
+                  ],
                 ),
               ],
               const SizedBox(height: 28),
@@ -214,6 +218,7 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
   String _audience = 'all';
   Set<String> _roleIds = {};
   Set<int> _recipients = {};
+  Set<String> _productionIds = {};
   @override
   void dispose() {
     _title.dispose();
@@ -231,6 +236,7 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
         'audience': _audience,
         'roleIds': _roleIds.toList(),
         'recipientPersonIds': _recipients.toList(),
+        'productionIds': _productionIds.toList(),
         'push': _push && widget.controller.pushConfigured,
       });
       if (mounted) {
@@ -292,6 +298,12 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
           onChanged: (value) => setState(() => _roleIds = value),
         ),
         const SizedBox(height: 16),
+        ProductionAudiencePicker(
+          controller: widget.controller,
+          selected: _productionIds,
+          onChanged: (value) => setState(() => _productionIds = value),
+        ),
+        const SizedBox(height: 16),
         PersonPicker(
           controller: widget.controller,
           selected: _recipients,
@@ -299,9 +311,9 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          _roleIds.isEmpty && _recipients.isEmpty
-              ? 'Bitte Rollen und/oder Personen auswählen.'
-              : 'An: ${widget.controller.audienceLabel(_roleIds, _recipients)}',
+          _roleIds.isEmpty && _recipients.isEmpty && _productionIds.isEmpty
+              ? 'Bitte Rollen, Stücke und/oder Personen auswählen.'
+              : 'An: ${widget.controller.audienceLabel(_roleIds, _recipients, _productionIds)}',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],

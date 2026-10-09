@@ -211,4 +211,61 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });
+
+  testWidgets('the event editor invites the ensemble of a production', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final server = TestServer();
+    server.data['productions'] = [
+      {
+        'id': 'winter',
+        'title': 'Winterstück',
+        'ensemble': [1, 3],
+      },
+    ];
+    final controller = server.controller();
+    await signIn(controller);
+    expect(controller.ensemblesOf(['winter']), [
+      [1, 3],
+    ]);
+    expect(
+      controller.audienceLabel(const [], const [], const ['winter']),
+      'Ensemble Winterstück',
+    );
+    const crew = TheaterMember(id: 3, name: 'Toni');
+    const other = TheaterMember(id: 2, name: 'Sam');
+    final ensembles = controller.ensemblesOf(['winter']);
+    expect(crew.inAudience(const [], const [], ensembles), isTrue);
+    expect(other.inAudience(const [], const [], ensembles), isFalse);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StageTheme.build(Brightness.light),
+        home: EventEditorScreen(controller: controller),
+      ),
+    );
+    await tester.enterText(find.widgetWithText(TextField, 'Titel'), 'Lesung');
+    await tester.tap(find.widgetWithText(FilterChip, 'Winterstück · 2'));
+    await tester.pumpAndSettle();
+    expect(find.text('Eingeladen: Ensemble Winterstück'), findsOneWidget);
+    expect(find.widgetWithText(FilterChip, 'Alle'), findsNothing);
+    final save = find.text('Termin speichern');
+    await tester.dragUntilVisible(
+      save,
+      find.byType(ListView).first,
+      const Offset(0, -300),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    final body = server.actionBodies.lastWhere(
+      (b) => b['action'] == 'event.save',
+    );
+    expect(body['productionIds'], ['winter']);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
 }

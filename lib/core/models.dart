@@ -108,6 +108,7 @@ class TheaterEvent {
     this.version = 1,
     this.roleIds = const [],
     this.personIds = const [],
+    this.productionIds = const [],
     this.slotPoolId,
   });
   final String id,
@@ -129,6 +130,9 @@ class TheaterEvent {
 
   /// Person roles addressed by this event; empty means everyone.
   final List<String> roleIds;
+
+  /// Productions whose whole ensemble is invited.
+  final List<String> productionIds;
 
   /// People invited by name in addition to [roleIds].
   final List<int> personIds;
@@ -170,6 +174,9 @@ class TheaterEvent {
     sceneIds: jsonList(json['sceneIds']).map((e) => e.toString()).toList(),
     roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
     personIds: jsonList(json['personIds']).map(intValue).toList(),
+    productionIds: jsonList(
+      json['productionIds'],
+    ).map((e) => e.toString()).toList(),
     slotPoolId: json['slotPoolId'] == null
         ? null
         : textValue(json['slotPoolId']),
@@ -202,6 +209,7 @@ class TheaterEvent {
     version: version,
     roleIds: roleIds,
     personIds: personIds,
+    productionIds: productionIds,
     slotPoolId: slotPoolId,
   );
   JsonMap toJson() => {
@@ -223,6 +231,7 @@ class TheaterEvent {
     'version': version,
     'roleIds': roleIds,
     'personIds': personIds,
+    'productionIds': productionIds,
     'productionId': productionId,
     'sceneIds': sceneIds,
     if (slotPoolId != null) 'slotPoolId': slotPoolId,
@@ -313,6 +322,7 @@ class Poll {
     this.version = 1,
     this.roleIds = const [],
     this.personIds = const [],
+    this.productionIds = const [],
   });
   final String id, title, description;
   final List<PollOption> options;
@@ -320,6 +330,7 @@ class Poll {
   /// Person roles that may see and vote; empty means everyone.
   final List<String> roleIds;
   final List<int> personIds;
+  final List<String> productionIds;
   final String? selectedOptionId, confirmedOptionId;
   final bool closed, anonymous;
   String get privacyLabel => anonymous ? 'Anonym' : 'Namentlich';
@@ -352,6 +363,9 @@ class Poll {
     version: intValue(json['version'], 1),
     roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
     personIds: jsonList(json['personIds']).map(intValue).toList(),
+    productionIds: jsonList(
+      json['productionIds'],
+    ).map((e) => e.toString()).toList(),
   );
   Poll withChoice(String optionId, {PollVoter? voter}) => Poll(
     id: id,
@@ -387,6 +401,7 @@ class Poll {
     version: version,
     roleIds: roleIds,
     personIds: personIds,
+    productionIds: productionIds,
   );
   JsonMap toJson() => {
     'id': id,
@@ -394,6 +409,7 @@ class Poll {
     'description': description,
     'roleIds': roleIds,
     'personIds': personIds,
+    'productionIds': productionIds,
     'options': options.map((e) => e.toJson(anonymous: anonymous)).toList(),
     'choice': selectedOptionId,
     'confirmedOptionId': confirmedOptionId,
@@ -420,12 +436,17 @@ class TheaterMember {
   final List<String> roleIds;
   final bool active;
 
-  /// Whether this member belongs to an audience of roles or invited people
-  /// (both empty = everyone).
-  bool inAudience(List<String> audience, [List<int> people = const []]) =>
-      (audience.isEmpty && people.isEmpty) ||
+  /// Whether this member belongs to an audience of roles, invited people or
+  /// production ensembles (one list per production); nothing chosen = everyone.
+  bool inAudience(
+    List<String> audience, [
+    List<int> people = const [],
+    List<List<int>> ensembles = const [],
+  ]) =>
+      (audience.isEmpty && people.isEmpty && ensembles.isEmpty) ||
       audience.any(roleIds.contains) ||
-      people.contains(id);
+      people.contains(id) ||
+      ensembles.any((ensemble) => ensemble.contains(id));
   factory TheaterMember.fromJson(JsonMap json) => TheaterMember(
     id: intValue(json['id']),
     name: textValue(json['name']),
@@ -481,6 +502,7 @@ class Production {
     this.createdAt,
     this.archived = false,
     this.version = 1,
+    this.ensemble = const [],
   });
   final String id, title, subtitle, revision;
   final List<ScriptRole> roles;
@@ -488,6 +510,9 @@ class Production {
   final DateTime? premiereAt, createdAt;
   final bool archived;
   final int version;
+
+  /// Cast, directors and crew added by hand; computed by the server.
+  final List<int> ensemble;
 
   DateTime get sortDate {
     if (premiereAt != null) return premiereAt!.toUtc();
@@ -527,6 +552,7 @@ class Production {
     createdAt: dateValue(json['createdAt']),
     archived: json['archived'] == true,
     version: intValue(json['version'] ?? 1),
+    ensemble: jsonList(json['ensemble']).map(intValue).toList(),
     roles: jsonList(
       json['roles'],
     ).map((e) => ScriptRole.fromJson(jsonMap(e))).toList(),
@@ -542,6 +568,7 @@ class Production {
     createdAt: createdAt,
     archived: archived,
     version: version,
+    ensemble: ensemble,
   );
   JsonMap toJson() => {
     'id': id,
@@ -554,6 +581,7 @@ class Production {
     'createdAt': createdAt?.toUtc().toIso8601String(),
     'archived': archived,
     'version': version,
+    'ensemble': ensemble,
   };
 }
 

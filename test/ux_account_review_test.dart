@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/ui/accounts_admin.dart';
@@ -12,6 +13,7 @@ import 'account_roster_test.dart' show fixture;
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
 
 void main() {
+  setUpAll(() => initializeDateFormatting('de'));
   test('registration pushes open the validated account target', () {
     final target = AppTarget.fromData({'accountUid': 'new'});
     expect(target?.kind, 'accounts');

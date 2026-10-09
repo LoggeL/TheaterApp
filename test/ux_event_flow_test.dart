@@ -101,9 +101,9 @@ void main() {
       expect(rect.right, lessThanOrEqualTo(320));
       expect(rect.bottom, lessThanOrEqualTo(1000));
     }
-    expect(find.text('Kommend · 0 Termine'), findsOneWidget);
+    expect(find.text('Hier ist alles ruhig.'), findsOneWidget);
     expect(tester.takeException(), isNull);
-    await tester.tap(find.widgetWithText(ChoiceChip, 'Kalender'));
+    await tester.tap(find.byTooltip('Kalender'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());

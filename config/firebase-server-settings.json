@@ -9,5 +9,11 @@
     "theater-app-6fa5d.web.app",
     "theater-app.logge.top",
     "app.kolpingtheater-ramsen.de"
-  ]
+  ],
+  "email": {
+    "method": "CUSTOM_SMTP",
+    "smtpHost": "smtp.resend.com",
+    "senderEmail": "app-noreply@kolpingtheater-ramsen.de",
+    "locale": "de"
+  }
 }

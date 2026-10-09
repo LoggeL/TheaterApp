@@ -33,220 +33,228 @@ class MoreScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = controller.user;
+    final theme = Theme.of(context);
+    final unread = controller.messages.where((m) => m['read'] != true).length;
+    final waiting = slotPoolsAwaitingChoice(controller);
+    final active = controller.members.where((m) => m.active).length;
     return ListView(
       padding: const EdgeInsets.fromLTRB(22, 20, 22, 30),
       children: [
-        Text('Mein Bereich.', style: Theme.of(context).textTheme.headlineLarge),
-        const SizedBox(height: 24),
+        const PageHeader('Mein Bereich.'),
         Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              children: [
-                MemberAvatar(
-                  controller: controller,
-                  avatarId: user?.avatarId,
-                  initials: user?.initials ?? 'KR',
-                  radius: 27,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => _open(context, ProfileScreen(controller: controller)),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    theme.colorScheme.primary.withValues(alpha: .09),
+                    theme.colorScheme.secondary.withValues(alpha: .05),
+                  ],
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        user?.name ?? 'Ensemble',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        controller.isDemo
-                            ? 'Demokonto · Beispieldaten'
-                            : (user?.roleIds.isNotEmpty == true
-                                  ? controller.roleNames(user!.roleIds)
-                                  : 'Kolpingtheater Ramsen'),
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      if (user?.isAdmin == true)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 8),
-                          child: StatePill(
-                            'Administration',
-                            color: StageTheme.violet,
+              ),
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  MemberAvatar(
+                    controller: controller,
+                    avatarId: user?.avatarId,
+                    initials: user?.initials ?? 'KR',
+                    radius: 30,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user?.name ?? 'Ensemble',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontSize: 18,
                           ),
                         ),
-                    ],
+                        const SizedBox(height: 4),
+                        Text(
+                          controller.isDemo
+                              ? 'Demokonto · Beispieldaten'
+                              : (user?.roleIds.isNotEmpty == true
+                                    ? controller.roleNames(user!.roleIds)
+                                    : 'Kolpingtheater Ramsen'),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        if (user?.isAdmin == true)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8),
+                            child: StatePill(
+                              'Administration',
+                              color: StageTheme.violet,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  IconButton.filledTonal(
+                    tooltip: 'Profil bearbeiten',
+                    onPressed: () =>
+                        _open(context, ProfileScreen(controller: controller)),
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-        TextButton.icon(
-          onPressed: () =>
-              _open(context, ProfileScreen(controller: controller)),
-          icon: const Icon(Icons.edit_outlined),
-          label: const Text('Profil bearbeiten'),
-        ),
-        const SectionTitle('Im Theater'),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.poll_outlined),
-            title: const Text('Abstimmungen'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _open(context, PollsScreen(controller: controller)),
-          ),
-        ),
-        if (controller.slotPools.isNotEmpty || user?.isAdmin == true) ...[
-          const SizedBox(height: 12),
-          Builder(
-            builder: (context) {
-              final waiting = slotPoolsAwaitingChoice(controller);
-              return Card(
-                child: ListTile(
-                  leading: const Icon(Icons.edit_calendar_outlined),
-                  title: const Text('Terminfinder'),
-                  subtitle: Text(
-                    waiting == 0
+        const SizedBox(height: 28),
+        ResponsiveGroups(
+          children: [
+            TileGroup(
+              title: 'Im Theater',
+              tiles: [
+                GroupTile(
+                  icon: Icons.chat_bubble_outline,
+                  title: 'Mitteilungen',
+                  subtitle: unread == 0
+                      ? 'Nachrichten der Theaterleitung'
+                      : unread == 1
+                      ? '1 ungelesene Mitteilung'
+                      : '$unread ungelesene Mitteilungen',
+                  subtitleColor: unread == 0 ? null : theme.colorScheme.primary,
+                  onTap: () =>
+                      _open(context, MessagesScreen(controller: controller)),
+                ),
+                GroupTile(
+                  icon: Icons.poll_outlined,
+                  title: 'Abstimmungen',
+                  subtitle: 'Mitreden und abstimmen',
+                  onTap: () =>
+                      _open(context, PollsScreen(controller: controller)),
+                ),
+                if (controller.slotPools.isNotEmpty || user?.isAdmin == true)
+                  GroupTile(
+                    icon: Icons.edit_calendar_outlined,
+                    title: 'Terminfinder',
+                    subtitle: waiting == 0
                         ? 'Zeitfenster buchen, z. B. für Fototermine'
                         : waiting == 1
                         ? '1 wartet auf deine Auswahl'
                         : '$waiting warten auf deine Auswahl',
-                    style: waiting == 0
+                    subtitleColor: waiting == 0
                         ? null
-                        : const TextStyle(
-                            color: StageTheme.orange,
-                            fontWeight: FontWeight.w700,
-                          ),
+                        : theme.colorScheme.primary,
+                    onTap: () =>
+                        _open(context, SlotPoolsScreen(controller: controller)),
                   ),
-                  trailing: const Icon(Icons.chevron_right),
+                GroupTile(
+                  icon: Icons.sticky_note_2_outlined,
+                  title: 'Notizen',
+                  subtitle: controller.notes.length == 1
+                      ? '1 Notiz'
+                      : '${controller.notes.length} Notizen',
                   onTap: () =>
-                      _open(context, SlotPoolsScreen(controller: controller)),
+                      _open(context, NotesScreen(controller: controller)),
                 ),
-              );
-            },
-          ),
-        ],
-        const SizedBox(height: 12),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.photo_library_outlined),
-            title: const Text('Galerien'),
-            subtitle: const Text('Unsere Stücke in Bildern'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () =>
-                _open(context, GalleryListScreen(controller: controller)),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.chat_bubble_outline),
-            title: const Text('Mitteilungen'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _open(context, MessagesScreen(controller: controller)),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: Column(
-            children: [
-              _MenuItem(
-                Icons.sticky_note_2_outlined,
-                'Notizen',
-                controller.notes.length == 1
-                    ? '1 Notiz'
-                    : '${controller.notes.length} Notizen',
-                () => _open(context, NotesScreen(controller: controller)),
-              ),
-              const Divider(indent: 60),
-              _MenuItem(
-                Icons.beach_access_outlined,
-                'Abwesenheiten',
-                '${controller.absences.length} Zeiträume gemeldet',
-                () => _open(context, AbsencesScreen(controller: controller)),
-              ),
-              if (!controller.isDemo) ...[
-                const Divider(indent: 60),
-                _MenuItem(
-                  Icons.event_available_outlined,
-                  'Meine Teilnahme',
-                  'Rückmeldungen und Anwesenheit der letzten sechs Monate',
-                  () => _open(
+                GroupTile(
+                  icon: Icons.photo_library_outlined,
+                  title: 'Galerien',
+                  subtitle: 'Unsere Stücke in Bildern',
+                  onTap: () =>
+                      _open(context, GalleryListScreen(controller: controller)),
+                ),
+              ],
+            ),
+            TileGroup(
+              title: 'Ich & das Ensemble',
+              tiles: [
+                GroupTile(
+                  icon: Icons.beach_access_outlined,
+                  title: 'Abwesenheiten',
+                  subtitle: controller.absences.length == 1
+                      ? '1 Zeitraum gemeldet'
+                      : '${controller.absences.length} Zeiträume gemeldet',
+                  onTap: () =>
+                      _open(context, AbsencesScreen(controller: controller)),
+                ),
+                if (!controller.isDemo)
+                  GroupTile(
+                    icon: Icons.event_available_outlined,
+                    title: 'Meine Teilnahme',
+                    subtitle: 'Rückmeldungen und Anwesenheit',
+                    onTap: () => _open(
+                      context,
+                      ParticipationScreen(controller: controller),
+                    ),
+                  ),
+                GroupTile(
+                  icon: Icons.groups_outlined,
+                  title: 'Unser Ensemble',
+                  subtitle: '$active aktive Mitglieder',
+                  onTap: () =>
+                      _open(context, MembersScreen(controller: controller)),
+                ),
+              ],
+            ),
+            TileGroup(
+              title: 'Einstellungen & Konto',
+              tiles: [
+                GroupTile(
+                  icon: Icons.tune,
+                  title: 'Darstellung & Erinnerungen',
+                  subtitle: 'Design, Push und Benachrichtigungen',
+                  onTap: () => _open(
                     context,
-                    ParticipationScreen(controller: controller),
+                    SettingsScreen(controller: controller, devices: devices),
                   ),
                 ),
-              ],
-              const Divider(indent: 60),
-              _MenuItem(
-                Icons.groups_outlined,
-                'Unser Ensemble',
-                '${controller.members.where((m) => m.active).length} aktive Mitglieder',
-                () => _open(context, MembersScreen(controller: controller)),
-              ),
-            ],
-          ),
-        ),
-        const SectionTitle('So, wie du es brauchst'),
-        Card(
-          child: Column(
-            children: [
-              _MenuItem(
-                Icons.tune,
-                'Darstellung & Erinnerungen',
-                'Design, Push und Benachrichtigungen',
-                () => _open(
-                  context,
-                  SettingsScreen(controller: controller, devices: devices),
+                GroupTile(
+                  icon: Icons.sync_outlined,
+                  title: 'Synchronisierung',
+                  subtitle: controller.isDemo
+                      ? 'Demo · alles bleibt auf diesem Gerät'
+                      : controller.pendingCount + controller.failedCount == 0
+                      ? 'Alles übertragen'
+                      : '${controller.pendingCount} ausstehend · ${controller.failedCount} zu prüfen',
+                  onTap: () =>
+                      _open(context, SyncScreen(controller: controller)),
                 ),
-              ),
-              const Divider(indent: 60),
-              _MenuItem(
-                Icons.sync_outlined,
-                'Synchronisierung',
-                controller.isDemo
-                    ? 'Demo · alles bleibt auf diesem Gerät'
-                    : '${controller.pendingCount} ausstehend · ${controller.failedCount} zu prüfen',
-                () => _open(context, SyncScreen(controller: controller)),
-              ),
-              if (!controller.isDemo &&
-                  (!controller.usesFirebase ||
-                      controller.identity!.linkedProviders.contains(
-                        'password',
-                      ))) ...[
-                const Divider(indent: 60),
-                _MenuItem(
-                  Icons.lock_outline,
-                  'Passwort ändern',
-                  'Deinen Zugang schützen',
-                  () => _open(context, PasswordScreen(controller: controller)),
-                ),
-              ],
-              if (controller.usesFirebase) ...[
-                const Divider(indent: 60),
-                _MenuItem(
-                  Icons.login_outlined,
-                  'Anmeldearten',
-                  'Zugänge zu deinem Konto',
-                  () => _open(
-                    context,
-                    AccountProvidersScreen(controller: controller),
+                if (!controller.isDemo &&
+                    (!controller.usesFirebase ||
+                        controller.identity!.linkedProviders.contains(
+                          'password',
+                        )))
+                  GroupTile(
+                    icon: Icons.lock_outline,
+                    title: 'Passwort ändern',
+                    subtitle: 'Deinen Zugang schützen',
+                    onTap: () =>
+                        _open(context, PasswordScreen(controller: controller)),
                   ),
-                ),
+                if (controller.usesFirebase)
+                  GroupTile(
+                    icon: Icons.login_outlined,
+                    title: 'Anmeldearten',
+                    subtitle: 'Zugänge zu deinem Konto',
+                    onTap: () => _open(
+                      context,
+                      AccountProvidersScreen(controller: controller),
+                    ),
+                  ),
+                if (user?.isAdmin == true && !controller.isDemo)
+                  GroupTile(
+                    icon: Icons.admin_panel_settings_outlined,
+                    title: 'Administration',
+                    subtitle: 'Konten, Termine, Ensemble und Besetzung',
+                    onTap: () => _open(
+                      context,
+                      ManagementScreen(controller: controller),
+                    ),
+                  ),
               ],
-              if (user?.isAdmin == true && !controller.isDemo) ...[
-                const Divider(indent: 60),
-                _MenuItem(
-                  Icons.admin_panel_settings_outlined,
-                  'Administration',
-                  'Konten, Termine, Ensemble und Besetzung',
-                  () =>
-                      _open(context, ManagementScreen(controller: controller)),
-                ),
-              ],
-            ],
-          ),
+            ),
+          ],
         ),
         const PrivacyLinks(),
         const PwaInstallCard(),
@@ -314,28 +322,6 @@ class MoreScreen extends StatelessWidget {
 
 void _open(BuildContext context, Widget screen) =>
     Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
-
-class _MenuItem extends StatelessWidget {
-  const _MenuItem(this.icon, this.title, this.subtitle, this.tap);
-  final IconData icon;
-  final String title, subtitle;
-  final VoidCallback tap;
-  @override
-  Widget build(BuildContext context) => ListTile(
-    contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
-    leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
-    title: Text(
-      title,
-      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-    ),
-    subtitle: Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Text(subtitle, style: const TextStyle(fontSize: 12)),
-    ),
-    trailing: const Icon(Icons.chevron_right, size: 20),
-    onTap: tap,
-  );
-}
 
 class AbsencesScreen extends StatelessWidget {
   const AbsencesScreen({super.key, required this.controller});
@@ -774,23 +760,29 @@ class SettingsScreen extends StatelessWidget {
               children: [
                 SwitchListTile(
                   title: const Text('Termin-E-Mails'),
-                  subtitle: Text(controller.emailConfigured
-                      ? 'Neue Termine, Änderungen und Erinnerungen an deine bestätigte Anmeldeadresse.'
-                      : 'Der E-Mail-Versand ist noch nicht eingerichtet.'),
+                  subtitle: Text(
+                    controller.emailConfigured
+                        ? 'Neue Termine, Änderungen und Erinnerungen an deine bestätigte Anmeldeadresse.'
+                        : 'Der E-Mail-Versand ist noch nicht eingerichtet.',
+                  ),
                   value: controller.reminders['emailEnabled'] ?? false,
                   onChanged: controller.emailConfigured
-                      ? (value) => runAction(context, () => controller.saveReminders({
-                          ...controller.reminders,
-                          'emailEnabled': value,
-                        }))
+                      ? (value) => runAction(
+                          context,
+                          () => controller.saveReminders({
+                            ...controller.reminders,
+                            'emailEnabled': value,
+                          }),
+                        )
                       : null,
                 ),
                 if (controller.emailConfigured)
                   TextButton.icon(
                     icon: const Icon(Icons.mail_outline),
                     label: const Text('Test-E-Mail an mich senden'),
-                    onPressed: () => runAction(context,
-                      () => controller.action({'action': 'email.test'}),
+                    onPressed: () => runAction(
+                      context,
+                      () => controller.performAction({'action': 'email.test'}),
                       message: 'Test-E-Mail angefordert.',
                     ),
                   ),
@@ -822,14 +814,17 @@ class SettingsScreen extends StatelessWidget {
                       }),
                     ),
                   ),
-                ListTile(
-                  title: const Text('Eigene Vorlaufzeit'),
-                  subtitle: const Text(
-                    'Zusätzlich zu einem selbst gewählten Zeitpunkt',
-                  ),
-                  trailing: DropdownButton<int?>(
-                    value: controller.customReminderMinutes,
-                    underline: const SizedBox.shrink(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+                  child: DropdownButtonFormField<int?>(
+                    key: const ValueKey('custom-reminder'),
+                    initialValue: controller.customReminderMinutes,
+                    decoration: const InputDecoration(
+                      labelText: 'Eigene Vorlaufzeit',
+                      helperText:
+                          'Zusätzlich zu einem selbst gewählten Zeitpunkt',
+                      prefixIcon: Icon(Icons.alarm_add_outlined),
+                    ),
                     items: [
                       for (final minutes in {
                         null,

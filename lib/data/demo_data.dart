@@ -137,6 +137,7 @@ class DemoData {
       'checkinsByEvent': <String, dynamic>{},
       'memberAttendanceByEvent': <String, dynamic>{},
       'reminders': {
+        'emailEnabled': false,
         'dayBefore': false,
         'twoHours': true,
         'changes': true,

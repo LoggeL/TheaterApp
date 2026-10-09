@@ -151,12 +151,15 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                         ? 'Die Antworten werden ohne Namen angezeigt.'
                         : 'Alle Mitglieder sehen, wer welche Antwort gewählt hat.',
                   ),
-                  if (poll.roleIds.isNotEmpty || poll.personIds.isNotEmpty) ...[
+                  if (poll.roleIds.isNotEmpty ||
+                      poll.personIds.isNotEmpty ||
+                      poll.productionIds.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     AudienceBadge(
                       controller: widget.controller,
                       roleIds: poll.roleIds,
                       personIds: poll.personIds,
+                      productionIds: poll.productionIds,
                     ),
                   ],
                   if (poll.description.isNotEmpty)
@@ -292,6 +295,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
   late bool _anonymous;
   late Set<String> _roleIds;
   late Set<int> _personIds;
+  late Set<String> _productionIds;
   bool _busy = false;
   final _form = GlobalKey<FormState>();
   bool get _fixed => (widget.poll?.totalVotes ?? 0) > 0;
@@ -309,6 +313,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
     _anonymous = widget.poll?.anonymous ?? true;
     _roleIds = {...?widget.poll?.roleIds};
     _personIds = {...?widget.poll?.personIds};
+    _productionIds = {...?widget.poll?.productionIds};
   }
 
   @override
@@ -343,6 +348,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
         'anonymous': _anonymous,
         'roleIds': _roleIds.toList(),
         'personIds': _personIds.toList(),
+        'productionIds': _productionIds.toList(),
         'options': _options.map((o) => {'label': o.text}).toList(),
         'closesAt': _closes?.toUtc().toIso8601String(),
       });
@@ -386,9 +392,15 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
             AudiencePicker(
               controller: widget.controller,
               label: 'Wer darf abstimmen?',
-              allowEveryone: _personIds.isEmpty,
+              allowEveryone: _personIds.isEmpty && _productionIds.isEmpty,
               selected: _roleIds,
               onChanged: (value) => setState(() => _roleIds = value),
+            ),
+            const SizedBox(height: 16),
+            ProductionAudiencePicker(
+              controller: widget.controller,
+              selected: _productionIds,
+              onChanged: (value) => setState(() => _productionIds = value),
             ),
             const SizedBox(height: 16),
             PersonPicker(
@@ -398,7 +410,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Abstimmen dürfen: ${widget.controller.audienceLabel(_roleIds, _personIds)}',
+              'Abstimmen dürfen: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SectionTitle('Abstimmungsart'),

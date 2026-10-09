@@ -89,6 +89,7 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (route === '/actions' && req.method === 'POST') return json(res, 200, theater.action(identity.uid, body, req.headers['idempotency-key']));
       if (route === '/participation' && req.method === 'GET') return json(res, 200, theater.participation(identity.uid));
       if (route === '/admin/accounts' && req.method === 'GET') return json(res, 200, theater.adminData(identity.uid));
+      if (route === '/admin/email' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.emailEnabled, jobs: theater.store.all('emailJobs').slice(-50).map(({ acceptedRecipientIds, failedRecipientIds, ...job }) => job) }); }
       if (route === '/admin/push' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.pushEnabled, devices: theater.store.all('devices').map(({ token, ...d }) => d), jobs: theater.store.all('pushJobs').slice(-50).map(({ acceptedDeviceIds, ...j }) => j) }); }
       if (route === '/admin/script-source' && req.method === 'GET') { theater.account(identity.uid, true); if (!scriptService?.configured) throw new AppError(409, 'Keine Skriptquelle eingerichtet.'); return json(res, 200, { productions: await scriptService.getProductions() }); }
       if (route === '/admin/import-script' && req.method === 'POST') {

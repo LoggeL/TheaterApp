@@ -80,6 +80,8 @@ void main() {
         findsNothing,
       );
 
+      await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Vergangen'));
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ChoiceChip, 'Vergangen'));
       await tester.pumpAndSettle();
       final past = find.widgetWithText(EventCard, 'Alte Probe');
@@ -98,7 +100,7 @@ void main() {
         isFalse,
       );
 
-      await tester.tap(find.text('Kalender'));
+      await tester.tap(find.byTooltip('Kalender'));
       await tester.pumpAndSettle();
       expect(find.byType(RehearsalCalendar), findsOneWidget);
       expect(tester.takeException(), isNull);

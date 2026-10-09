@@ -124,7 +124,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         if (width < 1000) {
-          await tester.tap(find.text('Kalender'));
+          await tester.tap(find.byTooltip('Kalender'));
           await tester.pumpAndSettle();
         }
         expect(find.byType(RehearsalCalendar), findsOneWidget);

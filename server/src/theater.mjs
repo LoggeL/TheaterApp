@@ -20,10 +20,19 @@ export const participationWindowDays = 183;
 const voluntaryEventTypes = ['social'];
 // Target audiences are person roles; an empty list addresses everyone.
 export const inRoles = (member, roleIds) => !list(roleIds).length || list(member?.roleIds).some(x => list(roleIds).includes(x));
-// Events may additionally invite single people: a member is addressed by a role or by name.
-export const inAudience = (member, item) => {
-  const roleIds = list(item?.roleIds), personIds = list(item?.personIds);
-  return (!roleIds.length && !personIds.length) || (roleIds.length > 0 && inRoles(member, roleIds)) || personIds.includes(member?.id);
+// A production's ensemble: its cast, its directors and people added by hand (crew).
+export const productionEnsemble = production => [...new Set([
+  ...Object.values(production?.casting ?? {}).filter(x => x != null).map(Number),
+  ...list(production?.directorMemberIds).map(Number),
+  ...list(production?.memberIds).map(Number),
+])];
+// A member is addressed by a role, a production ensemble or by name; nothing chosen = everyone.
+// Ensembles are resolved through the store, so later casting changes apply.
+export const inAudience = (member, item, store) => {
+  const roleIds = list(item?.roleIds), personIds = list(item?.personIds), productionIds = list(item?.productionIds);
+  if (!roleIds.length && !personIds.length && !productionIds.length) return true;
+  return (roleIds.length > 0 && inRoles(member, roleIds)) || personIds.includes(member?.id)
+    || (member?.id != null && productionIds.some(id => productionEnsemble(store?.get('productions', id)).includes(member.id)));
 };
 export const eventTypes = ['rehearsal', 'readthrough', 'technical', 'costume', 'dress', 'performance', 'meeting', 'workshop', 'setup', 'teardown', 'social', 'other'];
 const initialRoles = ['Schauspiel', 'Regie', 'Technik', 'Kostüm', 'Maske', 'Bühnenbau', 'Organisation'];
@@ -126,7 +135,7 @@ export class Theater {
       }
     }
     const receipts = this.store.all('receipts').filter(r => r.personId === a.personId);
-    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a), slotPools: this.slotPools(a), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, notes: this.store.all('notes').filter(n => admin || (n.published && this.canSee(a, n))).sort((x, y) => y.updatedAt.localeCompare(x.updatedAt)), messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true }, serverTime: now() };
+    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a), slotPools: this.slotPools(a), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, notes: this.store.all('notes').filter(n => admin || (n.published && this.canSee(a, n))).sort((x, y) => y.updatedAt.localeCompare(x.updatedAt)), messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true }, serverTime: now() };
   }
   /** Slot pools ("Terminfinder"): invited people book one time slot each. */
   slotPools(a) {
@@ -172,13 +181,22 @@ export class Theater {
       }) };
     }).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
   }
-  canSee(a, item) { return a.role === 'admin' || inAudience(this.store.get('members', a.personId), item); }
+  canSee(a, item) { return a.role === 'admin' || inAudience(this.store.get('members', a.personId), item, this.store); }
   // Roles are resolved when reading, so later role members see the message too.
-  canReadMessage(a, m) { return a.role === 'admin' || m.audience === 'all' || (list(m.roleIds).length > 0 && inRoles(this.store.get('members', a.personId), m.roleIds)) || list(m.recipientPersonIds).includes(a.personId); }
+  canReadMessage(a, m) {
+    if (a.role === 'admin' || m.audience === 'all' || list(m.recipientPersonIds).includes(a.personId)) return true;
+    const member = this.store.get('members', a.personId);
+    return (list(m.roleIds).length > 0 && inRoles(member, m.roleIds)) || (list(m.productionIds).length > 0 && inAudience(member, { productionIds: m.productionIds }, this.store));
+  }
   audience(value) {
     const roleIds = [...new Set(list(value).map(String))];
     if (roleIds.some(x => !this.store.get('personRoles', x))) fail(400, 'Unbekannte Rolle ausgewählt.');
     return roleIds;
+  }
+  productionAudience(value) {
+    const ids = [...new Set(list(value).map(String))];
+    if (ids.length > 20 || ids.some(x => !this.store.get('productions', x))) fail(400, 'Unbekanntes Stück ausgewählt.');
+    return ids;
   }
   invitedPeople(value, previous = []) {
     const personIds = [...new Set(list(value).map(Number))];
@@ -227,7 +245,7 @@ export class Theater {
     const linkedSince = new Map(this.store.accounts().filter(x => x.status === 'approved' && x.personId != null).map(x => [x.personId, Date.parse(x.approvedAt ?? x.createdAt)]));
     const summary = member => {
       const counts = { events: 0, answerable: 0, answered: 0, recorded: 0, attended: 0, missedAfterCommitment: 0, missedUnannounced: 0 };
-      for (const e of events.filter(e => inAudience(member, e))) {
+      for (const e of events.filter(e => inAudience(member, e, this.store))) {
         const key = `${e.id}:${member.id}`, status = responses.get(key), present = checkins.get(key);
         // Only people with an app account at that time could respond in the app.
         const answerable = Date.parse(e.startsAt) > (linkedSince.get(member.id) ?? Infinity);
@@ -278,7 +296,7 @@ export class Theater {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(b.from ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(b.to ?? '') || b.from > b.to || day(`${b.from}T12:00:00Z`) !== b.from || day(`${b.to}T12:00:00Z`) !== b.to) fail(400, 'Bitte einen gültigen Zeitraum angeben.');
         const entry = { id: id(), personId: a.personId, from: b.from, to: b.to, reason: text(b.reason, 600) };
         s.put('absences', entry.id, entry);
-        for (const e of s.all('events')) if (!e.locked && !e.slotPoolId && inAudience(s.get('members', a.personId), e) && Date.parse(e.startsAt) - declineCutoffMs > +this.clock() && day(e.startsAt) >= b.from && day(e.startsAt) <= b.to) s.put('responses', `${e.id}:${a.personId}`, { eventId: e.id, personId: a.personId, status: 'no', reason: entry.reason, expectedArrivalAt: null, updatedAt: now() });
+        for (const e of s.all('events')) if (!e.locked && !e.slotPoolId && inAudience(s.get('members', a.personId), e, s) && Date.parse(e.startsAt) - declineCutoffMs > +this.clock() && day(e.startsAt) >= b.from && day(e.startsAt) <= b.to) s.put('responses', `${e.id}:${a.personId}`, { eventId: e.id, personId: a.personId, status: 'no', reason: entry.reason, expectedArrivalAt: null, updatedAt: now() });
         return { id: entry.id };
       }
       case 'absence.delete': { const x = s.get('absences', b.id); if (!x || x.personId !== a.personId) fail(404, 'Abwesenheit nicht gefunden.'); s.delete('absences', b.id); return {}; }
@@ -367,7 +385,8 @@ export class Theater {
         const options = labels.map((label, i) => ({ id: old?.options[i]?.label === label ? old.options[i].id : id(), label }));
         const roleIds = b.roleIds === undefined ? list(old?.roleIds) : this.audience(b.roleIds);
         const personIds = b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds);
-        s.put('polls', pollId, { id: pollId, title: required(b.title, 'Frage'), description: text(b.description, 3000), roleIds, personIds, anonymous, options, closesAt, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 });
+        const productionIds = b.productionIds === undefined ? list(old?.productionIds) : this.productionAudience(b.productionIds);
+        s.put('polls', pollId, { id: pollId, title: required(b.title, 'Frage'), description: text(b.description, 3000), roleIds, personIds, productionIds, anonymous, options, closesAt, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 });
         return { id: pollId };
       }
       case 'poll.vote': {
@@ -396,19 +415,23 @@ export class Theater {
         if (b.type != null && !eventTypes.includes(b.type)) fail(400, 'Unbekannte Terminart.');
         const roleIds = b.roleIds === undefined ? list(old?.roleIds) : this.audience(b.roleIds);
         const personIds = b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds);
-        const e = { id: eventId, title: required(b.title, 'Titel'), description: text(b.description ?? old?.description, 5000), startsAt, endsAt, place: text(b.place), type: eventTypes.includes(b.type) ? b.type : 'rehearsal', locked: b.locked === true, productionId: b.productionId || null, sceneIds: b.productionId ? sceneIds : [], roleIds, personIds, version: (old?.version ?? 0) + 1 };
+        const productionIds = b.productionIds === undefined ? list(old?.productionIds) : this.productionAudience(b.productionIds);
+        const e = { id: eventId, title: required(b.title, 'Titel'), description: text(b.description ?? old?.description, 5000), startsAt, endsAt, place: text(b.place), type: eventTypes.includes(b.type) ? b.type : 'rehearsal', locked: b.locked === true, productionId: b.productionId || null, sceneIds: b.productionId ? sceneIds : [], roleIds, personIds, productionIds, version: (old?.version ?? 0) + 1 };
         s.put('events', eventId, e);
         for (const r of s.all('responses').filter(r => r.eventId === eventId && r.expectedArrivalAt && (r.expectedArrivalAt <= startsAt || r.expectedArrivalAt >= endsAt))) s.put('responses', `${eventId}:${r.personId}`, { ...r, expectedArrivalAt: null });
-        for (const absence of s.all('absences')) if (inAudience(s.get('members', absence.personId), e) && absence.from <= day(startsAt) && absence.to >= day(startsAt) && !s.get('responses', `${eventId}:${absence.personId}`)) s.put('responses', `${eventId}:${absence.personId}`, { eventId, personId: absence.personId, status: 'no', expectedArrivalAt: null, reason: absence.reason, updatedAt: now() });
-        if (old) this.enqueuePush({ title: `Termin aktualisiert: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, change: true });
-        else this.enqueueEmail({ data: { eventId }, roleIds, personIds, newEvent: true });
-        return { id: eventId };
+        for (const absence of s.all('absences')) if (inAudience(s.get('members', absence.personId), e, s) && absence.from <= day(startsAt) && absence.to >= day(startsAt) && !s.get('responses', `${eventId}:${absence.personId}`)) s.put('responses', `${eventId}:${absence.personId}`, { eventId, personId: absence.personId, status: 'no', expectedArrivalAt: null, reason: absence.reason, updatedAt: now() });
+        // An explicit push replaces the automatic change notification; its email mirror keeps the usual rules.
+        const kind = old ? { change: true } : { newEvent: true };
+        if (b.push === true) this.enqueuePush({ title: `${old ? 'Termin geändert' : 'Neuer Termin'}: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, ...kind, announce: old ? 'changed' : 'new' });
+        else if (old) this.enqueuePush({ title: `Termin aktualisiert: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, change: true });
+        else this.enqueueEmail({ data: { eventId }, roleIds, personIds, productionIds, newEvent: true });
+        return { id: eventId, pushQueued: b.push === true && this.pushEnabled };
       }
       case 'event.delete': {
         admin(); const e = s.get('events', b.id); if (!e) fail(404, 'Termin nicht gefunden.');
         if (e.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.');
         if ((e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.');
-        this.enqueueEmail({ data: { eventId: e.id }, roleIds: e.roleIds, personIds: e.personIds, cancelled: true, event: { id: e.id, title: e.title, startsAt: e.startsAt, endsAt: e.endsAt, place: e.place, roleIds: e.roleIds, personIds: e.personIds } });
+        this.enqueueEmail({ data: { eventId: e.id }, roleIds: e.roleIds, personIds: e.personIds, productionIds: e.productionIds, cancelled: true, event: { id: e.id, title: e.title, startsAt: e.startsAt, endsAt: e.endsAt, place: e.place, roleIds: e.roleIds, personIds: e.personIds, productionIds: e.productionIds } });
         s.delete('events', b.id);
         for (const kind of ['responses', 'checkins']) for (const item of s.all(kind).filter(x => x.eventId === b.id)) s.delete(kind, `${item.eventId}:${item.personId}`);
         return {};
@@ -453,9 +476,12 @@ export class Theater {
           if (memberId != null) casting[roleId] = Number(memberId);
         }
         const directors = list(b.directorMemberIds).map(Number);
+        // Crew and other helpers who belong to the production without a script role.
+        const memberIds = b.memberIds === undefined ? list(old?.memberIds) : [...new Set(list(b.memberIds).map(Number))];
+        if (b.memberIds !== undefined && memberIds.some(m => !s.get('members', m) || (!s.get('members', m).active && !list(old?.memberIds).includes(m)))) fail(400, 'Mitwirkende Person nicht verfügbar.');
         if (directors.some(m => !s.get('members', m)?.active)) fail(400, 'Regieperson nicht verfügbar.');
         const premiereAt = b.premiereAt === undefined ? old?.premiereAt ?? null : b.premiereAt ? date(b.premiereAt) : null;
-        s.put('productions', productionId, { ...old, id: productionId, title: required(b.title, 'Titel'), subtitle: text(b.subtitle), premiereAt, createdAt: old?.createdAt ?? now(), roles: old?.roles ?? [], sceneCount: old?.sceneCount ?? 0, revision: old?.revision ?? '', casting, directorMemberIds: [...new Set(directors)], version: (old?.version ?? 0) + 1 });
+        s.put('productions', productionId, { ...old, id: productionId, title: required(b.title, 'Titel'), subtitle: text(b.subtitle), premiereAt, createdAt: old?.createdAt ?? now(), roles: old?.roles ?? [], sceneCount: old?.sceneCount ?? 0, revision: old?.revision ?? '', casting, directorMemberIds: [...new Set(directors)], memberIds, version: (old?.version ?? 0) + 1 });
         return { id: productionId };
       }
       case 'message.send': {
@@ -463,10 +489,12 @@ export class Theater {
         admin(); const audience = ['selected', 'roles'].includes(b.audience) ? 'selected' : 'all';
         const roleIds = audience === 'all' ? [] : this.audience(b.roleIds);
         const people = audience === 'all' ? [] : [...new Set(list(b.recipientPersonIds).map(Number))];
+        const productionIds = audience === 'all' ? [] : this.productionAudience(b.productionIds);
+        const ensembles = new Set(productionIds.flatMap(x => productionEnsemble(s.get('productions', x))));
         if (people.some(m => !s.get('members', m)?.active)) fail(400, 'Bitte gültige Empfänger auswählen.');
-        const recipients = audience === 'all' ? s.all('members').filter(m => m.active).map(m => m.id) : [...new Set([...s.all('members').filter(m => m.active && roleIds.length && inRoles(m, roleIds)).map(m => m.id), ...people])];
-        if (!recipients.length) fail(400, audience === 'all' ? 'Bitte gültige Empfänger auswählen.' : 'Bitte mindestens eine Rolle oder Person mit aktiven Mitgliedern auswählen.');
-        const m = { id: id(), title: required(b.title, 'Betreff'), body: required(b.body, 'Nachricht', 10000), audience, roleIds, recipientPersonIds: people, authorId: a.personId, authorName: s.get('members', a.personId).name, createdAt: now() };
+        const recipients = audience === 'all' ? s.all('members').filter(m => m.active).map(m => m.id) : [...new Set([...s.all('members').filter(m => m.active && ((roleIds.length && inRoles(m, roleIds)) || ensembles.has(m.id))).map(m => m.id), ...people])];
+        if (!recipients.length) fail(400, audience === 'all' ? 'Bitte gültige Empfänger auswählen.' : 'Bitte mindestens eine Rolle, ein Stück oder eine Person mit aktiven Mitgliedern auswählen.');
+        const m = { id: id(), title: required(b.title, 'Betreff'), body: required(b.body, 'Nachricht', 10000), audience, roleIds, productionIds, recipientPersonIds: people, authorId: a.personId, authorName: s.get('members', a.personId).name, createdAt: now() };
         s.put('messages', m.id, m);
         if (b.push === true) this.enqueuePush({ title: m.title, body: m.body.slice(0, 200), data: { messageId: m.id }, recipientPersonIds: recipients });
         return { id: m.id, pushQueued: b.push === true && this.pushEnabled };
@@ -477,7 +505,7 @@ export class Theater {
         if (old && old.version !== b.version) fail(409, 'Die Notiz wurde inzwischen geändert.');
         if (b.published !== undefined && typeof b.published !== 'boolean') fail(400, 'Bitte Entwurf oder Freigabe auswählen.');
         const published = b.published ?? old?.published ?? false;
-        const n = { id: noteId, title: required(b.title, 'Titel', 200), body: text(b.body, 20000), roleIds: this.audience(b.roleIds), personIds: b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds), published, publishedAt: published ? old?.publishedAt ?? now() : null, authorId: old?.authorId ?? a.personId, authorName: old?.authorName ?? s.get('members', a.personId).name, createdAt: old?.createdAt ?? now(), updatedAt: now(), version: (old?.version ?? 0) + 1 };
+        const n = { id: noteId, title: required(b.title, 'Titel', 200), body: text(b.body, 20000), roleIds: this.audience(b.roleIds), personIds: b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds), productionIds: b.productionIds === undefined ? list(old?.productionIds) : this.productionAudience(b.productionIds), published, publishedAt: published ? old?.publishedAt ?? now() : null, authorId: old?.authorId ?? a.personId, authorName: old?.authorName ?? s.get('members', a.personId).name, createdAt: old?.createdAt ?? now(), updatedAt: now(), version: (old?.version ?? 0) + 1 };
         s.put('notes', noteId, n); return { id: noteId };
       }
       case 'note.delete': {
@@ -515,10 +543,11 @@ export class Theater {
         if (b.type != null && !eventTypes.includes(b.type)) fail(400, 'Unbekannte Terminart.');
         const roleIds = b.roleIds === undefined ? list(old?.roleIds) : this.audience(b.roleIds);
         const personIds = b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds);
-        const pool = { id: poolId, title: required(b.title, 'Titel'), description: text(b.description, 3000), place: text(b.place), type: b.type ?? old?.type ?? 'other', roleIds, personIds, slots, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 };
+        const productionIds = b.productionIds === undefined ? list(old?.productionIds) : this.productionAudience(b.productionIds);
+        const pool = { id: poolId, title: required(b.title, 'Titel'), description: text(b.description, 3000), place: text(b.place), type: b.type ?? old?.type ?? 'other', roleIds, personIds, productionIds, slots, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 };
         s.put('slotPools', poolId, pool);
         for (const slot of slots) this.syncSlotEvent(pool, slot);
-        if (!old) this.enqueuePush({ title: `Terminfinder: ${pool.title}`, body: 'Bitte wähle dein Zeitfenster.', data: { slotPoolId: poolId }, roleIds, personIds });
+        if (!old) this.enqueuePush({ title: `Terminfinder: ${pool.title}`, body: 'Bitte wähle dein Zeitfenster.', data: { slotPoolId: poolId }, roleIds, personIds, productionIds });
         return { id: poolId };
       }
       case 'slotPool.close': {
@@ -537,7 +566,7 @@ export class Theater {
       }
       case 'slot.book': case 'slot.cancel': {
         const pool = s.get('slotPools', b.poolId);
-        if (!pool || !inAudience(s.get('members', a.personId), pool)) fail(404, 'Terminfinder nicht gefunden.');
+        if (!pool || !inAudience(s.get('members', a.personId), pool, s)) fail(404, 'Terminfinder nicht gefunden.');
         if (pool.closed) fail(409, 'Die Buchung ist geschlossen.');
         const own = s.get('slotBookings', `${pool.id}:${a.personId}`), ownSlot = pool.slots.find(x => x.id === own?.slotId);
         if (ownSlot && Date.parse(ownSlot.startsAt) <= +this.clock()) fail(409, 'Dein Zeitfenster hat schon begonnen.');
@@ -594,7 +623,8 @@ export class Theater {
   }
   enqueueEmail(message) {
     if (!this.emailEnabled) return;
-    const job = { id: id(), ...message, attempts: 0, status: 'pending', createdAt: now(), nextAttemptAt: now() };
+    const eventVersion = this.store.get('events', message.data?.eventId)?.version;
+    const job = { id: id(), ...message, ...(eventVersion !== undefined ? { eventVersion } : {}), attempts: 0, status: 'pending', createdAt: now(), nextAttemptAt: now() };
     this.store.put('emailJobs', job.id, job);
   }
 }

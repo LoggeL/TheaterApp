@@ -87,18 +87,29 @@ class AppController extends ChangeNotifier {
   List<JsonMap> get personRoles =>
       jsonList(_baseSnapshot['personRoles']).map(jsonMap).toList();
 
-  /// Readable target audience; no roles and no people means everyone.
+  /// Readable target audience; no roles, productions or people = everyone.
   String audienceLabel(
     Iterable<String> roleIds, [
     Iterable<int> personIds = const [],
+    Iterable<String> productionIds = const [],
   ]) {
-    if (roleIds.isEmpty && personIds.isEmpty) return 'Alle';
+    if (roleIds.isEmpty && personIds.isEmpty && productionIds.isEmpty) {
+      return 'Alle';
+    }
     final names = roleNames(roleIds);
     return [
       if (roleIds.isNotEmpty) names.isEmpty ? 'Gelöschte Rolle' : names,
+      for (final id in productionIds)
+        'Ensemble ${_productions.where((p) => p.id == id).firstOrNull?.title ?? 'Gelöschtes Stück'}',
       ..._members.where((m) => personIds.contains(m.id)).map((m) => m.name),
     ].join(' · ');
   }
+
+  /// The ensembles of the given productions, one list per production.
+  List<List<int>> ensemblesOf(Iterable<String> productionIds) => [
+    for (final id in productionIds)
+      _productions.where((p) => p.id == id).firstOrNull?.ensemble ?? const [],
+  ];
 
   String roleNames(Iterable<String> ids) => personRoles
       .where((r) => ids.contains(r['id']))
@@ -790,7 +801,12 @@ class AppController extends ChangeNotifier {
     _checkinVersions = {};
     _capabilities = {};
     _mutationVersion = 0;
-    _reminders = {'dayBefore': false, 'twoHours': true, 'changes': true, 'emailEnabled': false};
+    _reminders = {
+      'dayBefore': false,
+      'twoHours': true,
+      'changes': true,
+      'emailEnabled': false,
+    };
     _customReminderMinutes = null;
   }
 
@@ -1037,7 +1053,12 @@ class AppController extends ChangeNotifier {
       _enqueue({
         'action': 'settings.reminders',
         'value': {
-          for (final key in ['dayBefore', 'twoHours', 'changes', 'emailEnabled'])
+          for (final key in [
+            'dayBefore',
+            'twoHours',
+            'changes',
+            'emailEnabled',
+          ])
             key: value[key] ?? false,
           'customMinutes': customMinutes,
         },
@@ -1444,6 +1465,7 @@ class AppController extends ChangeNotifier {
               ).inAudience(
                 jsonList(event['roleIds']).map((e) => '$e').toList(),
                 jsonList(event['personIds']).map(intValue).toList(),
+                ensemblesOf(jsonList(event['productionIds']).map((e) => '$e')),
               );
           if (event['locked'] == true ||
               event['slotPoolId'] != null ||

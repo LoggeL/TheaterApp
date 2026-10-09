@@ -25,7 +25,8 @@ test('archiving and restoring preserve script access, casting, comments and even
   const previous = store.get('productions','summer');
   const script = theater.script('member','summer'); delete script.fetchedAt;
   action({action:'production.archive',id:'summer',version:2,archived:true});
-  const archived = theater.snapshot('member').productions.find(p=>p.id==='summer');
+  const { ensemble, ...archived } = theater.snapshot('member').productions.find(p=>p.id==='summer');
+  assert.ok(Array.isArray(ensemble));
   assert.deepEqual(archived,{...previous,archived:true,version:3});
   const after = theater.script('member','summer'); delete after.fetchedAt;
   assert.deepEqual(after,script);

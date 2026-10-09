@@ -51,6 +51,7 @@ class SlotPool {
     this.kind = 'other',
     this.roleIds = const [],
     this.personIds = const [],
+    this.productionIds = const [],
     this.closed = false,
     this.version = 1,
     this.slots = const [],
@@ -59,6 +60,7 @@ class SlotPool {
   final String id, title, description, place, kind;
   final List<String> roleIds;
   final List<int> personIds;
+  final List<String> productionIds;
   final bool closed;
   final int version;
   final List<TimeSlot> slots;
@@ -77,6 +79,9 @@ class SlotPool {
     kind: textValue(json['type'], 'other'),
     roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
     personIds: jsonList(json['personIds']).map(intValue).toList(),
+    productionIds: jsonList(
+      json['productionIds'],
+    ).map((e) => e.toString()).toList(),
     closed: json['closed'] == true,
     version: intValue(json['version'], 1),
     slots: [
@@ -99,7 +104,11 @@ bool invitedToSlotPool(AppController controller, SlotPool pool) {
     id: user!.personId!,
     name: user.name,
     roleIds: user.roleIds,
-  ).inAudience(pool.roleIds, pool.personIds);
+  ).inAudience(
+    pool.roleIds,
+    pool.personIds,
+    controller.ensemblesOf(pool.productionIds),
+  );
 }
 
 /// Open pools in which the signed-in person still has to choose a slot.
@@ -515,6 +524,9 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
                                 else if (!m.inAudience(
                                   pool.roleIds,
                                   pool.personIds,
+                                  widget.controller.ensemblesOf(
+                                    pool.productionIds,
+                                  ),
                                 ))
                                   'Nicht eingeladen',
                               ].join(' · '),
@@ -655,7 +667,7 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
                       const SizedBox(height: 14),
                       _Meta(
                         Icons.group_outlined,
-                        'Eingeladen: ${_controller.audienceLabel(pool.roleIds, pool.personIds)}',
+                        'Eingeladen: ${_controller.audienceLabel(pool.roleIds, pool.personIds, pool.productionIds)}',
                       ),
                     ],
                   ),
@@ -795,7 +807,15 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
         for (final p in s.people) p.personId,
     };
     final invited = _controller.members
-        .where((m) => m.active && m.inAudience(pool.roleIds, pool.personIds))
+        .where(
+          (m) =>
+              m.active &&
+              m.inAudience(
+                pool.roleIds,
+                pool.personIds,
+                _controller.ensemblesOf(pool.productionIds),
+              ),
+        )
         .toList();
     final missing = invited.where((m) => !booked.contains(m.id)).toList();
     if (invited.isEmpty) return const SizedBox.shrink();
@@ -1116,6 +1136,7 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
   late String _kind;
   late Set<String> _roleIds;
   late Set<int> _personIds;
+  late Set<String> _productionIds;
   late List<_DraftSlot> _slots;
   late DateTime _day;
   TimeOfDay _from = const TimeOfDay(hour: 10, minute: 0),
@@ -1134,6 +1155,7 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
     _kind = eventTypes.containsKey(pool?.kind) ? pool!.kind : 'other';
     _roleIds = {...?pool?.roleIds};
     _personIds = {...?pool?.personIds};
+    _productionIds = {...?pool?.productionIds};
     _slots = [
       for (final s in pool?.slots ?? const <TimeSlot>[])
         _DraftSlot(
@@ -1249,6 +1271,7 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
         'type': _kind,
         'roleIds': _roleIds.toList(),
         'personIds': _personIds.toList(),
+        'productionIds': _productionIds.toList(),
         'slots': [
           for (final s in _slots)
             {
@@ -1312,9 +1335,15 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
         AudiencePicker(
           controller: widget.controller,
           label: 'Eingeladene Rollen',
-          allowEveryone: _personIds.isEmpty,
+          allowEveryone: _personIds.isEmpty && _productionIds.isEmpty,
           selected: _roleIds,
           onChanged: (value) => setState(() => _roleIds = value),
+        ),
+        const SizedBox(height: 16),
+        ProductionAudiencePicker(
+          controller: widget.controller,
+          selected: _productionIds,
+          onChanged: (value) => setState(() => _productionIds = value),
         ),
         const SizedBox(height: 16),
         PersonPicker(
@@ -1324,7 +1353,7 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Eingeladen: ${widget.controller.audienceLabel(_roleIds, _personIds)}',
+          'Eingeladen: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SectionTitle('Zeitfenster erzeugen'),

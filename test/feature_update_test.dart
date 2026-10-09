@@ -98,13 +98,13 @@ void main() {
       expect(find.text('Admin'), findsOneWidget);
       await tester.tap(find.text('Admin'));
       await tester.pumpAndSettle();
-      expect(find.text('Administration'), findsOneWidget);
+      expect(find.text('Administration.'), findsOneWidget);
       expect(find.text('Konten & Verknüpfungen'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('Termine'));
       await tester.pumpAndSettle();
       if (width < 1250) {
-        await tester.tap(find.text('Kalender'));
+        await tester.tap(find.byTooltip('Kalender'));
         await tester.pumpAndSettle();
       }
       expect(find.byType(RehearsalCalendar), findsOneWidget);

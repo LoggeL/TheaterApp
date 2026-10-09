@@ -67,16 +67,18 @@ class AudienceBadge extends StatelessWidget {
     required this.controller,
     required this.roleIds,
     this.personIds = const [],
+    this.productionIds = const [],
   });
   final AppController controller;
   final List<String> roleIds;
   final List<int> personIds;
+  final List<String> productionIds;
   @override
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
       Icon(
-        roleIds.isEmpty && personIds.isEmpty
+        roleIds.isEmpty && personIds.isEmpty && productionIds.isEmpty
             ? Icons.groups_outlined
             : Icons.group_outlined,
         size: 16,
@@ -85,7 +87,7 @@ class AudienceBadge extends StatelessWidget {
       const SizedBox(width: 6),
       Flexible(
         child: Text(
-          controller.audienceLabel(roleIds, personIds),
+          controller.audienceLabel(roleIds, personIds, productionIds),
           style: Theme.of(context).textTheme.bodySmall,
           overflow: TextOverflow.ellipsis,
         ),
@@ -207,4 +209,58 @@ class PersonPicker extends StatelessWidget {
       ),
     ],
   );
+}
+
+/// Picks productions whose whole ensemble (cast, directors, crew) is
+/// addressed, e.g. only the people of the winter play.
+class ProductionAudiencePicker extends StatelessWidget {
+  const ProductionAudiencePicker({
+    super.key,
+    required this.controller,
+    required this.selected,
+    required this.onChanged,
+    this.label = 'Ensemble eines Stücks',
+  });
+  final AppController controller;
+  final Set<String> selected;
+  final ValueChanged<Set<String>> onChanged;
+  final String label;
+  @override
+  Widget build(BuildContext context) {
+    // Current plays, plus archived ones that are still selected.
+    final productions = [
+      ...controller.activeProductions,
+      ...controller.archivedProductions.where((p) => selected.contains(p.id)),
+    ];
+    if (productions.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final p in productions)
+              FilterChip(
+                avatar: const Icon(Icons.theater_comedy_outlined, size: 18),
+                label: Text(
+                  p.ensemble.isEmpty
+                      ? p.title
+                      : '${p.title} · ${p.ensemble.length}',
+                ),
+                tooltip: p.ensemble.isEmpty
+                    ? 'Noch niemand besetzt'
+                    : '${p.ensemble.length} Personen: Besetzung, Regie und Mitwirkende',
+                selected: selected.contains(p.id),
+                onSelected: (on) => onChanged(
+                  on ? {...selected, p.id} : ({...selected}..remove(p.id)),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
 }

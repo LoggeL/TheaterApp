@@ -170,6 +170,7 @@ void main() {
         'dayBefore': false,
         'twoHours': true,
         'changes': true,
+        'emailEnabled': false,
         'customMinutes': 45,
       });
       // The test server does not persist settings like the real one does.

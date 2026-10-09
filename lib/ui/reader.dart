@@ -117,17 +117,17 @@ class ProductionsScreen extends StatelessWidget {
           else
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 110),
-              sliver: SliverList.builder(
-                itemCount: productions.length,
-                itemBuilder: (context, index) {
-                  final production = productions[index];
-                  final cached = controller.scripts.containsKey(production.id);
-                  final role =
-                      controller.preferences['reader.${production.id}.role']
-                          as String?;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: _ProductionCard(
+              sliver: SliverLayoutBuilder(
+                builder: (context, constraints) {
+                  Widget card(int index) {
+                    final production = productions[index];
+                    final cached = controller.scripts.containsKey(
+                      production.id,
+                    );
+                    final role =
+                        controller.preferences['reader.${production.id}.role']
+                            as String?;
+                    return _ProductionCard(
                       key: ValueKey('production.${production.id}'),
                       production: production,
                       number: index + 1,
@@ -141,6 +141,37 @@ class ProductionsScreen extends StatelessWidget {
                           ),
                         ),
                       ),
+                    );
+                  }
+
+                  // Two equal-height cards per row on wide screens.
+                  final columns =
+                      constraints.crossAxisExtent >= 820 &&
+                          MediaQuery.textScalerOf(context).scale(14) <= 21
+                      ? 2
+                      : 1;
+                  return SliverList.builder(
+                    itemCount: (productions.length / columns).ceil(),
+                    itemBuilder: (context, row) => Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: columns == 1
+                          ? card(row)
+                          : IntrinsicHeight(
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  for (var c = 0; c < columns; c++) ...[
+                                    if (c > 0) const SizedBox(width: 16),
+                                    Expanded(
+                                      child:
+                                          row * columns + c < productions.length
+                                          ? card(row * columns + c)
+                                          : const SizedBox.shrink(),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
                     ),
                   );
                 },
@@ -330,7 +361,9 @@ class _ProductionCard extends StatelessWidget {
               children: [
                 if (production.sceneCount > 0)
                   Text(
-                    '${production.sceneCount} Szenen',
+                    production.sceneCount == 1
+                        ? '1 Szene'
+                        : '${production.sceneCount} Szenen',
                     style: const TextStyle(color: Colors.white70),
                   ),
                 Text(
@@ -1861,7 +1894,9 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
       isScrollControlled: true,
       builder: (context) => _SheetFrame(
         title: 'Szenen',
-        subtitle: '${doc.scenes.length} Szenen',
+        subtitle: doc.scenes.length == 1
+            ? '1 Szene'
+            : '${doc.scenes.length} Szenen',
         child: ListView.builder(
           shrinkWrap: true,
           itemCount: doc.scenes.length,

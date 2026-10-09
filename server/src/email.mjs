@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { setTimeout as pause } from 'node:timers/promises';
 import { eventNotificationBody } from './event-notification.mjs';
 import { inAudience } from './theater.mjs';
 
@@ -13,6 +14,9 @@ export class ResendEmail {
   }
   async send({ to, subject, text, html, idempotencyKey }) {
     if (!this.configured) throw Object.assign(new Error('Email is not configured'), { code: 'email_unavailable', retryable: false });
+    const delay = (this.nextSendAt ?? 0) - Date.now();
+    if (delay > 0) await pause(delay);
+    this.nextSendAt = Date.now() + 600;
     const response = await this.fetch('https://api.resend.com/emails', {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
@@ -40,27 +44,37 @@ export function eventEmail(job, event, appOrigin) {
     html: `<!doctype html><html lang="de"><body><h1>${escapeHtml(subject)}</h1><p>${escapeHtml(body)}</p><p><a href="${escapeHtml(link.href)}">Theater-App öffnen</a></p><p>${escapeHtml(footer)}</p></body></html>` };
 }
 
+function eligibleRecipient(s, a, job, event) {
+  return a?.status === 'approved' && a.personId && a.emailVerified === true && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.email ?? '') && !/\.(?:test|invalid)$/i.test(a.email) && s.get('members', a.personId)?.active
+    && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId))
+    && (job.test || (event && s.get('reminders', a.personId)?.emailEnabled === true && inAudience(s.get('members', a.personId), job, s) && inAudience(s.get('members', a.personId), event, s)
+      && ((!job.change && !job.cancelled) || (s.get('reminders', a.personId)?.changes ?? true))
+      && (job.change || job.newEvent || job.cancelled || s.get('responses', `${event.id}:${a.personId}`)?.status !== 'no')));
+}
+
 /** Every recipient is rechecked before sending. Accepted recipients are never retried. */
 export async function deliverEmail(theater, email, appOrigin, now = new Date()) {
   if (!theater.emailEnabled || !email?.configured) return;
   const s = theater.store, at = +now;
   let sent = 0;
-  for (const job of s.all('emailJobs').filter(j => j.status === 'pending' && Date.parse(j.nextAttemptAt) <= at).slice(0, 20)) {
+  for (const job of s.all('emailJobs').filter(j => j.status === 'pending' && Date.parse(j.nextAttemptAt) <= at).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(0, 20)) {
     if (at - Date.parse(job.createdAt) >= maxAgeMs) { s.put('emailJobs', job.id, { ...job, status: 'expired', finishedAt: now.toISOString() }); continue; }
     const event = job.cancelled ? job.event : s.get('events', job.data?.eventId);
     if (!job.test && (!event || Date.parse(event.endsAt ?? event.startsAt) <= at)) { s.put('emailJobs', job.id, { ...job, status: 'obsolete', finishedAt: now.toISOString() }); continue; }
-    const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && a.emailVerified === true && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.email ?? '') && !/\.(?:test|invalid)$/i.test(a.email) && s.get('members', a.personId)?.active
-      && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId))
-      && (job.test || (s.get('reminders', a.personId)?.emailEnabled === true && inAudience(s.get('members', a.personId), job) && inAudience(s.get('members', a.personId), event) && (!job.change && !job.cancelled || (s.get('reminders', a.personId)?.changes ?? true)) && (job.change || job.newEvent || job.cancelled || s.get('responses', `${event.id}:${a.personId}`)?.status !== 'no'))));
+    if (!job.cancelled && job.eventVersion !== undefined && event?.version !== job.eventVersion) { s.put('emailJobs', job.id, { ...job, status: 'obsolete', finishedAt: now.toISOString() }); continue; }
+    const accounts = s.accounts().filter(a => eligibleRecipient(s, a, job, event));
     const accepted = new Set(job.acceptedRecipientIds ?? []), permanent = new Set(job.failedRecipientIds ?? []);
     let retry = false, deferred = false;
     for (const a of accounts) {
-      const recipient = createHash('sha256').update(a.uid + ':' + a.email.toLowerCase()).digest('hex');
+      const current = s.account(a.uid), currentEvent = job.cancelled ? job.event : s.get('events', job.data?.eventId);
+      if (!eligibleRecipient(s, current, job, currentEvent)) continue;
+      const recipient = createHash('sha256').update(current.uid + ':' + current.email.toLowerCase()).digest('hex');
       if (accepted.has(recipient) || permanent.has(recipient)) continue;
       if (sent >= 20) { deferred = true; break; }
       sent++;
       try {
-        await email.send({ to: a.email, ...eventEmail(job, event, appOrigin), idempotencyKey: `theater-event-${job.id}-${recipient}` });
+        if (!job.payload) { job.payload = eventEmail(job, currentEvent, appOrigin); s.put('emailJobs', job.id, job); }
+        await email.send({ to: current.email, ...job.payload, idempotencyKey: `theater-event-${job.id}-${recipient}` });
         accepted.add(recipient);
       } catch (error) {
         job.lastError = error.code ?? 'email_unavailable';

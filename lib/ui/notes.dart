@@ -11,6 +11,9 @@ List<String> _noteRoleIds(JsonMap note) => [
 ];
 List<int> _notePersonIds(JsonMap note) =>
     jsonList(note['personIds']).map(intValue).toList();
+List<String> _noteProductionIds(JsonMap note) => [
+  for (final id in jsonList(note['productionIds'])) id.toString(),
+];
 
 class NotesScreen extends StatelessWidget {
   const NotesScreen({super.key, required this.controller});
@@ -85,6 +88,7 @@ class NotesScreen extends StatelessWidget {
                                     controller: controller,
                                     roleIds: _noteRoleIds(n),
                                     personIds: _notePersonIds(n),
+                                    productionIds: _noteProductionIds(n),
                                   ),
                                 ],
                               ),
@@ -181,6 +185,7 @@ class NoteDetailScreen extends StatelessWidget {
                               controller: controller,
                               roleIds: _noteRoleIds(note),
                               personIds: _notePersonIds(note),
+                              productionIds: _noteProductionIds(note),
                             ),
                           ],
                         ),
@@ -211,6 +216,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   late final TextEditingController _title, _body;
   late Set<String> _roleIds;
   late Set<int> _personIds;
+  late Set<String> _productionIds;
   late bool _published;
   bool _busy = false;
   @override
@@ -221,6 +227,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     _body = TextEditingController(text: textValue(n?['body']));
     _roleIds = n == null ? {} : _noteRoleIds(n).toSet();
     _personIds = n == null ? {} : _notePersonIds(n).toSet();
+    _productionIds = n == null ? {} : _noteProductionIds(n).toSet();
     _published = n?['published'] == true;
   }
 
@@ -246,6 +253,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
         'body': _body.text,
         'roleIds': _roleIds.toList(),
         'personIds': _personIds.toList(),
+        'productionIds': _productionIds.toList(),
         'published': _published,
       });
       if (mounted) Navigator.pop(context);
@@ -318,9 +326,15 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       const SizedBox(height: 12),
       AudiencePicker(
         controller: widget.controller,
-        allowEveryone: _personIds.isEmpty,
+        allowEveryone: _personIds.isEmpty && _productionIds.isEmpty,
         selected: _roleIds,
         onChanged: (value) => setState(() => _roleIds = value),
+      ),
+      const SizedBox(height: 16),
+      ProductionAudiencePicker(
+        controller: widget.controller,
+        selected: _productionIds,
+        onChanged: (value) => setState(() => _productionIds = value),
       ),
       const SizedBox(height: 16),
       PersonPicker(
@@ -336,7 +350,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
         title: const Text('Freigeben'),
         subtitle: Text(
           _published
-              ? 'Sichtbar für ${widget.controller.audienceLabel(_roleIds, _personIds)}.'
+              ? 'Sichtbar für ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}.'
               : 'Entwurf · nur für Admins sichtbar.',
         ),
       ),

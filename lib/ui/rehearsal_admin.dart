@@ -39,7 +39,13 @@ class ResponsesAdminScreen extends StatelessWidget {
       final responses = jsonMap(controller.memberAttendanceByEvent[event.id]);
       final people = controller.members
           .where(
-            (m) => m.active && m.inAudience(event.roleIds, event.personIds),
+            (m) =>
+                m.active &&
+                m.inAudience(
+                  event.roleIds,
+                  event.personIds,
+                  controller.ensemblesOf(event.productionIds),
+                ),
           )
           .toList();
       return [
@@ -194,7 +200,11 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
           .where(
             (m) =>
                 m.active &&
-                m.inAudience(widget.event.roleIds, widget.event.personIds),
+                m.inAudience(
+                  widget.event.roleIds,
+                  widget.event.personIds,
+                  widget.controller.ensemblesOf(widget.event.productionIds),
+                ),
           )
           .toList();
       final here = members.where((m) => present(m.id) == true).length,

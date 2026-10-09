@@ -49,6 +49,12 @@ def main():
     remote = c['remotePath']; context = f'{remote}/releases/{release}'
     command = f'mkdir -p {shlex.quote(context)} && tar xzf - -C {shlex.quote(context)} && docker build --build-arg RELEASE_SHA={release} -t theater-app:{release} {shlex.quote(context)}'
     with archive.open('rb') as stream: run(ssh+[command], stdin=stream)
+    email = c.get('email', {})
+    email_env = ''
+    email_volume = ''
+    if email.get('enabled'):
+        email_env = f"      RESEND_API_KEY_FILE: /run/secrets/resend-api-key\n      EMAIL_FROM: {json.dumps(email['from'])}\n      EMAIL_REPLY_TO: {json.dumps(email['replyTo'])}\n"
+        email_volume = f"      - {remote}/secrets/resend-api-key:/run/secrets/resend-api-key:ro,Z\n"
     compose = f'''services:
   theater:
     image: theater-app:{release}
@@ -67,12 +73,12 @@ def main():
       SCRIPT_DIRECTOR_PASSWORD_FILE: /run/secrets/script-director-password
       MOBILE_PUSH_ENABLED: 'true'
       PLAY_REVIEW_CONFIG_FILE: /run/secrets/play-review.json
-    volumes:
+{email_env}    volumes:
       - {remote}/data:/data:Z
       - {remote}/secrets/firebase-service-account.json:/run/secrets/firebase-service-account.json:ro,Z
       - {remote}/secrets/script-director-password:/run/secrets/script-director-password:ro,Z
       - {remote}/secrets/play-review.json:/run/secrets/play-review.json:ro,Z
-    expose:
+{email_volume}    expose:
       - '8787'
     mem_limit: 512m
     cpus: 1.0

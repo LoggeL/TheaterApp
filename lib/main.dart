@@ -453,20 +453,37 @@ class _AppShellState extends State<AppShell> {
                       horizontal: 18,
                       vertical: 7,
                     ),
-                    color: const Color(0xFFEEE6DA),
-                    child: const Text(
-                      'DEMO · Beispieldaten, lokal auf deinem Gerät',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: StageTheme.ink,
-                      ),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.secondary.withValues(alpha: .12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.science_outlined,
+                          size: 15,
+                          color: Theme.of(context).colorScheme.secondary,
+                        ),
+                        const SizedBox(width: 6),
+                        const Flexible(
+                          child: Text(
+                            'DEMO · Beispieldaten, lokal auf deinem Gerät',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 if (!c.isDemo && (c.isOffline || c.failedCount > 0))
                   Material(
-                    color: Theme.of(context).colorScheme.errorContainer,
+                    // Offline is a normal state; only failed changes alarm.
+                    color: c.failedCount > 0
+                        ? Theme.of(context).colorScheme.errorContainer
+                        : Theme.of(context).colorScheme.surfaceContainerHigh,
                     child: InkWell(
                       onTap: () => Navigator.push(
                         context,
@@ -525,12 +542,14 @@ class _AppShellState extends State<AppShell> {
                         child: ProductionsScreen(controller: c),
                       ),
                       ContentWidth(
+                        maxWidth: 1100,
                         child: MoreScreen(
                           controller: c,
                           devices: widget.devices,
                         ),
                       ),
-                      if (admin) ManagementScreen(controller: c),
+                      if (admin)
+                        ManagementScreen(controller: c, embedded: true),
                     ],
                   ),
                 ),
