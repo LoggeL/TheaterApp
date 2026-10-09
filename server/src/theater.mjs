@@ -15,6 +15,8 @@ const id = () => randomUUID();
 const list = value => Array.isArray(value) ? value : [];
 // Members can still confirm or report a late arrival, but no longer decline.
 const declineCutoffMs = 60 * 60 * 1000;
+// Changes are pushed only for events in the near future, like the events badge.
+export const changePushWindowDays = 14;
 // Participation is only summarized for recent, binding events.
 export const participationWindowDays = 183;
 const voluntaryEventTypes = ['social'];
@@ -135,7 +137,7 @@ export class Theater {
       }
     }
     const receipts = this.store.all('receipts').filter(r => r.personId === a.personId);
-    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a), slotPools: this.slotPools(a), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, notes: this.store.all('notes').filter(n => admin || (n.published && this.canSee(a, n))).sort((x, y) => y.updatedAt.localeCompare(x.updatedAt)), messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true }, serverTime: now() };
+    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a), slotPools: this.slotPools(a), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id), ...(admin ? this.messageReach(m) : {}) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true }, serverTime: now() };
   }
   /** Slot pools ("Terminfinder"): invited people book one time slot each. */
   slotPools(a) {
@@ -187,6 +189,30 @@ export class Theater {
     if (a.role === 'admin' || m.audience === 'all' || list(m.recipientPersonIds).includes(a.personId)) return true;
     const member = this.store.get('members', a.personId);
     return (list(m.roleIds).length > 0 && inRoles(member, m.roleIds)) || (list(m.productionIds).length > 0 && inAudience(member, { productionIds: m.productionIds }, this.store));
+  }
+  /** Active members a message or push is addressed to: everyone, or roles, ensembles and named people. */
+  messageRecipients(m) {
+    const active = this.store.all('members').filter(x => x.active);
+    if (m.audience === 'all') return active.map(x => x.id);
+    const ensembles = new Set(list(m.productionIds).flatMap(x => productionEnsemble(this.store.get('productions', x))));
+    const people = list(m.recipientPersonIds);
+    return active.filter(x => (list(m.roleIds).length && inRoles(x, m.roleIds)) || ensembles.has(x.id) || people.includes(x.id)).map(x => x.id);
+  }
+  /** Who should read a message and who already did; admins only. */
+  messageReach(m) {
+    const recipientIds = this.messageRecipients(m);
+    const read = new Set(this.store.all('receipts').filter(r => r.messageId === m.id).map(r => r.personId));
+    return { recipientIds, readerIds: recipientIds.filter(x => read.has(x)) };
+  }
+  /** Validated audience of an admin message or push. */
+  messageTarget(b) {
+    const audience = ['selected', 'roles'].includes(b.audience) ? 'selected' : 'all';
+    const people = audience === 'all' ? [] : [...new Set(list(b.recipientPersonIds).map(Number))];
+    if (people.some(m => !this.store.get('members', m)?.active)) fail(400, 'Bitte gültige Empfänger auswählen.');
+    const target = { audience, roleIds: audience === 'all' ? [] : this.audience(b.roleIds), productionIds: audience === 'all' ? [] : this.productionAudience(b.productionIds), recipientPersonIds: people };
+    const recipients = this.messageRecipients(target);
+    if (!recipients.length) fail(400, audience === 'all' ? 'Bitte gültige Empfänger auswählen.' : 'Bitte mindestens eine Rolle, ein Stück oder eine Person mit aktiven Mitgliedern auswählen.');
+    return { target, recipients };
   }
   audience(value) {
     const roleIds = [...new Set(list(value).map(String))];
@@ -421,11 +447,14 @@ export class Theater {
         for (const r of s.all('responses').filter(r => r.eventId === eventId && r.expectedArrivalAt && (r.expectedArrivalAt <= startsAt || r.expectedArrivalAt >= endsAt))) s.put('responses', `${eventId}:${r.personId}`, { ...r, expectedArrivalAt: null });
         for (const absence of s.all('absences')) if (inAudience(s.get('members', absence.personId), e, s) && absence.from <= day(startsAt) && absence.to >= day(startsAt) && !s.get('responses', `${eventId}:${absence.personId}`)) s.put('responses', `${eventId}:${absence.personId}`, { eventId, personId: absence.personId, status: 'no', expectedArrivalAt: null, reason: absence.reason, updatedAt: now() });
         // An explicit push replaces the automatic change notification; its email mirror keeps the usual rules.
-        const kind = old ? { change: true } : { newEvent: true };
+        const near = at => { const until = Date.parse(at) - +this.clock(); return until > 0 && until <= changePushWindowDays * 86400000; };
+        // Moving a near event far away still concerns those who expect it soon.
+        const soon = !old || near(old.startsAt) || near(startsAt);
+        const kind = old ? { change: true, soon } : { newEvent: true };
         if (b.push === true) this.enqueuePush({ title: `${old ? 'Termin geändert' : 'Neuer Termin'}: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, ...kind, announce: old ? 'changed' : 'new' });
-        else if (old) this.enqueuePush({ title: `Termin aktualisiert: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, change: true });
+        else if (old) this.enqueuePush({ title: `Termin aktualisiert: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, change: true, soon });
         else this.enqueueEmail({ data: { eventId }, roleIds, personIds, productionIds, newEvent: true });
-        return { id: eventId, pushQueued: b.push === true && this.pushEnabled };
+        return { id: eventId, pushQueued: b.push === true && this.pushEnabled && soon };
       }
       case 'event.delete': {
         admin(); const e = s.get('events', b.id); if (!e) fail(404, 'Termin nicht gefunden.');
@@ -485,33 +514,33 @@ export class Theater {
         return { id: productionId };
       }
       case 'message.send': {
-        // A targeted message reaches everyone with one of the roles plus the people chosen by name.
-        admin(); const audience = ['selected', 'roles'].includes(b.audience) ? 'selected' : 'all';
-        const roleIds = audience === 'all' ? [] : this.audience(b.roleIds);
-        const people = audience === 'all' ? [] : [...new Set(list(b.recipientPersonIds).map(Number))];
-        const productionIds = audience === 'all' ? [] : this.productionAudience(b.productionIds);
-        const ensembles = new Set(productionIds.flatMap(x => productionEnsemble(s.get('productions', x))));
-        if (people.some(m => !s.get('members', m)?.active)) fail(400, 'Bitte gültige Empfänger auswählen.');
-        const recipients = audience === 'all' ? s.all('members').filter(m => m.active).map(m => m.id) : [...new Set([...s.all('members').filter(m => m.active && ((roleIds.length && inRoles(m, roleIds)) || ensembles.has(m.id))).map(m => m.id), ...people])];
-        if (!recipients.length) fail(400, audience === 'all' ? 'Bitte gültige Empfänger auswählen.' : 'Bitte mindestens eine Rolle, ein Stück oder eine Person mit aktiven Mitgliedern auswählen.');
-        const m = { id: id(), title: required(b.title, 'Betreff'), body: required(b.body, 'Nachricht', 10000), audience, roleIds, productionIds, recipientPersonIds: people, authorId: a.personId, authorName: s.get('members', a.personId).name, createdAt: now() };
+        // A targeted message reaches everyone with one of the roles, in one of the ensembles, plus the people chosen by name.
+        admin(); const { target, recipients } = this.messageTarget(b);
+        const link = text(b.link, 2000);
+        if (link && !/^https?:\/\/[^\s]+$/i.test(link)) fail(400, 'Bitte einen gültigen Link mit https:// angeben.');
+        const m = { id: id(), title: required(b.title, 'Betreff'), body: required(b.body, 'Nachricht', 10000), ...(link ? { link, linkLabel: text(b.linkLabel, 80) } : {}), ...target, authorId: a.personId, authorName: s.get('members', a.personId).name, createdAt: now() };
         s.put('messages', m.id, m);
         if (b.push === true) this.enqueuePush({ title: m.title, body: m.body.slice(0, 200), data: { messageId: m.id }, recipientPersonIds: recipients });
         return { id: m.id, pushQueued: b.push === true && this.pushEnabled };
       }
-      case 'note.save': {
-        admin(); const noteId = b.id || id(), old = s.get('notes', noteId);
-        if (b.id && !old) fail(404, 'Notiz nicht gefunden.');
-        if (old && old.version !== b.version) fail(409, 'Die Notiz wurde inzwischen geändert.');
-        if (b.published !== undefined && typeof b.published !== 'boolean') fail(400, 'Bitte Entwurf oder Freigabe auswählen.');
-        const published = b.published ?? old?.published ?? false;
-        const n = { id: noteId, title: required(b.title, 'Titel', 200), body: text(b.body, 20000), roleIds: this.audience(b.roleIds), personIds: b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds), productionIds: b.productionIds === undefined ? list(old?.productionIds) : this.productionAudience(b.productionIds), published, publishedAt: published ? old?.publishedAt ?? now() : null, authorId: old?.authorId ?? a.personId, authorName: old?.authorName ?? s.get('members', a.personId).name, createdAt: old?.createdAt ?? now(), updatedAt: now(), version: (old?.version ?? 0) + 1 };
-        s.put('notes', noteId, n); return { id: noteId };
+      case 'message.remind': {
+        // Nudges only the recipients who have not opened the message yet.
+        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.');
+        const m = s.get('messages', b.id); if (!m) fail(404, 'Mitteilung nicht gefunden.');
+        const { recipientIds, readerIds } = this.messageReach(m);
+        const open = recipientIds.filter(x => !readerIds.includes(x));
+        if (!open.length) fail(409, 'Alle Empfänger haben die Mitteilung schon gelesen.');
+        this.enqueuePush({ title: `Erinnerung: ${m.title}`, body: m.body.slice(0, 200), data: { messageId: m.id }, recipientPersonIds: open });
+        return { queued: true, recipients: open.length };
       }
-      case 'note.delete': {
-        admin(); const n = s.get('notes', b.id); if (!n) fail(404, 'Notiz nicht gefunden.');
-        if (n.version !== b.version) fail(409, 'Die Notiz wurde inzwischen geändert.');
-        s.delete('notes', n.id); return {};
+      case 'message.delete': {
+        admin(); const m = s.get('messages', b.id); if (!m) fail(404, 'Mitteilung nicht gefunden.');
+        for (const r of s.all('receipts').filter(r => r.messageId === m.id)) s.delete('receipts', `${r.messageId}:${r.personId}`);
+        s.delete('messages', m.id); return {};
+      }
+      case 'message.readAll': {
+        for (const m of s.all('messages').filter(m => this.canReadMessage(a, m))) if (!s.get('receipts', `${m.id}:${a.personId}`)) s.put('receipts', `${m.id}:${a.personId}`, { messageId: m.id, personId: a.personId, readAt: now() });
+        return {};
       }
       case 'message.read': { const m = s.get('messages', b.id); if (!m || !this.canReadMessage(a, m)) fail(404, 'Mitteilung nicht gefunden.'); s.put('receipts', `${m.id}:${a.personId}`, { messageId: m.id, personId: a.personId, readAt: now() }); return {}; }
       case 'comment.save': {
@@ -579,6 +608,15 @@ export class Theater {
         this.bookSlot(pool, personId, b.slotId === null ? null : required(b.slotId, 'Zeitfenster')); return {};
       }
       case 'email.test': { if (!this.emailEnabled || !a.emailVerified) fail(409, 'Der E-Mail-Versand benötigt eine bestätigte Anmeldeadresse.'); this.enqueueEmail({ test: true, data: {}, recipientPersonIds: [a.personId] }); return { queued: true }; }
+      case 'push.send': {
+        // An on-demand push without a stored message, e.g. "Probe fällt aus, Details folgen".
+        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.');
+        const title = required(b.title, 'Titel', 120), body = required(b.body, 'Text', 500);
+        const { recipients } = this.messageTarget(b);
+        const reached = new Set(s.accounts().filter(x => x.status === 'approved' && recipients.includes(x.personId)).map(x => x.uid));
+        this.enqueuePush({ title, body, data: {}, recipientPersonIds: recipients, manual: true, authorName: s.get('members', a.personId)?.name ?? a.name });
+        return { queued: true, recipients: recipients.length, withDevice: new Set(s.all('devices').filter(d => reached.has(d.uid)).map(d => d.uid)).size };
+      }
       case 'push.test': { if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.'); this.enqueuePush({ title: 'Theater-App', body: 'Deine Testbenachrichtigung ist da.', data: {}, recipientPersonIds: [a.personId] }); return { queued: true }; }
       default: fail(400, 'Diese Aktion wird nicht unterstützt.');
     }

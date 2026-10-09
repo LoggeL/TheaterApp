@@ -182,7 +182,7 @@ class ManagementScreen extends StatelessWidget {
                 Icons.chat_bubble_outline,
                 'Mitteilung schreiben',
                 MessageComposerScreen(controller: controller),
-                'An alle, Rollen oder einzelne Personen',
+                'An alle, Rollen, Stücke oder einzelne Personen',
               ),
               tile(
                 Icons.poll_outlined,
@@ -192,9 +192,9 @@ class ManagementScreen extends StatelessWidget {
               ),
               tile(
                 Icons.notifications_outlined,
-                'Push-Versand',
+                'Push senden',
                 PushAdminScreen(controller: controller),
-                'Benachrichtigungen prüfen',
+                'Eigene Pushes und Versandstatus',
               ),
             ],
           ),
@@ -976,6 +976,9 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
   );
 }
 
+/// Matches `changePushWindowDays` on the server.
+const changePushWindowDays = 14;
+
 class EventEditorScreen extends StatefulWidget {
   const EventEditorScreen({
     super.key,
@@ -1005,6 +1008,19 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
 
   /// New events notify their invitees by default; edits only on request.
   late bool _push = widget.event == null;
+
+  /// Changes are pushed only for events within the next two weeks (before or
+  /// after the change), mirroring the server.
+  bool get _changeIsNear {
+    final old = widget.event?.startsAt;
+    if (old == null) return true;
+    final now = widget.controller.now;
+    bool near(DateTime at) =>
+        at.isAfter(now) &&
+        !at.isAfter(now.add(const Duration(days: changePushWindowDays)));
+    return near(old) || near(_start);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1060,7 +1076,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
 
   Future<void> _save() async {
     setState(() => _busy = true);
-    final push = _push && widget.controller.pushConfigured;
+    final push = _push && widget.controller.pushConfigured && _changeIsNear;
     try {
       await widget.controller.performAction({
         'action': 'event.save',
@@ -1243,14 +1259,22 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       ),
       SwitchListTile(
         key: const ValueKey('event-push'),
-        value: _push && widget.controller.pushConfigured,
-        onChanged: widget.controller.pushConfigured
+        value: _push && widget.controller.pushConfigured && _changeIsNear,
+        onChanged: widget.controller.pushConfigured && _changeIsNear
             ? (v) => setState(() => _push = v)
             : null,
         title: const Text('Eingeladene per Push benachrichtigen'),
         subtitle: Text(
-          widget.controller.pushConfigured
-              ? 'Geht an: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}'
+          !_changeIsNear
+              ? 'Der Termin liegt mehr als $changePushWindowDays Tage in der '
+                    'Zukunft. Änderungen werden erst ab $changePushWindowDays '
+                    'Tagen vorher gepusht.'
+              : widget.controller.pushConfigured
+              ? widget.event == null
+                    ? 'Geht an: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}'
+                    // Changes only reach people who already answered.
+                    : 'Geht an alle, die schon zu- oder abgesagt haben '
+                          '(${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)})'
               : 'Push ist noch nicht eingerichtet.',
         ),
       ),

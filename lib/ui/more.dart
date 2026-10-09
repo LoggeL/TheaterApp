@@ -17,8 +17,6 @@ import '../core/device_services.dart';
 import 'auth.dart';
 import 'admin.dart';
 import 'firebase_auth.dart';
-import 'messages.dart';
-import 'notes.dart';
 import 'events.dart';
 import 'theme.dart';
 
@@ -34,7 +32,6 @@ class MoreScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = controller.user;
     final theme = Theme.of(context);
-    final unread = controller.messages.where((m) => m['read'] != true).length;
     final waiting = slotPoolsAwaitingChoice(controller);
     final active = controller.members.where((m) => m.active).length;
     return ListView(
@@ -115,18 +112,6 @@ class MoreScreen extends StatelessWidget {
               title: 'Im Theater',
               tiles: [
                 GroupTile(
-                  icon: Icons.chat_bubble_outline,
-                  title: 'Mitteilungen',
-                  subtitle: unread == 0
-                      ? 'Nachrichten der Theaterleitung'
-                      : unread == 1
-                      ? '1 ungelesene Mitteilung'
-                      : '$unread ungelesene Mitteilungen',
-                  subtitleColor: unread == 0 ? null : theme.colorScheme.primary,
-                  onTap: () =>
-                      _open(context, MessagesScreen(controller: controller)),
-                ),
-                GroupTile(
                   icon: Icons.poll_outlined,
                   title: 'Abstimmungen',
                   subtitle: 'Mitreden und abstimmen',
@@ -148,15 +133,6 @@ class MoreScreen extends StatelessWidget {
                     onTap: () =>
                         _open(context, SlotPoolsScreen(controller: controller)),
                   ),
-                GroupTile(
-                  icon: Icons.sticky_note_2_outlined,
-                  title: 'Notizen',
-                  subtitle: controller.notes.length == 1
-                      ? '1 Notiz'
-                      : '${controller.notes.length} Notizen',
-                  onTap: () =>
-                      _open(context, NotesScreen(controller: controller)),
-                ),
                 GroupTile(
                   icon: Icons.photo_library_outlined,
                   title: 'Galerien',

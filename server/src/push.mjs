@@ -30,11 +30,15 @@ export function scheduleReminders(theater, now = new Date()) {
   }
 }
 
+// Changes only reach people who already answered the event, and only for events
+// within the next two weeks (`soon`); open invitations stay quiet.
+const answered = (s, job, personId) => ['yes', 'late', 'no'].includes(s.get('responses', `${job.data?.eventId}:${personId}`)?.status);
+
 export async function deliverPush(theater, messaging, appOrigin = process.env.APP_ORIGIN) {
   if (!theater.pushEnabled || !messaging) return;
   const s = theater.store;
   for (const job of s.all('pushJobs').filter(j => j.status === 'pending' && Date.parse(j.nextAttemptAt) <= Date.now()).slice(0, 20)) {
-    const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && s.get('members', a.personId)?.active && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId)) && (!job.adminsOnly || a.role === 'admin') && inAudience(s.get('members', a.personId), job, s) && (!job.change || job.announce || (s.get('reminders', a.personId)?.changes ?? true)));
+    const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && s.get('members', a.personId)?.active && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId)) && (!job.adminsOnly || a.role === 'admin') && inAudience(s.get('members', a.personId), job, s) && (!job.change || job.announce || (s.get('reminders', a.personId)?.changes ?? true)) && (!job.change || (job.soon !== false && answered(s, job, a.personId))));
     const uids = new Set(accounts.map(a => a.uid));
     const devices = s.all('devices').filter(d => uids.has(d.uid));
     if (!devices.length) { s.put('pushJobs', job.id, { ...job, status: 'no_devices', finishedAt: new Date().toISOString() }); continue; }

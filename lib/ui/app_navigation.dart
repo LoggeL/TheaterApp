@@ -44,6 +44,19 @@ List<NavigationDestination> appNavigationDestinations(
       child: Icon(icon),
     ),
   );
+  final unread = controller.messages.where((m) => m['read'] != true).length;
+  Widget messageIcon(IconData icon) => Tooltip(
+    message: unread == 0
+        ? 'Mitteilungen'
+        : unread == 1
+        ? '1 ungelesene Mitteilung'
+        : '$unread ungelesene Mitteilungen',
+    child: Badge(
+      isLabelVisible: unread > 0,
+      label: Text('$unread'),
+      child: Icon(icon),
+    ),
+  );
   final registrations = controller.openRegistrationCount;
   Widget adminIcon(IconData icon) => Tooltip(
     message: registrations == 0
@@ -72,6 +85,11 @@ List<NavigationDestination> appNavigationDestinations(
       icon: Icon(Icons.auto_stories_outlined),
       selectedIcon: Icon(Icons.auto_stories),
       label: 'Drehbücher',
+    ),
+    NavigationDestination(
+      icon: messageIcon(Icons.chat_bubble_outline),
+      selectedIcon: messageIcon(Icons.chat_bubble),
+      label: 'Mitteilungen',
     ),
     const NavigationDestination(
       icon: Icon(Icons.person_outline),

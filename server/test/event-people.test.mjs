@@ -56,7 +56,7 @@ test('absences decline only events the person is invited to', t => {
   assert.equal(store.get('responses', `${id}:${kim}`), null);
 });
 
-test('messages, polls and notes reach roles and single people together', t => {
+test('messages and polls reach roles and single people together', t => {
   const { app, store, action, sam } = setup(t);
   action({ action: 'message.send', title: 'Kabel', body: 'Bitte mitbringen', audience: 'selected', roleIds: ['role-3'], recipientPersonIds: [sam], push: true });
   const reads = uid => app.snapshot(uid).messages.some(m => m.title === 'Kabel');
@@ -66,10 +66,7 @@ test('messages, polls and notes reach roles and single people together', t => {
 
   action({ action: 'poll.save', title: 'Pizza?', options: [{ label: 'Ja' }, { label: 'Nein' }], roleIds: ['role-3'], personIds: [sam] });
   assert.deepEqual(['sam', 'tech', 'kim'].map(uid => app.snapshot(uid).polls.length), [1, 1, 0]);
-
-  action({ action: 'note.save', title: 'Lichtplan', body: 'Seite 3', roleIds: ['role-3'], personIds: [sam], published: true });
-  assert.deepEqual(['sam', 'tech', 'kim'].map(uid => app.snapshot(uid).notes.length), [1, 1, 0]);
-  assert.throws(() => action({ action: 'note.save', title: 'X', personIds: [999] }), { status: 400 });
+  assert.throws(() => action({ action: 'poll.save', title: 'X', options: [{ label: 'Ja' }, { label: 'Nein' }], personIds: [999] }), { status: 400 });
 });
 
 test('saving an event can push the invited people once', async t => {
@@ -97,19 +94,24 @@ test('saving an event can push the invited people once', async t => {
   assert.equal(calls[0].notification.title, 'Neuer Termin: Lichtprobe');
   assert.equal(calls[0].data.eventId, created.id);
 
-  // Sam opted out of automatic change notifications; the explicit push still reaches the invitation.
+  // Changes only reach people who already answered: Sam declined, Toni never answered.
+  // Sam opted out of automatic change notifications; the explicit push still reaches him.
+  action({ action: 'attendance', eventId: created.id, status: 'no', reason: '' }, 'sam');
   action({ action: 'settings.reminders', value: { changes: false } }, 'sam');
   for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
   action(event({ id: created.id, version: 1, title: 'Lichtprobe neu', push: true }));
   assert.equal(eventJobs(created.id).length, 1, 'explicit push replaces the automatic change notification');
   assert.equal(eventJobs(created.id)[0].title, 'Termin geändert: Lichtprobe neu');
   calls = await deliver();
-  assert.deepEqual(calls.flatMap(p => p.tokens).sort(), ['token-sam', 'token-tech']);
+  assert.deepEqual(calls.flatMap(p => p.tokens).sort(), ['token-sam']);
   assert.equal(calls[0].notification.title, 'Termin geändert: Lichtprobe neu');
 
-  // Without the switch an edit keeps the automatic change notification.
+  // Without the switch an edit keeps the automatic change notification, again only for answers.
+  action({ action: 'attendance', eventId: created.id, status: 'yes' }, 'tech');
   action(event({ id: created.id, version: 2, title: 'Lichtprobe alt' }));
   assert.deepEqual(eventJobs(created.id).filter(j => j.status === 'pending').map(j => [j.title, j.change, j.announce]), [['Termin aktualisiert: Lichtprobe alt', true, undefined]]);
+  calls = await deliver();
+  assert.deepEqual(calls.flatMap(p => p.tokens), ['token-tech'], 'Sam opted out, Toni answered meanwhile');
 });
 
 test('a production ensemble is an audience that follows casting and crew', t => {
@@ -131,4 +133,29 @@ test('a production ensemble is an audience that follows casting and crew', t => 
   assert.deepEqual(['sam', 'tech', 'kim'].map(uid => app.snapshot(uid).messages.some(m => m.title === 'Winter')), [false, true, true]);
   action({ action: 'poll.save', title: 'Kostüme?', options: [{ label: 'Ja' }, { label: 'Nein' }], productionIds: ['winter'] });
   assert.deepEqual(['sam', 'tech', 'kim'].map(uid => app.snapshot(uid).polls.length), [0, 1, 1]);
+});
+
+test('changes to events more than two weeks ahead are not pushed', async t => {
+  const { store, action, sam } = setup(t);
+  for (const uid of ['sam']) store.put('devices', uid, { id: uid, uid, token: `token-${uid}`, platform: 'web' });
+  const deliver = async () => {
+    const calls = [];
+    await deliverPush({ pushEnabled: true, store }, { sendEachForMulticast: async p => { calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) }; } });
+    return calls.flatMap(p => p.tokens);
+  };
+  const far = { startsAt: '2026-10-20T17:00:00Z', endsAt: '2026-10-20T19:00:00Z' };
+  const id = action(event({ ...far, personIds: [sam] })).id;
+  action({ action: 'attendance', eventId: id, status: 'yes' }, 'sam');
+  for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
+
+  assert.equal(action(event({ id, version: 1, ...far, personIds: [sam], title: 'Später', push: true })).pushQueued, false);
+  assert.deepEqual(await deliver(), [], 'far away: neither the explicit nor the automatic change is pushed');
+  action(event({ id, version: 2, ...far, personIds: [sam], title: 'Noch später' }));
+  assert.deepEqual(await deliver(), []);
+
+  // Moving it into the next two weeks is pushed, and so is moving a near event far away.
+  action(event({ id, version: 3, personIds: [sam], title: 'Vorgezogen' }));
+  assert.deepEqual(await deliver(), ['token-sam']);
+  action(event({ id, version: 4, ...far, personIds: [sam], title: 'Wieder verschoben' }));
+  assert.deepEqual(await deliver(), ['token-sam']);
 });

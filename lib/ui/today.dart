@@ -18,9 +18,32 @@ class TodayScreen extends StatelessWidget {
     required this.controller,
     required this.onPlan,
     required this.onScripts,
+    this.onMessages,
   });
   final AppController controller;
   final VoidCallback onPlan, onScripts;
+
+  /// Switches to the messages tab; without it the list opens as a page.
+  final VoidCallback? onMessages;
+
+  void _allMessages(BuildContext context) => onMessages != null
+      ? onMessages!()
+      : Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => MessagesScreen(controller: controller),
+          ),
+        );
+
+  void _latestMessage(BuildContext context) => Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => MessageDetailScreen(
+        controller: controller,
+        message: controller.messages.first,
+      ),
+    ),
+  );
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -160,7 +183,13 @@ class TodayScreen extends StatelessWidget {
                   ),
                 ),
               if (controller.messages.isNotEmpty) ...[
-                const SectionTitle('Mitteilungen'),
+                SectionTitle(
+                  'Mitteilungen',
+                  trailing: TextButton(
+                    onPressed: () => _allMessages(context),
+                    child: const Text('Alle ansehen'),
+                  ),
+                ),
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.chat_bubble_outline),
@@ -171,12 +200,7 @@ class TodayScreen extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MessagesScreen(controller: controller),
-                      ),
-                    ),
+                    onTap: () => _latestMessage(context),
                   ),
                 ),
               ],
@@ -309,7 +333,13 @@ class TodayScreen extends StatelessWidget {
                         _PollPreview(poll: poll, controller: controller),
                       ],
                       if (controller.messages.isNotEmpty) ...[
-                        const SectionTitle('Mitteilungen'),
+                        SectionTitle(
+                          'Mitteilungen',
+                          trailing: TextButton(
+                            onPressed: () => _allMessages(context),
+                            child: const Text('Alle ansehen'),
+                          ),
+                        ),
                         Card(
                           child: ListTile(
                             leading: const Icon(Icons.chat_bubble_outline),
@@ -322,13 +352,7 @@ class TodayScreen extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                             trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    MessagesScreen(controller: controller),
-                              ),
-                            ),
+                            onTap: () => _latestMessage(context),
                           ),
                         ),
                       ],

@@ -295,6 +295,36 @@ void main() {
     },
   );
 
+  test('offline absences skip events addressed to other roles', () async {
+    final server = TestServer();
+    server.data['user'] = server.user;
+    server.data['events'] = [
+      for (final (id, roles) in [
+        ('light', ['role-light']),
+        ('all', <String>[]),
+      ])
+        {
+          'id': id,
+          'title': id,
+          'startsAt': '2026-09-13T17:00:00Z',
+          'endsAt': '2026-09-13T19:00:00Z',
+          'eventDate': '2026-09-13',
+          'roleIds': roles,
+        },
+    ];
+    final controller = server.controller();
+    addTearDown(controller.dispose);
+    await signIn(controller);
+    server.offline = true;
+    await controller.addAbsence(
+      DateTime(2026, 9, 13),
+      DateTime(2026, 9, 13),
+      'Urlaub',
+    );
+    final responses = {for (final e in controller.events) e.id: e.response};
+    expect(responses, {'light': 'open', 'all': 'no'});
+  });
+
   test('past RSVP is rejected before creating an offline change', () async {
     final server = TestServer();
     server.data['events'] = [

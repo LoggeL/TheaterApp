@@ -40,8 +40,6 @@ class AppController extends ChangeNotifier {
   bool get hasAccess => _user?.isApproved == true;
   List<JsonMap> get messages =>
       jsonList(_baseSnapshot['messages']).map(jsonMap).toList();
-  List<JsonMap> get notes =>
-      jsonList(_baseSnapshot['notes']).map(jsonMap).toList();
 
   /// Slot pools ("Terminfinder"), newest first; includes queued bookings.
   List<JsonMap> get slotPools => _slotPools;
@@ -103,6 +101,27 @@ class AppController extends ChangeNotifier {
         'Ensemble ${_productions.where((p) => p.id == id).firstOrNull?.title ?? 'Gelöschtes Stück'}',
       ..._members.where((m) => personIds.contains(m.id)).map((m) => m.name),
     ].join(' · ');
+  }
+
+  /// Active members reached by roles, production ensembles and named people;
+  /// [everyone] reaches all active members.
+  List<TheaterMember> recipientsOf(
+    Iterable<String> roleIds,
+    Iterable<int> personIds,
+    Iterable<String> productionIds, {
+    bool everyone = false,
+  }) {
+    final ensembles = ensemblesOf(productionIds).expand((e) => e).toSet();
+    return _members
+        .where(
+          (m) =>
+              m.active &&
+              (everyone ||
+                  roleIds.any(m.roleIds.contains) ||
+                  personIds.contains(m.id) ||
+                  ensembles.contains(m.id)),
+        )
+        .toList();
   }
 
   /// The ensembles of the given productions, one list per production.
@@ -1525,6 +1544,14 @@ class AppController extends ChangeNotifier {
                   : m,
             )
             .toList();
+      case 'message.readAll':
+        view['messages'] = jsonList(
+          view['messages'],
+        ).map((m) => {...jsonMap(m), 'read': true}).toList();
+      case 'message.delete':
+        view['messages'] = jsonList(
+          view['messages'],
+        ).where((m) => jsonMap(m)['id'] != body['id']).toList();
       case 'event.script':
         view['events'] = jsonList(view['events']).map((item) {
           final event = jsonMap(item);

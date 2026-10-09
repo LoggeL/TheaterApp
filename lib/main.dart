@@ -364,9 +364,6 @@ class _AppShellState extends State<AppShell> {
     final wide = MediaQuery.sizeOf(context).width >= 900;
     final admin = c.user?.isAdmin == true;
     final destinations = appNavigationDestinations(c);
-    final unread = c.messages
-        .where((message) => message['read'] != true)
-        .length;
     final navigation = AppNavigationScope.maybeOf(context);
     final selectedTab = (navigation?.value ?? _tab).clamp(
       0,
@@ -399,20 +396,6 @@ class _AppShellState extends State<AppShell> {
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: unread == 0
-                ? 'Mitteilungen'
-                : '$unread ungelesene Mitteilungen',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => MessagesScreen(controller: c)),
-            ),
-            icon: Badge(
-              isLabelVisible: unread > 0,
-              label: Text('$unread'),
-              child: const Icon(Icons.notifications_outlined),
-            ),
-          ),
           IconButton(
             tooltip: 'Synchronisierung',
             onPressed: () => Navigator.push(
@@ -531,6 +514,7 @@ class _AppShellState extends State<AppShell> {
                           controller: c,
                           onPlan: () => selectTab(1),
                           onScripts: () => selectTab(2),
+                          onMessages: () => selectTab(3),
                         ),
                       ),
                       ContentWidth(
@@ -541,6 +525,7 @@ class _AppShellState extends State<AppShell> {
                         maxWidth: 1050,
                         child: ProductionsScreen(controller: c),
                       ),
+                      MessagesScreen(controller: c, embedded: true),
                       ContentWidth(
                         maxWidth: 1100,
                         child: MoreScreen(
@@ -560,10 +545,29 @@ class _AppShellState extends State<AppShell> {
       ),
       bottomNavigationBar: wide
           ? null
-          : NavigationBar(
-              selectedIndex: selectedTab,
-              onDestinationSelected: selectTab,
-              destinations: destinations,
+          : NavigationBarTheme(
+              // Six sections on a phone: smaller labels keep words whole.
+              data: MediaQuery.sizeOf(context).width / destinations.length < 76
+                  ? NavigationBarTheme.of(context).copyWith(
+                      labelTextStyle: const WidgetStatePropertyAll(
+                        TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -.1,
+                        ),
+                      ),
+                    )
+                  : NavigationBarTheme.of(context),
+              child: NavigationBar(
+                // Below ~56 px per section even small labels break mid-word.
+                labelBehavior:
+                    MediaQuery.sizeOf(context).width / destinations.length < 56
+                    ? NavigationDestinationLabelBehavior.alwaysHide
+                    : null,
+                selectedIndex: selectedTab,
+                onDestinationSelected: selectTab,
+                destinations: destinations,
+              ),
             ),
     );
   }

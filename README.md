@@ -1,6 +1,6 @@
 # Theater-App
 
-Flutter-App für das Kolpingtheater Ramsen. Web und Android verwenden denselben Server und Firebase Auth. Die Web-App läuft unter [app.kolpingtheater-ramsen.de](https://app.kolpingtheater-ramsen.de). [theater-app.logge.top](https://theater-app.logge.top) bleibt für bestehende Installationen erreichbar.
+Flutter-App für das Kolpingtheater Ramsen. Web und Android verwenden denselben Server und Firebase Auth. Die Web-App läuft unter [app.kolpingtheater-ramsen.de](https://app.kolpingtheater-ramsen.de). [theater-app.logge.top](https://theater-app.logge.top) leitet Web-Aufrufe dauerhaft auf diese Adresse weiter; die bisherige API bleibt für bestehende Installationen erreichbar.
 
 ## Funktionen
 
@@ -12,7 +12,8 @@ Flutter-App für das Kolpingtheater Ramsen. Web und Android verwenden denselben 
 - Admin-Übersicht mit allen Personen, ihren Rollen und echten Login-Adressen; Filter für verknüpfte Personen, fehlende Konten, offene Freigaben und unbesetzte Rollen.
 - Minimalistischer Leser mit mehreren eigenen Rollen, Lernmodus, Kategorien, Suche, privaten Notizen, Kommentaren, Lesezeichen und PDF-Export.
 - Drehbuchimport aus dem bestehenden Skriptdienst, gemeinsame Regiemarkierungen zwischen Flutter-Web, mobilen Apps und dem bestehenden Skript-Browser.
-- Mitteilungen und Firebase-Push mit Berechtigungsabfrage beim Öffnen, Erinnerungseinstellungen mit eigener Vorlaufzeit und passenden Links.
+- Eigener Reiter „Mitteilungen“ mit Ungelesen-Filter, optionalem Link, Lesestatus und Push-Erinnerung an Ungelesene für die Theaterleitung; eigene Pushes auf Abruf an alle, Rollen, Stück-Ensembles oder einzelne Personen.
+- Firebase-Push mit Berechtigungsabfrage beim Öffnen, Erinnerungseinstellungen mit eigener Vorlaufzeit und passenden Links.
 - Teilnahmeübersicht der letzten sechs Monate: Mitglieder sehen ihre eigenen Zahlen, Admins alle aktiven Personen; keine Rangliste, Absagen zählen nicht negativ.
 - Tägliche automatische Löschung nicht mehr benötigter Daten (Fristen in `server/src/retention.mjs` und der Datenschutzerklärung) und Löschen von Anmeldekonten durch Admins.
 - Profilbilder und Galerien mit Immich-Titelbildern, eigenem Bildupload, Lightbox und Download.
