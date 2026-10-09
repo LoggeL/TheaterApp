@@ -53,7 +53,12 @@ class AppTarget {
       }
       final path = uri.pathSegments;
       if (path.length != 2 ||
-          !const {'events', 'productions', 'messages'}.contains(path[0]) ||
+          !const {
+            'events',
+            'productions',
+            'messages',
+            'accounts',
+          }.contains(path[0]) ||
           path[1].isEmpty ||
           path[1].length > 200) {
         return null;
@@ -93,6 +98,10 @@ class AppTarget {
     final message = data['messageId'];
     if (message is String && message.isNotEmpty && message.length <= 200) {
       return AppTarget('messages', message);
+    }
+    final account = data['accountUid'];
+    if (account is String && account.isNotEmpty && account.length <= 200) {
+      return AppTarget('accounts', account);
     }
     return null;
   }

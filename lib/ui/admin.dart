@@ -92,6 +92,7 @@ class ManagementScreen extends StatelessWidget {
       final next = controller.events
           .where((e) => e.endsAt?.isAfter(DateTime.now()) ?? false)
           .firstOrNull;
+      final registrations = controller.openRegistrationCount;
       return [
         if (next != null) ...[
           Container(
@@ -152,8 +153,16 @@ class ManagementScreen extends StatelessWidget {
           ctx,
           Icons.person_add_alt,
           'Konten & Verknüpfungen',
-          AccountsAdminScreen(controller: controller),
-          'Personen, Rollen und E-Mail-Adressen',
+          AccountsAdminScreen(
+            controller: controller,
+            initialView: registrations > 0 ? 'accounts' : 'people',
+            initialFilter: registrations > 0 ? 'pending' : 'all',
+          ),
+          registrations == 0
+              ? 'Personen, Rollen und E-Mail-Adressen'
+              : registrations == 1
+              ? '1 neue Registrierung wartet auf Zuordnung'
+              : '$registrations neue Registrierungen warten auf Zuordnung',
         ),
         const SizedBox(height: 10),
         tile(

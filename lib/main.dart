@@ -1,5 +1,6 @@
 import 'ui/app_navigation.dart';
 import 'ui/admin.dart';
+import 'ui/accounts_admin.dart';
 import 'ui/responsive.dart';
 import 'ui/push_prompt.dart';
 import 'ui/brand_logo.dart';
@@ -179,6 +180,18 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
           builder: (_) => EventDetailScreen(
             controller: widget.controller,
             eventId: target.id,
+          ),
+        ),
+      );
+    } else if (target.kind == 'accounts') {
+      // New registrations: only admins can act on them.
+      if (widget.controller.user?.isAdmin != true) return;
+      _navigator.currentState!.push(
+        MaterialPageRoute(
+          builder: (_) => AccountsAdminScreen(
+            controller: widget.controller,
+            initialView: 'accounts',
+            initialFilter: 'pending',
           ),
         ),
       );

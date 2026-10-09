@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/ui/accounts_admin.dart';
 import 'package:theater_app/ui/admin.dart';
@@ -11,6 +12,56 @@ import 'account_roster_test.dart' show fixture;
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
 
 void main() {
+  test('registration pushes open the validated account target', () {
+    final target = AppTarget.fromData({'accountUid': 'new'});
+    expect(target?.kind, 'accounts');
+    expect(target?.id, 'new');
+    expect(AppTarget.fromData({'accountUid': ''}), isNull);
+    expect(
+      AppTarget.fromUri(Uri.parse('theaterapp://app/accounts/new'))?.kind,
+      'accounts',
+    );
+  });
+
+  testWidgets('admins see open registrations and land on pending accounts', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final server = TestServer();
+    server.data['pendingAccounts'] = [
+      {'uid': 'new', 'status': 'pending', 'identityReady': true},
+      {'uid': 'unverified', 'status': 'pending', 'identityReady': false},
+      {
+        'uid': 'nameless',
+        'status': 'pending',
+        'identityReady': true,
+        'nameProvided': false,
+      },
+    ];
+    server.override = (request) => request.url.path.contains('/admin/accounts')
+        ? Future.value(jsonResponse(fixture()))
+        : null;
+    final controller = server.controller();
+    await signIn(controller);
+    expect(controller.openRegistrationCount, 1);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StageTheme.build(Brightness.light),
+        home: ManagementScreen(controller: controller),
+      ),
+    );
+    await tester.tap(find.text('1 neue Registrierung wartet auf Zuordnung'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AccountsAdminScreen), findsOneWidget);
+    expect(find.text('1 Konten'), findsOneWidget);
+    expect(find.text('Prüfen & verknüpfen'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
   testWidgets('rejecting an account requires explicit confirmation', (
     tester,
   ) async {

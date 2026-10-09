@@ -39,6 +39,19 @@ List<NavigationDestination> appNavigationDestinations(
       child: Icon(icon),
     ),
   );
+  final registrations = controller.openRegistrationCount;
+  Widget adminIcon(IconData icon) => Tooltip(
+    message: registrations == 0
+        ? 'Admin'
+        : registrations == 1
+        ? '1 neue Registrierung wartet auf Zuordnung'
+        : '$registrations neue Registrierungen warten auf Zuordnung',
+    child: Badge(
+      isLabelVisible: registrations > 0,
+      label: Text('$registrations'),
+      child: Icon(icon),
+    ),
+  );
   return [
     const NavigationDestination(
       icon: Icon(Icons.wb_sunny_outlined),
@@ -61,9 +74,9 @@ List<NavigationDestination> appNavigationDestinations(
       label: 'Mein Bereich',
     ),
     if (controller.user?.isAdmin == true)
-      const NavigationDestination(
-        icon: Icon(Icons.admin_panel_settings_outlined),
-        selectedIcon: Icon(Icons.admin_panel_settings),
+      NavigationDestination(
+        icon: adminIcon(Icons.admin_panel_settings_outlined),
+        selectedIcon: adminIcon(Icons.admin_panel_settings),
         label: 'Admin',
       ),
   ];

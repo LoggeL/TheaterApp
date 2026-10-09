@@ -7,15 +7,22 @@ import 'admin.dart';
 import 'theme.dart';
 
 class AccountsAdminScreen extends StatefulWidget {
-  const AccountsAdminScreen({super.key, required this.controller});
+  const AccountsAdminScreen({
+    super.key,
+    required this.controller,
+    this.initialView = 'people',
+    this.initialFilter = 'all',
+  });
   final AppController controller;
+  final String initialView, initialFilter;
   @override
   State<AccountsAdminScreen> createState() => _AccountsAdminScreenState();
 }
 
 class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
   late Future<JsonMap> _data;
-  String _view = 'people', _filter = 'all', _query = '';
+  late String _view = widget.initialView, _filter = widget.initialFilter;
+  String _query = '';
   final _search = TextEditingController();
   final _reconsidering = <String>{};
   @override

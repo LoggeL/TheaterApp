@@ -52,6 +52,11 @@ export class Theater {
         this.store.put('settings', 'bootstrap', { uid: a.uid, at: now() });
         this.store.audit('bootstrap', 'account.approve', a.uid);
       }
+      // Tell admins once per account, as soon as the registration can actually be linked.
+      if (a.status === 'pending' && a.identityReady && a.nameProvided && !a.adminNotifiedAt) {
+        a = { ...a, adminNotifiedAt: now() };
+        this.enqueuePush({ title: 'Neue Registrierung', body: `${a.name} wartet auf Zuordnung.`, data: { accountUid: a.uid }, adminsOnly: true });
+      }
       this.store.saveAccount(a);
       return this.profile(a);
     });

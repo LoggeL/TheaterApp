@@ -24,7 +24,7 @@ export async function deliverPush(theater, messaging, appOrigin = process.env.AP
   if (!theater.pushEnabled || !messaging) return;
   const s = theater.store;
   for (const job of s.all('pushJobs').filter(j => j.status === 'pending' && Date.parse(j.nextAttemptAt) <= Date.now()).slice(0, 20)) {
-    const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && s.get('members', a.personId)?.active && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId)) && (!job.change || (s.get('reminders', a.personId)?.changes ?? true)));
+    const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && s.get('members', a.personId)?.active && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId)) && (!job.adminsOnly || a.role === 'admin') && (!job.change || (s.get('reminders', a.personId)?.changes ?? true)));
     const uids = new Set(accounts.map(a => a.uid));
     const devices = s.all('devices').filter(d => uids.has(d.uid));
     if (!devices.length) { s.put('pushJobs', job.id, { ...job, status: 'no_devices', finishedAt: new Date().toISOString() }); continue; }
@@ -43,7 +43,7 @@ export async function deliverPush(theater, messaging, appOrigin = process.env.AP
           const title = event ? (job.change ? `Termin aktualisiert: ${event.title}` : event.title) : job.title;
           const body = event ? eventNotificationBody(event) : job.body;
           const canRespond = event && !event.locked && Date.parse(event.endsAt ?? event.startsAt) > Date.now();
-          const target = job.data?.eventId ? ['events', job.data.eventId] : job.data?.messageId ? ['messages', job.data.messageId] : job.data?.productionId ? ['productions', job.data.productionId] : null;
+          const target = job.data?.eventId ? ['events', job.data.eventId] : job.data?.messageId ? ['messages', job.data.messageId] : job.data?.productionId ? ['productions', job.data.productionId] : job.data?.accountUid ? ['accounts', job.data.accountUid] : null;
           const link = appOrigin ? new URL('/', appOrigin) : null;
           if (link && target) link.searchParams.set('target', `theaterapp://app/${target[0]}/${encodeURIComponent(target[1])}`);
           const result = await messaging.sendEachForMulticast({ tokens: chunk.map(d => d.token), ...(custom ? { data: { ...job.data, title, body, notificationId: job.id, recipientUid: chunk[0].uid, ...(canRespond ? { attendanceActions: 'true' } : {}) } } : { notification: { title, body }, data: job.data ?? {} }), ...(link?.protocol === 'https:' ? { webpush: { fcmOptions: { link: link.href } } } : {}), android: { priority: 'high', ...(custom ? {} : { notification: { channelId: 'theater_updates' } }) }, apns: { payload: { aps: { sound: 'default' } } } });

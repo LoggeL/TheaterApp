@@ -111,3 +111,32 @@ test('locked and expired events have no response actions', async t => {
     } });
   }
 });
+
+test('new registrations notify admins once, only when ready to link', async t => {
+  const { store, theater } = setup(t);
+  const jobs = () => store.all('pushJobs').filter(j => j.title === 'Neue Registrierung');
+  assert.equal(jobs().length, 0, 'bootstrap admin must not announce itself');
+  let n = 0; const act = body => theater.action('admin', body, `reg-${++n}`);
+  const personId = act({ action: 'member.save', name: 'Sam', group: 'Ensemble' }).id;
+  theater.session({ uid: 'sam', name: 'Sam', email: 'sam@example.invalid', email_verified: true });
+  act({ action: 'account.approve', uid: 'sam', version: 1, personId, role: 'member' });
+  store.put('devices', 's', { id: 's', uid: 'sam', token: 'token-s', platform: 'android' });
+  for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
+  const password = { uid: 'neu', name: 'Neu Mitglied', email: 'neu@example.invalid', email_verified: false };
+  theater.session(password); theater.session(password);
+  assert.equal(jobs().length, 0, 'unverified e-mail is not ready for approval');
+  theater.session({ ...password, email_verified: true }); theater.session({ ...password, email_verified: true });
+  assert.equal(jobs().length, 1);
+  assert.equal(jobs()[0].body, 'Neu Mitglied wartet auf Zuordnung.');
+  const google = { uid: 'g', name: 'Alias', email: 'g@example.invalid', email_verified: true, firebase: { sign_in_provider: 'google.com' } };
+  theater.session(google);
+  assert.equal(jobs().length, 1, 'name for linking is still missing');
+  theater.session(google, 'Gabi Beispiel'); theater.session(google);
+  assert.deepEqual(jobs().map(j => j.body).sort(), ['Gabi Beispiel wartet auf Zuordnung.', 'Neu Mitglied wartet auf Zuordnung.']);
+  const calls = [];
+  await deliverPush(theater, { sendEachForMulticast: async p => { calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) }; } }, 'https://theater.example');
+  assert.ok(calls.length > 0);
+  assert.ok(calls.every(p => !p.tokens.includes('token-s')), 'members must not receive admin notifications');
+  assert.ok(calls.some(p => new URL(p.webpush.fcmOptions.link).searchParams.get('target') === 'theaterapp://app/accounts/neu'));
+  assert.equal(calls.find(p => p.data.accountUid === 'neu').notification.title, 'Neue Registrierung');
+});

@@ -42,6 +42,16 @@ class AppController extends ChangeNotifier {
       jsonList(_baseSnapshot['messages']).map(jsonMap).toList();
   List<JsonMap> get pendingAccounts =>
       jsonList(_baseSnapshot['pendingAccounts']).map(jsonMap).toList();
+
+  /// Registrations an admin can link now (confirmed identity and name given).
+  int get openRegistrationCount => pendingAccounts
+      .where(
+        (a) =>
+            a['status'] == 'pending' &&
+            a['identityReady'] == true &&
+            a['nameProvided'] != false,
+      )
+      .length;
   JsonMap get memberAttendanceByEvent =>
       jsonMap(_baseSnapshot['memberAttendanceByEvent']);
   JsonMap get arrivalsByEvent => jsonMap(_baseSnapshot['arrivalsByEvent']);
