@@ -25,6 +25,7 @@ def main():
     parser.add_argument('--skip-build', action='store_true', help='Use the existing production build/web after checking config')
     args = parser.parse_args()
     c = json.loads(CFG.read_text())
+    hosts = list(dict.fromkeys([c['host'], *c.get('additionalHosts', [])]))
     if not args.skip_build:
         run(['node', 'tool/configure.mjs', 'config/production.web.json'])
         run(['flutter', 'build', 'web', '--release', '--dart-define-from-file=config/production.web.json', '--pwa-strategy=none'])
@@ -58,7 +59,7 @@ def main():
       FIREBASE_PROJECT_ID: {c['firebaseProjectId']}
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
       AUTH_PROVIDERS: password,google.com
-      ALLOWED_ORIGINS: https://{c['host']}
+      ALLOWED_ORIGINS: {','.join('https://' + host for host in hosts)}
       APP_ORIGIN: https://{c['host']}
       SCRIPT_SERVICE_URL: https://skript.logge.top/
       SCRIPT_CACHE_DIR: /data/mobile-script-cache
@@ -86,8 +87,10 @@ def main():
         CFG.write_text(json.dumps(c, indent=2)+'\n')
     api('compose.update', {'composeId': compose_id, 'composeFile': compose, 'sourceType': 'raw', 'composeType': 'docker-compose'})
     details = api('compose.one?composeId='+compose_id)
-    if not any(d['host'] == c['host'] for d in details.get('domains', [])):
-        api('domain.create', {'host': c['host'], 'composeId': compose_id, 'serviceName': 'theater', 'domainType': 'compose', 'path': '/', 'internalPath': '/', 'port': 8787, 'https': True, 'certificateType': 'letsencrypt', 'stripPath': False})
+    for host in hosts:
+        if not any(d['host'] == host for d in details.get('domains', [])):
+            origin_https = host not in c.get('httpOriginHosts', [])
+            api('domain.create', {'host': host, 'composeId': compose_id, 'serviceName': 'theater', 'domainType': 'compose', 'path': '/', 'internalPath': '/', 'port': 8787, 'https': origin_https, 'certificateType': 'letsencrypt' if origin_https else 'none', 'stripPath': False})
     api('compose.deploy', {'composeId': compose_id, 'title': 'Theater-App '+release, 'description': 'Geprüfter Flutter-Web-Build mit Firebase Auth'})
     (artifacts/'last-deploy.json').write_text(json.dumps({'release': release, 'composeId': compose_id, 'url': 'https://'+c['host']}, indent=2)+'\n')
     print(f'Deployment started: https://{c["host"]} (release {release}). Verify /api/healthz before reporting completion.')

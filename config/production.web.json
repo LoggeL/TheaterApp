@@ -1,6 +1,6 @@
 {
   "APP_NAME": "Theater-App",
-  "API_BASE_URL": "https://theater-app.logge.top",
+  "API_BASE_URL": "https://app.kolpingtheater-ramsen.de",
   "FIREBASE_PROJECT_ID": "theater-app-6fa5d",
   "FIREBASE_API_KEY": "AIzaSyBtZ9fNkwsLu-0FjyuxRnfkkdz-zpRhLTc",
   "FIREBASE_APP_ID": "1:275051540922:web:f517bcbe768d51271aad83",
