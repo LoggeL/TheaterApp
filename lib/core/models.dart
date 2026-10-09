@@ -111,6 +111,8 @@ class TheaterEvent {
     this.expectedArrivalAt,
     this.version = 1,
     this.roleIds = const [],
+    this.personIds = const [],
+    this.slotPoolId,
   });
   final String id,
       title,
@@ -132,9 +134,19 @@ class TheaterEvent {
 
   /// Person roles addressed by this event; empty means everyone.
   final List<String> roleIds;
-  bool get needsResponse => response == 'open' && !locked;
+
+  /// People invited by name in addition to [roleIds].
+  final List<int> personIds;
+
+  /// Set for events generated from a booked slot of a slot pool; their
+  /// attendance follows the booking instead of a response.
+  final String? slotPoolId;
+  bool get fromSlotPool => slotPoolId != null;
+  bool get needsResponse => response == 'open' && !locked && !fromSlotPool;
   bool acceptsResponsesAt(DateTime now) =>
-      !locked && !((endsAt ?? startsAt)?.isBefore(now) ?? false);
+      !locked &&
+      !fromSlotPool &&
+      !((endsAt ?? startsAt)?.isBefore(now) ?? false);
 
   /// Shortly before the start, members may still confirm or report a late
   /// arrival, but can no longer decline or withdraw. Mirrors the server.
@@ -163,6 +175,10 @@ class TheaterEvent {
     productionId: json['productionId'] as String?,
     sceneIds: jsonList(json['sceneIds']).map((e) => e.toString()).toList(),
     roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
+    personIds: jsonList(json['personIds']).map(intValue).toList(),
+    slotPoolId: json['slotPoolId'] == null
+        ? null
+        : textValue(json['slotPoolId']),
   );
   TheaterEvent copyWith({
     String? response,
@@ -192,6 +208,8 @@ class TheaterEvent {
         : expectedArrivalAt ?? this.expectedArrivalAt,
     version: version,
     roleIds: roleIds,
+    personIds: personIds,
+    slotPoolId: slotPoolId,
   );
   JsonMap toJson() => {
     'id': id,
@@ -212,8 +230,10 @@ class TheaterEvent {
     'expectedArrivalAt': expectedArrivalAt?.toUtc().toIso8601String(),
     'version': version,
     'roleIds': roleIds,
+    'personIds': personIds,
     'productionId': productionId,
     'sceneIds': sceneIds,
+    if (slotPoolId != null) 'slotPoolId': slotPoolId,
   };
 }
 
@@ -404,9 +424,12 @@ class TheaterMember {
   final List<String> roleIds;
   final bool active;
 
-  /// Whether this member belongs to an audience of roles (empty = everyone).
-  bool inAudience(List<String> audience) =>
-      audience.isEmpty || audience.any(roleIds.contains);
+  /// Whether this member belongs to an audience of roles or invited people
+  /// (both empty = everyone).
+  bool inAudience(List<String> audience, [List<int> people = const []]) =>
+      (audience.isEmpty && people.isEmpty) ||
+      audience.any(roleIds.contains) ||
+      people.contains(id);
   factory TheaterMember.fromJson(JsonMap json) => TheaterMember(
     id: intValue(json['id']),
     name: textValue(json['name']),

@@ -4,7 +4,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { AppError } from './theater.mjs';
 
-export function createHttpServer({ theater: defaultTheater, verifyToken, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null }) {
+export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null }) {
   const origins = new Set(allowedOrigins);
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   return createServer(async (req, res) => {
@@ -87,6 +87,7 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, scriptS
       }
       if (route === '/snapshot' && req.method === 'GET') return json(res, 200, theater.snapshot(identity.uid));
       if (route === '/actions' && req.method === 'POST') return json(res, 200, theater.action(identity.uid, body, req.headers['idempotency-key']));
+      if (route === '/participation' && req.method === 'GET') return json(res, 200, theater.participation(identity.uid));
       if (route === '/admin/accounts' && req.method === 'GET') return json(res, 200, theater.adminData(identity.uid));
       if (route === '/admin/push' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.pushEnabled, devices: theater.store.all('devices').map(({ token, ...d }) => d), jobs: theater.store.all('pushJobs').slice(-50).map(({ acceptedDeviceIds, ...j }) => j) }); }
       if (route === '/admin/script-source' && req.method === 'GET') { theater.account(identity.uid, true); if (!scriptService?.configured) throw new AppError(409, 'Keine Skriptquelle eingerichtet.'); return json(res, 200, { productions: await scriptService.getProductions() }); }
@@ -97,6 +98,8 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, scriptS
         const document = await scriptService.getScript(production.id);
         return json(res, 200, theater.importScript(identity.uid, production, document));
       }
+      const account = route.match(/^\/admin\/accounts\/([^/]+)$/);
+      if (account && req.method === 'DELETE') return json(res, 200, await theater.deleteAccount(identity.uid, account[1], body.version, theater === defaultTheater ? deleteIdentity : null));
       const detail = route.match(/^\/admin\/events\/([^/]+)$/);
       if (detail && req.method === 'GET') return json(res, 200, theater.eventDetails(identity.uid, detail[1]));
       const script = route.match(/^\/productions\/([^/]+)\/script$/);

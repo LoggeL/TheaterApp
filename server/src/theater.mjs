@@ -1,4 +1,4 @@
-import { defaultReminders, eventNotificationBody } from './event-notification.mjs';
+import { customReminderMinutes, defaultReminders, eventNotificationBody } from './event-notification.mjs';
 import { compareProductionsNewestFirst } from './production-order.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -15,8 +15,16 @@ const id = () => randomUUID();
 const list = value => Array.isArray(value) ? value : [];
 // Members can still confirm or report a late arrival, but no longer decline.
 const declineCutoffMs = 60 * 60 * 1000;
+// Participation is only summarized for recent, binding events.
+export const participationWindowDays = 183;
+const voluntaryEventTypes = ['social'];
 // Target audiences are person roles; an empty list addresses everyone.
 export const inRoles = (member, roleIds) => !list(roleIds).length || list(member?.roleIds).some(x => list(roleIds).includes(x));
+// Events may additionally invite single people: a member is addressed by a role or by name.
+export const inAudience = (member, item) => {
+  const roleIds = list(item?.roleIds), personIds = list(item?.personIds);
+  return (!roleIds.length && !personIds.length) || (roleIds.length > 0 && inRoles(member, roleIds)) || personIds.includes(member?.id);
+};
 export const eventTypes = ['rehearsal', 'readthrough', 'technical', 'costume', 'dress', 'performance', 'meeting', 'workshop', 'setup', 'teardown', 'social', 'other'];
 const initialRoles = ['Schauspiel', 'Regie', 'Technik', 'Kostüm', 'Maske', 'Bühnenbau', 'Organisation'];
 const initials = name => name.split(/\s+/).filter(Boolean).slice(0, 2).map(n => n[0]).join('').toUpperCase();
@@ -88,7 +96,39 @@ export class Theater {
       }
     }
     const receipts = this.store.all('receipts').filter(r => r.personId === a.personId);
-    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, notes: this.store.all('notes').filter(n => admin || (n.published && this.canSee(a, n))).sort((x, y) => y.updatedAt.localeCompare(x.updatedAt)), messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true }, serverTime: now() };
+    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a), slotPools: this.slotPools(a), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, notes: this.store.all('notes').filter(n => admin || (n.published && this.canSee(a, n))).sort((x, y) => y.updatedAt.localeCompare(x.updatedAt)), messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true }, serverTime: now() };
+  }
+  /** Slot pools ("Terminfinder"): invited people book one time slot each. */
+  slotPools(a) {
+    const bookings = this.store.all('slotBookings');
+    return this.store.all('slotPools').filter(p => this.canSee(a, p)).map(p => {
+      const own = bookings.find(b => b.poolId === p.id && b.personId === a.personId);
+      return { ...p, myBooking: own?.slotId ?? null, slots: p.slots.map(slot => {
+        const people = bookings.filter(b => b.poolId === p.id && b.slotId === slot.id).map(b => ({ personId: b.personId, name: this.store.get('members', b.personId)?.name ?? 'Ehemaliges Mitglied' })).sort((x, y) => x.name.localeCompare(y.name, 'de'));
+        return { ...slot, booked: people.length, people };
+      }) };
+    }).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  }
+  /** Keeps the calendar event of a slot in line with its bookings; booked people respond yes. */
+  syncSlotEvent(pool, slot) {
+    const s = this.store, eventId = `slot-${pool.id}-${slot.id}`, old = s.get('events', eventId);
+    const personIds = s.all('slotBookings').filter(b => b.poolId === pool.id && b.slotId === slot.id).map(b => b.personId).sort((x, y) => x - y);
+    for (const kind of ['responses', 'checkins']) for (const x of s.all(kind).filter(x => x.eventId === eventId && !personIds.includes(x.personId))) s.delete(kind, `${eventId}:${x.personId}`);
+    if (!personIds.length) { if (old) s.delete('events', eventId); return; }
+    s.put('events', eventId, { id: eventId, title: pool.title, description: pool.description, startsAt: slot.startsAt, endsAt: slot.endsAt, place: pool.place, group: '', type: pool.type, locked: false, productionId: null, sceneIds: [], roleIds: [], personIds, slotPoolId: pool.id, version: (old?.version ?? 0) + 1 });
+    for (const personId of personIds) if (s.get('responses', `${eventId}:${personId}`)?.status !== 'yes') s.put('responses', `${eventId}:${personId}`, { eventId, personId, status: 'yes', reason: '', expectedArrivalAt: null, updatedAt: now() });
+  }
+  bookSlot(pool, personId, slotId) {
+    const s = this.store, key = `${pool.id}:${personId}`, previous = s.get('slotBookings', key);
+    if (slotId === null) { if (previous) { s.delete('slotBookings', key); this.syncSlotEvent(pool, pool.slots.find(x => x.id === previous.slotId)); } return; }
+    const slot = pool.slots.find(x => x.id === slotId);
+    if (!slot) fail(404, 'Zeitfenster nicht gefunden.');
+    if (Date.parse(slot.startsAt) <= +this.clock()) fail(409, 'Dieses Zeitfenster hat schon begonnen.');
+    if (previous?.slotId === slotId) return;
+    if (s.all('slotBookings').filter(b => b.poolId === pool.id && b.slotId === slotId).length >= slot.capacity) fail(409, 'Dieses Zeitfenster ist schon voll.');
+    s.put('slotBookings', key, { poolId: pool.id, slotId, personId, bookedAt: now() });
+    if (previous) this.syncSlotEvent(pool, pool.slots.find(x => x.id === previous.slotId));
+    this.syncSlotEvent(pool, slot);
   }
   polls(a) {
     const votes = this.store.all('pollVotes');
@@ -102,12 +142,18 @@ export class Theater {
       }) };
     }).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
   }
-  canSee(a, item) { return a.role === 'admin' || inRoles(this.store.get('members', a.personId), item.roleIds); }
+  canSee(a, item) { return a.role === 'admin' || inAudience(this.store.get('members', a.personId), item); }
   canReadMessage(a, m) { return a.role === 'admin' || m.audience === 'all' || (m.audience === 'roles' ? this.canSee(a, m) : list(m.recipientPersonIds).includes(a.personId)); }
   audience(value) {
     const roleIds = [...new Set(list(value).map(String))];
     if (roleIds.some(x => !this.store.get('personRoles', x))) fail(400, 'Unbekannte Rolle als Zielgruppe ausgewählt.');
     return roleIds;
+  }
+  invitedPeople(value, previous = []) {
+    const personIds = [...new Set(list(value).map(Number))];
+    // People invited earlier may stay invited after they became inactive.
+    if (personIds.length > 200 || personIds.some(x => !(this.store.get('members', x)?.active || list(previous).includes(x)))) fail(400, 'Bitte gültige Personen auswählen.');
+    return personIds;
   }
   script(uid, productionId) {
     this.account(uid);
@@ -120,6 +166,54 @@ export class Theater {
     this.account(uid, true);
     if (!this.store.get('events', eventId)) fail(404, 'Termin nicht gefunden.');
     return { responses: this.store.all('responses').filter(r => r.eventId === eventId), checkins: this.store.all('checkins').filter(r => r.eventId === eventId), absences: this.store.all('absences').filter(x => { const d = day(this.store.get('events', eventId).startsAt); return x.from <= d && x.to >= d; }) };
+  }
+  /** Deletes a login and its link; the person and their theater data stay. `deleteIdentity` removes the Firebase user. */
+  async deleteAccount(uid, targetUid, version, deleteIdentity = null) {
+    const check = () => {
+      const a = this.account(uid, true), target = this.store.account(targetUid);
+      if (!target || target.version !== version) fail(409, 'Das Konto hat sich geändert. Bitte neu laden.');
+      if (target.uid === a.uid) fail(409, 'Das eigene Konto hier nicht löschen.');
+      if (target.role === 'admin' && target.status === 'approved' && this.store.accounts().filter(x => x.status === 'approved' && x.role === 'admin').length <= 1) fail(409, 'Der letzte Admin muss erhalten bleiben.');
+    };
+    check();
+    // Remove the login first: a failure leaves a complete, still deletable account.
+    if (deleteIdentity) await deleteIdentity(targetUid);
+    this.store.transaction(() => { check(); this.forgetAccount(targetUid, uid); });
+    return { ok: true };
+  }
+  forgetAccount(targetUid, actor) {
+    for (const d of this.store.all('devices').filter(d => d.uid === targetUid)) this.store.delete('devices', d.id);
+    this.store.db.prepare('DELETE FROM requests WHERE uid = ?').run(targetUid);
+    this.store.deleteAccount(targetUid);
+    this.store.audit(actor, 'account.delete', targetUid);
+  }
+  /** Recent response and attendance counts; members see their own, admins see all active people. */
+  participation(uid) {
+    const a = this.account(uid), at = +this.clock(), since = at - participationWindowDays * 86400000;
+    const events = this.store.all('events').filter(e => !voluntaryEventTypes.includes(e.type) && Date.parse(e.endsAt) < at && Date.parse(e.startsAt) >= since);
+    const responses = new Map(this.store.all('responses').map(r => [`${r.eventId}:${r.personId}`, r.status]));
+    const checkins = new Map(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.present]));
+    const linkedSince = new Map(this.store.accounts().filter(x => x.status === 'approved' && x.personId != null).map(x => [x.personId, Date.parse(x.approvedAt ?? x.createdAt)]));
+    const summary = member => {
+      const counts = { events: 0, answerable: 0, answered: 0, recorded: 0, attended: 0, missedAfterCommitment: 0, missedUnannounced: 0 };
+      for (const e of events.filter(e => inAudience(member, e))) {
+        const key = `${e.id}:${member.id}`, status = responses.get(key), present = checkins.get(key);
+        // Only people with an app account at that time could respond in the app.
+        const answerable = Date.parse(e.startsAt) > (linkedSince.get(member.id) ?? Infinity);
+        counts.events++;
+        if (answerable) { counts.answerable++; if (['yes', 'late', 'no'].includes(status)) counts.answered++; }
+        if (typeof present !== 'boolean') continue;
+        // A timely decline is reliable behaviour and never counts as missing.
+        counts.recorded++;
+        if (present) counts.attended++;
+        else if (['yes', 'late'].includes(status)) counts.missedAfterCommitment++;
+        else if (status !== 'no' && answerable) counts.missedUnannounced++;
+      }
+      return counts;
+    };
+    const own = summary(this.store.get('members', a.personId));
+    const people = a.role === 'admin' ? this.store.all('members').filter(m => m.active).map(m => ({ personId: m.id, name: m.name, ...summary(m) })).sort((x, y) => x.name.localeCompare(y.name, 'de')) : undefined;
+    return { since: new Date(since).toISOString(), own, ...(people ? { people } : {}) };
   }
   action(uid, body, requestId) {
     if (!requestId || requestId.length > 150) fail(400, 'Ein gültiger Änderungsschlüssel fehlt.');
@@ -140,6 +234,7 @@ export class Theater {
       case 'attendance': {
         const e = s.get('events', b.eventId);
         if (!e || !this.canSee(a, e)) fail(404, 'Termin nicht gefunden.');
+        if (e.slotPoolId) fail(409, 'Diesen Termin bitte im Terminfinder umbuchen oder freigeben.');
         if (e.locked || Date.parse(e.endsAt) < +this.clock()) fail(409, 'Die Rückmeldefrist ist vorbei.');
         if (!['yes', 'late', 'no', 'open'].includes(b.status)) fail(400, 'Ungültige Rückmeldung.');
         if (['no', 'open'].includes(b.status) && Date.parse(e.startsAt) - declineCutoffMs <= +this.clock()) fail(409, 'Ab einer Stunde vor Beginn ist keine Absage mehr möglich.');
@@ -152,11 +247,15 @@ export class Theater {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(b.from ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(b.to ?? '') || b.from > b.to || day(`${b.from}T12:00:00Z`) !== b.from || day(`${b.to}T12:00:00Z`) !== b.to) fail(400, 'Bitte einen gültigen Zeitraum angeben.');
         const entry = { id: id(), personId: a.personId, from: b.from, to: b.to, reason: text(b.reason, 600) };
         s.put('absences', entry.id, entry);
-        for (const e of s.all('events')) if (!e.locked && inRoles(s.get('members', a.personId), e.roleIds) && Date.parse(e.startsAt) - declineCutoffMs > +this.clock() && day(e.startsAt) >= b.from && day(e.startsAt) <= b.to) s.put('responses', `${e.id}:${a.personId}`, { eventId: e.id, personId: a.personId, status: 'no', reason: entry.reason, expectedArrivalAt: null, updatedAt: now() });
+        for (const e of s.all('events')) if (!e.locked && !e.slotPoolId && inAudience(s.get('members', a.personId), e) && Date.parse(e.startsAt) - declineCutoffMs > +this.clock() && day(e.startsAt) >= b.from && day(e.startsAt) <= b.to) s.put('responses', `${e.id}:${a.personId}`, { eventId: e.id, personId: a.personId, status: 'no', reason: entry.reason, expectedArrivalAt: null, updatedAt: now() });
         return { id: entry.id };
       }
       case 'absence.delete': { const x = s.get('absences', b.id); if (!x || x.personId !== a.personId) fail(404, 'Abwesenheit nicht gefunden.'); s.delete('absences', b.id); return {}; }
-      case 'settings.reminders': { const v = b.value ?? {}; s.put('reminders', a.personId, { dayBefore: v.dayBefore === true, twoHours: v.twoHours === true, changes: v.changes === true }); return {}; }
+      case 'settings.reminders': {
+        const v = b.value ?? {}, customMinutes = v.customMinutes ?? null;
+        if (customMinutes !== null && (!Number.isInteger(customMinutes) || customMinutes < customReminderMinutes.min || customMinutes > customReminderMinutes.max)) fail(400, 'Bitte eine Vorlaufzeit zwischen 15 Minuten und einer Woche wählen.');
+        s.put('reminders', a.personId, { dayBefore: v.dayBefore === true, twoHours: v.twoHours === true, changes: v.changes === true, customMinutes }); return {};
+      }
       case 'account.approve': {
         admin(); const target = s.account(required(b.uid, 'Konto')); const member = s.get('members', Number(b.personId));
         if (!target || target.status !== 'pending' || target.version !== b.version) fail(409, 'Die Kontoanfrage hat sich geändert. Bitte neu laden.');
@@ -174,7 +273,7 @@ export class Theater {
         if (!['rejected', 'suspended', 'approved'].includes(b.status)) fail(400, 'Ungültiger Kontostatus.');
         if (b.status === 'approved' && (!target.personId || !target.identityReady)) fail(409, 'Das Konto benötigt erst eine bestätigte Identität und Personenzuordnung.');
         if (target.role === 'admin' && target.status === 'approved' && s.accounts().filter(x => x.status === 'approved' && x.role === 'admin').length <= 1) fail(409, 'Der letzte Admin muss erhalten bleiben.');
-        s.saveAccount({ ...target, status: b.status, version: target.version + 1 }); return {};
+        s.saveAccount({ ...target, status: b.status, statusChangedAt: now(), version: target.version + 1 }); return {};
       }
       case 'account.reconsider': {
         admin(); const target = s.account(b.uid);
@@ -253,6 +352,7 @@ export class Theater {
       case 'event.save': {
         admin(); const eventId = b.id || id(), old = s.get('events', eventId);
         if (b.id && !old) fail(404, 'Termin nicht gefunden.');
+        if (old?.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.');
         if (old && (old.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.');
         const startsAt = date(b.startsAt), endsAt = date(b.endsAt);
         if (endsAt <= startsAt) fail(400, 'Das Ende muss nach dem Beginn liegen.');
@@ -261,15 +361,17 @@ export class Theater {
         if (b.productionId && sceneIds.some(x => !s.get('scripts', b.productionId)?.scenes.some(scene => scene.id === x))) fail(400, 'Eine ausgewählte Szene gehört nicht zur Produktion.');
         if (b.type != null && !eventTypes.includes(b.type)) fail(400, 'Unbekannte Terminart.');
         const roleIds = b.roleIds === undefined ? list(old?.roleIds) : this.audience(b.roleIds);
-        const e = { id: eventId, title: required(b.title, 'Titel'), description: text(b.description ?? old?.description, 5000), startsAt, endsAt, place: text(b.place), group: text(b.group), type: eventTypes.includes(b.type) ? b.type : 'rehearsal', locked: b.locked === true, productionId: b.productionId || null, sceneIds: b.productionId ? sceneIds : [], roleIds, version: (old?.version ?? 0) + 1 };
+        const personIds = b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds);
+        const e = { id: eventId, title: required(b.title, 'Titel'), description: text(b.description ?? old?.description, 5000), startsAt, endsAt, place: text(b.place), group: text(b.group), type: eventTypes.includes(b.type) ? b.type : 'rehearsal', locked: b.locked === true, productionId: b.productionId || null, sceneIds: b.productionId ? sceneIds : [], roleIds, personIds, version: (old?.version ?? 0) + 1 };
         s.put('events', eventId, e);
         for (const r of s.all('responses').filter(r => r.eventId === eventId && r.expectedArrivalAt && (r.expectedArrivalAt <= startsAt || r.expectedArrivalAt >= endsAt))) s.put('responses', `${eventId}:${r.personId}`, { ...r, expectedArrivalAt: null });
-        for (const absence of s.all('absences')) if (inRoles(s.get('members', absence.personId), roleIds) && absence.from <= day(startsAt) && absence.to >= day(startsAt) && !s.get('responses', `${eventId}:${absence.personId}`)) s.put('responses', `${eventId}:${absence.personId}`, { eventId, personId: absence.personId, status: 'no', expectedArrivalAt: null, reason: absence.reason, updatedAt: now() });
-        if (old) this.enqueuePush({ title: `Termin aktualisiert: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, change: true });
+        for (const absence of s.all('absences')) if (inAudience(s.get('members', absence.personId), e) && absence.from <= day(startsAt) && absence.to >= day(startsAt) && !s.get('responses', `${eventId}:${absence.personId}`)) s.put('responses', `${eventId}:${absence.personId}`, { eventId, personId: absence.personId, status: 'no', expectedArrivalAt: null, reason: absence.reason, updatedAt: now() });
+        if (old) this.enqueuePush({ title: `Termin aktualisiert: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, change: true });
         return { id: eventId };
       }
       case 'event.delete': {
         admin(); const e = s.get('events', b.id); if (!e) fail(404, 'Termin nicht gefunden.');
+        if (e.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.');
         if ((e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.');
         s.delete('events', b.id);
         for (const kind of ['responses', 'checkins']) for (const item of s.all(kind).filter(x => x.eventId === b.id)) s.delete(kind, `${item.eventId}:${item.personId}`);
@@ -355,6 +457,60 @@ export class Theater {
         s.put('comments', commentId, comment); return { id: commentId };
       }
       case 'comment.delete': { const comment = s.get('comments', b.id); if (!comment || (comment.authorId !== a.personId && a.role !== 'admin')) fail(403, 'Diesen Kommentar kannst du nicht entfernen.'); s.delete('comments', b.id); return {}; }
+      case 'slotPool.save': {
+        admin(); const poolId = b.id || id(), old = s.get('slotPools', poolId);
+        if (b.id && !old) fail(404, 'Terminfinder nicht gefunden.');
+        if (old && old.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.');
+        const input = list(b.slots);
+        if (!input.length || input.length > 100) fail(400, 'Bitte 1 bis 100 Zeitfenster anlegen.');
+        const slots = input.map(x => {
+          const startsAt = date(x?.startsAt), endsAt = date(x?.endsAt);
+          if (endsAt <= startsAt) fail(400, 'Ein Zeitfenster muss nach seinem Beginn enden.');
+          if (!Number.isInteger(x.capacity) || x.capacity < 1 || x.capacity > 50) fail(400, 'Bitte 1 bis 50 Plätze je Zeitfenster angeben.');
+          return { id: old?.slots.some(o => o.id === x.id) ? x.id : id(), startsAt, endsAt, capacity: x.capacity };
+        }).sort((x, y) => x.startsAt.localeCompare(y.startsAt));
+        const bookings = s.all('slotBookings').filter(x => x.poolId === poolId);
+        for (const slot of old?.slots ?? []) {
+          const booked = bookings.filter(x => x.slotId === slot.id).length, next = slots.find(x => x.id === slot.id);
+          if (booked && (!next || next.capacity < booked)) fail(409, 'Gebuchte Zeitfenster bleiben erhalten und behalten genug Plätze.');
+        }
+        if (b.type != null && !eventTypes.includes(b.type)) fail(400, 'Unbekannte Terminart.');
+        const roleIds = b.roleIds === undefined ? list(old?.roleIds) : this.audience(b.roleIds);
+        const personIds = b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds);
+        const pool = { id: poolId, title: required(b.title, 'Titel'), description: text(b.description, 3000), place: text(b.place), type: b.type ?? old?.type ?? 'other', roleIds, personIds, slots, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 };
+        s.put('slotPools', poolId, pool);
+        for (const slot of slots) this.syncSlotEvent(pool, slot);
+        if (!old) this.enqueuePush({ title: `Terminfinder: ${pool.title}`, body: 'Bitte wähle dein Zeitfenster.', data: { slotPoolId: poolId }, roleIds, personIds });
+        return { id: poolId };
+      }
+      case 'slotPool.close': {
+        admin(); const pool = s.get('slotPools', b.id);
+        if (!pool) fail(404, 'Terminfinder nicht gefunden.');
+        if (pool.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.');
+        s.put('slotPools', pool.id, { ...pool, closed: b.closed !== false, version: pool.version + 1 }); return {};
+      }
+      case 'slotPool.delete': {
+        admin(); const pool = s.get('slotPools', b.id);
+        if (!pool) fail(404, 'Terminfinder nicht gefunden.');
+        if (pool.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.');
+        for (const x of s.all('slotBookings').filter(x => x.poolId === pool.id)) s.delete('slotBookings', `${pool.id}:${x.personId}`);
+        for (const slot of pool.slots) this.syncSlotEvent(pool, slot);
+        s.delete('slotPools', pool.id); return {};
+      }
+      case 'slot.book': case 'slot.cancel': {
+        const pool = s.get('slotPools', b.poolId);
+        if (!pool || !inAudience(s.get('members', a.personId), pool)) fail(404, 'Terminfinder nicht gefunden.');
+        if (pool.closed) fail(409, 'Die Buchung ist geschlossen.');
+        const own = s.get('slotBookings', `${pool.id}:${a.personId}`), ownSlot = pool.slots.find(x => x.id === own?.slotId);
+        if (ownSlot && Date.parse(ownSlot.startsAt) <= +this.clock()) fail(409, 'Dein Zeitfenster hat schon begonnen.');
+        this.bookSlot(pool, a.personId, b.action === 'slot.book' ? required(b.slotId, 'Zeitfenster') : null); return {};
+      }
+      case 'slot.assign': {
+        admin(); const pool = s.get('slotPools', b.poolId), personId = Number(b.personId);
+        if (!pool) fail(404, 'Terminfinder nicht gefunden.');
+        if (!s.get('members', personId)?.active && b.slotId !== null) fail(400, 'Person nicht verfügbar.');
+        this.bookSlot(pool, personId, b.slotId === null ? null : required(b.slotId, 'Zeitfenster')); return {};
+      }
       case 'push.test': { if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.'); this.enqueuePush({ title: 'Theater-App', body: 'Deine Testbenachrichtigung ist da.', data: {}, recipientPersonIds: [a.personId] }); return { queued: true }; }
       default: fail(400, 'Diese Aktion wird nicht unterstützt.');
     }

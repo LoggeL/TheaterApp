@@ -1,6 +1,7 @@
 export 'today.dart' show TodayScreen;
 import '../core/event_types.dart';
 import 'calendar.dart';
+import 'event_style.dart';
 import 'app_navigation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +15,7 @@ import '../core/models.dart';
 import 'theme.dart';
 import 'reader.dart';
 import 'rehearsal_admin.dart';
+import 'slots.dart';
 
 String eventDate(TheaterEvent event) => event.startsAt == null
     ? 'Datum noch offen'
@@ -29,12 +31,7 @@ String statusText(String status) => switch (status) {
   'no' => 'Abwesend',
   _ => 'Offen',
 };
-Color statusColor(String status) => switch (status) {
-  'yes' => StageTheme.green,
-  'late' => const Color(0xFFA25B06),
-  'no' => const Color(0xFFB34343),
-  _ => const Color(0xFF657168),
-};
+Color statusColor(String status) => responseColor(status);
 
 class RsvpStatusBadge extends StatelessWidget {
   const RsvpStatusBadge({
@@ -43,11 +40,15 @@ class RsvpStatusBadge extends StatelessWidget {
     this.expectedArrivalAt,
     this.locked = false,
     this.onDark = false,
+    this.emphasizeOpen = false,
   });
 
   final String status;
   final DateTime? expectedArrivalAt;
   final bool locked, onDark;
+
+  /// Draws an open, still answerable response in the accent colour.
+  final bool emphasizeOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -59,20 +60,20 @@ class RsvpStatusBadge extends StatelessWidget {
       if (status == 'late') arrival ?? 'Uhrzeit offen',
       if (locked) 'Rückmeldung geschlossen',
     ].join(' · ');
+    final pending = emphasizeOpen && status == 'open' && !locked;
     final icon = switch (status) {
       'yes' => Icons.thumb_up_alt,
       'no' => Icons.thumb_down_alt,
       'late' => Icons.schedule,
+      _ when pending => Icons.mark_email_unread_outlined,
       _ => Icons.help_outline,
     };
-    final color = onDark || Theme.of(context).brightness == Brightness.dark
-        ? switch (status) {
-            'yes' => const Color(0xFFA8D6B6),
-            'no' => const Color(0xFFFFB3AB),
-            'late' => const Color(0xFFFFB18A),
-            _ => const Color(0xFFBFC8C0),
-          }
-        : statusColor(status);
+    final dark = onDark || Theme.of(context).brightness == Brightness.dark;
+    final color = pending
+        ? dark
+              ? const Color(0xFFFFB18A)
+              : const Color(0xFFB83E16)
+        : responseColor(status, dark: dark);
     return Tooltip(
       message: label,
       excludeFromSemantics: true,
@@ -83,8 +84,11 @@ class RsvpStatusBadge extends StatelessWidget {
           height: 32,
           padding: const EdgeInsets.symmetric(horizontal: 8),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: .12),
+            color: color.withValues(alpha: pending ? .16 : .12),
             borderRadius: BorderRadius.circular(16),
+            border: pending
+                ? Border.all(color: color.withValues(alpha: .55))
+                : null,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -112,6 +116,11 @@ class RsvpStatusBadge extends StatelessWidget {
     );
   }
 }
+
+/// Whether the badge shows a lock. Slot pool events have no responses at
+/// all; their attendance follows the booking, so no lock is shown.
+bool responsesClosed(AppController controller, TheaterEvent event) =>
+    !event.fromSlotPool && !controller.canRespondTo(event);
 
 Future<void> runAction(
   BuildContext context,
@@ -182,7 +191,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             b.startsAt ?? DateTime(9999),
           ),
         );
-    if (desktop) return _desktop(context, events);
+    final nextId = widget.controller.events
+        .where((e) => e.startsAt != null && !eventIsPast(e, now))
+        .fold<TheaterEvent?>(
+          null,
+          (next, e) =>
+              next == null || e.startsAt!.isBefore(next.startsAt!) ? e : next,
+        )
+        ?.id;
+    if (desktop) return _desktop(context, events, nextId);
     return RefreshIndicator(
       onRefresh: widget.controller.refresh,
       child: CustomScrollView(
@@ -323,6 +340,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         child: EventCard(
                           event: event,
                           controller: widget.controller,
+                          isNext: event.id == nextId,
                         ),
                       ),
                     ],
@@ -336,7 +354,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 
-  Widget _desktop(BuildContext context, List<TheaterEvent> events) {
+  Widget _desktop(
+    BuildContext context,
+    List<TheaterEvent> events,
+    String? nextId,
+  ) {
     final selected =
         events.where((event) => event.id == _selectedEventId).firstOrNull ??
         events.firstOrNull;
@@ -422,31 +444,18 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           for (final event in events)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 8),
-                              child: Material(
-                                color: selected?.id == event.id
-                                    ? Theme.of(
-                                        context,
-                                      ).colorScheme.primaryContainer
-                                    : Theme.of(context).colorScheme.surface,
-                                borderRadius: BorderRadius.circular(14),
-                                child: ListTile(
-                                  key: ValueKey('schedule-event-${event.id}'),
-                                  selected: selected?.id == event.id,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                  title: Text(event.title),
-                                  subtitle: Text(
-                                    '${eventDate(event)}\n${eventTime(event)} · ${event.place}',
-                                  ),
-                                  trailing: const Icon(Icons.chevron_right),
-                                  onTap: () => setState(() {
-                                    _selectedEventId = event.id;
-                                    if (event.startsAt != null) {
-                                      _day = event.startsAt!.toLocal();
-                                    }
-                                  }),
-                                ),
+                              child: _AgendaTile(
+                                key: ValueKey('schedule-event-${event.id}'),
+                                event: event,
+                                controller: widget.controller,
+                                selected: selected?.id == event.id,
+                                isNext: event.id == nextId,
+                                onTap: () => setState(() {
+                                  _selectedEventId = event.id;
+                                  if (event.startsAt != null) {
+                                    _day = event.startsAt!.toLocal();
+                                  }
+                                }),
                               ),
                             ),
                         ],
@@ -481,6 +490,79 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 }
 
+/// Compact desktop agenda entry next to the inline event details.
+class _AgendaTile extends StatelessWidget {
+  const _AgendaTile({
+    super.key,
+    required this.event,
+    required this.controller,
+    required this.selected,
+    required this.isNext,
+    required this.onTap,
+  });
+  final TheaterEvent event;
+  final AppController controller;
+  final bool selected, isNext;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final now = DateTime.now();
+    final past = eventIsPast(event, now);
+    final marker = eventMarker(event, now, isNext: isNext);
+    final prominent = !past && isProminentKind(event.kind);
+    final accent = past ? scheme.onSurfaceVariant : eventAccent(context, event);
+    final pending =
+        !past && event.response == 'open' && controller.canRespondTo(event);
+    final tile = Material(
+      color: selected
+          ? scheme.primaryContainer
+          : prominent
+          ? Color.alphaBlend(accent.withValues(alpha: .08), scheme.surface)
+          : scheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: marker != null && !selected
+            ? BorderSide(color: scheme.primary, width: 1.5)
+            : BorderSide.none,
+      ),
+      child: ListTile(
+        selected: selected,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        contentPadding: const EdgeInsets.only(left: 12, right: 12),
+        leading: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: .12),
+            borderRadius: BorderRadius.circular(11),
+          ),
+          child: Tooltip(
+            message: eventTypeLabel(event.kind),
+            child: Icon(eventKindIcon(event.kind), size: 20, color: accent),
+          ),
+        ),
+        title: Text(event.title),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${eventDate(event)}\n${eventTime(event)} · ${event.place}'),
+            if (marker != null) ...[
+              const SizedBox(height: 6),
+              EventMarker(marker),
+            ],
+          ],
+        ),
+        trailing: pending
+            ? RsvpStatusBadge(status: event.response, emphasizeOpen: true)
+            : const Icon(Icons.chevron_right),
+        onTap: onTap,
+      ),
+    );
+    return past ? Opacity(opacity: .62, child: tile) : tile;
+  }
+}
+
 void openEvent(BuildContext context, AppController controller, String id) =>
     Navigator.push(
       context,
@@ -490,88 +572,143 @@ void openEvent(BuildContext context, AppController controller, String id) =>
     );
 
 class EventCard extends StatelessWidget {
-  const EventCard({super.key, required this.event, required this.controller});
+  const EventCard({
+    super.key,
+    required this.event,
+    required this.controller,
+    this.isNext = false,
+  });
   final TheaterEvent event;
   final AppController controller;
+
+  /// Marks the chronologically next event of the whole plan.
+  final bool isNext;
   @override
-  Widget build(BuildContext context) => Card(
-    child: InkWell(
-      borderRadius: BorderRadius.circular(24),
-      onTap: () => openEvent(context, controller, event.id),
-      child: Padding(
-        padding: const EdgeInsets.all(17),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 48,
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(
-                color: Theme.of(
-                  context,
-                ).colorScheme.primary.withValues(alpha: .07),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    event.startsAt == null
-                        ? '–'
-                        : DateFormat('dd').format(event.startsAt!),
-                    style: TextStyle(
-                      fontSize: 23,
-                      fontWeight: FontWeight.w800,
-                      color: Theme.of(context).colorScheme.primary,
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final now = DateTime.now();
+    final past = eventIsPast(event, now);
+    final marker = eventMarker(event, now, isNext: isNext);
+    final prominent = !past && isProminentKind(event.kind);
+    final accent = past ? scheme.onSurfaceVariant : eventAccent(context, event);
+    final surface = theme.cardTheme.color ?? scheme.surfaceContainerLow;
+    final card = Card(
+      color: prominent
+          ? Color.alphaBlend(accent.withValues(alpha: .07), surface)
+          : null,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: marker != null
+            ? BorderSide(color: scheme.primary, width: 2)
+            : prominent
+            ? BorderSide(color: accent.withValues(alpha: .35))
+            : BorderSide.none,
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: () => openEvent(context, controller, event.id),
+        child: Padding(
+          padding: const EdgeInsets.all(17),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 48,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: .1),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      event.startsAt == null
+                          ? '–'
+                          : DateFormat('dd').format(event.startsAt!),
+                      style: TextStyle(
+                        fontSize: 23,
+                        fontWeight: FontWeight.w800,
+                        color: accent,
+                      ),
                     ),
-                  ),
-                  Text(
-                    event.startsAt == null
-                        ? 'OFFEN'
-                        : DateFormat(
-                            'EEE',
-                            'de',
-                          ).format(event.startsAt!).toUpperCase(),
-                    style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
+                    Text(
+                      event.startsAt == null
+                          ? 'OFFEN'
+                          : DateFormat(
+                              'EEE',
+                              'de',
+                            ).format(event.startsAt!).toUpperCase(),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    event.title,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${eventTypeLabel(event.kind)} · ${eventTime(event)}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    event.place,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (marker != null || prominent) ...[
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          if (marker != null) EventMarker(marker),
+                          if (prominent) EventKindPill(event.kind),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Text(
+                      event.title,
+                      style: prominent
+                          ? theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            )
+                          : theme.textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(
+                          eventKindIcon(event.kind),
+                          size: 14,
+                          color: accent,
+                        ),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            '${eventTypeLabel(event.kind)} · ${eventTime(event)}',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(event.place, style: theme.textTheme.bodySmall),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            RsvpStatusBadge(
-              status: event.response,
-              expectedArrivalAt: event.expectedArrivalAt,
-              locked: !controller.canRespondTo(event),
-            ),
-          ],
+              const SizedBox(width: 8),
+              RsvpStatusBadge(
+                status: event.response,
+                expectedArrivalAt: event.expectedArrivalAt,
+                locked: responsesClosed(controller, event),
+                emphasizeOpen: !past && !event.fromSlotPool,
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+    // Past events stay readable but step back behind what is still ahead.
+    return past ? Opacity(opacity: .62, child: card) : card;
+  }
 }
 
 class EventDetailScreen extends StatelessWidget {
@@ -656,10 +793,27 @@ class EventDetailContent extends StatelessWidget {
                 ? Theme.of(context).textTheme.headlineMedium
                 : Theme.of(context).textTheme.headlineLarge,
           ),
-          const SizedBox(height: 8),
-          Text(
-            eventTypeLabel(event.kind),
-            style: Theme.of(context).textTheme.labelLarge,
+          const SizedBox(height: 12),
+          Builder(
+            builder: (context) {
+              final now = DateTime.now();
+              final marker = eventMarker(event, now);
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  EventKindPill(event.kind),
+                  if (marker != null) EventMarker(marker),
+                  if (eventIsPast(event, now))
+                    StatePill(
+                      'Vorbei',
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      icon: Icons.history,
+                    ),
+                ],
+              );
+            },
           ),
           if (event.description.isNotEmpty) ...[
             const SizedBox(height: 20),
@@ -681,11 +835,12 @@ class EventDetailContent extends StatelessWidget {
                         ? 'Ort wird noch bekannt gegeben'
                         : event.place,
                   ),
-                  if (event.roleIds.isNotEmpty) ...[
+                  if (event.roleIds.isNotEmpty ||
+                      event.personIds.isNotEmpty) ...[
                     SizedBox(height: embedded ? 10 : 17),
                     _DetailMeta(
                       Icons.group_outlined,
-                      'Für ${controller.audienceLabel(event.roleIds)}',
+                      'Für ${controller.audienceLabel(event.roleIds, event.personIds)}',
                     ),
                   ],
                 ],
@@ -693,13 +848,16 @@ class EventDetailContent extends StatelessWidget {
             ),
           ),
           SizedBox(height: embedded ? 16 : 24),
-          RsvpPanel(
-            key: ValueKey(event.id),
-            controller: controller,
-            event: event,
-            compact: embedded,
-          ),
-          if (event.declineReason.isNotEmpty)
+          if (event.fromSlotPool)
+            SlotEventNotice(controller: controller, event: event)
+          else
+            RsvpPanel(
+              key: ValueKey(event.id),
+              controller: controller,
+              event: event,
+              compact: embedded,
+            ),
+          if (event.declineReason.isNotEmpty && !event.fromSlotPool)
             Padding(
               padding: const EdgeInsets.only(top: 10),
               child: Text('Dein Absagegrund: ${event.declineReason}'),
@@ -988,7 +1146,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
                   'no',
                   'Kann nicht',
                   Icons.thumb_down_alt_outlined,
-                  () => _decline(context, widget.controller, e),
+                  () => declineEvent(context, widget.controller, e),
                 ),
               ],
             )
@@ -1015,7 +1173,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
                   'no',
                   'Kann nicht',
                   Icons.thumb_down_alt_outlined,
-                  () => _decline(context, widget.controller, e),
+                  () => declineEvent(context, widget.controller, e),
                 ),
               ],
             )
@@ -1150,7 +1308,7 @@ class _DetailMeta extends StatelessWidget {
   );
 }
 
-Future<void> _decline(
+Future<void> declineEvent(
   BuildContext context,
   AppController controller,
   TheaterEvent event,

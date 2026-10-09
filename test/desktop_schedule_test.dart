@@ -43,6 +43,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('schedule-event-second')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('schedule-event-second')));
       await tester.pumpAndSettle();
       expect(find.byType(EventDetailScreen), findsNothing);

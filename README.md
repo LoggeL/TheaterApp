@@ -5,13 +5,16 @@ Flutter-App für das Kolpingtheater Ramsen. Web und Android verwenden denselben 
 ## Funktionen
 
 - Selbstregistrierung mit E-Mail/Passwort und Google; manuelle Personenzuordnung und Freigabe durch einen Admin.
-- Feste Termine mit Beschreibung und zwölf Terminarten, dabei/später/abgesagt, optionale Ankunftszeit und längere Abwesenheiten. Keine Terminabstimmungen.
+- Feste Termine mit Beschreibung und zwölf Terminarten für Gruppen und/oder einzelne Personen, dabei/später/abgesagt, optionale Ankunftszeit und längere Abwesenheiten. Keine Terminabstimmungen.
+- Terminfinder als Slot-Buchung, z. B. für Fototermine: Zeitfenster mit Platzzahl, Einladung von Gruppen und/oder Personen, je Person ein Fenster; belegte Fenster werden automatisch Termine.
 - Frei verwaltbare Mehrfachrollen pro Person und allgemeine Abstimmungen mit Frist, Stimmwechsel und Ergebnisübersicht.
 - Verwaltung von Ensemble, Konten, Terminen, Produktionen und Besetzungen; tatsächliche Anwesenheit und spielbare Szenen.
 - Admin-Übersicht mit allen Personen, ihren Rollen und echten Login-Adressen; Filter für verknüpfte Personen, fehlende Konten, offene Freigaben und unbesetzte Rollen.
 - Minimalistischer Leser mit mehreren eigenen Rollen, Lernmodus, Kategorien, Suche, privaten Notizen, Kommentaren, Lesezeichen und PDF-Export.
 - Drehbuchimport aus dem bestehenden Skriptdienst, gemeinsame Regiemarkierungen zwischen Flutter-Web, mobilen Apps und dem bestehenden Skript-Browser.
-- Mitteilungen und Firebase-Push mit Berechtigungsabfrage beim Öffnen, Erinnerungseinstellungen und passenden Links.
+- Mitteilungen und Firebase-Push mit Berechtigungsabfrage beim Öffnen, Erinnerungseinstellungen mit eigener Vorlaufzeit und passenden Links.
+- Teilnahmeübersicht der letzten sechs Monate: Mitglieder sehen ihre eigenen Zahlen, Admins alle aktiven Personen; keine Rangliste, Absagen zählen nicht negativ.
+- Tägliche automatische Löschung nicht mehr benötigter Daten (Fristen in `server/src/retention.mjs` und der Datenschutzerklärung) und Löschen von Anmeldekonten durch Admins.
 - Profilbilder und Galerien mit Immich-Titelbildern, eigenem Bildupload, Lightbox und Download.
 - Direkter Admin-Einstieg, Seitenleiste für Desktop und Kalender mit Termintiteln.
 - Lokaler Cache und sichtbare Warteschlange für Rückmeldungen bei fehlender Verbindung.

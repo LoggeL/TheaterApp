@@ -1,6 +1,6 @@
 # Abnahmestand
 
-Stand: 13. September 2026. Produktname: Theater-App. Flutter 3.44.6 / Dart 3.12.2, Node 24.18.0. Terminabstimmungen sind ausgeschlossen.
+Stand: 13. September 2026. Produktname: Theater-App. Flutter 3.44.6 / Dart 3.12.2, Node 24.18.0. Terminabstimmungen sind ausgeschlossen; der Terminfinder bucht feste Zeitfenster (Slot-Buchung).
 
 ## Bereitgestellt
 

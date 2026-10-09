@@ -30,6 +30,7 @@ export class Store {
     this.db.prepare(`INSERT INTO accounts VALUES(?,?,?,?,?) ON CONFLICT(uid) DO UPDATE SET person_id=excluded.person_id,status=excluded.status,role=excluded.role,data=excluded.data`).run(uid, personId ?? null, status, role, JSON.stringify(data));
     return a;
   }
+  deleteAccount(uid) { this.db.prepare('DELETE FROM accounts WHERE uid=?').run(uid); }
   audit(actor, action, subject) { this.db.prepare('INSERT INTO audit(actor,action,subject,created_at) VALUES(?,?,?,?)').run(actor, action, String(subject), new Date().toISOString()); }
   transaction(fn) {
     this.db.exec('BEGIN IMMEDIATE');

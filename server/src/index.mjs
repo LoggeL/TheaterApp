@@ -12,6 +12,7 @@ import { Theater } from './theater.mjs';
 import { createHttpServer } from './http.mjs';
 import { createScriptService } from './mobile-scripts.mjs';
 import { deliverPush, scheduleReminders } from './push.mjs';
+import { purgeExpired } from './retention.mjs';
 
 const projectId = process.env.FIREBASE_PROJECT_ID;
 if (!projectId) throw new Error('FIREBASE_PROJECT_ID fehlt. Siehe server/.env.example.');
@@ -24,9 +25,11 @@ const theater = new Theater(store, { bootstrapEmail: process.env.BOOTSTRAP_ADMIN
 const focusBridge = process.env.SCRIPT_FOCUS_BRIDGE === 'true' ? new ScriptFocusBridge(theater, { url: process.env.SCRIPT_SERVICE_URL, password: process.env.SCRIPT_DIRECTOR_PASSWORD_FILE ? readFileSync(process.env.SCRIPT_DIRECTOR_PASSWORD_FILE, 'utf8').trim() : '' }) : null;
 const reviewConfig = process.env.PLAY_REVIEW_CONFIG_FILE ? JSON.parse(readFileSync(process.env.PLAY_REVIEW_CONFIG_FILE, 'utf8')) : null;
 const review = reviewConfig ? createReviewServices({ ...reviewConfig, pushEnabled, databasePath: resolve(dirname(process.env.DATABASE_PATH ?? './data/theater.sqlite'), 'review.sqlite'), mediaDirectory: resolve(dirname(process.env.DATABASE_PATH ?? './data/theater.sqlite'), 'review-media') }) : null;
-const server = createHttpServer({ theater, review, focusBridge, media: new MediaService(theater, { directory: process.env.MEDIA_DIR ?? resolve(dirname(process.env.DATABASE_PATH ?? './data/theater.sqlite'), 'media'), immich: new Immich({ hosts: (process.env.GALLERY_HOSTS ?? 'photo.rittmann.cloud').split(',').map(s => s.trim()) }) }), verifyToken: token => auth.verifyIdToken(token, true), scriptService: createScriptService(), allowedOrigins: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:8080,http://127.0.0.1:8080,http://127.0.0.1:8787,http://localhost:8787').split(',').map(x => x.trim()), authProviders: (process.env.AUTH_PROVIDERS ?? 'password,google.com').split(','), webDir: process.env.WEB_APP_DIR ?? '../build/web' });
-let delivering = false;
-const tick = async () => { if (delivering) return; delivering = true; try { scheduleReminders(theater); await deliverPush(theater, pushEnabled ? getMessaging(firebase) : null); if (review) { scheduleReminders(review.theater); await deliverPush(review.theater, pushEnabled ? getMessaging(firebase) : null); } } finally { delivering = false; } };
+const deleteIdentity = uid => auth.deleteUser(uid).catch(e => { if (e.code !== 'auth/user-not-found') throw e; });
+const mediaDirectory = process.env.MEDIA_DIR ?? resolve(dirname(process.env.DATABASE_PATH ?? './data/theater.sqlite'), 'media');
+const server = createHttpServer({ theater, review, focusBridge, media: new MediaService(theater, { directory: mediaDirectory, immich: new Immich({ hosts: (process.env.GALLERY_HOSTS ?? 'photo.rittmann.cloud').split(',').map(s => s.trim()) }) }), verifyToken: token => auth.verifyIdToken(token, true), deleteIdentity, scriptService: createScriptService(), allowedOrigins: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:8080,http://127.0.0.1:8080,http://127.0.0.1:8787,http://localhost:8787').split(',').map(x => x.trim()), authProviders: (process.env.AUTH_PROVIDERS ?? 'password,google.com').split(','), webDir: process.env.WEB_APP_DIR ?? '../build/web' });
+let delivering = false, purgedAt = 0;
+const tick = async () => { if (delivering) return; delivering = true; try { if (Date.now() - purgedAt > 24 * 3600000) { purgedAt = Date.now(); await purgeExpired(theater, { mediaDirectory, deleteIdentity }).then(counts => console.log('Retention:', JSON.stringify(counts)), e => console.error('Retention:', e.code ?? e.message)); } scheduleReminders(theater); await deliverPush(theater, pushEnabled ? getMessaging(firebase) : null); if (review) { scheduleReminders(review.theater); await deliverPush(review.theater, pushEnabled ? getMessaging(firebase) : null); } } finally { delivering = false; } };
 const interval = setInterval(() => tick().catch(e => console.error('Push worker:', e.code ?? e.message)), 15000);
 const host = process.env.HOST ?? '127.0.0.1', port = Number(process.env.PORT ?? 8787);
 server.listen(port, host, () => console.log(`Theater-App: http://${host}:${port}; Firebase ${projectId}; push ${pushEnabled ? 'enabled' : 'disabled'}`));

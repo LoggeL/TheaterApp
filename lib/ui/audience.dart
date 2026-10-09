@@ -89,3 +89,116 @@ class AudienceBadge extends StatelessWidget {
     ],
   );
 }
+
+/// Picks single people, e.g. invited to an event in addition to roles.
+class PersonPicker extends StatelessWidget {
+  const PersonPicker({
+    super.key,
+    required this.controller,
+    required this.selected,
+    required this.onChanged,
+    this.label = 'Einzelne Personen',
+  });
+  final AppController controller;
+  final Set<int> selected;
+  final ValueChanged<Set<int>> onChanged;
+  final String label;
+
+  Future<void> _choose(BuildContext context) async {
+    final chosen = {...selected};
+    var query = '';
+    final result = await showModalBottomSheet<Set<int>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final people = controller.members
+              .where(
+                (m) =>
+                    (m.active || chosen.contains(m.id)) &&
+                    '${m.name} ${m.group}'.toLowerCase().contains(
+                      query.toLowerCase(),
+                    ),
+              )
+              .toList();
+          return SafeArea(
+            child: SizedBox(
+              height: MediaQuery.sizeOf(context).height * .7,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                    child: TextField(
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Person suchen',
+                      ),
+                      onChanged: (v) => setSheetState(() => query = v),
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        for (final m in people)
+                          CheckboxListTile(
+                            value: chosen.contains(m.id),
+                            title: Text(m.name),
+                            subtitle: m.group.isEmpty ? null : Text(m.group),
+                            onChanged: (v) => setSheetState(
+                              () => v == true
+                                  ? chosen.add(m.id)
+                                  : chosen.remove(m.id),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(context, chosen),
+                        child: Text('${chosen.length} übernehmen'),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    if (result != null) onChanged(result);
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: Theme.of(context).textTheme.titleSmall),
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final m in controller.members.where(
+            (m) => selected.contains(m.id),
+          ))
+            InputChip(
+              label: Text(m.name),
+              onDeleted: () => onChanged({...selected}..remove(m.id)),
+              deleteButtonTooltipMessage: '${m.name} entfernen',
+            ),
+          ActionChip(
+            avatar: const Icon(Icons.person_add_alt, size: 18),
+            label: const Text('Person hinzufügen'),
+            onPressed: () => _choose(context),
+          ),
+        ],
+      ),
+    ],
+  );
+}

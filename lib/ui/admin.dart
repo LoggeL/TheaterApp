@@ -1,6 +1,9 @@
 import '../core/event_types.dart';
 import 'roles_admin.dart';
+import 'calendar.dart';
+import 'participation.dart';
 import 'polls.dart';
+import 'slots.dart';
 import 'galleries.dart';
 import 'profile.dart';
 import 'package:flutter/material.dart';
@@ -182,6 +185,14 @@ class ManagementScreen extends StatelessWidget {
         const SizedBox(height: 10),
         tile(
           ctx,
+          Icons.event_available_outlined,
+          'Teilnahme im Ensemble',
+          ParticipationScreen(controller: controller, ensemble: true),
+          'Rückmeldungen und Anwesenheit der letzten sechs Monate',
+        ),
+        const SizedBox(height: 10),
+        tile(
+          ctx,
           Icons.badge_outlined,
           'Rollen verwalten',
           RolesAdminScreen(controller: controller),
@@ -193,6 +204,14 @@ class ManagementScreen extends StatelessWidget {
           Icons.poll_outlined,
           'Abstimmungen',
           PollsScreen(controller: controller),
+        ),
+        const SizedBox(height: 10),
+        tile(
+          ctx,
+          Icons.edit_calendar_outlined,
+          'Terminfinder',
+          SlotPoolsScreen(controller: controller),
+          'Zeitfenster zum Buchen, z. B. für Fototermine',
         ),
         const SizedBox(height: 10),
         tile(
@@ -490,47 +509,62 @@ class _MembersAdminScreenState extends State<MembersAdminScreen> {
         icon: const Icon(Icons.person_add_outlined),
       ),
     ],
-    children: (context) => [
-      TextField(
-        decoration: const InputDecoration(
-          prefixIcon: Icon(Icons.search),
-          hintText: 'Mitglied suchen',
+    children: (context) {
+      final found = widget.controller.memberRecords
+          .where(
+            (m) => textValue(
+              m['name'],
+            ).toLowerCase().contains(_search.toLowerCase()),
+          )
+          .toList();
+      final inactive = found.where((m) => m['active'] == false).toList();
+      return [
+        TextField(
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search),
+            hintText: 'Mitglied suchen',
+          ),
+          onChanged: (s) => setState(() => _search = s),
         ),
-        onChanged: (s) => setState(() => _search = s),
-      ),
-      const SizedBox(height: 20),
-      for (final m in widget.controller.memberRecords.where(
-        (m) =>
-            textValue(m['name']).toLowerCase().contains(_search.toLowerCase()),
-      ))
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Card(
-            child: ListTile(
-              leading: MemberAvatar(
-                controller: widget.controller,
-                avatarId: m['avatarId'] as String?,
-                initials: textValue(m['initials']),
+        const SizedBox(height: 20),
+        for (final m in found.where((m) => m['active'] != false))
+          _member(context, m),
+        if (inactive.isNotEmpty) ...[
+          SectionTitle('Nicht aktiv (${inactive.length})'),
+          for (final m in inactive) _member(context, m),
+        ],
+      ];
+    },
+  );
+
+  Widget _member(BuildContext context, JsonMap m) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Opacity(
+      opacity: m['active'] == false ? .7 : 1,
+      child: Card(
+        child: ListTile(
+          leading: MemberAvatar(
+            controller: widget.controller,
+            avatarId: m['avatarId'] as String?,
+            initials: textValue(m['initials']),
+          ),
+          title: Text(textValue(m['name'])),
+          subtitle: Text(
+            [
+              textValue(m['group']),
+              widget.controller.roleNames(
+                jsonList(m['roleIds']).map((r) => r.toString()),
               ),
-              title: Text(textValue(m['name'])),
-              subtitle: Text(
-                [
-                  textValue(m['group']),
-                  widget.controller.roleNames(
-                    jsonList(m['roleIds']).map((r) => r.toString()),
-                  ),
-                  if (m['active'] == false) 'Inaktiv',
-                ].where((s) => s.isNotEmpty).join(' · '),
-              ),
-              trailing: const Icon(Icons.edit_outlined),
-              onTap: () => openPage(
-                context,
-                MemberEditorScreen(controller: widget.controller, member: m),
-              ),
-            ),
+            ].where((s) => s.isNotEmpty).join(' · '),
+          ),
+          trailing: const Icon(Icons.edit_outlined),
+          onTap: () => openPage(
+            context,
+            MemberEditorScreen(controller: widget.controller, member: m),
           ),
         ),
-    ],
+      ),
+    ),
   );
 }
 
@@ -646,56 +680,145 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
   );
 }
 
-class EventsAdminScreen extends StatelessWidget {
+class EventsAdminScreen extends StatefulWidget {
   const EventsAdminScreen({super.key, required this.controller});
   final AppController controller;
   @override
+  State<EventsAdminScreen> createState() => _EventsAdminScreenState();
+}
+
+class _EventsAdminScreenState extends State<EventsAdminScreen> {
+  bool _calendar = false;
+  DateTime _day = DateUtils.dateOnly(DateTime.now());
+
+  Widget _event(BuildContext context, TheaterEvent e) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Card(
+      child: ListTile(
+        title: Text(e.title),
+        subtitle: Text(
+          '${eventDate(e)} · ${eventTime(e)}'
+          '${e.fromSlotPool ? ' · Terminfinder' : ''}',
+        ),
+        // Slot pool events follow their bookings and are edited in the pool.
+        trailing: e.fromSlotPool
+            ? IconButton(
+                tooltip: 'Im Terminfinder öffnen',
+                onPressed: () =>
+                    openSlotPool(context, widget.controller, e.slotPoolId!),
+                icon: const Icon(Icons.edit_calendar_outlined),
+              )
+            : IconButton(
+                tooltip: 'Termin bearbeiten',
+                onPressed: () => openPage(
+                  context,
+                  EventEditorScreen(controller: widget.controller, event: e),
+                ),
+                icon: const Icon(Icons.edit_outlined),
+              ),
+        onTap: () => openEvent(context, widget.controller, e.id),
+      ),
+    ),
+  );
+
+  @override
   Widget build(BuildContext context) => AdminPage(
-    controller: controller,
+    controller: widget.controller,
     title: 'Termine verwalten',
     actions: [
       IconButton(
         tooltip: 'Termin anlegen',
         onPressed: () =>
-            openPage(context, EventEditorScreen(controller: controller)),
+            openPage(context, EventEditorScreen(controller: widget.controller)),
         icon: const Icon(Icons.add),
       ),
     ],
-    children: (context) => [
-      FilledButton.icon(
-        onPressed: () =>
-            openPage(context, EventEditorScreen(controller: controller)),
-        icon: const Icon(Icons.add),
-        label: const Text('Termin anlegen'),
-      ),
-      const SizedBox(height: 20),
-      for (final e in controller.events)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Card(
-            child: ListTile(
-              title: Text(e.title),
-              subtitle: Text('${eventDate(e)} · ${eventTime(e)}'),
-              trailing: IconButton(
-                tooltip: 'Termin bearbeiten',
-                onPressed: () => openPage(
-                  context,
-                  EventEditorScreen(controller: controller, event: e),
-                ),
-                icon: const Icon(Icons.edit_outlined),
+    children: (context) {
+      final day = widget.controller.events
+          .where((e) => eventOnDay(e, _day))
+          .toList();
+      return [
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(
+              value: false,
+              label: Text('Liste'),
+              icon: Icon(Icons.view_agenda_outlined),
+            ),
+            ButtonSegment(
+              value: true,
+              label: Text('Kalender'),
+              icon: Icon(Icons.calendar_month_outlined),
+            ),
+          ],
+          selected: {_calendar},
+          onSelectionChanged: (value) =>
+              setState(() => _calendar = value.first),
+        ),
+        const SizedBox(height: 16),
+        if (_calendar) ...[
+          RehearsalCalendar(
+            selected: _day,
+            onSelected: (value) => setState(() => _day = value),
+            events: widget.controller.events,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            DateFormat.yMMMMEEEEd('de').format(_day),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 12),
+          if (day.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                'An diesem Tag ist nichts geplant.',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
-              onTap: () => openEvent(context, controller, e.id),
+            ),
+          for (final e in day) _event(context, e),
+          OutlinedButton.icon(
+            onPressed: () => openPage(
+              context,
+              EventEditorScreen(
+                controller: widget.controller,
+                initialDay: _day,
+              ),
+            ),
+            icon: const Icon(Icons.add),
+            label: Text(
+              'Termin am ${DateFormat('d. MMMM', 'de').format(_day)} anlegen',
             ),
           ),
-        ),
-    ],
+        ] else ...[
+          FilledButton.icon(
+            onPressed: () => openPage(
+              context,
+              EventEditorScreen(controller: widget.controller),
+            ),
+            icon: const Icon(Icons.add),
+            label: const Text('Termin anlegen'),
+          ),
+          const SizedBox(height: 20),
+          for (final e in widget.controller.events) _event(context, e),
+        ],
+      ];
+    },
   );
 }
 
 class EventEditorScreen extends StatefulWidget {
-  const EventEditorScreen({super.key, required this.controller, this.event});
+  const EventEditorScreen({
+    super.key,
+    required this.controller,
+    this.event,
+    this.initialDay,
+  });
   final AppController controller;
   final TheaterEvent? event;
+
+  /// Day preselected for a new event, e.g. from the calendar.
+  final DateTime? initialDay;
   @override
   State<EventEditorScreen> createState() => _EventEditorScreenState();
 }
@@ -707,17 +830,20 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
   late String _kind;
   String? _production;
   late Set<String> _roleIds;
+  late Set<int> _personIds;
   bool _busy = false;
   @override
   void initState() {
     super.initState();
     final e = widget.event;
     _roleIds = {...?e?.roleIds};
+    _personIds = {...?e?.personIds};
     _title = TextEditingController(text: e?.title);
     _description = TextEditingController(text: e?.description);
     _place = TextEditingController(text: e?.place ?? 'Kolpingheim');
     _group = TextEditingController(text: e?.group ?? 'Ensemble');
-    final next = DateTime.now().add(const Duration(days: 1));
+    final next =
+        widget.initialDay ?? DateTime.now().add(const Duration(days: 1));
     _start = e?.startsAt ?? DateTime(next.year, next.month, next.day, 19);
     _end = e?.endsAt ?? _start.add(const Duration(hours: 2));
     _locked = e?.locked ?? false;
@@ -777,6 +903,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         'type': _kind,
         'productionId': _production,
         'roleIds': _roleIds.toList(),
+        'personIds': _personIds.toList(),
         'sceneIds': _production == widget.event?.productionId
             ? widget.event?.sceneIds ?? []
             : [],
@@ -879,9 +1006,21 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       const SizedBox(height: 20),
       AudiencePicker(
         controller: widget.controller,
-        label: 'Eingeladen',
+        label: 'Eingeladene Gruppen',
+        allowEveryone: _personIds.isEmpty,
         selected: _roleIds,
         onChanged: (value) => setState(() => _roleIds = value),
+      ),
+      const SizedBox(height: 16),
+      PersonPicker(
+        controller: widget.controller,
+        selected: _personIds,
+        onChanged: (value) => setState(() => _personIds = value),
+      ),
+      const SizedBox(height: 8),
+      Text(
+        'Eingeladen: ${widget.controller.audienceLabel(_roleIds, _personIds)}',
+        style: Theme.of(context).textTheme.bodySmall,
       ),
       const SizedBox(height: 20),
       DropdownButtonFormField<String>(

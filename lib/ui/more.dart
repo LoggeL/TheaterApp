@@ -1,6 +1,8 @@
 import 'privacy_links.dart';
+import 'participation.dart';
 import 'pwa_install.dart';
 import 'polls.dart';
+import 'slots.dart';
 import 'responsive.dart';
 import 'brand_logo.dart';
 import 'profile.dart';
@@ -95,6 +97,36 @@ class MoreScreen extends StatelessWidget {
             onTap: () => _open(context, PollsScreen(controller: controller)),
           ),
         ),
+        if (controller.slotPools.isNotEmpty || user?.isAdmin == true) ...[
+          const SizedBox(height: 12),
+          Builder(
+            builder: (context) {
+              final waiting = slotPoolsAwaitingChoice(controller);
+              return Card(
+                child: ListTile(
+                  leading: const Icon(Icons.edit_calendar_outlined),
+                  title: const Text('Terminfinder'),
+                  subtitle: Text(
+                    waiting == 0
+                        ? 'Zeitfenster buchen, z. B. für Fototermine'
+                        : waiting == 1
+                        ? '1 wartet auf deine Auswahl'
+                        : '$waiting warten auf deine Auswahl',
+                    style: waiting == 0
+                        ? null
+                        : const TextStyle(
+                            color: StageTheme.orange,
+                            fontWeight: FontWeight.w700,
+                          ),
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      _open(context, SlotPoolsScreen(controller: controller)),
+                ),
+              );
+            },
+          ),
+        ],
         const SizedBox(height: 12),
         Card(
           child: ListTile(
@@ -134,11 +166,23 @@ class MoreScreen extends StatelessWidget {
                 '${controller.absences.length} Zeiträume gemeldet',
                 () => _open(context, AbsencesScreen(controller: controller)),
               ),
+              if (!controller.isDemo) ...[
+                const Divider(indent: 60),
+                _MenuItem(
+                  Icons.event_available_outlined,
+                  'Meine Teilnahme',
+                  'Rückmeldungen und Anwesenheit der letzten sechs Monate',
+                  () => _open(
+                    context,
+                    ParticipationScreen(controller: controller),
+                  ),
+                ),
+              ],
               const Divider(indent: 60),
               _MenuItem(
                 Icons.groups_outlined,
                 'Unser Ensemble',
-                '${controller.members.length} Mitglieder',
+                '${controller.members.where((m) => m.active).length} aktive Mitglieder',
                 () => _open(context, MembersScreen(controller: controller)),
               ),
             ],
@@ -506,6 +550,8 @@ class _MembersScreenState extends State<MembersScreen> {
                   .contains(_query.toLowerCase()),
         )
         .toList();
+    final active = members.where((m) => m.active).toList(),
+        inactive = members.where((m) => !m.active).toList();
     return Scaffold(
       appBar: AppBar(title: const Text('Unser Ensemble')),
       body: Column(
@@ -521,36 +567,45 @@ class _MembersScreenState extends State<MembersScreen> {
             ),
           ),
           Expanded(
-            child: ListView.separated(
-              itemCount: members.length,
-              separatorBuilder: (_, i) => const Divider(indent: 82),
-              itemBuilder: (context, i) {
-                final member = members[i];
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 7,
+            child: ListView(
+              children: [
+                for (final (i, member) in active.indexed) ...[
+                  if (i > 0) const Divider(indent: 82),
+                  _member(member),
+                ],
+                if (inactive.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: SectionTitle('Nicht aktiv (${inactive.length})'),
                   ),
-                  leading: MemberAvatar(
-                    controller: widget.controller,
-                    avatarId: member.avatarId,
-                    initials: member.initials,
-                  ),
-                  title: Text(member.name),
-                  subtitle: Text(
-                    [
-                      member.group,
-                      widget.controller.roleNames(member.roleIds),
-                    ].where((s) => s.isNotEmpty).join('\n'),
-                  ),
-                );
-              },
+                  for (final (i, member) in inactive.indexed) ...[
+                    if (i > 0) const Divider(indent: 82),
+                    Opacity(opacity: .7, child: _member(member)),
+                  ],
+                ],
+              ],
             ),
           ),
         ],
       ),
     );
   }
+
+  Widget _member(TheaterMember member) => ListTile(
+    contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 7),
+    leading: MemberAvatar(
+      controller: widget.controller,
+      avatarId: member.avatarId,
+      initials: member.initials,
+    ),
+    title: Text(member.name),
+    subtitle: Text(
+      [
+        member.group,
+        widget.controller.roleNames(member.roleIds),
+      ].where((s) => s.isNotEmpty).join('\n'),
+    ),
+  );
 }
 
 class CheckInScreen extends StatefulWidget {
@@ -669,6 +724,18 @@ class _CheckInScreenState extends State<CheckInScreen> {
   );
 }
 
+/// Offered personal reminder lead times in minutes.
+const reminderLeadTimes = [15, 30, 45, 60, 180, 360, 720, 2880, 4320, 10080];
+String reminderLeadTimeLabel(int? minutes) => switch (minutes) {
+  null => 'Aus',
+  10080 => '1 Woche vorher',
+  1440 => '1 Tag vorher',
+  >= 1440 when minutes % 1440 == 0 => '${minutes ~/ 1440} Tage vorher',
+  60 => '1 Stunde vorher',
+  >= 60 when minutes % 60 == 0 => '${minutes ~/ 60} Stunden vorher',
+  _ => '$minutes Minuten vorher',
+};
+
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({
     super.key,
@@ -737,6 +804,31 @@ class SettingsScreen extends StatelessWidget {
                       }),
                     ),
                   ),
+                ListTile(
+                  title: const Text('Eigene Vorlaufzeit'),
+                  subtitle: const Text(
+                    'Zusätzlich zu einem selbst gewählten Zeitpunkt',
+                  ),
+                  trailing: DropdownButton<int?>(
+                    value: controller.customReminderMinutes,
+                    underline: const SizedBox.shrink(),
+                    items: [
+                      for (final minutes in {
+                        null,
+                        ...reminderLeadTimes,
+                        ?controller.customReminderMinutes,
+                      })
+                        DropdownMenuItem(
+                          value: minutes,
+                          child: Text(reminderLeadTimeLabel(minutes)),
+                        ),
+                    ],
+                    onChanged: (v) => runAction(
+                      context,
+                      () => controller.saveCustomReminder(v),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

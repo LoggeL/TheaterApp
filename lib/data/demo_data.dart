@@ -95,12 +95,14 @@ class DemoData {
         email: 'demo@example.invalid',
         role: 'admin',
         group: 'Ensemble',
+        personId: 1,
       ).toJson(),
       'events': events.map((e) => e.toJson()).toList(),
       'attendanceByEvent': {'demo-tech': 'yes', 'demo-premiere': 'yes'},
       'declineReasons': <String, String>{},
       'absences': <dynamic>[],
       'polls': <dynamic>[],
+      'slotPools': [_photoSlots()],
       'members': const [
         TheaterMember(
           id: 1,
@@ -135,7 +137,12 @@ class DemoData {
       ].map((e) => e.toJson()).toList(),
       'checkinsByEvent': <String, dynamic>{},
       'memberAttendanceByEvent': <String, dynamic>{},
-      'reminders': {'dayBefore': false, 'twoHours': true, 'changes': true},
+      'reminders': {
+        'dayBefore': false,
+        'twoHours': true,
+        'changes': true,
+        'customMinutes': null,
+      },
       'productions': [
         Production(
           id: mainProductionId,
@@ -155,6 +162,42 @@ class DemoData {
         ).toJson(),
       ],
       'capabilities': {'pushConfigured': false, 'liveFocus': true},
+    };
+  }
+
+  /// Example slot pool: photo appointments for the programme booklet.
+  JsonMap _photoSlots() {
+    const booked = {
+      0: [(2, 'Robin Spielmann')],
+      1: [(3, 'Toni Lichtblick'), (5, 'Sam Vorhang')],
+    };
+    return {
+      'id': 'demo-photos',
+      'title': 'Fotos fürs Programmheft',
+      'description':
+          'Kurze Porträts in Alltagskleidung. Bitte wähle ein Zeitfenster.',
+      'place': 'Kolpingheim · Foyer',
+      'type': 'other',
+      'roleIds': <String>[],
+      'personIds': <int>[],
+      'closed': false,
+      'createdAt': today.toUtc().toIso8601String(),
+      'version': 1,
+      'myBooking': null,
+      'slots': [
+        for (var i = 0; i < 4; i++)
+          {
+            'id': 'demo-photo-$i',
+            'startsAt': _at(6, 10, i * 15).toUtc().toIso8601String(),
+            'endsAt': _at(6, 10, i * 15 + 15).toUtc().toIso8601String(),
+            'capacity': 2,
+            'booked': booked[i]?.length ?? 0,
+            'people': [
+              for (final (id, name) in booked[i] ?? const <(int, String)>[])
+                {'personId': id, 'name': name},
+            ],
+          },
+      ],
     };
   }
 

@@ -38,7 +38,9 @@ class ResponsesAdminScreen extends StatelessWidget {
     children: (context) {
       final responses = jsonMap(controller.memberAttendanceByEvent[event.id]);
       final people = controller.members
-          .where((m) => m.active && m.inAudience(event.roleIds))
+          .where(
+            (m) => m.active && m.inAudience(event.roleIds, event.personIds),
+          )
           .toList();
       return [
         Text(event.title, style: Theme.of(context).textTheme.headlineMedium),
@@ -189,7 +191,11 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
     title: 'Anwesenheit',
     children: (context) {
       final members = widget.controller.members
-          .where((m) => m.active && m.inAudience(widget.event.roleIds))
+          .where(
+            (m) =>
+                m.active &&
+                m.inAudience(widget.event.roleIds, widget.event.personIds),
+          )
           .toList();
       final here = members.where((m) => present(m.id) == true).length,
           away = members.where((m) => present(m.id) == false).length;

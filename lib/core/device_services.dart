@@ -58,6 +58,7 @@ class AppTarget {
             'productions',
             'messages',
             'accounts',
+            'slots',
           }.contains(path[0]) ||
           path[1].isEmpty ||
           path[1].length > 200) {
@@ -98,6 +99,10 @@ class AppTarget {
     final message = data['messageId'];
     if (message is String && message.isNotEmpty && message.length <= 200) {
       return AppTarget('messages', message);
+    }
+    final slotPool = data['slotPoolId'];
+    if (slotPool is String && slotPool.isNotEmpty && slotPool.length <= 200) {
+      return AppTarget('slots', slotPool);
     }
     final account = data['accountUid'];
     if (account is String && account.isNotEmpty && account.length <= 200) {

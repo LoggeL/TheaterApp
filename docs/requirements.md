@@ -9,7 +9,7 @@ Stand: 12. September 2026. Grundlage sind der aktuelle Nutzerauftrag, das Downlo
 - Die Samples im ZIP sind die visuelle Ausgangsbasis. Das Drehbuch soll näher an das bestehende System rücken.
 - Zunächst werden Anforderungen abgeglichen und mit Imagegen mehrere Ansichten entworfen. Ergänzend gewünscht sind Zu-/Absage und mehrere Admin-Ansichten.
 - Der Leser soll deutlich minimalistischer werden: fortlaufender Dialog, schlichte kursive Anweisungen und weniger dauerhafte Leisten/Kategorieüberschriften. Notizen, Kommentarzugriff und Lesezeichen bleiben erhalten.
-- „Komme später“ gehört zur Rückmeldung für einen bereits festgelegten Termin. Die Entwürfe bieten dazu eine optionale voraussichtliche Ankunftszeit. Terminabstimmungen sind ausdrücklich nicht im Umfang.
+- „Komme später“ gehört zur Rückmeldung für einen bereits festgelegten Termin. Die Entwürfe bieten dazu eine optionale voraussichtliche Ankunftszeit. Terminabstimmungen über einen gemeinsamen Termin sind ausdrücklich nicht im Umfang. Seit Oktober 2026 gibt es dafür einen Terminfinder als Slot-Buchung: Die Leitung bietet Zeitfenster mit Platzzahl an, eingeladene Gruppen und/oder Personen buchen je ein Fenster, und jedes belegte Fenster wird ein fester Termin für die Gebuchten (z. B. Fototermine).
 - Konten können selbst erstellt werden, über E-Mail/Passwort und mehrere Social Logins mit Firebase Auth. Erst ein Admin verknüpft das Konto mit einer Person und gibt den Theaterzugang frei.
 
 „Kompletter Theaterbedarf“ ist das Produktziel. Die bereits konkret beschriebenen Funktionen stehen unten. Die genaue Ausgestaltung weiterer Vereinsbereiche bleibt ein Vorschlag, solange dazu kein konkreter Ablauf vorliegt.
@@ -87,7 +87,7 @@ Ticketverkauf, Kasse/Buchhaltung und ein eigener Chat sind noch keine spezifizie
 
 Die Rückmeldung hat vier klar unterscheidbare Zustände: offen, dabei, komme später und abgesagt. „Offen“ bleibt der Zustand ohne Antwort. Bei „Komme später“ kann eine voraussichtliche Ankunft angegeben werden, beispielsweise 19:30 Uhr zu einer Probe um 19:00 Uhr. Die Uhrzeit ist eine Entwurfsentscheidung und freiwillig; ohne Angabe erscheint „Später · Uhrzeit offen“.
 
-Die Antwort bezieht sich ausschließlich auf einen bereits festgelegten Termin. Die Leitung legt Proben an; Mitglieder melden dabei, später oder abgesagt zurück. Der zuvor gezeigte Entwurf einer Terminabstimmung ist zurückgezogen.
+Die Antwort bezieht sich ausschließlich auf einen bereits festgelegten Termin. Die Leitung legt Proben an; Mitglieder melden dabei, später oder abgesagt zurück. Der zuvor gezeigte Entwurf einer Terminabstimmung ist zurückgezogen. Termine aus dem Terminfinder werden nicht zu- oder abgesagt, sondern im Terminfinder umgebucht oder freigegeben.
 
 Die Probenleitung sieht Späterkommende separat mit ihrer geplanten Ankunft. Summen verwenden überschneidungsfreie Kategorien; niemand wird gleichzeitig als dabei und später gezählt. In der Planung anhand von Zusagen ist die Person frühestens ab ihrer erwarteten Ankunft eingeplant. Eine offene Ankunftszeit macht diese Verfügbarkeit ungeklärt.
 

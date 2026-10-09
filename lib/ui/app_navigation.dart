@@ -17,22 +17,27 @@ class AppNavigationScope extends InheritedNotifier<ValueNotifier<int>> {
       ?.notifier;
 }
 
+/// The events badge only counts open responses for the near future.
+const responseBadgeWindow = Duration(days: 14);
+
+int unansweredSoon(AppController controller, DateTime now) => controller.events
+    .where(
+      (event) =>
+          event.needsResponse &&
+          (event.startsAt == null ||
+              ((event.endsAt ?? event.startsAt!).isAfter(now) &&
+                  event.startsAt!.isBefore(now.add(responseBadgeWindow)))),
+    )
+    .length;
+
 List<NavigationDestination> appNavigationDestinations(
   AppController controller,
 ) {
-  final now = DateTime.now();
-  final unanswered = controller.events
-      .where(
-        (event) =>
-            event.needsResponse &&
-            (event.startsAt == null ||
-                (event.endsAt ?? event.startsAt!).isAfter(now)),
-      )
-      .length;
+  final unanswered = unansweredSoon(controller, DateTime.now());
   Widget eventIcon(IconData icon) => Tooltip(
     message: unanswered == 0
         ? 'Termine'
-        : '$unanswered offene Rückmeldungen zu Terminen',
+        : '$unanswered offene Rückmeldungen in den nächsten zwei Wochen',
     child: Badge(
       isLabelVisible: unanswered > 0,
       label: Text('$unanswered'),

@@ -19,9 +19,11 @@ import 'core/identity.dart';
 import 'ui/firebase_auth.dart';
 import 'ui/messages.dart';
 import 'ui/auth.dart';
+import 'ui/app_update.dart';
 import 'ui/events.dart';
 import 'ui/more.dart';
 import 'ui/reader.dart';
+import 'ui/slots.dart';
 import 'ui/theme.dart';
 
 SemanticsHandle? _webSemantics;
@@ -50,6 +52,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
   final _messenger = GlobalKey<ScaffoldMessengerState>();
   final _navigationTab = ValueNotifier<int>(0);
   late final DeviceServices _devices;
+  final _updates = AppUpdateCheck();
   AppTarget? _pendingTarget;
   String? _identity;
   bool _starting = true;
@@ -86,6 +89,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
           _startupError = null;
         });
         _startTimer();
+        _checkForUpdate();
         final target = _pendingTarget;
         if (target != null) {
           _pendingTarget = null;
@@ -195,6 +199,13 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
           ),
         ),
       );
+    } else if (target.kind == 'slots') {
+      _navigator.currentState!.push(
+        MaterialPageRoute(
+          builder: (_) =>
+              SlotPoolScreen(controller: widget.controller, poolId: target.id),
+        ),
+      );
     } else if (target.kind == 'messages') {
       _navigator.currentState!.push(
         MaterialPageRoute(
@@ -237,9 +248,19 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _startTimer();
       unawaited(_refreshSession());
+      _checkForUpdate();
     } else {
       _syncTimer?.cancel();
     }
+  }
+
+  void _checkForUpdate() {
+    if (!widget.enableDeviceServices || !AppUpdateCheck.supported) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _navigator.currentContext != null) {
+        unawaited(_updates.run(() => _navigator.currentContext!));
+      }
+    });
   }
 
   @override

@@ -181,41 +181,85 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
         ? Icons.link_off
         : Icons.info_outline,
   );
+  Future<void> _delete(JsonMap a) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Konto löschen?'),
+        content: Text(
+          'Das Anmeldekonto ${textValue(a['email'], textValue(a['name']))} wird gelöscht. '
+          'Die Person im Ensemble mit ihren Rückmeldungen und Besetzungen bleibt erhalten. '
+          'Eine erneute Registrierung braucht wieder eine Freigabe.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Löschen'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await widget.controller.remote(
+        '/admin/accounts/${Uri.encodeComponent(textValue(a['uid']))}',
+        method: 'DELETE',
+        body: {'version': a['version']},
+      );
+      if (!mounted) return;
+      setState(_load);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Konto gelöscht.')));
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+  }
+
   Widget _accountActions(JsonMap a, AccountRoster roster) {
-    if (a['status'] == 'pending') {
-      return TextButton(
+    final primary = switch (a['status']) {
+      'pending' => TextButton(
         onPressed: () => _approve(a, roster),
         child: const Text('Prüfen & verknüpfen'),
-      );
-    }
-    if (a['status'] == 'rejected') {
-      return TextButton.icon(
+      ),
+      'rejected' => TextButton.icon(
         onPressed: _reconsidering.contains(textValue(a['uid']))
             ? null
             : () => _reconsider(a),
         icon: const Icon(Icons.undo, size: 18),
         label: const Text('Erneut prüfen'),
-      );
-    }
-    if (a['uid'] == widget.controller.user?.id ||
-        !['approved', 'suspended'].contains(a['status'])) {
-      return const SizedBox.shrink();
-    }
-    return PopupMenuButton<String>(
-      tooltip: 'Zugang verwalten',
-      onSelected: (s) => _change(a, s),
-      itemBuilder: (_) => [
-        if (a['status'] == 'approved')
-          const PopupMenuItem(
-            value: 'suspended',
-            child: Text('Zugang sperren'),
-          ),
-        if (a['status'] == 'suspended')
-          const PopupMenuItem(
-            value: 'approved',
-            child: Text('Wieder freigeben'),
-          ),
-      ],
+      ),
+      _ => null,
+    };
+    final menu = a['uid'] == widget.controller.user?.id
+        ? null
+        : PopupMenuButton<String>(
+            tooltip: 'Zugang verwalten',
+            onSelected: (s) => s == 'delete' ? _delete(a) : _change(a, s),
+            itemBuilder: (_) => [
+              if (a['status'] == 'approved')
+                const PopupMenuItem(
+                  value: 'suspended',
+                  child: Text('Zugang sperren'),
+                ),
+              if (a['status'] == 'suspended')
+                const PopupMenuItem(
+                  value: 'approved',
+                  child: Text('Wieder freigeben'),
+                ),
+              const PopupMenuItem(
+                value: 'delete',
+                child: Text('Konto löschen'),
+              ),
+            ],
+          );
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [?primary, ?menu],
     );
   }
 

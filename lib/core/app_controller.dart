@@ -42,6 +42,10 @@ class AppController extends ChangeNotifier {
       jsonList(_baseSnapshot['messages']).map(jsonMap).toList();
   List<JsonMap> get notes =>
       jsonList(_baseSnapshot['notes']).map(jsonMap).toList();
+
+  /// Slot pools ("Terminfinder"), newest first; includes queued bookings.
+  List<JsonMap> get slotPools => _slotPools;
+  List<JsonMap> _slotPools = const [];
   List<JsonMap> get pendingAccounts =>
       jsonList(_baseSnapshot['pendingAccounts']).map(jsonMap).toList();
 
@@ -83,14 +87,17 @@ class AppController extends ChangeNotifier {
   List<JsonMap> get personRoles =>
       jsonList(_baseSnapshot['personRoles']).map(jsonMap).toList();
 
-  /// Readable target audience; no roles means everyone.
-  String audienceLabel(Iterable<String> roleIds) {
+  /// Readable target audience; no roles and no people means everyone.
+  String audienceLabel(
+    Iterable<String> roleIds, [
+    Iterable<int> personIds = const [],
+  ]) {
+    if (roleIds.isEmpty && personIds.isEmpty) return 'Alle';
     final names = roleNames(roleIds);
-    return roleIds.isEmpty
-        ? 'Alle'
-        : names.isEmpty
-        ? 'Gelöschte Rolle'
-        : names;
+    return [
+      if (roleIds.isNotEmpty) names.isEmpty ? 'Gelöschte Rolle' : names,
+      ..._members.where((m) => personIds.contains(m.id)).map((m) => m.name),
+    ].join(' · ');
   }
 
   String roleNames(Iterable<String> ids) => personRoles
@@ -137,6 +144,8 @@ class AppController extends ChangeNotifier {
     }();
   }
 
+  /// Current time of the injected clock, e.g. whether a slot has started.
+  DateTime get now => _clock();
   bool canRespondTo(TheaterEvent event) => event.acceptsResponsesAt(_clock());
   bool canDecline(TheaterEvent event) => event.acceptsDeclineAt(_clock());
 
@@ -154,6 +163,9 @@ class AppController extends ChangeNotifier {
     'twoHours': true,
     'changes': true,
   };
+
+  /// Personal reminder lead time in minutes; null when switched off.
+  int? _customReminderMinutes;
   JsonMap _checkinsByEvent = {}, _capabilities = {};
 
   bool get initialized => _initialized;
@@ -180,6 +192,7 @@ class AppController extends ChangeNotifier {
   Map<String, ScriptDocument> get scripts => Map.unmodifiable(_scripts);
   Map<String, dynamic> get preferences => Map.unmodifiable(_preferences);
   Map<String, bool> get reminders => Map.unmodifiable(_reminders);
+  int? get customReminderMinutes => _customReminderMinutes;
   JsonMap get checkinsByEvent => cloneJson(_checkinsByEvent);
   JsonMap get capabilities => Map.unmodifiable(_capabilities);
   Set<String> get loadingScripts => Set.unmodifiable(_loadingScripts);
@@ -756,6 +769,7 @@ class AppController extends ChangeNotifier {
     _events = [];
     _absences = [];
     _polls = [];
+    _slotPools = const [];
     _productions = [];
     _members = [];
     _outbox = [];
@@ -774,6 +788,7 @@ class AppController extends ChangeNotifier {
     _capabilities = {};
     _mutationVersion = 0;
     _reminders = {'dayBefore': false, 'twoHours': true, 'changes': true};
+    _customReminderMinutes = null;
   }
 
   Future<void> refresh() {
@@ -1011,13 +1026,19 @@ class AppController extends ChangeNotifier {
     await _enqueue({'action': 'absence.delete', 'id': id});
   }
 
-  Future<void> saveReminders(Map<String, bool> value) => _enqueue({
-    'action': 'settings.reminders',
-    'value': {
-      for (final key in ['dayBefore', 'twoHours', 'changes'])
-        key: value[key] ?? false,
-    },
-  });
+  Future<void> saveReminders(Map<String, bool> value) =>
+      _saveReminders(value, _customReminderMinutes);
+  Future<void> saveCustomReminder(int? minutes) =>
+      _saveReminders(_reminders, minutes);
+  Future<void> _saveReminders(Map<String, bool> value, int? customMinutes) =>
+      _enqueue({
+        'action': 'settings.reminders',
+        'value': {
+          for (final key in ['dayBefore', 'twoHours', 'changes'])
+            key: value[key] ?? false,
+          'customMinutes': customMinutes,
+        },
+      });
   Future<void> checkIn(String eventId, List<int> memberIds) async {
     if (_user?.isAdmin != true) {
       throw const ApiException(
@@ -1325,6 +1346,7 @@ class AppController extends ChangeNotifier {
     _polls = jsonList(
       view['polls'],
     ).map((e) => Poll.fromJson(jsonMap(e))).toList();
+    _slotPools = List.unmodifiable(jsonList(view['slotPools']).map(jsonMap));
     _productions = jsonList(view['productions']).map((e) {
       final production = Production.fromJson(jsonMap(e));
       return _scripts[production.id] == null
@@ -1338,6 +1360,10 @@ class AppController extends ChangeNotifier {
       for (final key in ['dayBefore', 'twoHours', 'changes'])
         key: jsonMap(view['reminders'])[key] == true,
     };
+    final customMinutes = jsonMap(view['reminders'])['customMinutes'];
+    _customReminderMinutes = customMinutes is num
+        ? customMinutes.toInt()
+        : null;
     _checkinsByEvent = jsonMap(view['checkinsByEvent']);
     _checkinVersions = jsonMap(view['checkinVersions']);
     _capabilities = jsonMap(view['capabilities']);
@@ -1406,12 +1432,19 @@ class AppController extends ChangeNotifier {
           final event = jsonMap(item);
           final end = dateValue(event['endsAt']),
               start = dateValue(event['startsAt']);
-          final audience = jsonList(event['roleIds']).map((e) => '$e');
+          final viewer = jsonMap(view['user']);
+          final invited =
+              TheaterMember(
+                id: intValue(viewer['personId'], -1),
+                name: '',
+                roleIds: jsonList(viewer['roleIds']).map((e) => '$e').toList(),
+              ).inAudience(
+                jsonList(event['roleIds']).map((e) => '$e').toList(),
+                jsonList(event['personIds']).map(intValue).toList(),
+              );
           if (event['locked'] == true ||
-              (audience.isNotEmpty &&
-                  !audience.any(
-                    jsonList(jsonMap(view['user'])['roleIds']).contains,
-                  )) ||
+              event['slotPoolId'] != null ||
+              !invited ||
               end == null ||
               end.isBefore(_clock()) ||
               (start != null &&
@@ -1478,6 +1511,34 @@ class AppController extends ChangeNotifier {
                   'version': intValue(event['version'], 1) + 1,
                 }
               : event;
+        }).toList();
+      case 'slot.book' || 'slot.cancel' || 'slot.assign':
+        final personId = body['action'] == 'slot.assign'
+            ? intValue(body['personId'], -1)
+            : _user?.personId;
+        if (personId == null) break;
+        final slotId = body['action'] == 'slot.cancel'
+            ? null
+            : body['slotId']?.toString();
+        final name =
+            _members.where((m) => m.id == personId).firstOrNull?.name ??
+            (personId == _user?.personId ? _user!.name : '');
+        view['slotPools'] = jsonList(view['slotPools']).map((item) {
+          final pool = jsonMap(item);
+          if (pool['id'] != body['poolId']) return item;
+          return {
+            ...pool,
+            if (personId == _user?.personId) 'myBooking': slotId,
+            'slots': jsonList(pool['slots']).map((entry) {
+              final slot = jsonMap(entry);
+              final people = [
+                for (final p in jsonList(slot['people']).map(jsonMap))
+                  if (intValue(p['personId'], -1) != personId) p,
+                if (slot['id'] == slotId) {'personId': personId, 'name': name},
+              ];
+              return {...slot, 'people': people, 'booked': people.length};
+            }).toList(),
+          };
         }).toList();
       case 'account.reconsider':
         view['pendingAccounts'] = jsonList(view['pendingAccounts']).map((item) {

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/app_controller.dart';
+import '../core/event_types.dart';
 import '../core/models.dart';
+import 'event_style.dart';
 import 'events.dart';
 import 'messages.dart';
 import 'polls.dart';
@@ -80,6 +82,7 @@ class TodayScreen extends StatelessWidget {
                       value: '$unanswered',
                       label: 'Rückmeldungen offen',
                       onTap: onPlan,
+                      highlight: unanswered > 0,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -287,6 +290,7 @@ class TodayScreen extends StatelessWidget {
                         value: '$unanswered',
                         label: 'Rückmeldungen offen',
                         onTap: onPlan,
+                        highlight: unanswered > 0,
                       ),
                       if (poll != null) ...[
                         SectionTitle(
@@ -414,91 +418,229 @@ class _NextRehearsal extends StatelessWidget {
   final TheaterEvent event;
   final AppController controller;
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(23),
-    decoration: BoxDecoration(
-      color: StageTheme.ink,
-      borderRadius: BorderRadius.circular(28),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Eyebrow('Dein nächster Termin', color: Color(0xFFFFB18A)),
-            ),
-            if (event.startsAt != null)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: .08),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  DateFormat('dd.MM.').format(event.startsAt!),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
+  Widget build(BuildContext context) {
+    final marker = eventMarker(event, DateTime.now());
+    final accent = eventKindColor(event.kind, dark: true);
+    return Container(
+      padding: const EdgeInsets.all(23),
+      decoration: BoxDecoration(
+        color: StageTheme.ink,
+        borderRadius: BorderRadius.circular(28),
+        // The frame also separates the dark card from the dark-mode surface.
+        border: Border.all(
+          color: marker != null
+              ? StageTheme.orange
+              : isProminentKind(event.kind)
+              ? accent.withValues(alpha: .6)
+              : Colors.white.withValues(alpha: .1),
+          width: marker != null ? 2 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Eyebrow(
+                  'Dein nächster Termin',
+                  color: Color(0xFFFFB18A),
                 ),
               ),
+              if (marker != null)
+                EventMarker(marker, onDark: true)
+              else if (event.startsAt != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: .08),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    DateFormat('dd.MM.').format(event.startsAt!),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 21),
+          Text(
+            event.title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 27,
+              height: 1.16,
+              letterSpacing: -.6,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 20),
+          _HeroMeta(
+            eventKindIcon(event.kind),
+            eventTypeLabel(event.kind),
+            iconColor: accent,
+          ),
+          const SizedBox(height: 9),
+          _HeroMeta(Icons.schedule, eventTime(event)),
+          const SizedBox(height: 9),
+          _HeroMeta(
+            Icons.location_on_outlined,
+            event.place.isEmpty ? 'Ort folgt' : event.place,
+          ),
+          const SizedBox(height: 20),
+          if (event.needsResponse && controller.canRespondTo(event))
+            _QuickRsvp(event: event, controller: controller)
+          else
+            RsvpStatusBadge(
+              status: event.response,
+              expectedArrivalAt: event.expectedArrivalAt,
+              locked: responsesClosed(controller, event),
+              onDark: true,
+              emphasizeOpen: !event.fromSlotPool,
+            ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: StageTheme.orange,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => openEvent(context, controller, event.id),
+              icon: const Icon(Icons.arrow_forward, size: 19),
+              label: const Text('Termin ansehen'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Answers a still open event right on the start page.
+class _QuickRsvp extends StatefulWidget {
+  const _QuickRsvp({required this.event, required this.controller});
+  final TheaterEvent event;
+  final AppController controller;
+  @override
+  State<_QuickRsvp> createState() => _QuickRsvpState();
+}
+
+class _QuickRsvpState extends State<_QuickRsvp> {
+  bool _busy = false;
+
+  Future<void> _run(Future<void> Function() action) async {
+    setState(() => _busy = true);
+    try {
+      await action();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _late() async {
+    final start = widget.event.startsAt;
+    final time = start == null
+        ? null
+        : await showTimePicker(
+            context: context,
+            helpText: 'Voraussichtlich da ab',
+            initialTime: TimeOfDay.fromDateTime(
+              start.add(const Duration(minutes: 30)),
+            ),
+          );
+    if ((start != null && time == null) || !mounted) return;
+    await _run(
+      () => widget.controller.respond(
+        widget.event.id,
+        'late',
+        expectedArrivalAt: start == null
+            ? null
+            : DateTime(
+                start.year,
+                start.month,
+                start.day,
+                time!.hour,
+                time.minute,
+              ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final outlined = OutlinedButton.styleFrom(
+      foregroundColor: Colors.white,
+      side: BorderSide(color: Colors.white.withValues(alpha: .4)),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Bist du dabei?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: StageTheme.ink,
+              ),
+              onPressed: _busy
+                  ? null
+                  : () => _run(
+                      () => widget.controller.respond(widget.event.id, 'yes'),
+                    ),
+              icon: const Icon(Icons.thumb_up_alt_outlined, size: 18),
+              label: const Text('Bin dabei'),
+            ),
+            OutlinedButton.icon(
+              style: outlined,
+              onPressed: _busy ? null : _late,
+              icon: const Icon(Icons.schedule, size: 18),
+              label: const Text('Komme später'),
+            ),
+            OutlinedButton.icon(
+              style: outlined,
+              onPressed: _busy || !widget.controller.canDecline(widget.event)
+                  ? null
+                  : () =>
+                        declineEvent(context, widget.controller, widget.event),
+              icon: const Icon(Icons.thumb_down_alt_outlined, size: 18),
+              label: const Text('Kann nicht'),
+            ),
           ],
         ),
-        const SizedBox(height: 21),
-        Text(
-          event.title,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 27,
-            height: 1.16,
-            letterSpacing: -.6,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 20),
-        _HeroMeta(Icons.schedule, eventTime(event)),
-        const SizedBox(height: 9),
-        _HeroMeta(
-          Icons.location_on_outlined,
-          event.place.isEmpty ? 'Ort folgt' : event.place,
-        ),
-        const SizedBox(height: 20),
-        RsvpStatusBadge(
-          status: event.response,
-          expectedArrivalAt: event.expectedArrivalAt,
-          locked: !controller.canRespondTo(event),
-          onDark: true,
-        ),
-        const SizedBox(height: 20),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: StageTheme.orange,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => openEvent(context, controller, event.id),
-            icon: const Icon(Icons.arrow_forward, size: 19),
-            label: const Text('Termin ansehen'),
-          ),
-        ),
       ],
-    ),
-  );
+    );
+  }
 }
 
 class _HeroMeta extends StatelessWidget {
-  const _HeroMeta(this.icon, this.label);
+  const _HeroMeta(this.icon, this.label, {this.iconColor});
   final IconData icon;
   final String label;
+  final Color? iconColor;
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      Icon(icon, color: const Color(0xFFBFC8C0), size: 17),
+      Icon(icon, color: iconColor ?? const Color(0xFFBFC8C0), size: 17),
       const SizedBox(width: 9),
       Expanded(
         child: Text(
@@ -516,12 +658,21 @@ class _QuickTile extends StatelessWidget {
     required this.value,
     required this.label,
     required this.onTap,
+    this.highlight = false,
   });
   final IconData icon;
   final String value, label;
   final VoidCallback onTap;
+  final bool highlight;
   @override
   Widget build(BuildContext context) => Card(
+    color: highlight
+        ? Color.alphaBlend(
+            Theme.of(context).colorScheme.primary.withValues(alpha: .09),
+            Theme.of(context).cardTheme.color ??
+                Theme.of(context).colorScheme.surfaceContainerLow,
+          )
+        : null,
     child: InkWell(
       borderRadius: BorderRadius.circular(24),
       onTap: onTap,
@@ -542,6 +693,9 @@ class _QuickTile extends StatelessWidget {
                   value,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w800,
+                    color: highlight
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
                   ),
                 ),
               ],

@@ -54,7 +54,7 @@ test('one-day reminder defaults off, two-hour reminder defaults on, opt-in survi
   const { store, theater, a } = setup(t);
   const now = new Date('2026-09-14T12:00:00Z');
   store.put('events', 'e', { id: 'e', title: 'Abbau', startsAt: '2026-09-15T11:00:00Z', place: 'Kolpingheim' });
-  assert.deepEqual(theater.snapshot('admin').reminders, { dayBefore: false, twoHours: true, changes: true });
+  assert.deepEqual(theater.snapshot('admin').reminders, { dayBefore: false, twoHours: true, changes: true, customMinutes: null });
   scheduleReminders(theater, now);
   assert.equal(store.all('pushJobs').length, 0);
   store.put('events', 'e', { ...store.get('events', 'e'), startsAt: '2026-09-14T13:30:00Z' });
