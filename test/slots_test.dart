@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/device_services.dart';
@@ -9,6 +10,13 @@ import 'package:theater_app/ui/slots.dart';
 import 'package:theater_app/ui/theme.dart';
 
 import 'app_controller_test.dart' show TestServer, signIn;
+
+/// Local wall-clock time of a UTC instant, so expectations hold in any time
+/// zone (CI runs in UTC, the theatre in Europe/Berlin).
+String hm(String utc) =>
+    DateFormat('HH:mm').format(DateTime.parse(utc).toLocal());
+final firstSlot =
+    'Sa 19.9., ${hm('2026-09-19T08:00:00Z')}–${hm('2026-09-19T08:15:00Z')}';
 
 /// Signed in as member 1 (Alex), optionally with admin rights.
 class SlotServer extends TestServer {
@@ -152,7 +160,7 @@ void main() {
       screen(SlotPoolScreen(controller: controller, poolId: 'pool-1')),
     );
     expect(find.text('Dein Slot'), findsOneWidget);
-    expect(find.textContaining('Dein Slot: Sa 19.9., 10:00–10:15'), findsOne);
+    expect(find.textContaining('Dein Slot: $firstSlot'), findsOne);
     expect(find.text('Freigeben'), findsOneWidget);
     expect(find.text('Buchen'), findsNothing);
     // Only s3 still has room; s2 is full.
@@ -446,10 +454,15 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pumpWidget(screen(SlotPoolsScreen(controller: controller)));
     expect(find.text('Noch kein Slot gewählt'), findsOneWidget);
-    expect(find.text('Dein Slot: Sa 19.9., 10:00–10:15'), findsOneWidget);
+    expect(find.text('Dein Slot: $firstSlot'), findsOneWidget);
     expect(find.text('Geschlossen'), findsOneWidget);
     expect(find.byTooltip('Terminfinder anlegen'), findsOneWidget);
-    expect(find.textContaining('Sa 19.9., 10:00–10:45'), findsNWidgets(2));
+    expect(
+      find.textContaining(
+        'Sa 19.9., ${hm('2026-09-19T08:00:00Z')}–${hm('2026-09-19T08:45:00Z')}',
+      ),
+      findsNWidgets(2),
+    );
 
     for (final (page, title) in [
       (SlotPoolScreen(controller: controller, poolId: 'pool-1'), 'Fototermin'),
