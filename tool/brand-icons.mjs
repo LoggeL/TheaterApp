@@ -12,7 +12,7 @@ async function icon(path, size, fraction = .84, transparent = false) {
   const dest = resolve(root, path); await mkdir(dirname(dest), { recursive: true });
   const canvas = sharp({ create: { width: size, height: size, channels: 4, background: transparent ? '#ffffff00' : '#ffffff' } }).composite([{ input: image, gravity: 'centre' }]);
   // iOS app icons must have no alpha channel, even when all pixels are opaque.
-  if (path.startsWith('ios/')) canvas.removeAlpha();
+  if (path.startsWith('ios/') || path.includes('apple-touch-icon')) canvas.removeAlpha();
   await canvas.png().toFile(dest);
 }
 for (const [density, size] of Object.entries({ mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 })) await icon(`android/app/src/main/res/mipmap-${density}/ic_launcher.png`, size);
@@ -25,6 +25,8 @@ const adaptive = resolve(root, 'android/app/src/main/res/mipmap-anydpi-v33/ic_la
 await writeFile(adaptive, (await readFile(adaptive, 'utf8')).replace(/\s*<monochrome[^>]+\/>/, ''));
 for (const size of [192, 512]) { await icon(`web/icons/Icon-${size}.png`, size); await icon(`web/icons/Icon-maskable-${size}.png`, size, .65); }
 await icon('web/favicon.png', 64);
+// Safari uses this for "Zum Home-Bildschirm"; it ignores manifest icons.
+await icon('web/icons/apple-touch-icon.png', 180);
 const ios = 'ios/Runner/Assets.xcassets/AppIcon.appiconset';
 for (const i of JSON.parse(await readFile(resolve(root, ios, 'Contents.json'), 'utf8')).images) if (i.filename) await icon(`${ios}/${i.filename}`, Math.round(parseFloat(i.size) * parseFloat(i.scale)));
 console.log('Official Kolpingtheater logo prepared for web, Android and iOS.');

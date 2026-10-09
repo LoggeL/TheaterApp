@@ -6,6 +6,7 @@ import '../core/models.dart';
 import 'events.dart';
 import 'messages.dart';
 import 'polls.dart';
+import 'pwa_install.dart';
 import 'reader.dart';
 import 'theme.dart';
 
@@ -59,6 +60,7 @@ class TodayScreen extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 26),
+              if (!controller.isDemo) const PwaInstallCard(homeHint: true),
               if (next != null)
                 _NextRehearsal(event: next, controller: controller)
               else

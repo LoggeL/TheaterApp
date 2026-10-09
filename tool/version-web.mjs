@@ -29,7 +29,7 @@ const bootName = `flutter_bootstrap.${hash(bootstrap)}.js`;
 const pwa = await readFile(new URL('pwa.js', root));
 const pwaName = `pwa.${hash(pwa)}.js`;
 const favicon = await versionIcon('favicon.png');
-const touchIcon = await versionIcon('icons/Icon-192.png');
+const touchIcon = await versionIcon('icons/apple-touch-icon.png');
 const manifest = JSON.parse(await readFile(new URL('manifest.json', root), 'utf8'));
 for (const icon of manifest.icons) icon.src = await versionIcon(icon.src);
 const manifestJson = JSON.stringify(manifest, null, 2) + '\n';
@@ -39,7 +39,7 @@ index = index
   .replace(/src="flutter_bootstrap(?:\.[a-f0-9]{16})?\.js"/, `src="${bootName}"`)
   .replace(/src="pwa(?:\.[a-f0-9]{16})?\.js"/, `src="${pwaName}"`)
   .replace(/href="favicon(?:\.[a-f0-9]{16})?\.png"/, `href="${favicon}"`)
-  .replace(/href="icons\/Icon-192(?:\.[a-f0-9]{16})?\.png"/, `href="${touchIcon}"`)
+  .replace(/href="icons\/apple-touch-icon(?:\.[a-f0-9]{16})?\.png"/, `href="${touchIcon}"`)
   .replace(/href="manifest(?:\.[a-f0-9]{16})?\.json"/, `href="${manifestName}"`);
 await writeFile(new URL(mainName, root), main);
 await writeFile(new URL(bootName, root), bootstrap);

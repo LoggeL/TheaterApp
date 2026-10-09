@@ -8,6 +8,13 @@ class PwaInstallation extends ChangeNotifier {
   bool get available => false;
   bool get installed => false;
   bool get canPrompt => false;
+
+  /// An in-app browser that cannot add pages to the home screen.
+  bool get embedded => false;
+
+  /// The member hid the install hint on the home screen.
+  bool get dismissed => false;
+  void dismiss() {}
   String get devicePlatform => 'desktop';
   Future<bool> prompt() async => false;
 }

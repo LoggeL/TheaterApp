@@ -8,6 +8,9 @@ extension type _PwaBridge(JSObject _) implements JSObject {
   external JSBoolean get installed;
   external JSBoolean get canPrompt;
   external JSString get platform;
+  external JSBoolean? get embedded;
+  external JSBoolean? get dismissed;
+  external void dismiss();
   external void subscribe(JSFunction listener);
   external void unsubscribe(JSFunction listener);
   external JSPromise<JSBoolean> install();
@@ -27,6 +30,12 @@ class _WebPwaInstallation extends PwaInstallation {
   bool get installed => _bridge?.installed.toDart ?? false;
   @override
   bool get canPrompt => _bridge?.canPrompt.toDart ?? false;
+  @override
+  bool get embedded => _bridge?.embedded?.toDart ?? false;
+  @override
+  bool get dismissed => _bridge?.dismissed?.toDart ?? false;
+  @override
+  void dismiss() => _bridge?.dismiss();
   @override
   String get devicePlatform => _bridge?.platform.toDart ?? 'desktop';
   @override
