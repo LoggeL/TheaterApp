@@ -49,6 +49,10 @@ void main() {
           ? 'admins see every active person alphabetically'
           : 'members see only their own participation',
       (tester) async {
+        tester.view.physicalSize = const Size(900, 1600);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final semantics = tester.ensureSemantics();
         final server = TestServer();
         server.override = (request) =>
             request.url.path.contains('/participation')
@@ -78,17 +82,26 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.textContaining('seit 12. März 2026'), findsOneWidget);
         if (ensemble) {
-          expect(find.text('Ensemble gesamt'), findsOneWidget);
+          expect(find.text('ENSEMBLE GESAMT'), findsOneWidget);
+          expect(find.text('Personen (2)'), findsOneWidget);
           expect(find.text('Alex'), findsOneWidget);
           expect(find.text(participationLine({...counts})), findsOneWidget);
         } else {
           expect(find.text('Meine Teilnahme'), findsOneWidget);
-          expect(find.text('4 von 5'), findsOneWidget);
-          expect(find.text('3 von 4 erfassten'), findsOneWidget);
+          expect(
+            find.bySemanticsLabel('Rückmeldung gegeben: 4 von 5'),
+            findsOneWidget,
+          );
+          expect(
+            find.bySemanticsLabel('Dabei gewesen: 3 von 4'),
+            findsOneWidget,
+          );
+          expect(find.text('Trotz Zusage gefehlt'), findsOneWidget);
           expect(find.textContaining('keine Rangliste'), findsOneWidget);
         }
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
+        semantics.dispose();
         controller.dispose();
       },
     );
@@ -171,4 +184,47 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets('participation stays readable with large text in dark mode', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final server = TestServer();
+    server.override = (request) => request.url.path.contains('/participation')
+        ? Future.value(
+            jsonResponse({
+              'since': '2026-03-12T12:00:00.000Z',
+              'own': counts,
+              'people': [
+                {'personId': 2, 'name': 'Sam', ...counts},
+              ],
+            }),
+          )
+        : null;
+    final controller = server.controller();
+    await signIn(controller);
+    for (final ensemble in [false, true]) {
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(
+            size: Size(390, 844),
+            textScaler: TextScaler.linear(2),
+          ),
+          child: MaterialApp(
+            theme: StageTheme.build(Brightness.dark),
+            home: ParticipationScreen(
+              controller: controller,
+              ensemble: ensemble,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
 }

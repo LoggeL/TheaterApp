@@ -51,7 +51,7 @@ class AudiencePicker extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
-              'Lege unter Administration Rollen an, um gezielt Gruppen anzusprechen.',
+              'Lege unter Administration Rollen an, um gezielt Personen mit einer Rolle anzusprechen.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
@@ -66,22 +66,26 @@ class AudienceBadge extends StatelessWidget {
     super.key,
     required this.controller,
     required this.roleIds,
+    this.personIds = const [],
   });
   final AppController controller;
   final List<String> roleIds;
+  final List<int> personIds;
   @override
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
       Icon(
-        roleIds.isEmpty ? Icons.groups_outlined : Icons.group_outlined,
+        roleIds.isEmpty && personIds.isEmpty
+            ? Icons.groups_outlined
+            : Icons.group_outlined,
         size: 16,
         color: Theme.of(context).colorScheme.outline,
       ),
       const SizedBox(width: 6),
       Flexible(
         child: Text(
-          controller.audienceLabel(roleIds),
+          controller.audienceLabel(roleIds, personIds),
           style: Theme.of(context).textTheme.bodySmall,
           overflow: TextOverflow.ellipsis,
         ),
@@ -116,9 +120,9 @@ class PersonPicker extends StatelessWidget {
               .where(
                 (m) =>
                     (m.active || chosen.contains(m.id)) &&
-                    '${m.name} ${m.group}'.toLowerCase().contains(
-                      query.toLowerCase(),
-                    ),
+                    '${m.name} ${controller.roleNames(m.roleIds)}'
+                        .toLowerCase()
+                        .contains(query.toLowerCase()),
               )
               .toList();
           return SafeArea(
@@ -144,7 +148,9 @@ class PersonPicker extends StatelessWidget {
                           CheckboxListTile(
                             value: chosen.contains(m.id),
                             title: Text(m.name),
-                            subtitle: m.group.isEmpty ? null : Text(m.group),
+                            subtitle: m.roleIds.isEmpty
+                                ? null
+                                : Text(controller.roleNames(m.roleIds)),
                             onChanged: (v) => setSheetState(
                               () => v == true
                                   ? chosen.add(m.id)

@@ -15,7 +15,7 @@ let token=await login(user.email,password);
 let session=(await api(token,'/auth/session',{})).user;assert.equal(session.status,'pending');assert.equal(session.identityReady,false);
 await api(token,'/snapshot',null,403);
 await auth.updateUser(user.uid,{emailVerified:true});token=await login(user.email,password);session=(await api(token,'/auth/session',{})).user;assert.equal(session.status,'pending');await api(token,'/snapshot',null,403);
-const person=await api(adminToken,'/actions',{action:'member.save',name:'Temporäre Freigabeprüfung',group:'QA',active:true});cleanup.personId=person.id;await writeFile(new URL('.secrets/qa-production-cleanup.json',root),JSON.stringify(cleanup),{mode:0o600});
+const person=await api(adminToken,'/actions',{action:'member.save',name:'Temporäre Freigabeprüfung',active:true});cleanup.personId=person.id;await writeFile(new URL('.secrets/qa-production-cleanup.json',root),JSON.stringify(cleanup),{mode:0o600});
 let account=(await api(adminToken,'/admin/accounts')).accounts.find(a=>a.uid===user.uid);
 await api(adminToken,'/actions',{action:'account.approve',uid:user.uid,personId:person.id,version:account.version,role:'member'});
 session=(await api(token,'/auth/session',{})).user;assert.equal(session.status,'approved');assert.equal(session.personId,person.id);

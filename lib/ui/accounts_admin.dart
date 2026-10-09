@@ -273,10 +273,8 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
           textValue(m['name']),
           style: Theme.of(context).textTheme.titleMedium,
         ),
-        Text(
-          '${textValue(m['group'])}${m['active'] == false ? ' · Inaktiv' : ''}',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
+        if (m['active'] == false)
+          Text('Inaktiv', style: Theme.of(context).textTheme.bodySmall),
         if (jsonList(m['roleIds']).isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),

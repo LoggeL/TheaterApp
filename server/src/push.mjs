@@ -12,7 +12,7 @@ function dueReminder(preferences, until) {
 }
 
 export function scheduleReminders(theater, now = new Date()) {
-  if (!theater.pushEnabled) return;
+  if (!theater.pushEnabled && !theater.emailEnabled) return;
   const s = theater.store;
   for (const event of s.all('events')) {
     const until = Date.parse(event.startsAt) - +now;

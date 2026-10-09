@@ -32,6 +32,7 @@ Die beiden Sommerstücke 2025 und 2026 sind aus dem aktuellen Skriptdienst impor
 | Web-Upload 0.4.0 | Fehler vor dem Fix reproduziert: Web-Plugin fehlte im Release. Produktionsseite öffnet jetzt den nativen Dateidialog und zeigt die gewählte Datei als Vorschau. Vollständiger Albumupload im Browser gegen isolierten lokalen Server: WebP gespeichert, im Raster angezeigt und in der Lightbox geöffnet |
 | Push-Abfrage 0.4.0 | Startdialog auf der echten Webinstanz sichtbar geprüft. Browser- und Betriebssystemfreigaben bleiben geräteabhängig; dies ist keine neue Zustellungsabnahme |
 | Web-Layout 0.4.0 | Navigation, Admin-Einstieg und Monatskalender bei 390, 900 und 1440 Pixeln ohne Layoutfehler geprüft; Albumkarten passen sich ein- oder zweispaltig an |
+| Rollen statt Gruppen (Oktober 2026) | Das frühere Freitextfeld „Gruppe“ an Personen und Terminen ist entfernt. Eine einmalige Servermigration überträgt Personengruppen in Rollen (Ensemble → Schauspiel, Technik → Technik, Kostümteam → Kostüm, unbekannte Namen als neue Rolle; „Admin“ ist ein Kontorecht und wird keine Rolle). Termine, Terminfinder, Abstimmungen, Notizen und Mitteilungen richten sich an Rollen und/oder einzelne Personen |
 | Datensicherung | Konsistentes SQLite-Backup über die Backup-API geladen und mit `PRAGMA integrity_check` geprüft; passendes Medienarchiv einschließlich Referenzprüfung |
 
 Die lokalen Prüfprotokolle liegen unter `artifacts/` und werden nicht in Git übertragen. Die CI führt Analyse, Flutter- und Servertests sowie den Webbuild erneut auf dem gepushten Stand aus.

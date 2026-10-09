@@ -27,7 +27,7 @@ export function importRoster(store, input, { apply = false } = {}) {
       const personId = old?.id ?? nextId++;
       // Explicitly map public roster fields. No source email, password or auth role.
       const person = old ? { ...old, roleName: old.roleName || m.roleName || '', sourceRefs: [...new Set([...(old.sourceRefs ?? []), ref])], version: (old.version ?? 1) + 1 }
-        : { id: personId, name: m.name.trim(), group: m.group || 'Ensemble', roleName: m.roleName || '', initials: m.initials || initials(m.name), active: m.active !== false, version: 1, sourceRefs: [ref] };
+        : { id: personId, name: m.name.trim(), roleName: m.roleName || '', initials: m.initials || initials(m.name), active: m.active !== false, version: 1, sourceRefs: [ref] };
       bySource.set(sourceId, person); changes.set(personId, person);
     }
     for (const [actor, sourceId] of Object.entries(actorAliases)) {
@@ -52,7 +52,7 @@ export function importRoster(store, input, { apply = false } = {}) {
             person = extraActors.get(key(actor));
             if (!person) {
               const ref = `script-actor:${key(actor)}`;
-              person = allMembers.find(m => m.sourceRefs?.includes(ref)) ?? { id: nextId++, name: actor, group: 'Ensemble', initials: initials(actor), active: true, version: 1, sourceRefs: [ref] };
+              person = allMembers.find(m => m.sourceRefs?.includes(ref)) ?? { id: nextId++, name: actor, roleIds: [], initials: initials(actor), active: true, version: 1, sourceRefs: [ref] };
               extraActors.set(key(actor), person); changes.set(person.id, person);
             }
           }

@@ -24,7 +24,7 @@ test('review UID isolates reads, writes, media, accounts and script source from 
   assert(!demo.members.some(m => m.name === 'PRIVATE PRODUCTION MEMBER'));
   assert.equal(demo.user.role, 'admin');
   assert.equal(demo.capabilities.pushConfigured, false);
-  assert.equal((await call('reviewer', '/actions', { action: 'member.save', name: 'Review-only person', group: 'Test' })).status, 200);
+  assert.equal((await call('reviewer', '/actions', { action: 'member.save', name: 'Review-only person' })).status, 200);
   assert(!store.all('members').some(m => m.name === 'Review-only person'));
   assert(review.theater.store.all('members').some(m => m.name === 'Review-only person'));
   const accounts = await (await call('reviewer', '/admin/accounts')).json();

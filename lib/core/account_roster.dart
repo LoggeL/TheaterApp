@@ -61,7 +61,6 @@ class AccountRoster {
 
   bool personMatches(JsonMap m, String query) => matches(query, [
     m['name'],
-    m['group'],
     m['roleName'],
     accountFor(intValue(m['id']))?['email'],
     for (final r in rolesFor(intValue(m['id']))) ...[

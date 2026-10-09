@@ -785,7 +785,7 @@ class EventDetailContent extends StatelessWidget {
         primary: false,
         padding: EdgeInsets.fromLTRB(side, 16, side, 36),
         children: [
-          Eyebrow(event.group.isEmpty ? 'Kolpingtheater Ramsen' : event.group),
+          const Eyebrow('Kolpingtheater Ramsen'),
           const SizedBox(height: 12),
           Text(
             event.title,

@@ -54,7 +54,7 @@ test('one-day reminder defaults off, two-hour reminder defaults on, opt-in survi
   const { store, theater, a } = setup(t);
   const now = new Date('2026-09-14T12:00:00Z');
   store.put('events', 'e', { id: 'e', title: 'Abbau', startsAt: '2026-09-15T11:00:00Z', place: 'Kolpingheim' });
-  assert.deepEqual(theater.snapshot('admin').reminders, { dayBefore: false, twoHours: true, changes: true, customMinutes: null });
+  assert.deepEqual(theater.snapshot('admin').reminders, { dayBefore: false, twoHours: true, changes: true, emailEnabled: false, customMinutes: null });
   scheduleReminders(theater, now);
   assert.equal(store.all('pushJobs').length, 0);
   store.put('events', 'e', { ...store.get('events', 'e'), startsAt: '2026-09-14T13:30:00Z' });
@@ -117,7 +117,7 @@ test('new registrations notify admins once, only when ready to link', async t =>
   const jobs = () => store.all('pushJobs').filter(j => j.title === 'Neue Registrierung');
   assert.equal(jobs().length, 0, 'bootstrap admin must not announce itself');
   let n = 0; const act = body => theater.action('admin', body, `reg-${++n}`);
-  const personId = act({ action: 'member.save', name: 'Sam', group: 'Ensemble' }).id;
+  const personId = act({ action: 'member.save', name: 'Sam' }).id;
   theater.session({ uid: 'sam', name: 'Sam', email: 'sam@example.invalid', email_verified: true });
   act({ action: 'account.approve', uid: 'sam', version: 1, personId, role: 'member' });
   store.put('devices', 's', { id: 's', uid: 'sam', token: 'token-s', platform: 'android' });

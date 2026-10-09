@@ -10,7 +10,7 @@ function setup(t) {
   app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.com', email_verified: true });
   let sequence = 0;
   const action = (body, uid = 'admin', key = `test-${++sequence}`) => app.action(uid, body, key);
-  const memberId = action({ action: 'member.save', name: 'Sam', group: 'Ensemble' }).id;
+  const memberId = action({ action: 'member.save', name: 'Sam' }).id;
   app.session({ uid: 'sam', name: 'Sam', email: 'sam@example.com', email_verified: true });
   const approve = () => action({ action: 'account.approve', uid: 'sam', personId: memberId, version: 1, role: 'member' });
   const event = () => action({ action: 'event.save', title: 'Szenenprobe', startsAt: '2026-09-17T17:00:00Z', endsAt: '2026-09-17T19:00:00Z', place: 'Kolpingheim' }).id;
@@ -143,7 +143,7 @@ test('general polls accept one replaceable vote per person and enforce closure a
   const result = app.snapshot('sam').polls[0];
   assert.deepEqual(result.options.map(o => o.votes), [0, 1]);
   assert.equal(result.choice, p.options[1].id);
-  assert.equal(JSON.stringify(app.snapshot('admin').polls).includes('personId'), false);
+  assert.equal(JSON.stringify(app.snapshot('admin').polls).includes('"personId"'), false);
   assert.throws(() => action({ ...vote, optionId: 'foreign' }, 'sam'), { status: 400 });
   assert.throws(() => action({ ...body, id: pollId, version: 1, options: [{ label: 'Suppe' }, { label: 'Pasta' }] }), { status: 409 });
   action({ action: 'poll.close', id: pollId, version: 1 });
@@ -183,7 +183,7 @@ test('role audiences limit events, polls, messages and notes for members', t => 
   assert.throws(() => action({ action: 'attendance', eventId, status: 'yes' }, 'sam'), { status: 404 });
   assert.throws(() => action({ action: 'poll.vote', pollId, optionId: app.snapshot('admin').polls[0].options[0].id }, 'sam'), { status: 404 });
   assert.equal(app.snapshot('admin').notes.length, 2);
-  action({ action: 'member.save', id: memberId, name: 'Sam', group: 'Ensemble', roleIds: [tech], version: app.snapshot('admin').members.find(m => m.id === memberId).version });
+  action({ action: 'member.save', id: memberId, name: 'Sam', roleIds: [tech], version: app.snapshot('admin').members.find(m => m.id === memberId).version });
   action({ action: 'message.send', title: 'Kabel', body: 'Bitte mitbringen', audience: 'roles', roleIds: [tech] });
   sam = app.snapshot('sam');
   assert.deepEqual(sam.events.map(e => e.id), [eventId]);

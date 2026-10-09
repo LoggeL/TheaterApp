@@ -62,8 +62,8 @@ class MoreScreen extends StatelessWidget {
                       Text(
                         controller.isDemo
                             ? 'Demokonto · Beispieldaten'
-                            : (user?.group.isNotEmpty == true
-                                  ? user!.group
+                            : (user?.roleIds.isNotEmpty == true
+                                  ? controller.roleNames(user!.roleIds)
                                   : 'Kolpingtheater Ramsen'),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
@@ -544,10 +544,9 @@ class _MembersScreenState extends State<MembersScreen> {
   Widget build(BuildContext context) {
     final members = widget.controller.members
         .where(
-          (m) =>
-              '${m.name} ${m.group} ${widget.controller.roleNames(m.roleIds)}'
-                  .toLowerCase()
-                  .contains(_query.toLowerCase()),
+          (m) => '${m.name} ${widget.controller.roleNames(m.roleIds)}'
+              .toLowerCase()
+              .contains(_query.toLowerCase()),
         )
         .toList();
     final active = members.where((m) => m.active).toList(),
@@ -560,7 +559,7 @@ class _MembersScreenState extends State<MembersScreen> {
             padding: const EdgeInsets.fromLTRB(22, 8, 22, 18),
             child: TextField(
               decoration: const InputDecoration(
-                hintText: 'Name, Gruppe oder Rolle suchen',
+                hintText: 'Name oder Rolle suchen',
                 prefixIcon: Icon(Icons.search),
               ),
               onChanged: (v) => setState(() => _query = v),
@@ -599,12 +598,7 @@ class _MembersScreenState extends State<MembersScreen> {
       initials: member.initials,
     ),
     title: Text(member.name),
-    subtitle: Text(
-      [
-        member.group,
-        widget.controller.roleNames(member.roleIds),
-      ].where((s) => s.isNotEmpty).join('\n'),
-    ),
+    subtitle: Text(widget.controller.roleNames(member.roleIds)),
   );
 }
 
@@ -667,12 +661,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                   .elementAt(index);
               return CheckboxListTile(
                 title: Text(member.name),
-                subtitle: Text(
-                  [
-                    member.group,
-                    widget.controller.roleNames(member.roleIds),
-                  ].where((s) => s.isNotEmpty).join('\n'),
-                ),
+                subtitle: Text(widget.controller.roleNames(member.roleIds)),
                 value: _present.contains(member.id),
                 onChanged: (value) => setState(() {
                   if (value == true) {
@@ -777,6 +766,35 @@ class SettingsScreen extends StatelessWidget {
                   }
                 },
               ),
+            ),
+          ),
+          const SectionTitle('E-Mail'),
+          Card(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: const Text('Termin-E-Mails'),
+                  subtitle: Text(controller.emailConfigured
+                      ? 'Neue Termine, Änderungen und Erinnerungen an deine bestätigte Anmeldeadresse.'
+                      : 'Der E-Mail-Versand ist noch nicht eingerichtet.'),
+                  value: controller.reminders['emailEnabled'] ?? false,
+                  onChanged: controller.emailConfigured
+                      ? (value) => runAction(context, () => controller.saveReminders({
+                          ...controller.reminders,
+                          'emailEnabled': value,
+                        }))
+                      : null,
+                ),
+                if (controller.emailConfigured)
+                  TextButton.icon(
+                    icon: const Icon(Icons.mail_outline),
+                    label: const Text('Test-E-Mail an mich senden'),
+                    onPressed: () => runAction(context,
+                      () => controller.action({'action': 'email.test'}),
+                      message: 'Test-E-Mail angefordert.',
+                    ),
+                  ),
+              ],
             ),
           ),
           const SectionTitle('Erinnere mich'),

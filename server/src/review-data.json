@@ -6,7 +6,6 @@
       "displayName": "Alex Bühnenfreund",
       "email": "demo@example.invalid",
       "role": "admin",
-      "group": "Ensemble",
       "status": "approved",
       "personId": null,
       "emailVerified": true,
@@ -22,7 +21,6 @@
         "endsAt": "2026-09-13T21:00:00.000",
         "time": "19:00–21:00",
         "place": "Kolpingheim · Großer Saal",
-        "group": "Ensemble",
         "type": "rehearsal",
         "tone": "orange",
         "locked": false,
@@ -45,7 +43,6 @@
         "endsAt": "2026-09-15T20:30:00.000",
         "time": "18:30–20:30",
         "place": "Kolpingheim · Bühne",
-        "group": "Technik & Ensemble",
         "type": "technical",
         "tone": "green",
         "locked": false,
@@ -68,7 +65,6 @@
         "endsAt": "2026-09-17T16:00:00.000",
         "time": "14:00–16:00",
         "place": "Kolpingheim · Fundus",
-        "group": "Alle",
         "type": "costume",
         "tone": "violet",
         "locked": false,
@@ -88,7 +84,6 @@
         "endsAt": "2026-09-20T22:00:00.000",
         "time": "19:00–22:00",
         "place": "Kolpingheim · Großer Saal",
-        "group": "Alle",
         "type": "rehearsal",
         "tone": "orange",
         "locked": false,
@@ -113,7 +108,6 @@
         "endsAt": "2026-09-28T22:00:00.000",
         "time": "19:30–22:00",
         "place": "Kolpingheim · Bühne",
-        "group": "Alle",
         "type": "performance",
         "tone": "pink",
         "locked": true,
@@ -138,42 +132,52 @@
       {
         "id": 1,
         "name": "Alex Bühnenfreund",
-        "group": "Ensemble",
         "initials": "AB",
         "avatar": null,
-        "active": true
+        "active": true,
+        "roleIds": [
+          "role-1"
+        ]
       },
       {
         "id": 2,
         "name": "Robin Spielmann",
-        "group": "Ensemble",
         "initials": "RS",
         "avatar": null,
-        "active": true
+        "active": true,
+        "roleIds": [
+          "role-1"
+        ]
       },
       {
         "id": 3,
         "name": "Toni Lichtblick",
-        "group": "Technik",
         "initials": "TL",
         "avatar": null,
-        "active": true
+        "active": true,
+        "roleIds": [
+          "role-3"
+        ]
       },
       {
         "id": 4,
         "name": "Kim Kulisse",
-        "group": "Regie",
         "initials": "KK",
         "avatar": null,
-        "active": true
+        "active": true,
+        "roleIds": [
+          "role-2"
+        ]
       },
       {
         "id": 5,
         "name": "Sam Vorhang",
-        "group": "Ensemble",
         "initials": "SV",
         "avatar": null,
-        "active": true
+        "active": true,
+        "roleIds": [
+          "role-1"
+        ]
       }
     ],
     "checkinsByEvent": {},

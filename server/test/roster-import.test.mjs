@@ -8,7 +8,7 @@ function setup(t) {
   s.put('members', 1, { id: 1, name: 'Admin', active: true, version: 1 });
   s.saveAccount({ uid: 'admin', personId: 1, status: 'approved', role: 'admin', identityReady: true, email: 'real@example.test', version: 1 });
   s.put('productions', 'play', { id: 'play', version: 1, roles: [{ id: 'A', actor: 'Sam' }, { id: 'B', actor: 'Sam' }, { id: 'C', actor: 'Kim' }, { id: 'ALL', actor: '' }], casting: {} });
-  const input = { source: 'legacy', migrationId: 'one', members: [{ sourceId: 8, name: 'Sam', group: 'Ensemble', roleName: 'Technik', email: 'fake@example.test', password: 'DO NOT IMPORT', profileRole: 'admin' }], productionIds: ['play'] };
+  const input = { source: 'legacy', migrationId: 'one', members: [{ sourceId: 8, name: 'Sam', roleName: 'Technik', email: 'fake@example.test', password: 'DO NOT IMPORT', profileRole: 'admin' }], productionIds: ['play'] };
   return { s, input };
 }
 test('roster dry run and repeated apply preserve login identities and existing people', t => {
@@ -20,7 +20,7 @@ test('roster dry run and repeated apply preserve login identities and existing p
   assert.deepEqual(s.accounts(), [account]);
   assert.equal(importRoster(s, input, { apply: true }).alreadyApplied, true); assert.deepEqual(s.get('productions', 'play'), p);
   const app = new Theater(s);
-  app.action('admin', { action: 'member.save', id: p.casting.A, version: 1, name: 'Sam neu', group: 'Ensemble' }, 'edit');
+  app.action('admin', { action: 'member.save', id: p.casting.A, version: 1, name: 'Sam neu' }, 'edit');
   assert.deepEqual(s.get('members', p.casting.A).sourceRefs, ['legacy:8']); assert.equal(s.get('members', p.casting.A).roleName, 'Technik');
   app.session({ uid: 'sam', name: 'Sam', email: 'fake@example.test', email_verified: true });
   assert.equal(s.account('sam').personId, null); assert.equal(s.account('sam').status, 'pending');

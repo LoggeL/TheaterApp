@@ -20,7 +20,7 @@ const previous = store.account(user.uid);
 if (previous?.role === 'admin' && previous.status === 'approved') { console.log('Admin-Zuordnung bereits vorhanden.'); store.close(); process.exit(0); }
 store.transaction(() => {
   const personId = previous?.personId ?? Math.max(0, ...store.all('members').map(x => x.id)) + 1;
-  if (!store.get('members', personId)) store.put('members', personId, { id: personId, name: process.env.ADMIN_DISPLAY_NAME || user.displayName || email, group: 'Theaterleitung', initials: 'TL', active: true, version: 1 });
+  if (!store.get('members', personId)) store.put('members', personId, { id: personId, name: process.env.ADMIN_DISPLAY_NAME || user.displayName || email, initials: 'TL', active: true, version: 1 });
   store.saveAccount({ ...previous, uid: user.uid, personId, name: user.displayName || email, email, emailVerified: user.emailVerified, identityReady: user.emailVerified, provider: 'password', role: 'admin', status: 'approved', approvedAt: new Date().toISOString(), approvedBy: 'server-bootstrap', version: (previous?.version ?? 0) + 1 });
   store.put('settings', 'bootstrap', { uid: user.uid, at: new Date().toISOString() });
   store.audit('server-bootstrap', 'account.approve', user.uid);

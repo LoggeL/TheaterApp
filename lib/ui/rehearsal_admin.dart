@@ -77,7 +77,7 @@ class ResponsesAdminScreen extends StatelessWidget {
                   initials: m.initials,
                 ),
                 title: Text(m.name),
-                subtitle: Text(m.group),
+                subtitle: Text(controller.roleNames(m.roleIds)),
                 trailing: RsvpStatusBadge(
                   status: textValue(responses[m.id.toString()], 'open'),
                   expectedArrivalAt: dateValue(

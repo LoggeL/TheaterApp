@@ -21,7 +21,7 @@ export async function purgeExpired(theater, { now = new Date(), mediaDirectory =
   s.transaction(() => {
     // Stored idempotency results can contain decline reasons.
     counts.requests = Number(s.db.prepare('DELETE FROM requests WHERE created_at < ?').run(before(retention.requestDays)).changes);
-    for (const job of s.all('pushJobs').filter(j => j.createdAt < before(retention.pushJobDays))) { s.delete('pushJobs', job.id); counts.pushJobs++; }
+    for (const kind of ['pushJobs', 'emailJobs']) for (const job of s.all(kind).filter(j => j.createdAt < before(retention.pushJobDays))) { s.delete(kind, job.id); counts.pushJobs++; }
     s.db.prepare("DELETE FROM entities WHERE kind = 'reminderSent' AND json_extract(data, '$.at') < ?").run(before(retention.pushJobDays));
     const events = new Map(s.all('events').map(e => [e.id, e]));
     for (const r of s.all('responses')) {

@@ -13,9 +13,9 @@ void main() {
       (tester) async {
         final server = TestServer();
         server.data['members'] = [
-          {'id': 1, 'name': 'Alex', 'group': 'Ensemble', 'active': true},
-          {'id': 2, 'name': 'Kim', 'group': 'Ensemble', 'active': false},
-          {'id': 3, 'name': 'Sam', 'group': 'Technik', 'active': true},
+          {'id': 1, 'name': 'Alex', 'active': true},
+          {'id': 2, 'name': 'Kim', 'active': false},
+          {'id': 3, 'name': 'Sam', 'active': true},
         ];
         final controller = server.controller();
         await signIn(controller);

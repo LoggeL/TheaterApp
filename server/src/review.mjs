@@ -17,7 +17,7 @@ export function createReviewServices({ uid, email, databasePath, mediaDirectory,
     }
     for (const script of fixture.scripts) store.put('scripts', script.productionId, script);
     const personId = theater.nextPersonId();
-    store.put('members', personId, { id: personId, name: 'Alex Testleitung', initials: 'AT', group: 'Testbereich · Beispieldaten', active: true, roleIds: ['role-2'], version: 1 });
+    store.put('members', personId, { id: personId, name: 'Alex Testleitung', initials: 'AT', active: true, roleIds: ['role-2'], version: 1 });
     store.saveAccount({ uid, email, name: 'Alex Testleitung', personId, status: 'approved', role: 'admin', identityReady: true, emailVerified: true, provider: 'password', version: 1 });
     for (const p of store.all('productions')) store.put('productions', p.id, { ...p, casting: Object.fromEntries(p.roles.map(r => [r.id, personId])), directorMemberIds: [personId] });
     store.put('settings', 'sampleData', { enabled: true });

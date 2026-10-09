@@ -5,7 +5,7 @@ const timeFormat = new Intl.DateTimeFormat('de-DE', {
   timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 });
 
-export const defaultReminders = Object.freeze({ dayBefore: false, twoHours: true, changes: true, customMinutes: null });
+export const defaultReminders = Object.freeze({ dayBefore: false, twoHours: true, changes: true, emailEnabled: false, customMinutes: null });
 // A personal reminder lead time from 15 minutes to one week.
 export const customReminderMinutes = Object.freeze({ min: 15, max: 7 * 24 * 60 });
 

@@ -162,6 +162,7 @@ class AppController extends ChangeNotifier {
     'dayBefore': false,
     'twoHours': true,
     'changes': true,
+    'emailEnabled': false,
   };
 
   /// Personal reminder lead time in minutes; null when switched off.
@@ -202,6 +203,8 @@ class AppController extends ChangeNotifier {
       _capabilities['pushConfigured'] == true ||
       _capabilities['pushEnabled'] == true ||
       _capabilities['push'] == true;
+
+  bool get emailConfigured => _capabilities['emailConfigured'] == true;
 
   void _notify() {
     if (!_disposed) notifyListeners();
@@ -787,7 +790,7 @@ class AppController extends ChangeNotifier {
     _checkinVersions = {};
     _capabilities = {};
     _mutationVersion = 0;
-    _reminders = {'dayBefore': false, 'twoHours': true, 'changes': true};
+    _reminders = {'dayBefore': false, 'twoHours': true, 'changes': true, 'emailEnabled': false};
     _customReminderMinutes = null;
   }
 
@@ -1034,7 +1037,7 @@ class AppController extends ChangeNotifier {
       _enqueue({
         'action': 'settings.reminders',
         'value': {
-          for (final key in ['dayBefore', 'twoHours', 'changes'])
+          for (final key in ['dayBefore', 'twoHours', 'changes', 'emailEnabled'])
             key: value[key] ?? false,
           'customMinutes': customMinutes,
         },
@@ -1357,7 +1360,7 @@ class AppController extends ChangeNotifier {
       view['members'],
     ).map((e) => TheaterMember.fromJson(jsonMap(e))).toList();
     _reminders = {
-      for (final key in ['dayBefore', 'twoHours', 'changes'])
+      for (final key in ['dayBefore', 'twoHours', 'changes', 'emailEnabled'])
         key: jsonMap(view['reminders'])[key] == true,
     };
     final customMinutes = jsonMap(view['reminders'])['customMinutes'];

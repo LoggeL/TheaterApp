@@ -10,7 +10,7 @@ function setup(t) {
   app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
   let sequence = 0;
   const action = body => app.action('admin', body, `name-test-${++sequence}`);
-  const personId = action({ action: 'member.save', name: 'Sam im Ensemble', group: 'Ensemble' }).id;
+  const personId = action({ action: 'member.save', name: 'Sam im Ensemble' }).id;
   const identity = { uid: 'new-user', name: 'Google Alias', email: 'r8x@example.invalid', email_verified: true, firebase: { sign_in_provider: 'google.com' } };
   const approve = version => action({ action: 'account.approve', uid: identity.uid, version, personId, role: 'member' });
   return { app, store, identity, personId, approve };

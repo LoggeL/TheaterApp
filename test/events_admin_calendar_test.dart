@@ -8,7 +8,7 @@ import 'package:theater_app/ui/calendar.dart';
 import 'package:theater_app/ui/event_style.dart';
 import 'package:theater_app/ui/theme.dart';
 
-import 'app_controller_test.dart' show TestServer, signIn;
+import 'app_controller_test.dart' show TestServer, fixedNow, signIn;
 
 void main() {
   setUpAll(() => initializeDateFormatting('de'));
@@ -66,7 +66,7 @@ void main() {
     expect(sam.inAudience(const ['role-1'], const [2]), isTrue);
   });
 
-  testWidgets('the event editor invites single people besides groups', (
+  testWidgets('the event editor invites single people besides roles', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1000, 2400);
@@ -148,5 +148,67 @@ void main() {
     for (final label in ['Zugesagt', 'Später', 'Abgesagt', 'Offen']) {
       expect(find.text(label), findsOneWidget);
     }
+  });
+
+  testWidgets('event management lists past and upcoming chronologically', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final server = TestServer();
+    String at(int days) =>
+        fixedNow.add(Duration(days: days)).toUtc().toIso8601String();
+    server.data['events'] = [
+      for (final (title, days) in [
+        ('Premiere', 40),
+        ('Altprobe', -60),
+        ('Leseprobe', 3),
+        ('Abbau', -5),
+        for (var i = 0; i < 8; i++) ('Frühere Probe $i', -100 - i * 7),
+      ])
+        {
+          'id': title,
+          'title': title,
+          'startsAt': at(days),
+          'endsAt': fixedNow
+              .add(Duration(days: days, hours: 2))
+              .toUtc()
+              .toIso8601String(),
+        },
+    ];
+    final controller = server.controller();
+    await signIn(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StageTheme.build(Brightness.light),
+        home: EventsAdminScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // Opens at the upcoming events, with the past reachable above.
+    expect(find.text('Kommend (2)'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Kommend (2)')).dy,
+      lessThan(tester.getTopLeft(find.text('Leseprobe')).dy),
+    );
+    expect(find.text('Leseprobe').hitTestable(), findsOneWidget);
+    double y(String title) =>
+        tester.getTopLeft(find.text(title, skipOffstage: false)).dy;
+    expect(y('Leseprobe'), lessThan(y('Premiere')));
+    expect(y('Altprobe'), lessThan(y('Abbau')));
+    expect(y('Abbau'), lessThan(y('Kommend (2)')));
+    expect(find.text('Vergangen (10)', skipOffstage: false), findsOneWidget);
+    expect(find.text('JUNI 2026', skipOffstage: false), findsOneWidget);
+    expect(find.text('OKTOBER 2026'), findsOneWidget);
+    await tester.ensureVisible(find.text('Ausblenden', skipOffstage: false));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ausblenden'));
+    await tester.pumpAndSettle();
+    expect(find.text('Abbau'), findsNothing);
+    expect(find.text('Einblenden'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
   });
 }

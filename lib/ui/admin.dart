@@ -7,10 +7,12 @@ import 'slots.dart';
 import 'galleries.dart';
 import 'profile.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:intl/intl.dart';
 import '../core/app_controller.dart';
 import '../core/identity.dart';
 import '../core/models.dart';
+import 'event_style.dart';
 import 'events.dart';
 import 'accounts_admin.dart';
 import 'rehearsal_admin.dart';
@@ -31,11 +33,17 @@ class AdminPage extends StatelessWidget {
     required this.title,
     required this.children,
     this.actions,
+    this.scrollController,
+    this.cacheExtent,
   });
   final AppController controller;
   final String title;
   final List<Widget> Function(BuildContext) children;
   final List<Widget>? actions;
+  final ScrollController? scrollController;
+
+  /// Builds children beyond the viewport, e.g. to scroll to one on open.
+  final ScrollCacheExtent? cacheExtent;
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
@@ -59,6 +67,8 @@ class AdminPage extends StatelessWidget {
                 child: RefreshIndicator(
                   onRefresh: controller.refresh,
                   child: ListView(
+                    controller: scrollController,
+                    scrollCacheExtent: cacheExtent,
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(22, 14, 22, 32),
                     children: children(context),
@@ -423,7 +433,10 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
               subtitle: Text(
                 linked.contains(m.id)
                     ? 'Bereits mit einem Konto verknüpft'
-                    : '${m.group} · Mitglied Nr. ${m.id.toString().padLeft(3, '0')}',
+                    : [
+                        widget.controller.roleNames(m.roleIds),
+                        'Mitglied Nr. ${m.id.toString().padLeft(3, '0')}',
+                      ].where((s) => s.isNotEmpty).join(' · '),
               ),
             ),
           ),
@@ -550,12 +563,9 @@ class _MembersAdminScreenState extends State<MembersAdminScreen> {
           ),
           title: Text(textValue(m['name'])),
           subtitle: Text(
-            [
-              textValue(m['group']),
-              widget.controller.roleNames(
-                jsonList(m['roleIds']).map((r) => r.toString()),
-              ),
-            ].where((s) => s.isNotEmpty).join(' · '),
+            widget.controller.roleNames(
+              jsonList(m['roleIds']).map((r) => r.toString()),
+            ),
           ),
           trailing: const Icon(Icons.edit_outlined),
           onTap: () => openPage(
@@ -577,7 +587,7 @@ class MemberEditorScreen extends StatefulWidget {
 }
 
 class _MemberEditorScreenState extends State<MemberEditorScreen> {
-  late final TextEditingController _name, _group;
+  late final TextEditingController _name;
   late bool _active;
   late Set<String> _roles;
   bool _busy = false;
@@ -585,9 +595,6 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
   void initState() {
     super.initState();
     _name = TextEditingController(text: textValue(widget.member?['name']));
-    _group = TextEditingController(
-      text: textValue(widget.member?['group'], 'Ensemble'),
-    );
     _active = widget.member?['active'] != false;
     _roles = jsonList(
       widget.member?['roleIds'],
@@ -597,7 +604,6 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
   @override
   void dispose() {
     _name.dispose();
-    _group.dispose();
     super.dispose();
   }
 
@@ -610,7 +616,6 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
         'id': widget.member?['id'],
         'version': widget.member?['version'] ?? 1,
         'name': _name.text,
-        'group': _group.text,
         'active': _active,
         'roleIds': _roles.toList(),
       });
@@ -631,11 +636,6 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
         controller: _name,
         decoration: const InputDecoration(labelText: 'Name'),
         textCapitalization: TextCapitalization.words,
-      ),
-      const SizedBox(height: 20),
-      TextField(
-        controller: _group,
-        decoration: const InputDecoration(labelText: 'Gruppe'),
       ),
       const SizedBox(height: 20),
       const SectionTitle('Rollen'),
@@ -688,8 +688,53 @@ class EventsAdminScreen extends StatefulWidget {
 }
 
 class _EventsAdminScreenState extends State<EventsAdminScreen> {
-  bool _calendar = false;
+  bool _calendar = false, _showPast = true;
   DateTime _day = DateUtils.dateOnly(DateTime.now());
+  final _upcoming = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToUpcoming());
+  }
+
+  /// Opens at the next events; the past stays reachable above them.
+  void _jumpToUpcoming() {
+    final target = _upcoming.currentContext;
+    if (!mounted || target == null) return;
+    Scrollable.ensureVisible(target);
+  }
+
+  /// Chronological cards with a heading whenever the month changes.
+  List<Widget> _months(
+    BuildContext context,
+    List<TheaterEvent> events, {
+    bool past = false,
+  }) {
+    String? month;
+    return [
+      for (final e in events) ...[
+        if (_monthLabel(e) != month) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
+            child: Eyebrow(
+              month = _monthLabel(e),
+              color: past
+                  ? Theme.of(context).colorScheme.onSurfaceVariant
+                  : null,
+            ),
+          ),
+        ],
+        past
+            ? Opacity(opacity: .6, child: _event(context, e))
+            : _event(context, e),
+      ],
+    ];
+  }
+
+  String _monthLabel(TheaterEvent e) => e.startsAt == null
+      ? 'Ohne Datum'
+      : DateFormat('MMMM yyyy', 'de').format(e.startsAt!.toLocal());
 
   Widget _event(BuildContext context, TheaterEvent e) => Padding(
     padding: const EdgeInsets.only(bottom: 10),
@@ -725,6 +770,8 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
   Widget build(BuildContext context) => AdminPage(
     controller: widget.controller,
     title: 'Termine verwalten',
+    // All cards exist up front so the list can open at the upcoming ones.
+    cacheExtent: _calendar ? null : const ScrollCacheExtent.pixels(100000),
     actions: [
       IconButton(
         tooltip: 'Termin anlegen',
@@ -737,6 +784,15 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
       final day = widget.controller.events
           .where((e) => eventOnDay(e, _day))
           .toList();
+      final now = widget.controller.now;
+      final past = [
+        for (final e in widget.controller.events)
+          if (eventIsPast(e, now)) e,
+      ];
+      final upcoming = [
+        for (final e in widget.controller.events)
+          if (!eventIsPast(e, now)) e,
+      ];
       return [
         SegmentedButton<bool>(
           segments: const [
@@ -799,8 +855,23 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
             icon: const Icon(Icons.add),
             label: const Text('Termin anlegen'),
           ),
-          const SizedBox(height: 20),
-          for (final e in widget.controller.events) _event(context, e),
+          if (past.isNotEmpty) ...[
+            SectionTitle(
+              'Vergangen (${past.length})',
+              trailing: TextButton(
+                onPressed: () => setState(() => _showPast = !_showPast),
+                child: Text(_showPast ? 'Ausblenden' : 'Einblenden'),
+              ),
+            ),
+            if (_showPast) ..._months(context, past, past: true),
+          ],
+          SectionTitle('Kommend (${upcoming.length})', key: _upcoming),
+          if (upcoming.isEmpty)
+            Text(
+              'Keine kommenden Termine.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ..._months(context, upcoming),
         ],
       ];
     },
@@ -824,7 +895,7 @@ class EventEditorScreen extends StatefulWidget {
 }
 
 class _EventEditorScreenState extends State<EventEditorScreen> {
-  late final TextEditingController _title, _place, _group, _description;
+  late final TextEditingController _title, _place, _description;
   late DateTime _start, _end;
   late bool _locked;
   late String _kind;
@@ -841,7 +912,6 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     _title = TextEditingController(text: e?.title);
     _description = TextEditingController(text: e?.description);
     _place = TextEditingController(text: e?.place ?? 'Kolpingheim');
-    _group = TextEditingController(text: e?.group ?? 'Ensemble');
     final next =
         widget.initialDay ?? DateTime.now().add(const Duration(days: 1));
     _start = e?.startsAt ?? DateTime(next.year, next.month, next.day, 19);
@@ -856,7 +926,6 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     _title.dispose();
     _description.dispose();
     _place.dispose();
-    _group.dispose();
     super.dispose();
   }
 
@@ -898,7 +967,6 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         'startsAt': _start.toUtc().toIso8601String(),
         'endsAt': _end.toUtc().toIso8601String(),
         'place': _place.text,
-        'group': _group.text,
         'locked': _locked,
         'type': _kind,
         'productionId': _production,
@@ -999,14 +1067,9 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         decoration: const InputDecoration(labelText: 'Ort'),
       ),
       const SizedBox(height: 20),
-      TextField(
-        controller: _group,
-        decoration: const InputDecoration(labelText: 'Gruppe'),
-      ),
-      const SizedBox(height: 20),
       AudiencePicker(
         controller: widget.controller,
-        label: 'Eingeladene Gruppen',
+        label: 'Eingeladene Rollen',
         allowEveryone: _personIds.isEmpty,
         selected: _roleIds,
         onChanged: (value) => setState(() => _roleIds = value),

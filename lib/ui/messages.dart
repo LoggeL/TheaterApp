@@ -176,13 +176,16 @@ class _MessageDetailScreenState extends State<MessageDetailScreen> {
                 '${textValue(m['authorName'])}${date == null ? '' : ' · ${DateFormat('d. MMMM · HH:mm', 'de').format(date.toLocal())}'}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
-              if (m['audience'] == 'roles') ...[
+              if (m['audience'] != 'all') ...[
                 const SizedBox(height: 8),
                 AudienceBadge(
                   controller: widget.controller,
                   roleIds: [
                     for (final id in jsonList(m['roleIds'])) id.toString(),
                   ],
+                  personIds: jsonList(
+                    m['recipientPersonIds'],
+                  ).map(intValue).toList(),
                 ),
               ],
               const SizedBox(height: 28),
@@ -210,7 +213,7 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
   bool _push = true, _busy = false;
   String _audience = 'all';
   Set<String> _roleIds = {};
-  final Set<int> _recipients = {};
+  Set<int> _recipients = {};
   @override
   void dispose() {
     _title.dispose();
@@ -274,13 +277,12 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
       SegmentedButton<String>(
         segments: const [
           ButtonSegment(value: 'all', label: Text('Alle')),
-          ButtonSegment(value: 'roles', label: Text('Rollen')),
-          ButtonSegment(value: 'selected', label: Text('Personen')),
+          ButtonSegment(value: 'selected', label: Text('Auswahl')),
         ],
         selected: {_audience},
         onSelectionChanged: (s) => setState(() => _audience = s.single),
       ),
-      if (_audience == 'roles') ...[
+      if (_audience == 'selected') ...[
         const SizedBox(height: 16),
         AudiencePicker(
           controller: widget.controller,
@@ -289,22 +291,19 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
           selected: _roleIds,
           onChanged: (value) => setState(() => _roleIds = value),
         ),
-      ],
-      if (_audience == 'selected') ...[
         const SizedBox(height: 16),
-        for (final m in widget.controller.members.where((m) => m.active))
-          CheckboxListTile(
-            value: _recipients.contains(m.id),
-            title: Text(m.name),
-            subtitle: Text(m.group),
-            onChanged: (v) => setState(() {
-              if (v == true) {
-                _recipients.add(m.id);
-              } else {
-                _recipients.remove(m.id);
-              }
-            }),
-          ),
+        PersonPicker(
+          controller: widget.controller,
+          selected: _recipients,
+          onChanged: (value) => setState(() => _recipients = value),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _roleIds.isEmpty && _recipients.isEmpty
+              ? 'Bitte Rollen und/oder Personen auswählen.'
+              : 'An: ${widget.controller.audienceLabel(_roleIds, _recipients)}',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
       ],
       const SizedBox(height: 20),
       SwitchListTile(

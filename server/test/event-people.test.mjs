@@ -55,3 +55,19 @@ test('absences decline only events the person is invited to', t => {
   assert.equal(store.get('responses', `${id}:${sam}`)?.status, 'no');
   assert.equal(store.get('responses', `${id}:${kim}`), null);
 });
+
+test('messages, polls and notes reach roles and single people together', t => {
+  const { app, store, action, sam } = setup(t);
+  action({ action: 'message.send', title: 'Kabel', body: 'Bitte mitbringen', audience: 'selected', roleIds: ['role-3'], recipientPersonIds: [sam], push: true });
+  const reads = uid => app.snapshot(uid).messages.some(m => m.title === 'Kabel');
+  assert.deepEqual(['sam', 'tech', 'kim'].map(reads), [true, true, false]);
+  assert.equal(store.all('pushJobs').find(j => j.data?.messageId).recipientPersonIds.length, 2);
+  assert.throws(() => action({ action: 'message.send', title: 'Leer', body: 'Niemand', audience: 'selected', roleIds: [], recipientPersonIds: [] }), { status: 400 });
+
+  action({ action: 'poll.save', title: 'Pizza?', options: [{ label: 'Ja' }, { label: 'Nein' }], roleIds: ['role-3'], personIds: [sam] });
+  assert.deepEqual(['sam', 'tech', 'kim'].map(uid => app.snapshot(uid).polls.length), [1, 1, 0]);
+
+  action({ action: 'note.save', title: 'Lichtplan', body: 'Seite 3', roleIds: ['role-3'], personIds: [sam], published: true });
+  assert.deepEqual(['sam', 'tech', 'kim'].map(uid => app.snapshot(uid).notes.length), [1, 1, 0]);
+  assert.throws(() => action({ action: 'note.save', title: 'X', personIds: [999] }), { status: 400 });
+});

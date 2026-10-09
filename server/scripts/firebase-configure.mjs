@@ -6,7 +6,8 @@ const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-pl
 const client = await auth.getClient();
 const url = `https://identitytoolkit.googleapis.com/admin/v2/projects/${project}/config`;
 const { data } = await client.request({ url });
-const domains = [...new Set([...(data.authorizedDomains ?? []), 'theater-app.logge.top', 'localhost'])];
+const deployment = JSON.parse(await readFile(new URL('../../config/dokploy.json', import.meta.url), 'utf8'));
+const domains = [...new Set([...(data.authorizedDomains ?? []), deployment.host, ...(deployment.additionalHosts ?? []), 'localhost'])];
 await client.request({ url, method: 'PATCH', params: { updateMask: 'authorizedDomains' }, data: { authorizedDomains: domains } });
 const publicConfig = { project, providers: { emailPassword: data.signIn?.email?.enabled === true }, authorizedDomains: domains };
 await writeFile(new URL('../../config/firebase-server-settings.json', import.meta.url), JSON.stringify(publicConfig, null, 2) + '\n');

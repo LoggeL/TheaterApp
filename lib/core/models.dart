@@ -18,7 +18,6 @@ class AppUser {
     required this.name,
     required this.email,
     required this.role,
-    this.group = '',
     this.mustChangePassword = false,
     this.directorProductionIds = const [],
     this.status = 'approved',
@@ -30,7 +29,7 @@ class AppUser {
     this.roleIds = const [],
     this.profileVersion = 0,
   });
-  final String id, name, email, role, group;
+  final String id, name, email, role;
   final bool mustChangePassword;
   final List<String> directorProductionIds;
   final String status;
@@ -56,7 +55,6 @@ class AppUser {
     name: textValue(json['displayName'] ?? json['name']),
     email: textValue(json['email']),
     role: textValue(json['role'], 'member'),
-    group: textValue(json['group']),
     status: textValue(json['status'], 'approved'),
     personId: json['personId'] == null ? null : intValue(json['personId']),
     emailVerified: json['emailVerified'] != false,
@@ -75,7 +73,6 @@ class AppUser {
     'displayName': name,
     'email': email,
     'role': role,
-    'group': group,
     'status': status,
     'personId': personId,
     'emailVerified': emailVerified,
@@ -98,7 +95,6 @@ class TheaterEvent {
     this.description = '',
     this.time = '',
     this.place = '',
-    this.group = '',
     this.kind = 'other',
     this.tone = 'orange',
     this.locked = false,
@@ -119,7 +115,6 @@ class TheaterEvent {
       description,
       time,
       place,
-      group,
       kind,
       tone,
       response,
@@ -162,7 +157,6 @@ class TheaterEvent {
     endsAt: dateValue(json['endsAt'])?.toLocal(),
     time: textValue(json['time']),
     place: textValue(json['place']),
-    group: textValue(json['group']),
     kind: textValue(json['type'] ?? json['kind'], 'other'),
     tone: textValue(json['tone'], 'orange'),
     locked: json['locked'] == true,
@@ -193,7 +187,6 @@ class TheaterEvent {
     endsAt: endsAt,
     time: time,
     place: place,
-    group: group,
     kind: kind,
     tone: tone,
     locked: locked,
@@ -219,7 +212,6 @@ class TheaterEvent {
     'endsAt': endsAt?.toIso8601String(),
     'time': time,
     'place': place,
-    'group': group,
     'type': kind,
     'tone': tone,
     'locked': locked,
@@ -320,12 +312,14 @@ class Poll {
     this.closesAt,
     this.version = 1,
     this.roleIds = const [],
+    this.personIds = const [],
   });
   final String id, title, description;
   final List<PollOption> options;
 
   /// Person roles that may see and vote; empty means everyone.
   final List<String> roleIds;
+  final List<int> personIds;
   final String? selectedOptionId, confirmedOptionId;
   final bool closed, anonymous;
   String get privacyLabel => anonymous ? 'Anonym' : 'Namentlich';
@@ -357,6 +351,7 @@ class Poll {
     closesAt: dateValue(json['closesAt']),
     version: intValue(json['version'], 1),
     roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
+    personIds: jsonList(json['personIds']).map(intValue).toList(),
   );
   Poll withChoice(String optionId, {PollVoter? voter}) => Poll(
     id: id,
@@ -391,12 +386,14 @@ class Poll {
     closesAt: closesAt,
     version: version,
     roleIds: roleIds,
+    personIds: personIds,
   );
   JsonMap toJson() => {
     'id': id,
     'title': title,
     'description': description,
     'roleIds': roleIds,
+    'personIds': personIds,
     'options': options.map((e) => e.toJson(anonymous: anonymous)).toList(),
     'choice': selectedOptionId,
     'confirmedOptionId': confirmedOptionId,
@@ -411,7 +408,6 @@ class TheaterMember {
   const TheaterMember({
     required this.id,
     required this.name,
-    this.group = '',
     this.initials = '',
     this.avatar,
     this.avatarId,
@@ -419,7 +415,7 @@ class TheaterMember {
     this.active = true,
   });
   final int id;
-  final String name, group, initials;
+  final String name, initials;
   final String? avatar, avatarId;
   final List<String> roleIds;
   final bool active;
@@ -433,7 +429,6 @@ class TheaterMember {
   factory TheaterMember.fromJson(JsonMap json) => TheaterMember(
     id: intValue(json['id']),
     name: textValue(json['name']),
-    group: textValue(json['group']),
     initials: textValue(json['initials']),
     avatar: json['avatar'] as String?,
     avatarId: json['avatarId'] as String?,
@@ -443,7 +438,6 @@ class TheaterMember {
   JsonMap toJson() => {
     'id': id,
     'name': name,
-    'group': group,
     'initials': initials,
     'avatar': avatar,
     'avatarId': avatarId,

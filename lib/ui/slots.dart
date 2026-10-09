@@ -466,9 +466,9 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
                 (m) =>
                     m.active &&
                     bookedIn[m.id]?.id != slot.id &&
-                    '${m.name} ${m.group}'.toLowerCase().contains(
-                      query.toLowerCase(),
-                    ),
+                    '${m.name} ${widget.controller.roleNames(m.roleIds)}'
+                        .toLowerCase()
+                        .contains(query.toLowerCase()),
               )
               .toList();
           return SafeArea(
@@ -508,7 +508,8 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
                             title: Text(m.name),
                             subtitle: Text(
                               [
-                                if (m.group.isNotEmpty) m.group,
+                                if (m.roleIds.isNotEmpty)
+                                  widget.controller.roleNames(m.roleIds),
                                 if (bookedIn[m.id] != null)
                                   'Wird umgebucht von ${slotTime(bookedIn[m.id]!)}'
                                 else if (!m.inAudience(
@@ -1310,7 +1311,7 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
         const SizedBox(height: 20),
         AudiencePicker(
           controller: widget.controller,
-          label: 'Eingeladene Gruppen',
+          label: 'Eingeladene Rollen',
           allowEveryone: _personIds.isEmpty,
           selected: _roleIds,
           onChanged: (value) => setState(() => _roleIds = value),

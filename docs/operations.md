@@ -2,7 +2,8 @@
 
 ## Laufende Instanz
 
-- App: https://theater-app.logge.top
+- Web-App: https://app.kolpingtheater-ramsen.de
+- Bisherige App- und API-Adresse für installierte Clients: https://theater-app.logge.top
 - Privater Quellcode: https://github.com/LoggeL/TheaterApp
 - Dokploy: Projekt `kolping-ramsen`, Umgebung `production`, eigener Dienst `Theater-App`.
 - Firebase-Projekt `theater-app-6fa5d`, derzeit Spark. Auth: E-Mail/Passwort und Google. FCM V1 und Web-VAPID sind eingerichtet.
@@ -39,7 +40,7 @@ flutter analyze
 flutter test
 npm --prefix server test
 python3 tool/deploy.py
-curl --fail https://theater-app.logge.top/api/healthz
+curl --fail https://app.kolpingtheater-ramsen.de/api/healthz
 ```
 
 Das Deploymentwerkzeug nutzt den bestehenden SSH-Key `~/.ssh/id_ed25519_homebox` und den Keychain-Eintrag `dokploy.logge.top API Key`. Es überträgt ausschließlich explizit ausgewählte Docker-Quelldateien und `build/web`, erzeugt ein unveränderliches Image mit Inhalts-Hash und aktualisiert den bekannten Compose-Dienst. Ein Git-Push allein löst keine Serverbereitstellung aus. `artifacts/last-deploy.json` enthält den erwarteten Hash; `/api/healthz` muss ihn zurückgeben. In Dokploy muss der Dienst `done` und der Container `healthy` sein.
@@ -50,7 +51,11 @@ Die Daten und der Firebase-Schlüssel liegen auf HomeBox getrennt vom Image:
 - `/home/logge/projects/theater-app/secrets/firebase-service-account.json`
 - `/home/logge/projects/theater-app/releases/<Inhalts-Hash>`
 
-Die Datenbank wird mit WAL betrieben. Datenverzeichnis und Schlüssel sind nur für den Benutzer mit UID 1000 lesbar. SELinux-Bind-Mounts verwenden `:Z`. Der Container läuft als `node`, mit 512 MB RAM-Limit und einer CPU. TLS/Domain-Routing übernimmt Dokploy.
+Die Datenbank wird mit WAL betrieben. Datenverzeichnis und Schlüssel sind nur für den Benutzer mit UID 1000 lesbar. SELinux-Bind-Mounts verwenden `:Z`. Der Container läuft als `node`, mit 512 MB RAM-Limit und einer CPU.
+
+Die Web-Domain nutzt den bestehenden, lokal verwalteten Cloudflare-Tunnel `local-server` auf HomeBox. Der DNS-CNAME `app` zeigt mit aktiviertem Proxy auf `0bbb6ff3-724e-4d75-b4c5-42769c3aa5c6.cfargotunnel.com`. In `/etc/cloudflared/config.yml` zeigt die genaue Hostname-Route auf `http://localhost:80`; Dokploy ordnet diesen Host dem Dienst `theater`, Port 8787, zu. Öffentlich erfolgt der Zugriff per HTTPS, der Tunnel verschlüsselt die Verbindung bis HomeBox, und der HTTP-Schritt bleibt auf dem lokalen Rechner. Für diese Route ist deshalb in Dokploy kein zusätzliches Origin-TLS konfiguriert.
+
+`config/dokploy.json` enthält die Hauptdomain, die weiterhin bedienten zusätzlichen Hosts und die Hosts mit lokalem HTTP-Origin. Das Deployment übernimmt alle Hosts in `ALLOWED_ORIGINS` und verwendet die Hauptdomain als `APP_ORIGIN` für Push-Links. Firebase Authentication muss beide öffentlichen App-Domains in `authorizedDomains` führen. `server/scripts/firebase-configure.mjs` ergänzt diese Domains aus derselben Konfiguration. Die Android- und iOS-Konfigurationen behalten die bisherige API-Adresse; der nächste Webbuild verwendet die neue Domain.
 
 ## Backup und Wiederherstellung
 

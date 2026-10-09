@@ -9,7 +9,7 @@ Stand: 12. September 2026. Grundlage sind der aktuelle Nutzerauftrag, das Downlo
 - Die Samples im ZIP sind die visuelle Ausgangsbasis. Das Drehbuch soll näher an das bestehende System rücken.
 - Zunächst werden Anforderungen abgeglichen und mit Imagegen mehrere Ansichten entworfen. Ergänzend gewünscht sind Zu-/Absage und mehrere Admin-Ansichten.
 - Der Leser soll deutlich minimalistischer werden: fortlaufender Dialog, schlichte kursive Anweisungen und weniger dauerhafte Leisten/Kategorieüberschriften. Notizen, Kommentarzugriff und Lesezeichen bleiben erhalten.
-- „Komme später“ gehört zur Rückmeldung für einen bereits festgelegten Termin. Die Entwürfe bieten dazu eine optionale voraussichtliche Ankunftszeit. Terminabstimmungen über einen gemeinsamen Termin sind ausdrücklich nicht im Umfang. Seit Oktober 2026 gibt es dafür einen Terminfinder als Slot-Buchung: Die Leitung bietet Zeitfenster mit Platzzahl an, eingeladene Gruppen und/oder Personen buchen je ein Fenster, und jedes belegte Fenster wird ein fester Termin für die Gebuchten (z. B. Fototermine).
+- „Komme später“ gehört zur Rückmeldung für einen bereits festgelegten Termin. Die Entwürfe bieten dazu eine optionale voraussichtliche Ankunftszeit. Terminabstimmungen über einen gemeinsamen Termin sind ausdrücklich nicht im Umfang. Seit Oktober 2026 gibt es dafür einen Terminfinder als Slot-Buchung: Die Leitung bietet Zeitfenster mit Platzzahl an, eingeladene Rollen und/oder Personen buchen je ein Fenster, und jedes belegte Fenster wird ein fester Termin für die Gebuchten (z. B. Fototermine).
 - Konten können selbst erstellt werden, über E-Mail/Passwort und mehrere Social Logins mit Firebase Auth. Erst ein Admin verknüpft das Konto mit einer Person und gibt den Theaterzugang frei.
 
 „Kompletter Theaterbedarf“ ist das Produktziel. Die bereits konkret beschriebenen Funktionen stehen unten. Die genaue Ausgestaltung weiterer Vereinsbereiche bleibt ein Vorschlag, solange dazu kein konkreter Ablauf vorliegt.
@@ -39,7 +39,7 @@ Stand: 12. September 2026. Grundlage sind der aktuelle Nutzerauftrag, das Downlo
 | Probenplanung | Szenen aus Besetzung und tatsächlich erfasster Anwesenheit bestimmen | Produktion/Szenen einer Probe zuordnen vorhanden; berechnete spielbare Szenen nicht als fertige Funktion enthalten |
 | Produktionen | Mehrere Stücke, Fassung, Szenen, Besetzung, gezielter Download | Liste, Leser und Cache vorhanden; vollständige Pflege erfolgt noch nicht in der App |
 | Drehbuch | Bestehende Abläufe erhalten, siehe Detailtabelle | Gute Basis mit mehreren relevanten Funktionslücken |
-| Mitteilungen | Leitung schreibt an alle oder eine erlaubte Gruppe/Produktion; Nachricht bleibt im Postfach | Kein durchgängiger Postfach-/Versandablauf im Client gefunden |
+| Mitteilungen | Leitung schreibt an alle oder an Rollen und/oder einzelne Personen; Nachricht bleibt im Postfach | Kein durchgängiger Postfach-/Versandablauf im Client gefunden |
 | Push | Hinweise und Erinnerungen mit passenden Deep Links | Registrierung, Empfang und Worker vorbereitet; echte Einrichtung und Zustellung fehlen laut Paket |
 | Ensemble | Mitglieder finden und Besetzungen mit Personen verknüpfen | Mitgliederliste vorhanden; persönliche Leseauswahl ist keine verbindliche Besetzungsverwaltung |
 | Verwaltung | Neue Konten einer Person zuordnen und freigeben; Mitglieder, Rechte, Produktionen, Besetzungen und Termine pflegen | Paket belässt wesentliche Verwaltungsabläufe im bisherigen Websystem; Freigabeprozess und vollständige mobile Verwaltung noch umzusetzen |

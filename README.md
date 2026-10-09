@@ -1,12 +1,12 @@
 # Theater-App
 
-Flutter-App für das Kolpingtheater Ramsen. Web und Android verwenden denselben Server und Firebase Auth. Die laufende Testinstanz ist [theater-app.logge.top](https://theater-app.logge.top).
+Flutter-App für das Kolpingtheater Ramsen. Web und Android verwenden denselben Server und Firebase Auth. Die Web-App läuft unter [app.kolpingtheater-ramsen.de](https://app.kolpingtheater-ramsen.de). [theater-app.logge.top](https://theater-app.logge.top) bleibt für bestehende Installationen erreichbar.
 
 ## Funktionen
 
 - Selbstregistrierung mit E-Mail/Passwort und Google; manuelle Personenzuordnung und Freigabe durch einen Admin.
-- Feste Termine mit Beschreibung und zwölf Terminarten für Gruppen und/oder einzelne Personen, dabei/später/abgesagt, optionale Ankunftszeit und längere Abwesenheiten. Keine Terminabstimmungen.
-- Terminfinder als Slot-Buchung, z. B. für Fototermine: Zeitfenster mit Platzzahl, Einladung von Gruppen und/oder Personen, je Person ein Fenster; belegte Fenster werden automatisch Termine.
+- Feste Termine mit Beschreibung und zwölf Terminarten für Rollen und/oder einzelne Personen, dabei/später/abgesagt, optionale Ankunftszeit und längere Abwesenheiten. Keine Terminabstimmungen.
+- Terminfinder als Slot-Buchung, z. B. für Fototermine: Zeitfenster mit Platzzahl, Einladung von Rollen und/oder Personen, je Person ein Fenster; belegte Fenster werden automatisch Termine.
 - Frei verwaltbare Mehrfachrollen pro Person und allgemeine Abstimmungen mit Frist, Stimmwechsel und Ergebnisübersicht.
 - Verwaltung von Ensemble, Konten, Terminen, Produktionen und Besetzungen; tatsächliche Anwesenheit und spielbare Szenen.
 - Admin-Übersicht mit allen Personen, ihren Rollen und echten Login-Adressen; Filter für verknüpfte Personen, fehlende Konten, offene Freigaben und unbesetzte Rollen.

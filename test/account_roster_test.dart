@@ -15,10 +15,10 @@ import 'firebase_access_test.dart' show FakeIdentity;
 
 JsonMap fixture() => {
   'members': [
-    {'id': 1, 'name': 'Alex', 'group': 'Theaterleitung', 'active': true},
-    {'id': 2, 'name': 'Sam', 'group': 'Ensemble', 'active': true},
-    {'id': 3, 'name': 'Sam', 'group': 'Technik', 'active': true},
-    {'id': 4, 'name': 'Kim', 'group': 'Ensemble', 'active': false},
+    {'id': 1, 'name': 'Alex', 'active': true},
+    {'id': 2, 'name': 'Sam', 'active': true},
+    {'id': 3, 'name': 'Sam', 'active': true},
+    {'id': 4, 'name': 'Kim', 'active': false},
   ],
   'accounts': [
     {

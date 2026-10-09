@@ -38,7 +38,7 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       }
       if (origin && !origins.has(origin)) throw new AppError(403, 'Diese App-Adresse ist nicht freigegeben.');
       const route = path.slice('/api/mobile/v1'.length);
-      if (route === '/config' && req.method === 'GET') return json(res, 200, { authProviders, pushConfigured: theater.pushEnabled, scriptSourceConfigured: scriptService?.configured === true });
+      if (route === '/config' && req.method === 'GET') return json(res, 200, { authProviders, pushConfigured: theater.pushEnabled, emailConfigured: theater.emailEnabled, scriptSourceConfigured: scriptService?.configured === true });
       const token = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
       if (!token || token.length > 12000) throw new AppError(401, 'Bitte zuerst anmelden.');
       let identity;
