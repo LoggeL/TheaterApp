@@ -77,10 +77,12 @@ class DeepLinkRouter {
     if (target.attendance != null && target.recipientUid != null) {
       unawaited(_respondToTarget(target));
     }
-    // One target at a time: the page opens above its section's start.
+    // One target at a time: the page opens above its section's start. A
+    // page with unsaved input stays below the target instead.
     final context = navigator.currentContext!;
+    final state = navigator.currentState!;
     selectSection(context, section);
-    navigator.currentState!.popUntil((route) => route.isFirst);
+    if (!hasUnsavedChanges(state)) state.popUntil((route) => route.isFirst);
     openPage(context, page);
   }
 

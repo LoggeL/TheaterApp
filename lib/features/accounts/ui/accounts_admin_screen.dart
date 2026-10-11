@@ -7,6 +7,7 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/state_pill.dart';
 import '../../casting/ui/casting_screen.dart';
+import '../../ensemble/admin/member_editor_screen.dart';
 import '../domain/account_roster.dart';
 import 'account_approval_screen.dart';
 
@@ -16,9 +17,13 @@ class AccountsAdminScreen extends StatefulWidget {
     required this.controller,
     this.initialView = 'people',
     this.initialFilter = 'all',
+    this.initialQuery = '',
   });
   final AppController controller;
   final String initialView, initialFilter;
+
+  /// Prefills the search, e.g. with a person's name from the member editor.
+  final String initialQuery;
   @override
   State<AccountsAdminScreen> createState() => _AccountsAdminScreenState();
 }
@@ -29,8 +34,8 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
   Object? _loadError;
   bool _loading = false;
   late String _view = widget.initialView, _filter = widget.initialFilter;
-  String _query = '';
-  final _search = TextEditingController();
+  late String _query = widget.initialQuery;
+  late final _search = TextEditingController(text: widget.initialQuery);
   final _reconsidering = <String>{};
   @override
   void initState() {
@@ -310,6 +315,15 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
     );
   }
 
+  /// Name, roles and activity live in the ensemble; edits show here after.
+  Future<void> _editPerson(JsonMap m) async {
+    await openPage(
+      context,
+      MemberEditorScreen(controller: widget.controller, member: m),
+    );
+    if (mounted) await _load();
+  }
+
   Widget _person(JsonMap m, AccountRoster roster) {
     final a = roster.accountFor(intValue(m['id']));
     final roles = roster.rolesFor(intValue(m['id']));
@@ -372,6 +386,12 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
             icon: const Icon(Icons.link, size: 18),
             label: const Text('Konto verknüpfen'),
           ),
+        TextButton.icon(
+          key: ValueKey('account-person-edit-${m['id']}'),
+          onPressed: () => _editPerson(m),
+          icon: const Icon(Icons.edit_outlined, size: 18),
+          label: const Text('In Ensemble bearbeiten'),
+        ),
       ],
     );
     return Card(

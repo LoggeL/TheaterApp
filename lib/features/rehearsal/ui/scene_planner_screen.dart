@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -34,6 +35,15 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
   final Set<String> _failedSaves = {};
   late DateTime _at;
   final Set<String> _selected = {};
+
+  /// The saved production and scenes; anything else is unsaved input.
+  String? _savedProduction;
+  Set<String> _savedScenes = {};
+
+  bool get _dirty =>
+      !_saving &&
+      (_production != _savedProduction || !setEquals(_selected, _savedScenes));
+
   @override
   void initState() {
     super.initState();
@@ -50,6 +60,8 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
     ).isNotEmpty;
     _at = event.startsAt ?? widget.controller.now;
     _selected.addAll(event.sceneIds);
+    _savedProduction = event.productionId;
+    _savedScenes = event.sceneIds.toSet();
     if (_production != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _load();
@@ -131,6 +143,8 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
         _version = latest.version;
         _conflict = false;
         _failedSaves.clear();
+        _savedProduction = latest.productionId;
+        _savedScenes = latest.sceneIds.toSet();
         if (!keepDraft) {
           _production = latest.productionId;
           _selected
@@ -168,7 +182,7 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
   @override
   Widget build(BuildContext context) {
     final admin = widget.controller.user?.isAdmin == true;
-    return Scaffold(
+    final page = Scaffold(
       body: AdminPage(
         controller: widget.controller,
         title: 'Szenen planen',
@@ -183,6 +197,7 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
             )
           : null,
     );
+    return DiscardGuard(dirty: admin && _dirty, child: page);
   }
 
   List<Widget> _content(BuildContext context) {

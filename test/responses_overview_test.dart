@@ -77,7 +77,7 @@ void main() {
       expect(find.bySemanticsLabel(label), findsOneWidget, reason: label);
     }
     expect(find.text('3 von 5 haben sich zurückgemeldet'), findsOneWidget);
-    expect(find.text('Fehlt noch'), findsOneWidget);
+    expect(find.text('Noch keine Rückmeldung'), findsOneWidget);
     for (final name in [
       'Alex Bühnenfreund',
       'Robin Spielmann',
@@ -97,17 +97,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Toni Lichtblick'), findsOneWidget);
     expect(find.text('Kim Kulisse'), findsNothing);
-    expect(find.text('Fehlt noch'), findsNothing);
+    expect(find.text('Noch keine Rückmeldung'), findsNothing);
     await tester.tap(find.text('Alle zeigen'));
     await tester.pumpAndSettle();
     expect(find.text('Kim Kulisse'), findsOneWidget);
 
     // Sections collapse.
-    await tester.tap(find.text('Fehlt noch'));
+    await tester.tap(find.text('Noch keine Rückmeldung'));
     await tester.pumpAndSettle();
     expect(find.text('Kim Kulisse'), findsNothing);
     expect(find.text('Sam Vorhang'), findsNothing);
-    await tester.tap(find.text('Fehlt noch'));
+    await tester.tap(find.text('Noch keine Rückmeldung'));
     await tester.pumpAndSettle();
     expect(find.text('Sam Vorhang'), findsOneWidget);
 
@@ -175,7 +175,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Admin-Zugang erforderlich.'), findsOneWidget);
     expect(find.text('Kim Kulisse'), findsNothing);
-    expect(find.text('Fehlt noch'), findsNothing);
+    expect(find.text('Noch keine Rückmeldung'), findsNothing);
     expect(find.text('Offene erinnern'), findsNothing);
     await tester.pumpWidget(const SizedBox());
     memberController.dispose();

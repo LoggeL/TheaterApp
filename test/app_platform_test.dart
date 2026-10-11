@@ -11,7 +11,9 @@ import 'package:theater_app/core/controller/pending_action.dart';
 import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/features/events/events.dart';
+import 'package:theater_app/features/messages/messages.dart';
 import 'package:theater_app/shared/feedback.dart';
+import 'package:theater_app/shared/navigation.dart';
 
 Future<AppController> demoController() async {
   final controller = AppController(
@@ -71,6 +73,53 @@ void main() {
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
     expect(find.text('Start'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
+
+  testWidgets('deep links keep a page with unsaved input below the target', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(420, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final c = await demoController();
+    final navigator = GlobalKey<NavigatorState>();
+    final messenger = GlobalKey<ScaffoldMessengerState>();
+    final selection = ValueNotifier(AppSection.today.index);
+    addTearDown(selection.dispose);
+    await tester.pumpWidget(
+      AppNavigationScope(
+        selection: selection,
+        controller: c,
+        child: MaterialApp(
+          navigatorKey: navigator,
+          scaffoldMessengerKey: messenger,
+          home: const Scaffold(body: Text('Start')),
+        ),
+      ),
+    );
+    final router = DeepLinkRouter(
+      controller: c,
+      navigator: navigator,
+      messenger: messenger,
+      isMounted: () => true,
+    );
+    openPage(navigator.currentContext!, MessageComposerScreen(controller: c));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Betreff'), 'Fest');
+    await tester.pump();
+
+    router.handle(AppTarget('events', c.events.first.id));
+    await tester.pumpAndSettle();
+    expect(find.byType(EventDetailScreen), findsOneWidget);
+    expect(
+      find.byType(MessageComposerScreen, skipOffstage: false),
+      findsOneWidget,
+    );
+    navigator.currentState!.pop();
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'Fest'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     c.dispose();
   });

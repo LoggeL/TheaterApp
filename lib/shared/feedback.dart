@@ -73,32 +73,38 @@ void showDone(
   ),
 );
 
-/// Asks before an action that cannot be undone. Resolves to true only when
-/// the member explicitly confirms.
-Future<bool> confirmDestructive(
+/// Asks the member to confirm [title]. Resolves to true only when the member
+/// explicitly confirms. A [destructive] action gets an error-coloured button.
+Future<bool> confirmAction(
   BuildContext context, {
   required String title,
   required String message,
   required String confirmLabel,
   String cancelLabel = 'Abbrechen',
+  bool scrollable = false,
+  bool destructive = false,
 }) async {
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (context) {
       final scheme = Theme.of(context).colorScheme;
       return AlertDialog(
+        scrollable: scrollable,
         title: Text(title),
         content: Text(message),
         actions: [
           TextButton(
+            autofocus: true,
             onPressed: () => Navigator.pop(context, false),
             child: Text(cancelLabel),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: scheme.error,
-              foregroundColor: scheme.onError,
-            ),
+            style: destructive
+                ? FilledButton.styleFrom(
+                    backgroundColor: scheme.error,
+                    foregroundColor: scheme.onError,
+                  )
+                : null,
             onPressed: () => Navigator.pop(context, true),
             child: Text(confirmLabel),
           ),
@@ -109,6 +115,25 @@ Future<bool> confirmDestructive(
   return confirmed == true;
 }
 
+/// Asks before an action that cannot be undone. Resolves to true only when
+/// the member explicitly confirms.
+Future<bool> confirmDestructive(
+  BuildContext context, {
+  required String title,
+  required String message,
+  required String confirmLabel,
+  String cancelLabel = 'Abbrechen',
+  bool scrollable = false,
+}) => confirmAction(
+  context,
+  title: title,
+  message: message,
+  confirmLabel: confirmLabel,
+  cancelLabel: cancelLabel,
+  scrollable: scrollable,
+  destructive: true,
+);
+
 /// Asks before unsaved input is thrown away.
 Future<bool> confirmDiscardChanges(BuildContext context) => confirmDestructive(
   context,
@@ -118,22 +143,74 @@ Future<bool> confirmDiscardChanges(BuildContext context) => confirmDestructive(
   cancelLabel: 'Weiter bearbeiten',
 );
 
+/// The mounted guards that currently hold unsaved input.
+final _dirtyGuards = <_DiscardGuardState>{};
+
+/// Whether a page above the first route of [navigator] holds unsaved input.
+bool hasUnsavedChanges(NavigatorState navigator) => _dirtyGuards.any((guard) {
+  final route = guard.route;
+  return route != null &&
+      route.navigator == navigator &&
+      route.isActive &&
+      !route.isFirst;
+});
+
+/// Goes back to the first route of [navigator]. Pages with unsaved input ask
+/// first; resolves to false (and stays put) when the member keeps editing.
+///
+/// [Navigator.popUntil] ignores [PopScope.canPop], so every jump to a
+/// section start goes through here instead.
+Future<bool> popToFirst(BuildContext context, NavigatorState navigator) async {
+  if (hasUnsavedChanges(navigator) && !await confirmDiscardChanges(context)) {
+    return false;
+  }
+  if (!navigator.mounted) return false;
+  navigator.popUntil((route) => route.isFirst);
+  return true;
+}
+
 /// Blocks leaving a page with unsaved input until the member confirms.
-class DiscardGuard extends StatelessWidget {
+class DiscardGuard extends StatefulWidget {
   const DiscardGuard({super.key, required this.dirty, required this.child});
   final bool dirty;
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => PopScope<Object?>(
-    canPop: !dirty,
-    onPopInvokedWithResult: (didPop, result) async {
-      if (didPop) return;
-      final navigator = Navigator.of(context);
-      if (await confirmDiscardChanges(context)) navigator.pop(result);
-    },
-    child: child,
-  );
+  State<DiscardGuard> createState() => _DiscardGuardState();
+}
+
+class _DiscardGuardState extends State<DiscardGuard> {
+  ModalRoute<Object?>? route;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    route = ModalRoute.of(context);
+  }
+
+  @override
+  void dispose() {
+    _dirtyGuards.remove(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.dirty) {
+      _dirtyGuards.add(this);
+    } else {
+      _dirtyGuards.remove(this);
+    }
+    return PopScope<Object?>(
+      canPop: !widget.dirty,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final navigator = Navigator.of(context);
+        if (await confirmDiscardChanges(context)) navigator.pop(result);
+      },
+      child: widget.child,
+    );
+  }
 }
 
 /// Refreshes and, if that failed, offers a retry in a SnackBar.

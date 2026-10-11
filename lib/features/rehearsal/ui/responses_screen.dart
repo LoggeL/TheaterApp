@@ -72,28 +72,16 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
       ...people.take(shown).map((m) => m.name),
       if (open > shown) 'und ${open - shown} weitere',
     ].join(', ');
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        scrollable: true,
-        title: const Text('Offene erinnern?'),
-        content: Text(
+    final confirmed = await confirmAction(
+      context,
+      title: 'Offene erinnern?',
+      message:
           '${open == 1 ? 'Eine Person bekommt' : '$open Personen bekommen'} '
           'eine Push-Erinnerung an diesen Termin: $names.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Abbrechen'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Erinnerung senden'),
-          ),
-        ],
-      ),
+      confirmLabel: 'Erinnerung senden',
+      scrollable: true,
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
     setState(() => _busy = true);
     try {
       final outcome = await widget.controller.performAction({
@@ -482,7 +470,9 @@ class _ResponseSection extends StatelessWidget {
       status,
       dark: theme.brightness == Brightness.dark,
     );
-    final title = status == 'open' ? 'Fehlt noch' : _responseCountLabel(status);
+    final title = status == 'open'
+        ? 'Noch keine Rückmeldung'
+        : _responseCountLabel(status);
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Column(

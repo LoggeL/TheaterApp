@@ -51,7 +51,9 @@ void main() {
       return Future.value(jsonResponse({'ok': true, 'id': 'neu'}));
     };
     await _pump(tester, server);
-    await tester.tap(find.widgetWithText(FilledButton, 'Produktion anlegen'));
+    await tester.tap(
+      find.widgetWithText(FloatingActionButton, 'Produktion anlegen'),
+    );
     await tester.pumpAndSettle();
     expect(find.byType(ProductionEditorScreen), findsOneWidget);
     expect(find.widgetWithText(AppBar, 'Produktion anlegen'), findsOneWidget);
@@ -89,6 +91,61 @@ void main() {
     expect(find.widgetWithText(TextField, 'Sommernacht'), findsOneWidget);
     expect(find.byKey(const ValueKey('production-editor-casting')), findsOne);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the editor guards edits and archiving asks, then offers undo', (
+    tester,
+  ) async {
+    final server = TestServer();
+    await _pump(tester, server);
+    await tester.tap(find.text('Wenn das Licht angeht'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ProductionEditorScreen), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'Titel'), 'Neu');
+    await tester.pump();
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Änderungen verwerfen?'), findsOneWidget);
+    await tester.tap(find.text('Weiter bearbeiten'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ProductionEditorScreen), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Ins Archiv verschieben'));
+    await tester.tap(find.text('Ins Archiv verschieben'));
+    await tester.pumpAndSettle();
+    expect(find.text('Ins Archiv verschieben?'), findsOneWidget);
+    expect(
+      find.textContaining('Ungespeicherte Änderungen gehen dabei verloren.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Abbrechen'));
+    await tester.pumpAndSettle();
+    expect(server.actionBodies, isEmpty);
+
+    await tester.tap(find.text('Ins Archiv verschieben'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Archivieren'));
+    await tester.pumpAndSettle();
+    expect(server.actionBodies.single['action'], 'production.archive');
+    expect(server.actionBodies.single['archived'], isTrue);
+    expect(find.byType(ProductionEditorScreen), findsNothing);
+    expect(find.text('„Wenn das Licht angeht“ archiviert.'), findsOneWidget);
+    await tester.tap(find.text('Rückgängig'));
+    await tester.pumpAndSettle();
+    expect(server.actionBodies.last['action'], 'production.archive');
+    expect(server.actionBodies.last['archived'], isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a failed pull-to-refresh offers a retry', (tester) async {
+    final server = TestServer();
+    await _pump(tester, server);
+    server.override = (request) => request.url.path.contains('/snapshot')
+        ? Future.value(jsonResponse({'error': 'kaputt'}, 500))
+        : null;
+    tester.state<RefreshIndicatorState>(find.byType(RefreshIndicator)).show();
+    await tester.pumpAndSettle();
+    expect(find.text('Erneut versuchen'), findsOneWidget);
   });
 
   testWidgets('archived productions are collapsed below the active ones', (

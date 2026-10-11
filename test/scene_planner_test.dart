@@ -122,6 +122,28 @@ void main() {
     await finish(tester, controller);
   });
 
+  testWidgets('leaving with a changed selection asks first', (tester) async {
+    final server = TestServer()..data['events'] = [rehearsal()];
+    final controller = await open(tester, server);
+    await tester.tap(find.byType(CheckboxListTile).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Änderungen verwerfen?'), findsOneWidget);
+    await tester.tap(find.text('Weiter bearbeiten'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ScenePlannerScreen), findsOneWidget);
+
+    // Back at the saved selection, leaving needs no confirmation.
+    await tester.tap(find.byType(CheckboxListTile).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Änderungen verwerfen?'), findsNothing);
+    expect(find.text('öffnen'), findsOneWidget);
+    await finish(tester, controller);
+  });
+
   testWidgets('filters playable scenes and saves the selection', (
     tester,
   ) async {

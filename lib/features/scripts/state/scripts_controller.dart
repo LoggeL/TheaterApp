@@ -46,7 +46,10 @@ extension ScriptsController on AppController {
     }
   }
 
-  Future<void> setProductionArchived(String productionId, bool archived) async {
+  Future<ActionOutcome> setProductionArchived(
+    String productionId,
+    bool archived,
+  ) async {
     if (_user?.isAdmin != true) {
       throw const ApiException(
         'Nur die Theaterleitung kann Drehbücher archivieren.',
@@ -62,7 +65,7 @@ extension ScriptsController on AppController {
         statusCode: 404,
       );
     }
-    await performAction({
+    return performAction({
       'action': 'production.archive',
       'id': productionId,
       'version': production.version,

@@ -31,6 +31,13 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
   bool _busy = false, _touched = false;
 
   bool get _titleMissing => _title.text.trim().isEmpty;
+
+  /// Title or subtitle differ from what was saved.
+  bool get _dirty =>
+      !_busy &&
+      (_title.text != textValue(widget.production?['title']) ||
+          _subtitle.text != textValue(widget.production?['subtitle']));
+
   @override
   void initState() {
     super.initState();
@@ -38,7 +45,7 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
       ..addListener(() => setState(() => _touched = true));
     _subtitle = TextEditingController(
       text: textValue(widget.production?['subtitle']),
-    );
+    )..addListener(() => setState(() {}));
     _version = intValue(widget.production?['version'] ?? 1);
   }
 
@@ -70,18 +77,35 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
     final known = widget.controller.productionRecords
         .map((p) => p['id'])
         .toSet();
+    // The route pops before the confirmation shows.
+    final messenger = ScaffoldMessenger.of(context);
+    final isNew = widget.production?['id'] == null;
     setState(() => _busy = true);
     try {
-      await widget.controller.performAction({
+      final outcome = await widget.controller.performAction({
         'action': 'production.save',
         'id': widget.production?['id'],
         'version': _version,
         'title': _title.text,
         'subtitle': _subtitle.text,
       });
-      if (widget.production?['id'] != null) {
+      void confirm() => messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            outcomeText(
+              outcome,
+              done: isNew ? 'Produktion angelegt.' : 'Produktion gespeichert.',
+              queued: 'Produktion vorgemerkt – wird bei Verbindung gesendet.',
+            ),
+          ),
+        ),
+      );
+      if (!isNew) {
         await widget.controller.loadScript(textValue(widget.production!['id']));
-        if (mounted) Navigator.pop(context);
+        if (mounted) {
+          Navigator.pop(context);
+          confirm();
+        }
         return;
       }
       // The new production has an id once the server took it.
@@ -90,7 +114,10 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
           .where((id) => !known.contains(id))
           .map((id) => textValue(id))
           .singleOrNull;
-      if (mounted) Navigator.pop(context, created);
+      if (mounted) {
+        Navigator.pop(context, created);
+        confirm();
+      }
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
@@ -101,13 +128,57 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
   Future<void> _archive() async {
     final production = widget.production;
     if (production == null) return;
+    final id = textValue(production['id']);
+    final archive = production['archived'] != true;
+    final title = textValue(production['title']);
+    if (archive &&
+        !await confirmDestructive(
+          context,
+          title: 'Ins Archiv verschieben?',
+          message:
+              '„$title“ verschwindet für alle aus dem Reiter Drehbücher und '
+              'steht danach im Drehbucharchiv.'
+              '${_dirty ? ' Ungespeicherte Änderungen gehen dabei verloren.' : ''}',
+          confirmLabel: 'Archivieren',
+        )) {
+      return;
+    }
+    if (!mounted) return;
+    // The route pops before the confirmation shows.
+    final messenger = ScaffoldMessenger.of(context);
+    final controller = widget.controller;
     setState(() => _busy = true);
     try {
-      await widget.controller.setProductionArchived(
-        textValue(production['id']),
-        production['archived'] != true,
+      final outcome = await controller.setProductionArchived(id, archive);
+      if (!mounted) return;
+      Navigator.pop(context);
+      final done = archive
+          ? '„$title“ archiviert.'
+          : '„$title“ aus dem Archiv zurückgeholt.';
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            outcomeText(
+              outcome,
+              done: done,
+              queued: '$done Wird bei Verbindung gesendet.',
+            ),
+          ),
+          action: archive
+              ? SnackBarAction(
+                  label: 'Rückgängig',
+                  onPressed: () => controller
+                      .setProductionArchived(id, false)
+                      .catchError((Object e) {
+                        messenger.showSnackBar(
+                          SnackBar(content: Text(userMessage(e))),
+                        );
+                        return ActionOutcome.synced;
+                      }),
+                )
+              : null,
+        ),
       );
-      if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
@@ -116,7 +187,10 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => AdminPage(
+  Widget build(BuildContext context) =>
+      DiscardGuard(dirty: _dirty, child: _page(context));
+
+  Widget _page(BuildContext context) => AdminPage(
     controller: widget.controller,
     title: widget.production == null
         ? 'Produktion anlegen'
@@ -163,7 +237,8 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
                 title: Text(
                   cast.roles.isEmpty
                       ? 'Regie und Team zuordnen'
-                      : '${cast.castCount} von ${cast.roles.length} Rollen besetzt',
+                      : '${cast.castCount} von ${cast.roles.length} '
+                            '${cast.roles.length == 1 ? 'Rolle' : 'Rollen'} besetzt',
                 ),
                 subtitle: Text(
                   '${open > 0 ? '$open offen · ' : ''}Ensemble: '

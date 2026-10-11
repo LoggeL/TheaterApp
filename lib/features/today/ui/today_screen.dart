@@ -40,12 +40,17 @@ class TodayScreen extends StatefulWidget {
     required this.onPlan,
     required this.onScripts,
     this.onMessages,
+    this.onPolls,
   });
   final AppController controller;
   final VoidCallback onPlan, onScripts;
 
   /// Switches to the messages tab; without it the list opens as a page.
   final VoidCallback? onMessages;
+
+  /// Switches to the polls in the messages tab; without it the list opens
+  /// as a page.
+  final VoidCallback? onPolls;
 
   @override
   State<TodayScreen> createState() => _TodayScreenState();
@@ -61,6 +66,10 @@ class _TodayScreenState extends State<TodayScreen> {
   void _allMessages(BuildContext context) => widget.onMessages != null
       ? widget.onMessages!()
       : openPage(context, MessagesScreen(controller: controller));
+
+  void _allPolls(BuildContext context) => widget.onPolls != null
+      ? widget.onPolls!()
+      : openPage(context, PollsScreen(controller: controller));
 
   @override
   Widget build(BuildContext context) {
@@ -285,8 +294,7 @@ class _TodayScreenState extends State<TodayScreen> {
         SectionTitle(
           'Abstimmung',
           trailing: TextButton(
-            onPressed: () =>
-                openPage(context, PollsScreen(controller: controller)),
+            onPressed: () => _allPolls(context),
             child: const Text('Alle ansehen'),
           ),
         ),
@@ -300,8 +308,7 @@ class _TodayScreenState extends State<TodayScreen> {
             morePolls == 1
                 ? '+ 1 weitere Abstimmung'
                 : '+ $morePolls weitere Abstimmungen',
-            onPressed: () =>
-                openPage(context, PollsScreen(controller: controller)),
+            onPressed: () => _allPolls(context),
           ),
       ],
       if (digest.slotPools.isNotEmpty) ...[
@@ -560,37 +567,49 @@ class _PollPreviewState extends State<_PollPreview> {
               Semantics(
                 button: true,
                 inMutuallyExclusiveGroup: true,
-                selected: option.id == poll.selectedOptionId,
+                checked: option.id == poll.selectedOptionId,
+                enabled: _sending == null,
+                label:
+                    '${option.label}, '
+                    '${option.votes == 1 ? '1 Stimme' : '${option.votes} Stimmen'}',
+                excludeSemantics: true,
+                onTap: _sending != null ? null : () => _vote(option.id),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
                   onTap: _sending != null ? null : () => _vote(option.id),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 9,
-                    ),
-                    child: Row(
-                      children: [
-                        if (_sending == option.id)
-                          const SizedBox.square(
-                            dimension: 20,
-                            child: Padding(
-                              padding: EdgeInsets.all(2),
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                  child: ConstrainedBox(
+                    // One tap votes: a full-size target avoids mis-taps.
+                    constraints: const BoxConstraints(minHeight: 48),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 9,
+                      ),
+                      child: Row(
+                        children: [
+                          if (_sending == option.id)
+                            const SizedBox.square(
+                              dimension: 20,
+                              child: Padding(
+                                padding: EdgeInsets.all(2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            )
+                          else
+                            Icon(
+                              option.id == poll.selectedOptionId
+                                  ? Icons.radio_button_checked
+                                  : Icons.radio_button_off,
+                              size: 20,
                             ),
-                          )
-                        else
-                          Icon(
-                            option.id == poll.selectedOptionId
-                                ? Icons.radio_button_checked
-                                : Icons.radio_button_off,
-                            size: 20,
-                          ),
-                        const SizedBox(width: 10),
-                        Expanded(child: Text(option.label)),
-                        const SizedBox(width: 12),
-                        Text('${option.votes}'),
-                      ],
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(option.label)),
+                          const SizedBox(width: 12),
+                          Text('${option.votes}'),
+                        ],
+                      ),
                     ),
                   ),
                 ),

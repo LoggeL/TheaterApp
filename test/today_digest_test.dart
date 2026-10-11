@@ -109,6 +109,24 @@ void main() {
     },
   );
 
+  test(
+    'admins outside a poll audience see it neither as open nor as voted',
+    () async {
+      final unaddressed = {
+        ..._poll('others'),
+        'personIds': [999],
+      };
+      final server = TestServer()..data['polls'] = [unaddressed];
+      final digest = await _digest(server);
+      expect(digest.pollsToVote, isEmpty);
+      expect(digest.votedPoll, isNull);
+
+      final mixed = TestServer()
+        ..data['polls'] = [unaddressed, _poll('voted', choice: 'a')];
+      expect((await _digest(mixed)).votedPoll?.id, 'voted');
+    },
+  );
+
   group('script shortcut', () {
     test('opens the next event production at its first scene', () async {
       final server = TestServer()

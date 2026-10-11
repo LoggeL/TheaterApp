@@ -2,15 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/app/shell/app_navigation.dart';
+import 'package:theater_app/app/shell/app_section.dart';
 import 'package:theater_app/app/shell/status_banners.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/features/events/events.dart';
+import 'package:theater_app/features/messages/messages.dart';
 import 'package:theater_app/features/polls/polls.dart';
 import 'package:theater_app/features/settings/settings.dart';
 import 'package:theater_app/features/slots/slots.dart';
 import 'package:theater_app/features/sync/sync.dart';
+import 'package:theater_app/features/today/today.dart';
 import 'package:theater_app/main.dart';
 import 'package:theater_app/shared/navigation.dart';
 
@@ -294,6 +297,76 @@ void main() {
     await finish(tester, c);
   });
 
+  testWidgets('rail jumps ask before discarding an unsaved editor', (
+    tester,
+  ) async {
+    setWidth(tester, 1000);
+    final c = await pumpDemo(tester);
+    final navigation = AppNavigationScope.maybeOf(shellContext(tester))!;
+    final before = navigation.value;
+    openPage(shellContext(tester), MessageComposerScreen(controller: c));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Betreff'), 'Fest');
+    await tester.pump();
+    Finder rail(String label) => find.descendant(
+      of: find.byType(AppNavigationRail),
+      matching: find.text(label),
+    );
+
+    await tester.tap(rail('Termine'));
+    await tester.pumpAndSettle();
+    expect(find.text('Änderungen verwerfen?'), findsOneWidget);
+    await tester.tap(find.text('Weiter bearbeiten'));
+    await tester.pumpAndSettle();
+    expect(find.byType(MessageComposerScreen), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Fest'), findsOneWidget);
+    expect(navigation.value, before);
+
+    await tester.tap(rail('Termine'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Verwerfen'));
+    await tester.pumpAndSettle();
+    expect(find.byType(MessageComposerScreen), findsNothing);
+    expect(navigation.value, AppSection.schedule.index);
+    expect(find.text('Änderungen verwerfen?'), findsNothing);
+    await finish(tester, c);
+  });
+
+  testWidgets('links from Heute open the matching Mitteilungen segment', (
+    tester,
+  ) async {
+    setWidth(tester, 390);
+    final c = await pumpDemo(tester);
+    await tester.tap(find.text('Mitteilungen').last);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(SegmentedButton<bool>),
+        matching: find.textContaining('Abstimmungen'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(PollsScreen), findsOneWidget);
+
+    TodayScreen today() =>
+        tester.widget(find.byType(TodayScreen, skipOffstage: false));
+    today().onMessages!();
+    await tester.pumpAndSettle();
+    expect(find.byType(MessagesScreen), findsOneWidget);
+    expect(find.byType(PollsScreen), findsNothing);
+
+    today().onPolls!();
+    await tester.pumpAndSettle();
+    expect(find.byType(PollsScreen), findsOneWidget);
+    // The tab's own list, not a separate page above Heute.
+    expect(Navigator.of(shellContext(tester)).canPop(), isFalse);
+    expect(
+      AppNavigationScope.maybeOf(shellContext(tester))!.value,
+      AppSection.messages.index,
+    );
+    await finish(tester, c);
+  });
+
   testWidgets('demo can be ended from the banner after confirming', (
     tester,
   ) async {
@@ -302,7 +375,7 @@ void main() {
     await tester.tap(find.text('Demo beenden'));
     await tester.pumpAndSettle();
     expect(find.text('Demo beenden?'), findsOneWidget);
-    await tester.tap(find.text('Abbrechen'));
+    await tester.tap(find.text('Hierbleiben'));
     await tester.pumpAndSettle();
     expect(c.isDemo, isTrue);
     await tester.tap(find.text('Demo beenden'));

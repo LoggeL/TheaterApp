@@ -71,34 +71,18 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
   bool get _withPush => _push && widget.controller.pushConfigured;
 
   /// Everyone gets a push right away, so the reach is confirmed first.
-  Future<bool> _confirmPush() async {
+  Future<bool> _confirmPush() {
     final count = _to.members(widget.controller).length;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          count == 1
-              ? 'Mitteilung an 1 Person veröffentlichen?'
-              : 'Mitteilung an $count Personen veröffentlichen?',
-        ),
-        content: Text(
-          count == 1
-              ? 'Die Person erhält zusätzlich einen Push.'
-              : 'Alle erhalten zusätzlich einen Push.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Abbrechen'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Veröffentlichen'),
-          ),
-        ],
-      ),
+    return confirmAction(
+      context,
+      title: count == 1
+          ? 'Mitteilung an 1 Person veröffentlichen?'
+          : 'Mitteilung an $count Personen veröffentlichen?',
+      message: count == 1
+          ? 'Die Person erhält zusätzlich einen Push.'
+          : 'Alle erhalten zusätzlich einen Push.',
+      confirmLabel: 'Veröffentlichen',
     );
-    return confirmed == true;
   }
 
   Future<void> _send() async {

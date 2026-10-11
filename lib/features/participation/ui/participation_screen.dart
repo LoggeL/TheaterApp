@@ -163,7 +163,7 @@ String participationLine(JsonMap p) {
       '${intValue(p['missedUnannounced'])}× ohne Absage gefehlt',
   ];
   return parts.isEmpty
-      ? '${intValue(p['events'])} Termine, noch nichts erfasst'
+      ? '${intValue(p['events']) == 1 ? '1 Termin' : '${intValue(p['events'])} Termine'}, noch nichts erfasst'
       : parts.join(' · ');
 }
 

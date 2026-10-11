@@ -77,28 +77,16 @@ class _PushAdminScreenState extends State<PushAdminScreen> {
 
   Future<void> _send() async {
     final count = _to.members(widget.controller).length;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          count == 1
-              ? 'Push an 1 Person senden?'
-              : 'Push an $count Personen senden?',
-        ),
-        content: Text('„${_title.text.trim()}“\n${_body.text.trim()}'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Abbrechen'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Senden'),
-          ),
-        ],
-      ),
+    final confirmed = await confirmAction(
+      context,
+      title: count == 1
+          ? 'Push an 1 Person senden?'
+          : 'Push an $count Personen senden?',
+      message: '„${_title.text.trim()}“\n${_body.text.trim()}',
+      confirmLabel: 'Senden',
+      scrollable: true,
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
     setState(() => _busy = true);
     try {
       final outcome = await widget.controller.performAction({

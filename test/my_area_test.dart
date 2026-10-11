@@ -144,10 +144,10 @@ void main() {
     expect(find.text('Passwort ändern'), findsNothing);
     expect(find.text('Meine Teilnahme'), findsNothing);
     expect(find.text('Demo · alles bleibt auf diesem Gerät'), findsOneWidget);
-    await tester.tap(find.text('Demo verlassen'));
+    await tester.tap(find.text('Demo beenden'));
     await tester.pumpAndSettle();
-    expect(find.text('Demo verlassen?'), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, 'Demo verlassen'), findsOneWidget);
+    expect(find.text('Demo beenden?'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Demo beenden'), findsOneWidget);
     await tester.tap(find.text('Hierbleiben'));
     await tester.pumpAndSettle();
     expect(controller.isDemo, true);

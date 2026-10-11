@@ -76,13 +76,11 @@ class _MembersAdminScreenState extends State<MembersAdminScreen> {
   Widget build(BuildContext context) => AdminPage(
     controller: widget.controller,
     title: 'Ensemble verwalten',
-    actions: [
-      IconButton(
-        tooltip: 'Person anlegen',
-        onPressed: () => _open(null),
-        icon: const Icon(Icons.person_add_outlined),
-      ),
-    ],
+    floatingActionButton: FloatingActionButton.extended(
+      onPressed: () => _open(null),
+      icon: const Icon(Icons.person_add_outlined),
+      label: const Text('Person anlegen'),
+    ),
     children: (context) {
       final found = widget.controller.memberRecords
           .where(

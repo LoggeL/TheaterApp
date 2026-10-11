@@ -6,6 +6,7 @@ import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/page_header.dart';
+import '../../accounts/ui/accounts_admin_screen.dart';
 import '../../casting/ui/person_productions.dart';
 import 'roles_admin_screen.dart';
 
@@ -295,6 +296,21 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
           onChanged: (v) => setState(() => _active = v),
           title: const Text('Aktives Mitglied'),
         ),
+        if (widget.member != null)
+          ListTile(
+            key: const ValueKey('member-editor-account'),
+            leading: const Icon(Icons.key_outlined),
+            title: const Text('App-Zugang'),
+            subtitle: const Text('Konto, Freigabe und Zugang verwalten'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openPage(
+              context,
+              AccountsAdminScreen(
+                controller: widget.controller,
+                initialQuery: textValue(widget.member!['name']),
+              ),
+            ),
+          ),
         if (widget.member != null)
           PersonProductions(
             controller: widget.controller,

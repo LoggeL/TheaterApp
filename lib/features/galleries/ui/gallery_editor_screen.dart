@@ -24,6 +24,21 @@ class _GalleryEditorState extends State<GalleryEditor> {
     _description = TextEditingController(text: textValue(g['description']));
     _url = TextEditingController(text: textValue(g['sourceUrl']));
     _production = g['productionId'] as String?;
+    for (final field in [_title, _description, _url]) {
+      field.addListener(_changed);
+    }
+  }
+
+  void _changed() => setState(() {});
+
+  /// Any field differs from what was saved.
+  bool get _dirty {
+    final g = widget.gallery ?? {};
+    return !_busy &&
+        (_title.text != textValue(g['title']) ||
+            _description.text != textValue(g['description']) ||
+            _url.text != textValue(g['sourceUrl']) ||
+            _production != g['productionId'] as String?);
   }
 
   @override
@@ -39,6 +54,9 @@ class _GalleryEditorState extends State<GalleryEditor> {
       setState(() => _error = 'Bitte einen Titel eingeben.');
       return;
     }
+    // The route pops before the confirmation shows.
+    final messenger = ScaffoldMessenger.of(context);
+    final isNew = widget.gallery == null;
     setState(() {
       _busy = true;
       _error = null;
@@ -55,7 +73,14 @@ class _GalleryEditorState extends State<GalleryEditor> {
           'productionId': _production,
         },
       );
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) {
+        Navigator.pop(context, true);
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(isNew ? 'Album freigegeben.' : 'Album gespeichert.'),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) setState(() => _error = userMessage(e));
     } finally {
@@ -67,7 +92,7 @@ class _GalleryEditorState extends State<GalleryEditor> {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.controller,
-    builder: (context, _) => _form(context),
+    builder: (context, _) => DiscardGuard(dirty: _dirty, child: _form(context)),
   );
 
   Widget _form(BuildContext context) => Scaffold(
@@ -119,7 +144,8 @@ class _GalleryEditorState extends State<GalleryEditor> {
           ],
           onChanged: _busy
               ? null
-              : (v) => _production = v?.isEmpty == true ? null : v,
+              : (v) =>
+                    setState(() => _production = v?.isEmpty == true ? null : v),
         ),
         const SizedBox(height: 20),
         TextField(

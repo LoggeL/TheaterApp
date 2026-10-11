@@ -127,7 +127,6 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
   @override
   Widget build(BuildContext context) {
     final active = controller.members.where((m) => m.active).length;
-    final unsent = controller.pendingCount + controller.failedCount;
     final showPassword =
         !controller.isDemo &&
         (!controller.usesFirebase ||
@@ -244,9 +243,11 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                           ? 'Demo · alles bleibt auf diesem Gerät'
                           : controller.isOffline
                           ? 'Offline'
-                          : unsent == 0
-                          ? 'Alles übertragen'
-                          : '${controller.pendingCount} ausstehend · ${controller.failedCount} zu prüfen',
+                          : remainingChanges(
+                                  controller.pendingCount,
+                                  controller.failedCount,
+                                ) ??
+                                'Alles übertragen',
                       subtitleColor: controller.failedCount > 0
                           ? Theme.of(context).colorScheme.error
                           : null,

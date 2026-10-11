@@ -1,27 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_controller.dart';
+import '../../features/me/ui/widgets/logout_button.dart';
 import '../../features/sync/ui/sync_screen.dart';
-import '../../shared/feedback.dart';
 import '../../shared/navigation.dart';
 
 /// Marks the local demo with its sample data and offers to leave it.
 class DemoBanner extends StatelessWidget {
   const DemoBanner({super.key, required this.controller});
   final AppController controller;
-
-  Future<void> _end(BuildContext context) async {
-    final confirmed = await confirmDestructive(
-      context,
-      title: 'Demo beenden?',
-      message:
-          'Die Beispieldaten und alles, was du in der Demo geändert hast, '
-          'werden von diesem Gerät gelöscht.',
-      confirmLabel: 'Demo beenden',
-    );
-    // Logging out also switches push off (DeviceServices.disablePush).
-    if (confirmed) await controller.logout();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +37,7 @@ class DemoBanner extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
             ),
-            onPressed: () => _end(context),
+            onPressed: () => confirmLeaveDemo(context, controller),
             child: const Text('Demo beenden'),
           ),
         ],

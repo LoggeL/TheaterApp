@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
+import 'package:theater_app/features/accounts/accounts.dart';
 import 'package:theater_app/features/ensemble/ensemble.dart';
 
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
@@ -49,6 +50,50 @@ void main() {
     expect(pillOf('Alex Bühnenfreund', 'Freigegeben'), findsOneWidget);
     expect(pillOf('Kim Kulisse', 'Gesperrt'), findsOneWidget);
     expect(pillOf('Sam Vorhang', 'Kein Konto verknüpft'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('member editor and account cards link to each other', (
+    tester,
+  ) async {
+    final server = TestServer();
+    server.override = (request) => request.url.path.contains('/admin/accounts')
+        ? Future.value(
+            jsonResponse({
+              'members': [
+                {'id': 1, 'name': 'Alex Bühnenfreund', 'active': true},
+                {'id': 2, 'name': 'Sam Vorhang', 'active': true},
+              ],
+              'accounts': [
+                {
+                  'uid': 'a',
+                  'personId': 1,
+                  'status': 'approved',
+                  'name': 'Alex Bühnenfreund',
+                  'email': 'alex@example.test',
+                },
+              ],
+            }),
+          )
+        : null;
+    await _pump(tester, server, (c) => MembersAdminScreen(controller: c));
+    expect(
+      find.widgetWithText(FloatingActionButton, 'Person anlegen'),
+      findsOne,
+    );
+    await tester.tap(find.text('Alex Bühnenfreund'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('App-Zugang'));
+    await tester.tap(find.text('App-Zugang'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AccountsAdminScreen), findsOneWidget);
+    // The search starts at this person.
+    expect(find.widgetWithText(TextField, 'Alex Bühnenfreund'), findsOneWidget);
+    expect(find.text('Sam Vorhang'), findsNothing);
+
+    await tester.tap(find.text('In Ensemble bearbeiten'));
+    await tester.pumpAndSettle();
+    expect(find.text('Person bearbeiten'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

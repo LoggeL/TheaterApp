@@ -118,36 +118,22 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
     setState(() => _busy = true);
     try {
       if (!approve) {
-        final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            scrollable: true,
-            title: const Text('Anfrage ablehnen?'),
-            content: Text(
+        final confirmed = await confirmDestructive(
+          context,
+          title: 'Anfrage ablehnen?',
+          message:
               'Die Anfrage von ${textValue(widget.account['name'])} '
               '(${textValue(widget.account['email'])}) wird abgelehnt. '
               'Das Konto erhält keinen Zugang. Du kannst es später in der '
               'Kontenverwaltung erneut prüfen.',
-            ),
-            actions: [
-              TextButton(
-                autofocus: true,
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Abbrechen'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.error,
-                ),
-                child: const Text('Ablehnen'),
-              ),
-            ],
-          ),
+          confirmLabel: 'Ablehnen',
+          scrollable: true,
         );
-        if (confirmed != true || !mounted) return;
+        if (!confirmed || !mounted) return;
       }
-      await widget.controller.performAction(
+      // The route pops before the confirmation shows.
+      final messenger = ScaffoldMessenger.of(context);
+      final outcome = await widget.controller.performAction(
         approve
             ? {
                 'action': 'account.approve',
@@ -163,7 +149,22 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
                 'status': 'rejected',
               },
       );
-      if (mounted) Navigator.pop(context);
+      if (!mounted) return;
+      Navigator.pop(context);
+      final done = approve
+          ? 'Konto von $_accountName freigegeben.'
+          : 'Anfrage von $_accountName abgelehnt.';
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            outcomeText(
+              outcome,
+              done: done,
+              queued: '$done Wird bei Verbindung gesendet.',
+            ),
+          ),
+        ),
+      );
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {

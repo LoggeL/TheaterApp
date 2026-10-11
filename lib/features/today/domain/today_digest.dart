@@ -67,9 +67,15 @@ class TodayDigest {
                 .toList(),
       unread: unreadMessages(controller).toList(),
       pollsToVote: toVote,
+      // Only a poll the member actually voted in counts as done; admins
+      // also receive polls they were never asked to vote in.
       votedPoll: toVote.isEmpty
           ? controller.polls
-                .where((p) => !p.isClosedAt(controller.now))
+                .where(
+                  (p) =>
+                      !p.isClosedAt(controller.now) &&
+                      p.selectedOptionId != null,
+                )
                 .firstOrNull
           : null,
       slotPools: slotPoolsToChoose(controller),

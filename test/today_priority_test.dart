@@ -188,6 +188,12 @@ void main() {
     for (var i = 1; i < order.length; i++) {
       expect(_top(tester, order[i - 1]), lessThan(_top(tester, order[i])));
     }
+    // One tap votes, so each answer row is a full-size target.
+    final answer = find.ancestor(
+      of: find.text('Großer Saal'),
+      matching: find.byType(InkWell),
+    );
+    expect(tester.getSize(answer.first).height, greaterThanOrEqualTo(48));
     // The expanded cards also fit a small phone with large text.
     await _pump(tester, controller, width: 320, scale: 2);
     await tester.scrollUntilVisible(find.text('Jetzt abstimmen'), 300);

@@ -128,6 +128,8 @@ void main() {
       },
     ]);
     expect(find.byType(AccountApprovalScreen), findsNothing);
+    // The admin learns that the rejection went through.
+    expect(find.textContaining('abgelehnt.'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     controller.dispose();

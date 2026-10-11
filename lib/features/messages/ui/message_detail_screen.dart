@@ -107,28 +107,16 @@ class _MessageDetailScreenState extends State<MessageDetailScreen> {
 
   Future<void> _remind(int open, List<String> names) async {
     final people = open == 1 ? '1 Person' : '$open Personen';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('$people per Push erinnern?'),
-        content: Text(
-          names.isEmpty
-              ? 'Alle, die die Mitteilung noch nicht gelesen haben, erhalten einen Push.'
-              : 'Noch nicht gelesen ${names.length == 1 ? 'hat' : 'haben'}: ${names.join(', ')}.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Abbrechen'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Erinnern'),
-          ),
-        ],
-      ),
+    final confirmed = await confirmAction(
+      context,
+      title: '$people per Push erinnern?',
+      message: names.isEmpty
+          ? 'Alle, die die Mitteilung noch nicht gelesen haben, erhalten einen Push.'
+          : 'Noch nicht gelesen ${names.length == 1 ? 'hat' : 'haben'}: ${names.join(', ')}.',
+      confirmLabel: 'Erinnern',
+      scrollable: true,
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
     setState(() => _busy = true);
     try {
       final outcome = await widget.controller.performAction({

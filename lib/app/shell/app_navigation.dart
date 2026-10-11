@@ -5,6 +5,7 @@ import '../../features/events/domain/event_selectors.dart';
 import '../../features/messages/domain/message_selectors.dart';
 import '../../features/polls/domain/poll_selectors.dart';
 import '../../features/slots/domain/slot_pool.dart';
+import '../../shared/feedback.dart';
 import '../../shared/layout/breakpoints.dart';
 import '../../shared/widgets/brand_logo.dart';
 import '../brand.dart';
@@ -282,9 +283,11 @@ class _DesktopRouteFrameState extends State<DesktopRouteFrame> {
               controller: widget.controller,
               selectedIndex: widget.selectedIndex,
               showBrand: true,
-              onSelected: (index) {
-                selection.value = index;
-                Navigator.of(context).popUntil((route) => route.isFirst);
+              onSelected: (index) async {
+                // Unsaved input asks first; staying keeps the section.
+                if (await popToFirst(context, Navigator.of(context))) {
+                  selection.value = index;
+                }
               },
             ),
             const VerticalDivider(width: 1),

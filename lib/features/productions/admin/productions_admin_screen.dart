@@ -126,8 +126,8 @@ class _ProductionsAdminScreenState extends State<ProductionsAdminScreen> {
           title: Text(textValue(p['title'])),
           subtitle: Text(
             '${newest ? 'Neuestes Stück · ' : ''}'
-            '${intValue(p['sceneCount'])} Szenen · '
-            '${roles == 0 ? '0 Rollen' : '${ProductionCast.fromRecord(p).castCount} von $roles Rollen besetzt'}',
+            '${intValue(p['sceneCount']) == 1 ? '1 Szene' : '${intValue(p['sceneCount'])} Szenen'} · '
+            '${roles == 0 ? '0 Rollen' : '${ProductionCast.fromRecord(p).castCount} von $roles ${roles == 1 ? 'Rolle' : 'Rollen'} besetzt'}',
           ),
           trailing: IconButton(
             key: ValueKey('production-casting-${p['id']}'),
@@ -157,17 +157,16 @@ class _ProductionsAdminScreenState extends State<ProductionsAdminScreen> {
   Widget build(BuildContext context) => AdminPage(
     controller: widget.controller,
     title: 'Produktionen & Besetzung',
+    floatingActionButton: FloatingActionButton.extended(
+      onPressed: _busy ? null : _create,
+      icon: const Icon(Icons.add),
+      label: const Text('Produktion anlegen'),
+    ),
     children: (context) {
       final records = widget.controller.productionRecords;
       final active = records.where((p) => p['archived'] != true).toList();
       final archived = records.where((p) => p['archived'] == true).toList();
       return [
-        FilledButton.icon(
-          onPressed: _busy ? null : _create,
-          icon: const Icon(Icons.add),
-          label: const Text('Produktion anlegen'),
-        ),
-        const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: _busy ? null : _import,
           icon: const Icon(Icons.cloud_download_outlined),

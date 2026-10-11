@@ -59,26 +59,13 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                 'Danach kann niemand mehr abstimmen. Du kannst sie später wieder öffnen.',
             confirmLabel: 'Beenden',
           )
-        : await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text('Abstimmung wieder öffnen?'),
-                  content: const Text(
-                    'Die Frist wird entfernt. Alle können wieder abstimmen, bis du sie beendest.',
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Abbrechen'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Wieder öffnen'),
-                    ),
-                  ],
-                ),
-              ) ==
-              true;
+        : await confirmAction(
+            context,
+            title: 'Abstimmung wieder öffnen?',
+            message:
+                'Die Frist wird entfernt. Alle können wieder abstimmen, bis du sie beendest.',
+            confirmLabel: 'Wieder öffnen',
+          );
     if (!confirmed || !mounted) return;
     setState(() => _busy = true);
     try {

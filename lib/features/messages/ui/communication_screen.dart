@@ -13,14 +13,51 @@ import 'push_admin_screen.dart';
 /// The Mitteilungen tab of the app shell: messages and polls, switched by a
 /// segment below the header.
 class CommunicationScreen extends StatefulWidget {
-  const CommunicationScreen({super.key, required this.controller});
+  const CommunicationScreen({
+    super.key,
+    required this.controller,
+    this.showPolls,
+  });
   final AppController controller;
+
+  /// The selected segment (true: polls). The shell owns it, so links from
+  /// other tabs can open a segment; without it the screen keeps its own.
+  final ValueNotifier<bool>? showPolls;
   @override
   State<CommunicationScreen> createState() => _CommunicationScreenState();
 }
 
 class _CommunicationScreenState extends State<CommunicationScreen> {
-  bool _polls = false;
+  ValueNotifier<bool>? _own;
+  ValueNotifier<bool> get _segment =>
+      widget.showPolls ?? (_own ??= ValueNotifier(false));
+  bool get _polls => _segment.value;
+
+  @override
+  void initState() {
+    super.initState();
+    _segment.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(CommunicationScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.showPolls != widget.showPolls) {
+      (oldWidget.showPolls ?? _own)?.removeListener(_changed);
+      _segment.addListener(_changed);
+    }
+  }
+
+  @override
+  void dispose() {
+    _segment.removeListener(_changed);
+    _own?.dispose();
+    super.dispose();
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
 
   /// One entry point for everything admins can send to the ensemble.
   Future<void> _create() async {
@@ -88,7 +125,7 @@ class _CommunicationScreenState extends State<CommunicationScreen> {
           ],
           selected: {_polls},
           showSelectedIcon: false,
-          onSelectionChanged: (s) => setState(() => _polls = s.single),
+          onSelectionChanged: (s) => _segment.value = s.single,
         ),
       );
       final create = c.user?.isAdmin == true

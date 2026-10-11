@@ -38,6 +38,16 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _tab = 0;
+
+  /// The Mitteilungen tab's segment (true: polls), set by links from Heute.
+  final _showPolls = ValueNotifier<bool>(false);
+
+  @override
+  void dispose() {
+    _showPolls.dispose();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -137,8 +147,14 @@ class _AppShellState extends State<AppShell> {
                           controller: c,
                           onPlan: () => selectTab(AppSection.schedule.index),
                           onScripts: () => selectTab(AppSection.scripts.index),
-                          onMessages: () =>
-                              selectTab(AppSection.messages.index),
+                          onMessages: () {
+                            _showPolls.value = false;
+                            selectTab(AppSection.messages.index);
+                          },
+                          onPolls: () {
+                            _showPolls.value = true;
+                            selectTab(AppSection.messages.index);
+                          },
                         ),
                       ),
                       ContentWidth(
@@ -149,7 +165,7 @@ class _AppShellState extends State<AppShell> {
                         maxWidth: 1050,
                         child: ProductionsScreen(controller: c),
                       ),
-                      CommunicationScreen(controller: c),
+                      CommunicationScreen(controller: c, showPolls: _showPolls),
                       ContentWidth(
                         maxWidth: 1100,
                         child: MyAreaScreen(

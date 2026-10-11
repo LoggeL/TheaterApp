@@ -163,7 +163,8 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
                   Text('Vor Ort', style: theme.textTheme.titleLarge),
                   const SizedBox(height: 8),
                   Text(
-                    '$here da · $away fehlt · ${members.length - here - away} nicht erfasst',
+                    '$here da · ${away == 1 ? '1 fehlt' : '$away fehlen'} · '
+                    '${members.length - here - away} nicht erfasst',
                   ),
                   const SizedBox(height: 10),
                   Row(

@@ -28,6 +28,7 @@ void main() {
       'Rückmeldung 4 von 5 · dabei 3 von 4 · 1× trotz Zusage gefehlt',
     );
     expect(participationLine({'events': 2}), '2 Termine, noch nichts erfasst');
+    expect(participationLine({'events': 1}), '1 Termin, noch nichts erfasst');
   });
 
   test('reminder lead times read naturally', () {
