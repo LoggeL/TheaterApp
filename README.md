@@ -5,19 +5,19 @@ Flutter-App für das Kolpingtheater Ramsen. Web und Android verwenden denselben 
 ## Funktionen
 
 - Selbstregistrierung mit E-Mail/Passwort und Google; manuelle Personenzuordnung und Freigabe durch einen Admin.
-- Feste Termine mit Beschreibung und zwölf Terminarten für Rollen, das Ensemble eines Stücks (Besetzung, Regie und weitere Mitwirkende) und/oder einzelne Personen, dabei/später/abgesagt, optionale Ankunftszeit und längere Abwesenheiten; beim Anlegen oder Ändern kann die Leitung die Eingeladenen direkt per Push benachrichtigen. Serientermine (wöchentlich, alle 2 Wochen, monatlich bis zu einem Enddatum) mit einer einzigen Benachrichtigung; Löschen einzeln oder ab einem Termin. Keine Terminabstimmungen.
-- Terminfinder als Slot-Buchung, z. B. für Fototermine: Zeitfenster mit Platzzahl, Einladung von Rollen und/oder Personen, je Person ein Fenster; belegte Fenster werden automatisch Termine.
-- Frei verwaltbare Mehrfachrollen pro Person und allgemeine Abstimmungen mit Frist, Stimmwechsel und Ergebnisübersicht.
+- Feste Termine mit Beschreibung und zwölf Terminarten für Rollen, das Ensemble eines Stücks (Besetzung, Regie und weitere Mitwirkende) und/oder einzelne Personen, dabei/später/abgesagt, optionale Ankunftszeit und längere Abwesenheiten (meldbar im Reiter „Termine“, über „Länger weg?“ beim Absagen und unter „Mein Bereich“); beim Anlegen oder Ändern kann die Leitung die Eingeladenen direkt per Push benachrichtigen. Serientermine (wöchentlich, alle 2 Wochen, monatlich bis zu einem Enddatum) mit einer einzigen Benachrichtigung; Löschen einzeln oder ab einem Termin. Keine Terminabstimmungen.
+- Terminfinder als Slot-Buchung, z. B. für Fototermine: Zeitfenster mit Platzzahl, Einladung von Rollen und/oder Personen, je Person ein Fenster; belegte Fenster werden automatisch Termine. Erreichbar über den Reiter „Termine“ (Hinweis, solange eine Wahl aussteht, und Menü), „Heute“ und die Admin-Übersicht.
+- Frei verwaltbare Mehrfachrollen pro Person und allgemeine Abstimmungen mit Frist, Stimmwechsel und Ergebnisübersicht; Abstimmungen liegen im Reiter „Mitteilungen“.
 - Verwaltung von Ensemble, Konten, Terminen, Produktionen und Besetzungen; tatsächliche Anwesenheit und spielbare Szenen.
 - Admin-Übersicht mit allen Personen, ihren Rollen und echten Login-Adressen; Filter für verknüpfte Personen, fehlende Konten, offene Freigaben und unbesetzte Rollen.
 - Minimalistischer Leser mit mehreren eigenen Rollen, Lernmodus, Kategorien, Suche, privaten Notizen, Kommentaren, Lesezeichen und PDF-Export.
 - Drehbuchimport aus dem bestehenden Skriptdienst, gemeinsame Regiemarkierungen zwischen Flutter-Web, mobilen Apps und dem bestehenden Skript-Browser.
-- Eigener Reiter „Mitteilungen“ mit Ungelesen-Filter, optionalem Link, Lesestatus und Push-Erinnerung an Ungelesene für die Theaterleitung; eigene Pushes auf Abruf an alle, Rollen, Stück-Ensembles oder einzelne Personen.
+- Eigener Reiter „Mitteilungen“ mit den Bereichen Mitteilungen und Abstimmungen, Ungelesen-Filter, optionalem Link, Lesestatus und Push-Erinnerung an Ungelesene für die Theaterleitung; eigene Pushes auf Abruf an alle, Rollen, Stück-Ensembles oder einzelne Personen.
 - Firebase-Push mit Berechtigungsabfrage beim Öffnen, Erinnerungseinstellungen mit eigener Vorlaufzeit und passenden Links.
 - Teilnahmeübersicht der letzten sechs Monate: Mitglieder sehen ihre eigenen Zahlen, Admins alle aktiven Personen; keine Rangliste, Absagen zählen nicht negativ.
 - Tägliche automatische Löschung nicht mehr benötigter Daten (Fristen in `server/src/retention.mjs` und der Datenschutzerklärung) und Löschen von Anmeldekonten durch Admins.
 - Profilbilder und Galerien mit Immich-Titelbildern, eigenem Bildupload, Lightbox und Download.
-- Direkter Admin-Einstieg, Seitenleiste für Desktop und Kalender mit Termintiteln.
+- Fünf Reiter auf dem Telefon (Heute, Termine, Drehbücher, Mitteilungen, Mein Bereich); Admins öffnen die Verwaltung über die Schaltfläche „Admin“ in der Kopfleiste. Ab 900 px Breite eine Seitenleiste mit Admin-Eintrag, die auch auf Unterseiten sichtbar bleibt; Kalender mit Termintiteln.
 - Lokaler Cache und sichtbare Warteschlange für Rückmeldungen bei fehlender Verbindung.
 
 Der [Abnahmestand](docs/implementation-status.md) unterscheidet implementierte, getestete und noch extern einzurichtende Funktionen.
