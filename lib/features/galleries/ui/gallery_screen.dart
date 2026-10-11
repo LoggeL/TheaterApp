@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../data/api_client.dart';
+import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/protected_image.dart';
 import 'gallery_editor_screen.dart';
@@ -30,7 +31,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
   Future<String?>? _loadTask;
   late JsonMap _gallery;
   int? _next = 0;
-  int _total = 0, _loadGeneration = 0;
+  int _total = 0, _loadGeneration = 0, _uploadDone = 0, _uploadTotal = 0;
   bool _loading = false, _uploading = false, _hidden = false;
   String? _error, _sourceError;
   @override
@@ -88,8 +89,9 @@ class _GalleryScreenState extends State<GalleryScreen> {
       });
     } catch (e) {
       if (mounted && generation == _loadGeneration) {
-        setState(() => _error = e.toString());
-        return e.toString();
+        final message = userMessage(e);
+        setState(() => _error = message);
+        return message;
       }
     } finally {
       if (mounted && generation == _loadGeneration) {
@@ -99,52 +101,124 @@ class _GalleryScreenState extends State<GalleryScreen> {
     return null;
   }
 
+  bool get _admin => widget.controller.user?.isAdmin == true;
+
   Future<void> _upload() async {
-    setState(() => _uploading = true);
-    var count = 0;
+    final List<XFile> picked;
     try {
-      final files = await ImagePicker().pickMultiImage(
+      picked = (await ImagePicker().pickMultiImage(
         maxWidth: 2048,
         imageQuality: 85,
         requestFullMetadata: false,
         limit: 20,
-      );
-      for (final file in files.take(20)) {
-        if (await file.length() > 8 * 1024 * 1024) {
-          throw const ApiException('Ein Bild ist größer als 8 MB.');
-        }
-        await widget.controller.remote(
-          '/media',
-          method: 'POST',
-          body: {
-            'kind': 'gallery',
-            'galleryId': _gallery['id'],
-            'content': base64Encode(await file.readAsBytes()),
-          },
-        );
-        count++;
-      }
-      if (mounted && count > 0) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$count Bilder hinzugefügt.')));
-      }
+      )).take(20).toList();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$count Bilder hinzugefügt. $e')),
-        );
+      if (mounted) showProblem(context, e);
+      return;
+    }
+    if (picked.isEmpty || !mounted) return;
+    setState(() {
+      _uploading = true;
+      _uploadDone = 0;
+      _uploadTotal = picked.length;
+    });
+    var added = 0, skipped = 0;
+    Object? failure;
+    for (final file in picked) {
+      try {
+        if (await file.length() > 8 * 1024 * 1024) {
+          skipped++;
+        } else {
+          await widget.controller.remote(
+            '/media',
+            method: 'POST',
+            body: {
+              'kind': 'gallery',
+              'galleryId': _gallery['id'],
+              'content': base64Encode(await file.readAsBytes()),
+            },
+          );
+          added++;
+        }
+      } catch (e) {
+        failure = e;
+        break;
       }
-    } finally {
-      if (mounted) {
-        setState(() => _uploading = false);
-        await _load(refresh: true);
-      }
+      if (mounted) setState(() => _uploadDone++);
+    }
+    if (!mounted) return;
+    setState(() => _uploading = false);
+    final summary = [
+      added == 1 ? '1 Bild hinzugefügt' : '$added Bilder hinzugefügt',
+      if (skipped > 0)
+        skipped == 1
+            ? '1 Bild über 8 MB übersprungen'
+            : '$skipped Bilder über 8 MB übersprungen',
+    ].join(' · ');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          failure == null ? '$summary.' : '$summary. ${userMessage(failure)}',
+        ),
+        duration: Duration(seconds: failure == null && skipped == 0 ? 4 : 8),
+      ),
+    );
+    if (added > 0) await _load(refresh: true);
+  }
+
+  Future<void> _togglePublication() async {
+    final publish = _gallery['published'] == false;
+    if (!publish) {
+      final confirmed = await confirmDestructive(
+        context,
+        title: 'Freigabe beenden?',
+        message:
+            'Das Ensemble sieht das Album danach nicht mehr. Nur die Administration kann es weiter öffnen.',
+        confirmLabel: 'Freigabe beenden',
+      );
+      if (!confirmed || !mounted) return;
+    }
+    try {
+      await widget.controller.remote(
+        '/galleries/${_gallery['id']}/visibility',
+        method: 'PUT',
+        body: {'published': publish, 'version': _gallery['version']},
+      );
+      if (!mounted) return;
+      showDone(
+        context,
+        publish
+            ? 'Album für das Ensemble freigegeben.'
+            : 'Freigabe beendet. Nur die Administration sieht das Album.',
+      );
+      await _load(refresh: true);
+    } catch (e) {
+      if (mounted) showProblem(context, e);
     }
   }
 
+  Future<void> _pullToRefresh() async {
+    try {
+      await _load(refresh: true, reportError: true);
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+  }
+
+  /// Takes over what the lightbox changed without reloading from page 0.
+  /// Hidden images leave the grid unless hidden ones are shown.
+  void _applyLightboxChanges() => setState(() {
+    if (_hidden) return;
+    final before = _assets.length;
+    _assets.removeWhere((a) => a['hidden'] == true);
+    final removed = before - _assets.length;
+    _total = (_total - removed).clamp(0, _total);
+    // The server no longer counts them, so later pages start earlier.
+    if (_next != null) _next = (_next! - removed).clamp(0, _next!);
+  });
+
   Future<void> _open(int index) async {
-    await openPage(
+    final changed = await openPage<bool>(
       context,
       GalleryLightbox(
         controller: widget.controller,
@@ -156,7 +230,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
       ),
       fullscreen: true,
     );
-    if (mounted) await _load(refresh: true);
+    if (changed == true && mounted) _applyLightboxChanges();
   }
 
   @override
@@ -164,13 +238,10 @@ class _GalleryScreenState extends State<GalleryScreen> {
     appBar: AppBar(
       title: Text(textValue(_gallery['title'])),
       actions: [
-        if (widget.controller.user?.isAdmin == true)
+        if (_admin)
           PopupMenuButton<String>(
             tooltip: 'Album verwalten',
             onSelected: (value) async {
-              if (value == 'upload') {
-                await _upload();
-              }
               if (value == 'edit' && context.mounted) {
                 await openPage(
                   context,
@@ -181,25 +252,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
                 );
                 if (mounted) await _load(refresh: true);
               }
-              if (value == 'publication') {
-                try {
-                  await widget.controller.remote(
-                    '/galleries/${_gallery['id']}/visibility',
-                    method: 'PUT',
-                    body: {
-                      'published': _gallery['published'] == false,
-                      'version': _gallery['version'],
-                    },
-                  );
-                  if (mounted) await _load(refresh: true);
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text(e.toString())));
-                  }
-                }
-              }
+              if (value == 'publication') await _togglePublication();
               if (value == 'hidden') {
                 setState(() => _hidden = !_hidden);
                 await _load(refresh: true);
@@ -219,11 +272,6 @@ class _GalleryScreenState extends State<GalleryScreen> {
                 child: Text('Album bearbeiten'),
               ),
               PopupMenuItem(
-                value: 'upload',
-                enabled: !_uploading,
-                child: const Text('Bilder hinzufügen'),
-              ),
-              PopupMenuItem(
                 value: 'hidden',
                 child: Text(
                   _hidden
@@ -235,8 +283,19 @@ class _GalleryScreenState extends State<GalleryScreen> {
           ),
       ],
     ),
+    floatingActionButton: _admin
+        ? FloatingActionButton.extended(
+            onPressed: _uploading ? null : _upload,
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+            label: Text(
+              _uploading
+                  ? '$_uploadDone von $_uploadTotal …'
+                  : 'Bilder hinzufügen',
+            ),
+          )
+        : null,
     body: RefreshIndicator(
-      onRefresh: () => _load(refresh: true),
+      onRefresh: _pullToRefresh,
       child: CustomScrollView(
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
@@ -247,8 +306,12 @@ class _GalleryScreenState extends State<GalleryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (_gallery['published'] == false)
+                    _UnpublishedBanner(
+                      onPublish: _admin ? _togglePublication : null,
+                    ),
                   Text(
-                    '$_total Aufnahmen',
+                    _total == 1 ? '1 Aufnahme' : '$_total Aufnahmen',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   if (textValue(_gallery['description']).isNotEmpty)
@@ -267,9 +330,18 @@ class _GalleryScreenState extends State<GalleryScreen> {
                       ),
                     ),
                   if (_uploading)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 12),
-                      child: LinearProgressIndicator(),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Semantics(
+                        liveRegion: true,
+                        label:
+                            '$_uploadDone von $_uploadTotal Bildern hochgeladen',
+                        child: LinearProgressIndicator(
+                          value: _uploadTotal == 0
+                              ? null
+                              : _uploadDone / _uploadTotal,
+                        ),
+                      ),
                     ),
                 ],
               ),
@@ -333,7 +405,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
           ),
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.fromLTRB(24, 24, 24, _admin ? 96 : 24),
               child: Center(
                 child: _error != null
                     ? GalleryError(message: _error!, retry: _load)
@@ -347,7 +419,9 @@ class _GalleryScreenState extends State<GalleryScreen> {
                     : _assets.isEmpty
                     ? const Text('In diesem Album sind noch keine Bilder.')
                     : Text(
-                        '${_assets.length} Aufnahmen',
+                        _assets.length == 1
+                            ? '1 Aufnahme'
+                            : '${_assets.length} Aufnahmen',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
               ),
@@ -357,4 +431,42 @@ class _GalleryScreenState extends State<GalleryScreen> {
       ),
     ),
   );
+}
+
+class _UnpublishedBanner extends StatelessWidget {
+  const _UnpublishedBanner({this.onPublish});
+  final VoidCallback? onPublish;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.visibility_off_outlined,
+            size: 20,
+            color: theme.colorScheme.onSecondaryContainer,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Nur für Administration sichtbar',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSecondaryContainer,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (onPublish != null)
+            TextButton(onPressed: onPublish, child: const Text('Freigeben')),
+        ],
+      ),
+    );
+  }
 }

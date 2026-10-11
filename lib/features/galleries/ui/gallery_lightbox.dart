@@ -1,14 +1,22 @@
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../data/api_client.dart';
+import '../../../shared/feedback.dart';
 import '../../../shared/widgets/protected_image.dart';
 
+const _stageBlack = Color(0xFF101311);
+const _pageTurn = Duration(milliseconds: 180);
+
+/// Full-screen image viewer. Pops with `true` when it changed an asset in
+/// [assets] (for example hid an image), so the grid can take that over.
 class GalleryLightbox extends StatefulWidget {
   const GalleryLightbox({
     super.key,
@@ -31,8 +39,9 @@ class GalleryLightbox extends StatefulWidget {
 class _GalleryLightboxState extends State<GalleryLightbox> {
   late final PageController _pages;
   late int _index;
-  bool _saving = false, _paging = false;
+  bool _saving = false, _paging = false, _changed = false;
   String? _pageError;
+  ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _undoBar;
   @override
   void initState() {
     super.initState();
@@ -110,27 +119,104 @@ class _GalleryLightboxState extends State<GalleryLightbox> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.toString())));
-      }
+      if (mounted) showProblem(context, e);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
+  /// Hides or shows one uploaded image in place; the lightbox stays open.
+  Future<void> _setHidden(int index, bool hidden, {bool undo = true}) async {
+    final asset = widget.assets[index];
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.controller.remote(
+        '/media/${textValue(asset['id']).substring(6)}/visibility',
+        method: 'PUT',
+        body: {'hidden': hidden},
+      );
+      if (!mounted) return;
+      setState(() {
+        widget.assets[index] = {...asset, 'hidden': hidden};
+        _changed = true;
+      });
+      _undoBar?.close();
+      _undoBar = messenger.showSnackBar(
+        SnackBar(
+          content: Text(hidden ? 'Bild ausgeblendet' : 'Bild eingeblendet'),
+          action: undo
+              ? SnackBarAction(
+                  label: 'Rückgängig',
+                  onPressed: () {
+                    if (mounted) _setHidden(index, !hidden, undo: false);
+                  },
+                )
+              : null,
+        ),
+      );
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+  }
+
+  void _previous() {
+    if (_index > 0) {
+      _pages.previousPage(duration: _pageTurn, curve: Curves.easeOut);
+    }
+  }
+
+  /// Turns the page, loading the next batch first at the end of the list.
+  VoidCallback? get _nextAction {
+    if (_index + 1 < widget.assets.length) {
+      return () => _pages.nextPage(duration: _pageTurn, curve: Curves.easeOut);
+    }
+    if (_index + 1 >= widget.total || _paging) return null;
+    return () async {
+      final requestedIndex = _index;
+      await _more(retry: true);
+      if (mounted &&
+          _index == requestedIndex &&
+          _index + 1 < widget.assets.length) {
+        _pages.nextPage(duration: _pageTurn, curve: Curves.easeOut);
+      }
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final asset = widget.assets[_index];
+    final next = _nextAction;
+    return PopScope<bool>(
+      canPop: !_changed,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          _undoBar?.close();
+          return;
+        }
+        Navigator.pop(context, true);
+      },
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.arrowLeft): _previous,
+          const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+              next?.call(),
+          const SingleActivator(LogicalKeyboardKey.escape): () =>
+              Navigator.maybePop(context),
+        },
+        child: Focus(autofocus: true, child: _viewer(context, asset, next)),
+      ),
+    );
+  }
+
+  Widget _viewer(BuildContext context, JsonMap asset, VoidCallback? next) {
     final date = dateValue(asset['date']);
     final video = asset['type'] == 'VIDEO';
     return Theme(
-      data: ThemeData.dark(useMaterial3: true),
+      data: StageTheme.build(Brightness.dark),
       child: Scaffold(
-        backgroundColor: const Color(0xFF101311),
+        backgroundColor: _stageBlack,
         appBar: AppBar(
-          backgroundColor: const Color(0xFF101311),
+          backgroundColor: _stageBlack,
           title: Text('${_index + 1} / ${widget.total}'),
           actions: [
             if (asset['canDownload'] == true && !video)
@@ -152,22 +238,7 @@ class _GalleryLightboxState extends State<GalleryLightbox> {
                 tooltip: asset['hidden'] == true
                     ? 'Bild einblenden'
                     : 'Bild ausblenden',
-                onPressed: () async {
-                  try {
-                    await widget.controller.remote(
-                      '/media/${textValue(asset['id']).substring(6)}/visibility',
-                      method: 'PUT',
-                      body: {'hidden': asset['hidden'] != true},
-                    );
-                    if (context.mounted) Navigator.pop(context);
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(
-                        context,
-                      ).showSnackBar(SnackBar(content: Text(e.toString())));
-                    }
-                  }
-                },
+                onPressed: () => _setHidden(_index, asset['hidden'] != true),
                 icon: Icon(
                   asset['hidden'] == true
                       ? Icons.visibility
@@ -268,12 +339,7 @@ class _GalleryLightboxState extends State<GalleryLightbox> {
                       children: [
                         IconButton(
                           tooltip: 'Vorheriges Bild',
-                          onPressed: _index > 0
-                              ? () => _pages.previousPage(
-                                  duration: const Duration(milliseconds: 180),
-                                  curve: Curves.easeOut,
-                                )
-                              : null,
+                          onPressed: _index > 0 ? _previous : null,
                           icon: const Icon(Icons.chevron_left),
                         ),
                         Expanded(
@@ -286,27 +352,7 @@ class _GalleryLightboxState extends State<GalleryLightbox> {
                         ),
                         IconButton(
                           tooltip: 'Nächstes Bild',
-                          onPressed: _index + 1 < widget.assets.length
-                              ? () => _pages.nextPage(
-                                  duration: const Duration(milliseconds: 180),
-                                  curve: Curves.easeOut,
-                                )
-                              : _index + 1 < widget.total && !_paging
-                              ? () async {
-                                  final requestedIndex = _index;
-                                  await _more(retry: true);
-                                  if (mounted &&
-                                      _index == requestedIndex &&
-                                      _index + 1 < widget.assets.length) {
-                                    _pages.nextPage(
-                                      duration: const Duration(
-                                        milliseconds: 180,
-                                      ),
-                                      curve: Curves.easeOut,
-                                    );
-                                  }
-                                }
-                              : null,
+                          onPressed: next,
                           icon: const Icon(Icons.chevron_right),
                         ),
                       ],

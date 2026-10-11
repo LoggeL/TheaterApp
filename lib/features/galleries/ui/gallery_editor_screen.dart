@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
+import '../../../shared/feedback.dart';
 
 class GalleryEditor extends StatefulWidget {
   const GalleryEditor({super.key, required this.controller, this.gallery});
@@ -56,7 +57,7 @@ class _GalleryEditorState extends State<GalleryEditor> {
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = userMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -72,7 +73,7 @@ class _GalleryEditorState extends State<GalleryEditor> {
   Widget _form(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: Text(
-        widget.gallery == null ? 'Album freigeben' : 'Album bearbeiten',
+        widget.gallery == null ? 'Album anlegen' : 'Album bearbeiten',
       ),
     ),
     body: ListView(

@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/app_controller.dart';
-import '../../../core/identity.dart';
 import '../../../core/models.dart';
+import '../../../shared/feedback.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/member_avatar.dart';
 import '../../../shared/widgets/page_header.dart';
@@ -29,6 +29,24 @@ class _ParticipationScreenState extends State<ParticipationScreen> {
   late Future<JsonMap> _data = _load();
   Future<JsonMap> _load() => widget.controller.remote('/participation');
 
+  void _reload() => setState(() {
+    _data = _load();
+  });
+
+  /// Pull to refresh keeps the current numbers visible until new ones arrive.
+  Future<void> _refresh() async {
+    try {
+      final next = await _load();
+      if (mounted) {
+        setState(() {
+          _data = Future.value(next);
+        });
+      }
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
@@ -38,7 +56,7 @@ class _ParticipationScreenState extends State<ParticipationScreen> {
       actions: [
         IconButton(
           tooltip: 'Aktualisieren',
-          onPressed: () => setState(() => _data = _load()),
+          onPressed: _reload,
           icon: const Icon(Icons.refresh),
         ),
       ],
@@ -47,10 +65,20 @@ class _ParticipationScreenState extends State<ParticipationScreen> {
       future: _data,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return EmptyState(
-            icon: Icons.cloud_off_outlined,
-            title: 'Übersicht nicht geladen',
-            message: identityError(snapshot.error!),
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(22, 40, 22, 32),
+            children: [
+              EmptyState(
+                icon: Icons.cloud_off_outlined,
+                title: 'Übersicht nicht geladen',
+                message: userMessage(snapshot.error!),
+                action: OutlinedButton.icon(
+                  onPressed: _reload,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Erneut laden'),
+                ),
+              ),
+            ],
           );
         }
         if (!snapshot.hasData) {
@@ -59,44 +87,48 @@ class _ParticipationScreenState extends State<ParticipationScreen> {
         final data = snapshot.data!;
         final since = dateValue(data['since']);
         final people = jsonList(data['people']).map(jsonMap).toList();
-        return Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 840),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(22, 14, 22, 32),
-              children: [
-                if (!widget.ensemble)
-                  _SummaryCard(jsonMap(data['own']), since: since)
-                else if (people.isEmpty)
-                  const EmptyState(
-                    icon: Icons.groups_outlined,
-                    title: 'Keine aktiven Personen',
-                    message: 'Aktive Personen im Ensemble erscheinen hier.',
-                  )
-                else ...[
-                  _SummaryCard(
-                    _total(people),
-                    since: since,
-                    title: 'Ensemble gesamt',
-                  ),
-                  SectionTitle('Personen (${people.length})'),
-                  for (final p in people)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _PersonCard(
-                        controller: widget.controller,
-                        counts: p,
-                      ),
+        return RefreshIndicator(
+          onRefresh: _refresh,
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 840),
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(22, 14, 22, 32),
+                children: [
+                  if (!widget.ensemble)
+                    _SummaryCard(jsonMap(data['own']), since: since)
+                  else if (people.isEmpty)
+                    const EmptyState(
+                      icon: Icons.groups_outlined,
+                      title: 'Keine aktiven Personen',
+                      message: 'Aktive Personen im Ensemble erscheinen hier.',
+                    )
+                  else ...[
+                    _SummaryCard(
+                      _total(people),
+                      since: since,
+                      title: 'Ensemble gesamt',
                     ),
+                    SectionTitle('Personen (${people.length})'),
+                    for (final p in people)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _PersonCard(
+                          controller: widget.controller,
+                          counts: p,
+                        ),
+                      ),
+                  ],
+                  const SizedBox(height: 20),
+                  _Explanation(
+                    widget.ensemble
+                        ? 'Absagen zählen nie negativ. „Ohne Absage gefehlt“ zählt nur Termine, zu denen die Person schon ein App-Konto hatte. Jedes Mitglied sieht unter „Mein Bereich“ die eigenen Zahlen.'
+                        : 'Absagen zählen nicht negativ – rechtzeitig absagen ist genau richtig, eine Begründung ist nicht nötig. Die Theaterleitung sieht dieselben Zahlen, es gibt keine Rangliste.',
+                  ),
                 ],
-                const SizedBox(height: 20),
-                _Explanation(
-                  widget.ensemble
-                      ? 'Absagen zählen nie negativ. „Ohne Absage gefehlt“ zählt nur Termine, zu denen die Person schon ein App-Konto hatte. Jedes Mitglied sieht unter „Mein Bereich“ die eigenen Zahlen.'
-                      : 'Absagen zählen nicht negativ – rechtzeitig absagen ist genau richtig, eine Begründung ist nicht nötig. Die Theaterleitung sieht dieselben Zahlen, es gibt keine Rangliste.',
-                ),
-              ],
+              ),
             ),
           ),
         );

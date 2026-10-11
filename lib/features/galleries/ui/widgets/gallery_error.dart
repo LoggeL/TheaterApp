@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+/// A load failure with a retry button; [retry] errors are ignored because
+/// the caller shows the next failure itself.
 class GalleryError extends StatelessWidget {
   const GalleryError({super.key, required this.message, required this.retry});
   final String message;
