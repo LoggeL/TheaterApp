@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:theater_app/app/shell/app_navigation.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/data/local_store.dart';
+import 'package:theater_app/features/events/events.dart';
 import 'package:theater_app/main.dart';
-import 'package:theater_app/ui/app_navigation.dart';
-import 'package:theater_app/ui/events.dart';
 
 Future<AppController> demoApp(WidgetTester tester) async {
   tester.view.devicePixelRatio = 1;

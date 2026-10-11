@@ -1,13 +1,14 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:theater_app/main.dart' as app;
 import 'package:theater_app/core/models.dart';
-import 'package:theater_app/ui/calendar.dart';
-import 'package:theater_app/ui/galleries.dart';
-import 'package:theater_app/ui/profile.dart';
+import 'package:theater_app/features/events/events.dart';
+import 'package:theater_app/features/galleries/galleries.dart';
+import 'package:theater_app/features/profile/profile.dart';
+import 'package:theater_app/main.dart' as app;
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();

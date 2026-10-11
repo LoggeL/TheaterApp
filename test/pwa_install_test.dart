@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:theater_app/core/pwa_install.dart';
-import 'package:theater_app/ui/pwa_install.dart';
+import 'package:theater_app/app/platform/pwa_install.dart';
+import 'package:theater_app/app/platform/pwa_install_card.dart';
 
 class Installation extends PwaInstallation {
   Installation({

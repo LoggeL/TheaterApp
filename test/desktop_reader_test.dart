@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/data/local_store.dart';
-import 'package:theater_app/ui/reader.dart';
+import 'package:theater_app/features/scripts/scripts.dart';
 
 void main() {
   testWidgets('desktop scene navigation and modes survive mobile resizing', (

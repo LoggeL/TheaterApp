@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
+import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/core/models.dart';
-import 'package:theater_app/ui/events.dart';
-import 'package:theater_app/ui/slots.dart';
-import 'package:theater_app/ui/theme.dart';
+import 'package:theater_app/features/events/events.dart';
+import 'package:theater_app/features/slots/slots.dart';
 
 import 'app_controller_test.dart' show TestServer, signIn;
 

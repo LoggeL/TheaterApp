@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/data/local_store.dart';
-import 'package:theater_app/ui/messages.dart';
-import 'package:theater_app/ui/theme.dart';
-import 'package:theater_app/ui/today.dart';
+import 'package:theater_app/features/messages/messages.dart';
+import 'package:theater_app/features/today/today.dart';
 
 import 'app_controller_test.dart' show TestServer, fixedNow, signIn;
 

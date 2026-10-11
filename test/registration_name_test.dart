@@ -7,7 +7,7 @@ import 'package:http/testing.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/data/api_client.dart';
 import 'package:theater_app/data/local_store.dart';
-import 'package:theater_app/ui/firebase_auth.dart';
+import 'package:theater_app/features/auth/auth.dart';
 
 import 'firebase_access_test.dart' show FakeIdentity;
 

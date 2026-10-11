@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
-import 'package:theater_app/ui/theme.dart';
-import 'package:theater_app/ui/today.dart';
+import 'package:theater_app/app/theme/stage_theme.dart';
+import 'package:theater_app/features/today/today.dart';
 
 import 'app_controller_test.dart' show TestServer, fixedNow, signIn;
 

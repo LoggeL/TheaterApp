@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -7,15 +8,14 @@ import 'package:http/testing.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/data/api_client.dart';
-import 'package:theater_app/ui/calendar.dart';
-import 'package:theater_app/ui/events.dart';
-import 'package:theater_app/ui/galleries.dart';
-import 'package:theater_app/ui/profile.dart';
-import 'package:theater_app/ui/theme.dart';
+import 'package:theater_app/features/events/events.dart';
+import 'package:theater_app/features/galleries/galleries.dart';
+
 import 'app_controller_test.dart' show TestServer, signIn, jsonResponse;
 
 void main() {
   setUpAll(() => initializeDateFormatting('de'));
+
   test(
     'calendar uses Monday-first civil days across leap months and year boundaries',
     () {
@@ -27,6 +27,7 @@ void main() {
       expect(jan.first, DateTime(2026, 12, 28));
     },
   );
+
   test(
     'multi-day rehearsals appear on every occupied day, end midnight is exclusive',
     () {
@@ -41,6 +42,7 @@ void main() {
       expect(eventOnDay(e, DateTime(2026, 10, 26)), false);
     },
   );
+
   test(
     'JSON and binary API retain pagination query without placing bearer tokens in URLs',
     () async {
@@ -83,6 +85,7 @@ void main() {
       api.close();
     },
   );
+
   test('late image fetch cannot populate a new account session', () async {
     final server = TestServer(),
         gate = Completer<http.Response>(),
@@ -106,46 +109,7 @@ void main() {
     await rejected;
     c.dispose();
   });
-  for (final width in [320.0, 1100.0]) {
-    testWidgets(
-      'calendar and profile remain usable at $width px in dark theme',
-      (tester) async {
-        tester.view.physicalSize = Size(width, 900);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-        final c = TestServer().controller();
-        await signIn(c);
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: StageTheme.build(Brightness.dark),
-            home: Scaffold(body: ScheduleScreen(controller: c)),
-          ),
-        );
-        await tester.pumpAndSettle();
-        if (width < 1000) {
-          await tester.tap(find.byTooltip('Kalender'));
-          await tester.pumpAndSettle();
-        }
-        expect(find.byType(RehearsalCalendar), findsOneWidget);
-        expect(find.byTooltip('Datum auswählen'), findsNothing);
-        await tester.tap(find.byTooltip('Vorheriger Monat'));
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: StageTheme.build(Brightness.dark),
-            home: ProfileScreen(controller: c),
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(find.text('Bild auswählen'), findsOneWidget);
-        expect(tester.takeException(), isNull);
-        await tester.pumpWidget(const SizedBox());
-        c.dispose();
-      },
-    );
-  }
+
   testWidgets(
     'gallery pagination opens and advances lightbox without exposing forbidden downloads',
     (tester) async {

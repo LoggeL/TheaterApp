@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:in_app_update/in_app_update.dart';
-import 'package:theater_app/ui/app_update.dart';
+import 'package:theater_app/app/platform/app_update.dart';
 
 AppUpdateInfo info(UpdateAvailability availability, {bool immediate = true}) =>
     AppUpdateInfo(

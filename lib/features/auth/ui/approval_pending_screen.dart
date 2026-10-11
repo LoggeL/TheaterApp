@@ -1,0 +1,231 @@
+import 'package:flutter/material.dart';
+
+import '../../../app/brand.dart';
+import '../../../app/theme/stage_theme.dart';
+import '../../../core/app_controller.dart';
+import '../../../core/identity.dart';
+import '../../../shared/widgets/privacy_links.dart';
+import '../../../shared/widgets/state_pill.dart';
+
+class ApprovalPendingScreen extends StatefulWidget {
+  const ApprovalPendingScreen({super.key, required this.controller});
+  final AppController controller;
+  @override
+  State<ApprovalPendingScreen> createState() => _ApprovalPendingScreenState();
+}
+
+class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
+  final _nameForm = GlobalKey<FormState>();
+  late final TextEditingController _name;
+  bool _busy = false;
+  String? _error, _info;
+  @override
+  void initState() {
+    super.initState();
+    final user = widget.controller.user!;
+    _name = TextEditingController(
+      text: user.needsRegistrationName ? '' : user.name,
+    );
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveName() async {
+    if (!_nameForm.currentState!.validate()) return;
+    await _run(() async {
+      await widget.controller.saveRegistrationName(_name.text);
+      if (mounted) {
+        setState(() => _info = 'Dein Name zur Zuordnung ist gespeichert.');
+      }
+    });
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+      _info = null;
+    });
+    try {
+      await action();
+    } catch (e) {
+      if (mounted) setState(() => _error = identityError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.controller, user = widget.controller.user!;
+    final blocked = ['suspended', 'rejected'].contains(user.status);
+    final verify = !user.identityReady;
+    final title = blocked
+        ? 'Zugang nicht freigegeben'
+        : user.needsRegistrationName
+        ? 'Namen angeben'
+        : verify
+        ? 'E-Mail bestätigen'
+        : 'Freigabe ausstehend';
+    return Scaffold(
+      appBar: AppBar(title: const Text(Brand.name)),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: ListView(
+              padding: const EdgeInsets.all(28),
+              children: [
+                const SizedBox(height: 32),
+                CircleAvatar(
+                  radius: 42,
+                  backgroundColor: const Color(0xFFFFECCE),
+                  child: Icon(
+                    blocked
+                        ? Icons.lock_outline
+                        : verify
+                        ? Icons.mark_email_unread_outlined
+                        : Icons.schedule,
+                    color: const Color(0xFFA25B06),
+                    size: 42,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  blocked
+                      ? 'Bitte wende dich an die Theaterleitung.'
+                      : user.needsRegistrationName
+                      ? 'Bitte gib deinen Namen an, damit die Theaterleitung dein Konto der richtigen Person im Ensemble zuordnen kann.'
+                      : verify
+                      ? 'Öffne den Link in deiner E-Mail und kehre zur App zurück. Die Bestätigung wird automatisch geprüft. Danach kann die Theaterleitung deinen Zugang freigeben.'
+                      : 'Dein Konto ist erstellt. Die Theaterleitung ordnet dich einer Person zu und gibt deinen Zugang frei.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 28),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user.needsRegistrationName ? 'Dein Konto' : user.name,
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        if (!user.needsRegistrationName &&
+                            user.status == 'pending') ...[
+                          const SizedBox(height: 4),
+                          const Text('Name zur Zuordnung'),
+                        ],
+                        const SizedBox(height: 6),
+                        Text(user.email),
+                        const SizedBox(height: 12),
+                        StatePill(
+                          user.emailVerified
+                              ? 'E-Mail bestätigt'
+                              : verify
+                              ? 'Bestätigung ausstehend'
+                              : 'Konto erstellt',
+                          icon: user.emailVerified
+                              ? Icons.check
+                              : Icons.schedule,
+                          color: user.emailVerified
+                              ? StageTheme.green
+                              : const Color(0xFFA25B06),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (user.status == 'pending') ...[
+                  const SizedBox(height: 20),
+                  Form(
+                    key: _nameForm,
+                    child: TextFormField(
+                      controller: _name,
+                      enabled: !_busy,
+                      maxLength: 120,
+                      autofillHints: const [AutofillHints.name],
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'Name zur Zuordnung',
+                        hintText: 'Vor- und Nachname',
+                        helperText:
+                            'Nur zur Zuordnung deines Kontos zur richtigen Person im Ensemble.',
+                        helperMaxLines: 5,
+                        counterText: '',
+                      ),
+                      validator: (value) => value?.trim().isNotEmpty == true
+                          ? null
+                          : 'Bitte deinen Namen eingeben.',
+                      onFieldSubmitted: (_) {
+                        if (!_busy) _saveName();
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  FilledButton(
+                    onPressed: _busy ? null : _saveName,
+                    child: const Text('Namen speichern'),
+                  ),
+                ],
+                const SizedBox(height: 28),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+                if (_info != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Text(_info!),
+                  ),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : () => _run(c.refreshIdentityAccess),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Status aktualisieren'),
+                ),
+                if (verify)
+                  TextButton(
+                    onPressed: _busy
+                        ? null
+                        : () => _run(() async {
+                            await c.identity!.verifyEmail();
+                            if (mounted) {
+                              setState(
+                                () => _info =
+                                    'Die Bestätigungs-E-Mail wurde erneut angefordert.',
+                              );
+                            }
+                          }),
+                    child: const Text('E-Mail erneut senden'),
+                  ),
+                const SizedBox(height: 14),
+                TextButton(
+                  onPressed: _busy ? null : () => _run(c.logout),
+                  child: const Text('Abmelden'),
+                ),
+                const PrivacyLinks(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

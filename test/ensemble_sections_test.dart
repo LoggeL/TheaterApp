@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:theater_app/ui/admin.dart';
-import 'package:theater_app/ui/more.dart';
-import 'package:theater_app/ui/theme.dart';
+import 'package:theater_app/app/theme/stage_theme.dart';
+import 'package:theater_app/features/ensemble/ensemble.dart';
 
 import 'app_controller_test.dart' show TestServer, signIn;
 

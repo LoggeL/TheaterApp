@@ -1,16 +1,16 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:theater_app/core/account_roster.dart';
+import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/data/api_client.dart';
 import 'package:theater_app/data/local_store.dart';
-import 'package:theater_app/ui/accounts_admin.dart';
-import 'package:theater_app/ui/admin.dart';
-import 'package:theater_app/ui/theme.dart';
+import 'package:theater_app/features/accounts/accounts.dart';
+
 import 'firebase_access_test.dart' show FakeIdentity;
 
 JsonMap fixture() => {

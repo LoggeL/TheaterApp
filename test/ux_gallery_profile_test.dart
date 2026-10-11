@@ -7,8 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:theater_app/core/models.dart';
-import 'package:theater_app/ui/galleries.dart';
-import 'package:theater_app/ui/profile.dart';
+import 'package:theater_app/features/galleries/galleries.dart';
+import 'package:theater_app/features/profile/profile.dart';
 
 import 'app_controller_test.dart' show TestServer, signIn, jsonResponse;
 

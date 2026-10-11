@@ -8,7 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'app_controller.dart';
-import 'brand.dart';
+import '../app/brand.dart';
 import 'identity.dart';
 
 /// Validated navigation targets; push payloads never execute external URLs.

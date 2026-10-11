@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:theater_app/core/models.dart';
-import 'package:theater_app/core/scene_planning.dart';
+import 'package:theater_app/features/rehearsal/rehearsal.dart';
 
 void main() {
   final scene = ScriptScene.fromJson({

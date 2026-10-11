@@ -1,10 +1,12 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/models.dart';
-import 'package:theater_app/ui/admin.dart';
-import 'package:theater_app/ui/theme.dart';
+import 'package:theater_app/features/ensemble/ensemble.dart';
+import 'package:theater_app/shared/navigation.dart';
 
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
 

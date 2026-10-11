@@ -1,17 +1,15 @@
-import 'package:theater_app/ui/calendar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/core/models.dart';
+import 'package:theater_app/features/events/events.dart';
 import 'package:theater_app/main.dart';
-import 'package:theater_app/ui/admin.dart';
-import 'package:theater_app/ui/events.dart';
-import 'package:theater_app/ui/polls.dart';
-import 'package:theater_app/ui/theme.dart';
+
 import 'app_controller_test.dart' show TestServer, signIn;
 
 void main() {
   setUpAll(() => initializeDateFormatting('de'));
+
   test(
     'descriptions and member roles survive model copies and cache serialization',
     () {
@@ -46,6 +44,7 @@ void main() {
       expect(TheaterMember.fromJson(member.toJson()).roleIds, ['r1', 'r2']);
     },
   );
+
   test(
     'offline votes survive synchronization conflicts without inflating results',
     () async {
@@ -77,6 +76,7 @@ void main() {
       c.dispose();
     },
   );
+
   for (final width in [390.0, 900.0, 1440.0]) {
     testWidgets('Admin navigation and plan fit ${width.toInt()}px', (
       tester,
@@ -113,107 +113,4 @@ void main() {
       c.dispose();
     });
   }
-  testWidgets('event editor saves description and additional event type', (
-    tester,
-  ) async {
-    final server = TestServer(), c = server.controller();
-    await signIn(c);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: StageTheme.build(Brightness.light),
-        home: EventEditorScreen(controller: c),
-      ),
-    );
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Titel'),
-      'Werkstatt',
-    );
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Beschreibung'),
-      'Schraubendreher mitbringen',
-    );
-    final kind = find.byKey(const ValueKey('event-kind'));
-    await tester.scrollUntilVisible(
-      kind,
-      250,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(kind);
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Aufbau').last);
-    await tester.tap(find.text('Aufbau').last);
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('Termin speichern'),
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(find.text('Termin speichern'));
-    await tester.pumpAndSettle();
-    expect(server.actionBodies.last['type'], 'setup');
-    expect(
-      server.actionBodies.last['description'],
-      'Schraubendreher mitbringen',
-    );
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox());
-    c.dispose();
-  });
-  testWidgets('member editor saves two independently selectable roles', (
-    tester,
-  ) async {
-    final server = TestServer();
-    server.data['personRoles'] = [
-      {'id': 'r1', 'name': 'Technik'},
-      {'id': 'r2', 'name': 'Requisite'},
-    ];
-    final c = server.controller();
-    await signIn(c);
-    await tester.pumpWidget(
-      MaterialApp(home: MemberEditorScreen(controller: c)),
-    );
-    await tester.enterText(find.widgetWithText(TextField, 'Name'), 'Sam');
-    await tester.tap(find.text('Technik'));
-    await tester.tap(find.text('Requisite'));
-    await tester.ensureVisible(find.text('Speichern'));
-    await tester.tap(find.text('Speichern'));
-    await tester.pumpAndSettle();
-    expect(server.actionBodies.last['roleIds'], ['r1', 'r2']);
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox());
-    c.dispose();
-  });
-  testWidgets('poll detail sends a general choice and renders results', (
-    tester,
-  ) async {
-    final server = TestServer();
-    server.data['polls'] = [
-      {
-        'id': 'p',
-        'title': 'Welches Essen?',
-        'options': [
-          {'id': 'a', 'label': 'Pizza', 'votes': 2},
-          {'id': 'b', 'label': 'Pasta', 'votes': 1},
-        ],
-      },
-    ];
-    final c = server.controller();
-    await signIn(c);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: PollDetailScreen(controller: c, pollId: 'p'),
-      ),
-    );
-    await tester.tap(find.text('Pasta'));
-    await tester.pumpAndSettle();
-    expect(server.actionBodies.last, {
-      'action': 'poll.vote',
-      'pollId': 'p',
-      'optionId': 'b',
-    });
-    expect(find.text('3 Stimmen'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox());
-    c.dispose();
-  });
 }

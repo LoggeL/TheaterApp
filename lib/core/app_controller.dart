@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../data/api_client.dart';
 import '../data/demo_data.dart';
 import '../data/local_store.dart';
-import 'casting.dart';
+import '../features/casting/domain/casting.dart';
 import 'models.dart';
 import 'identity.dart';
 
@@ -1144,18 +1144,6 @@ class AppController extends ChangeNotifier {
       'sceneIds': productionId == null ? <String>[] : sceneIds.toSet().toList(),
     });
   }
-
-  Future<void> linkEventToScript(
-    String eventId,
-    String? productionId,
-    List<String> sceneIds, {
-    int? expectedVersion,
-  }) => linkEventScript(
-    eventId,
-    productionId,
-    sceneIds,
-    expectedVersion: expectedVersion,
-  );
 
   Future<void> _enqueue(JsonMap payload) async {
     if (_user == null) {

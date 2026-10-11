@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:theater_app/ui/app_navigation.dart';
+import 'package:theater_app/features/events/events.dart';
 
 import 'app_controller_test.dart' show TestServer, signIn;
 

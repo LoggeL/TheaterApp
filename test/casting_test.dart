@@ -2,11 +2,10 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:theater_app/core/casting.dart';
+import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/data/demo_data.dart';
-import 'package:theater_app/ui/casting.dart';
-import 'package:theater_app/ui/theme.dart';
+import 'package:theater_app/features/casting/casting.dart';
 
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
 

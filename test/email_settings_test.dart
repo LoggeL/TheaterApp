@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/core/models.dart';
-import 'package:theater_app/ui/more.dart';
+import 'package:theater_app/features/settings/settings.dart';
+
 import 'app_controller_test.dart' show TestServer, signIn;
 
 void main() {

@@ -421,7 +421,7 @@ void main() {
       final production = event.productionId;
       server.offline = true;
       await controller.linkEventScript(event.id, production, ['1']);
-      await controller.linkEventToScript(event.id, production, ['2']);
+      await controller.linkEventScript(event.id, production, ['2']);
       expect(controller.outbox.map((a) => a.payload['version']), [
         event.version,
         event.version + 1,
