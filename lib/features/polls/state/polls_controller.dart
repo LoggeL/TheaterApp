@@ -10,7 +10,7 @@ extension PollsController on AppController {
         statusCode: 404,
       );
     }
-    if (poll.isClosed) {
+    if (poll.isClosedAt(now)) {
       throw const ApiException(
         'Die Abstimmung ist bereits beendet.',
         statusCode: 409,
