@@ -77,9 +77,12 @@ class _MessageDetailScreenState extends State<MessageDetailScreen> {
               'action': 'message.read',
               'id': widget.message['id'],
             })
-            .catchError((Object e) {
-              if (mounted) showProblem(context, e);
-            });
+            .then<void>(
+              (_) {},
+              onError: (Object e) {
+                if (mounted) showProblem(context, e);
+              },
+            );
       }
     });
   }

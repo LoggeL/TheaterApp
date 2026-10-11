@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/events/events.dart';
 import 'package:theater_app/features/polls/polls.dart';

@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:intl/date_symbol_data_local.dart';
-import 'package:theater_app/core/models.dart';
+import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/data/api_client.dart';
 import 'package:theater_app/features/events/events.dart';
 import 'package:theater_app/features/galleries/galleries.dart';

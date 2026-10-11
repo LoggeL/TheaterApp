@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/data/demo_data.dart';

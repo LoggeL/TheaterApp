@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/participation/participation.dart';

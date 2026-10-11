@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/app_controller.dart';
+import '../core/controller/pending_action.dart';
 import '../core/identity.dart';
 
 /// A readable German message for an error shown to the member.
@@ -33,6 +34,17 @@ Future<void> runAction(
     }
   }
 }
+
+/// The confirmation for a change: [done] once the server has it, [queued]
+/// while it waits in the outbox for a connection.
+String outcomeText(
+  ActionOutcome outcome, {
+  required String done,
+  required String queued,
+}) => switch (outcome) {
+  ActionOutcome.synced => done,
+  ActionOutcome.queued => queued,
+};
 
 /// Confirms a finished action, optionally with one follow-up action.
 void showDone(

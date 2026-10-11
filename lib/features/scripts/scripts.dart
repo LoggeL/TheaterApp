@@ -1,6 +1,10 @@
 /// Public API of the scripts feature.
 library;
 
+export '../../core/app_controller.dart' show ScriptsController;
+export 'domain/focus_state.dart';
+export 'domain/production.dart';
+export 'domain/script_document.dart';
 export 'domain/script_filter.dart';
 export 'ui/annotations/cue_comments_screen.dart';
 export 'ui/annotations/private_note_editor.dart';

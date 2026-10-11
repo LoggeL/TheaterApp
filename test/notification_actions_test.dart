@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/data/api_client.dart';
 import 'app_controller_test.dart' show TestServer, signIn;
