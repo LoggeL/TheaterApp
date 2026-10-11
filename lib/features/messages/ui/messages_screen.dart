@@ -36,11 +36,19 @@ class MessagesScreen extends StatefulWidget {
     super.key,
     required this.controller,
     this.embedded = false,
+    this.switcher,
+    this.floatingActionButton,
   });
   final AppController controller;
 
   /// Shown as a main tab below the app bar instead of as its own page.
   final bool embedded;
+
+  /// Shown below the header, e.g. to switch to the polls.
+  final Widget? switcher;
+
+  /// Replaces the own compose button, e.g. by the shared one of the tab.
+  final Widget? floatingActionButton;
   @override
   State<MessagesScreen> createState() => _MessagesScreenState();
 }
@@ -111,17 +119,19 @@ class _MessagesScreenState extends State<MessagesScreen> {
                 title: const Text('Mitteilungen'),
                 actions: [if (unread > 0) readAll],
               ),
-        floatingActionButton: admin
-            ? FloatingActionButton.extended(
-                tooltip: 'Mitteilung schreiben',
-                onPressed: () =>
-                    openPage(context, MessageComposerScreen(controller: c)),
-                icon: const Icon(Icons.edit_outlined),
-                label: const Text('Schreiben'),
-              )
-            : null,
+        floatingActionButton:
+            widget.floatingActionButton ??
+            (admin
+                ? FloatingActionButton.extended(
+                    tooltip: 'Mitteilung schreiben',
+                    onPressed: () =>
+                        openPage(context, MessageComposerScreen(controller: c)),
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Schreiben'),
+                  )
+                : null),
         body: RefreshIndicator(
-          onRefresh: c.refresh,
+          onRefresh: () => refreshWithFeedback(context, c),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 760),
@@ -144,6 +154,10 @@ class _MessagesScreenState extends State<MessagesScreen> {
                           : '$unread ungelesene Mitteilungen',
                       trailing: unread > 0 ? readAll : null,
                     ),
+                  if (widget.switcher != null) ...[
+                    widget.switcher!,
+                    const SizedBox(height: 14),
+                  ],
                   if (all.isNotEmpty) ...[
                     Align(
                       alignment: Alignment.centerLeft,
@@ -205,16 +219,21 @@ class _MessageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context), m = message;
-    final unread = m['read'] != true, date = dateValue(m['createdAt']);
+    final unread = messageUnreadFor(controller.user, m);
+    final date = dateValue(m['createdAt']);
+    // Admins also see messages to others; those stay in the background.
+    final forOthers = !messageAddressedTo(controller.user, m);
     final author = controller.members
         .where((x) => x.id == intValue(m['authorId']))
         .firstOrNull;
     final recipients = jsonList(m['recipientIds']).length;
     final readers = jsonList(m['readerIds']).length;
-    return Card(
+    final card = Card(
       clipBehavior: Clip.antiAlias,
       color: unread
           ? theme.colorScheme.primaryContainer.withValues(alpha: .35)
+          : forOthers
+          ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: .5)
           : null,
       child: InkWell(
         onTap: () => openPage(
@@ -254,6 +273,9 @@ class _MessageCard extends StatelessWidget {
                               fontWeight: unread
                                   ? FontWeight.w800
                                   : FontWeight.w600,
+                              color: forOthers
+                                  ? theme.colorScheme.onSurfaceVariant
+                                  : null,
                             ),
                           ),
                         ),
@@ -296,6 +318,11 @@ class _MessageCard extends StatelessWidget {
                             semanticLabel: 'Mit Link',
                             color: theme.colorScheme.outline,
                           ),
+                        if (forOthers)
+                          StatePill(
+                            'Nicht an dich',
+                            color: theme.colorScheme.outline,
+                          ),
                         if (admin && m['audience'] != 'all')
                           messageAudience(controller, m),
                         if (admin && recipients > 0)
@@ -315,6 +342,11 @@ class _MessageCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+    return Semantics(
+      label: unread ? 'Ungelesen' : null,
+      container: true,
+      child: card,
     );
   }
 }

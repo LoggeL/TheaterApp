@@ -42,10 +42,37 @@ class _PushAdminScreenState extends State<PushAdminScreen> {
   void _reload() =>
       setState(() => _data = widget.controller.remote('/admin/push'));
 
-  bool get _ready =>
-      _title.text.trim().isNotEmpty &&
-      _body.text.trim().isNotEmpty &&
-      _to.chosen;
+  /// What still keeps the push from being sent.
+  List<String> get _missing => [
+    if (_title.text.trim().isEmpty) 'Titel',
+    if (_body.text.trim().isEmpty) 'Text',
+    if (!_to.chosen) 'Empfänger',
+  ];
+
+  bool get _ready => _missing.isEmpty;
+
+  bool get _dirty =>
+      _title.text.trim().isNotEmpty || _body.text.trim().isNotEmpty;
+
+  void _clear() {
+    _title.clear();
+    _body.clear();
+    _to = const Recipients();
+  }
+
+  /// Continues the draft as a message; once it is published, the push
+  /// draft is no longer needed.
+  Future<void> _writeMessage() async {
+    final published = await openPage<bool>(
+      context,
+      MessageComposerScreen(
+        controller: widget.controller,
+        initialTitle: _title.text.trim(),
+        initialBody: _body.text.trim(),
+      ),
+    );
+    if (published == true && mounted) setState(_clear);
+  }
 
   Future<void> _send() async {
     final count = _to.members(widget.controller).length;
@@ -73,25 +100,23 @@ class _PushAdminScreenState extends State<PushAdminScreen> {
     if (confirmed != true || !mounted) return;
     setState(() => _busy = true);
     try {
-      await widget.controller.performAction({
+      final outcome = await widget.controller.performAction({
         'action': 'push.send',
         'title': _title.text,
         'body': _body.text,
         ..._to.toJson(),
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            widget.controller.pendingCount > 0
-                ? 'Push zur Übertragung vorgemerkt.'
-                : 'Push an $count ${count == 1 ? 'Person' : 'Personen'} wird versendet.',
-          ),
+      showDone(
+        context,
+        outcomeText(
+          outcome,
+          done:
+              'Push an $count ${count == 1 ? 'Person' : 'Personen'} wird versendet.',
+          queued: 'Push zur Übertragung vorgemerkt.',
         ),
       );
-      _title.clear();
-      _body.clear();
-      _to = const Recipients();
+      _clear();
       _reload();
     } catch (e) {
       if (mounted) showProblem(context, e);
@@ -118,149 +143,160 @@ class _PushAdminScreenState extends State<PushAdminScreen> {
   @override
   Widget build(BuildContext context) {
     final c = widget.controller, theme = Theme.of(context);
-    return AdminPage(
-      controller: c,
-      title: 'Push senden',
-      actions: [
-        IconButton(
-          tooltip: 'Aktualisieren',
-          onPressed: _reload,
-          icon: const Icon(Icons.refresh),
-        ),
-      ],
-      children: (context) => [
-        const PageHeader(
-          'Eigener Push',
-          eyebrow: 'Sofort benachrichtigen',
-          subtitle:
-              'Für kurzfristige Hinweise wie „Probe beginnt 30 Minuten später“. '
-              'Ein Push wird nicht gespeichert. Was man nachlesen können soll, gehört in eine Mitteilung.',
-        ),
-        if (!c.pushConfigured)
-          const EmptyState(
-            icon: Icons.notifications_off_outlined,
-            title: 'Push ist noch nicht eingerichtet',
-            message:
-                'Sobald der Versand eingerichtet ist, kannst du hier Pushes senden.',
-          )
-        else ...[
-          TextField(
-            controller: _title,
-            decoration: const InputDecoration(labelText: 'Titel'),
-            maxLength: 120,
-            textCapitalization: TextCapitalization.sentences,
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _body,
-            decoration: const InputDecoration(
-              labelText: 'Text',
-              alignLabelWithHint: true,
-            ),
-            minLines: 2,
-            maxLines: 5,
-            maxLength: 500,
-            textCapitalization: TextCapitalization.sentences,
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 8),
-          _PushPreview(title: _title.text, body: _body.text),
-          const SectionTitle('Empfänger'),
-          RecipientSelector(
-            controller: c,
-            value: _to,
-            onChanged: (value) => setState(() => _to = value),
-          ),
-          const SizedBox(height: 20),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              FilledButton.icon(
-                onPressed: _busy || !_ready ? null : _send,
-                icon: const Icon(Icons.send_outlined),
-                label: const Text('Push senden'),
-              ),
-              OutlinedButton.icon(
-                onPressed: () =>
-                    openPage(context, MessageComposerScreen(controller: c)),
-                icon: const Icon(Icons.edit_outlined),
-                label: const Text('Lieber Mitteilung schreiben'),
-              ),
-            ],
+    return DiscardGuard(
+      dirty: _dirty && !_busy,
+      child: AdminPage(
+        controller: c,
+        title: 'Push senden',
+        actions: [
+          IconButton(
+            tooltip: 'Aktualisieren',
+            onPressed: _reload,
+            icon: const Icon(Icons.refresh),
           ),
         ],
-        const SectionTitle('Versand'),
-        FutureBuilder<JsonMap>(
-          future: _data,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return EmptyState(
-                icon: Icons.error_outline,
-                title: 'Versandstatus nicht geladen',
-                message: identityError(snapshot.error!),
-              );
-            }
-            if (!snapshot.hasData) {
-              return const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: CircularProgressIndicator()),
-              );
-            }
-            final data = snapshot.data!,
-                configured = data['configured'] == true;
-            final jobs = jsonList(data['jobs']).map(jsonMap).toList()
-              ..sort(
-                (a, b) => textValue(
-                  b['createdAt'],
-                ).compareTo(textValue(a['createdAt'])),
-              );
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: (context) => [
+          const PageHeader(
+            'Eigener Push',
+            eyebrow: 'Sofort benachrichtigen',
+            subtitle:
+                'Für kurzfristige Hinweise wie „Probe beginnt 30 Minuten später“. '
+                'Ein Push wird nicht gespeichert. Was man nachlesen können soll, gehört in eine Mitteilung.',
+          ),
+          if (!c.pushConfigured)
+            const EmptyState(
+              icon: Icons.notifications_off_outlined,
+              title: 'Push ist noch nicht eingerichtet',
+              message:
+                  'Sobald der Versand eingerichtet ist, kannst du hier Pushes senden.',
+            )
+          else ...[
+            TextField(
+              controller: _title,
+              decoration: const InputDecoration(labelText: 'Titel'),
+              maxLength: 120,
+              textCapitalization: TextCapitalization.sentences,
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _body,
+              decoration: const InputDecoration(
+                labelText: 'Text',
+                alignLabelWithHint: true,
+              ),
+              minLines: 2,
+              maxLines: 5,
+              maxLength: 500,
+              textCapitalization: TextCapitalization.sentences,
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            _PushPreview(title: _title.text, body: _body.text),
+            const SectionTitle('Empfänger'),
+            RecipientSelector(
+              controller: c,
+              value: _to,
+              onChanged: (value) => setState(() => _to = value),
+            ),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
               children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Wrap(
-                      spacing: 16,
-                      runSpacing: 12,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        StatePill(
-                          configured
-                              ? 'Versand eingerichtet'
-                              : 'Einrichtung ausstehend',
-                          color: configured
-                              ? StageTheme.green
-                              : StageTheme.orange,
-                        ),
-                        Text(
-                          '${jsonList(data['devices']).length} registrierte Geräte',
-                          style: theme.textTheme.titleSmall,
-                        ),
-                        TextButton.icon(
-                          onPressed: configured ? _test : null,
-                          icon: const Icon(Icons.notifications_active_outlined),
-                          label: const Text('Test an meine Geräte'),
-                        ),
-                      ],
+                FilledButton.icon(
+                  onPressed: _busy || !_ready ? null : _send,
+                  icon: const Icon(Icons.send_outlined),
+                  label: const Text('Push senden'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _writeMessage,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Lieber Mitteilung schreiben'),
+                ),
+              ],
+            ),
+            if (!_ready) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Noch fehlt: ${_missing.join(', ')}',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ],
+          const SectionTitle('Versand'),
+          FutureBuilder<JsonMap>(
+            future: _data,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return EmptyState(
+                  icon: Icons.error_outline,
+                  title: 'Versandstatus nicht geladen',
+                  message: identityError(snapshot.error!),
+                );
+              }
+              if (!snapshot.hasData) {
+                return const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              final data = snapshot.data!,
+                  configured = data['configured'] == true;
+              final jobs = jsonList(data['jobs']).map(jsonMap).toList()
+                ..sort(
+                  (a, b) => textValue(
+                    b['createdAt'],
+                  ).compareTo(textValue(a['createdAt'])),
+                );
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Wrap(
+                        spacing: 16,
+                        runSpacing: 12,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          StatePill(
+                            configured
+                                ? 'Versand eingerichtet'
+                                : 'Einrichtung ausstehend',
+                            color: configured
+                                ? StageTheme.green
+                                : StageTheme.orange,
+                          ),
+                          Text(
+                            '${jsonList(data['devices']).length} registrierte Geräte',
+                            style: theme.textTheme.titleSmall,
+                          ),
+                          TextButton.icon(
+                            onPressed: configured ? _test : null,
+                            icon: const Icon(
+                              Icons.notifications_active_outlined,
+                            ),
+                            label: const Text('Test an meine Geräte'),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                const SectionTitle('Letzte Sendungen'),
-                if (jobs.isEmpty)
-                  const EmptyState(
-                    icon: Icons.notifications_none,
-                    title: 'Noch nichts gesendet',
-                    message: 'Versendete Pushes erscheinen hier.',
-                  ),
-                for (final job in jobs) _JobTile(controller: c, job: job),
-              ],
-            );
-          },
-        ),
-      ],
+                  const SectionTitle('Letzte Sendungen'),
+                  if (jobs.isEmpty)
+                    const EmptyState(
+                      icon: Icons.notifications_none,
+                      title: 'Noch nichts gesendet',
+                      message: 'Versendete Pushes erscheinen hier.',
+                    ),
+                  for (final job in jobs) _JobTile(controller: c, job: job),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 }
@@ -328,6 +364,7 @@ class _JobTile extends StatelessWidget {
   final JsonMap job;
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final (icon, color, status) = switch (job['status']) {
       'accepted_by_provider' => (
         Icons.check_circle_outline,
@@ -336,10 +373,10 @@ class _JobTile extends StatelessWidget {
       ),
       'no_devices' => (
         Icons.phonelink_off,
-        Colors.grey,
+        scheme.outline,
         'Kein registriertes Gerät',
       ),
-      'failed' => (Icons.error_outline, Colors.red, 'Versand fehlgeschlagen'),
+      'failed' => (Icons.error_outline, scheme.error, 'Versand fehlgeschlagen'),
       _ => (Icons.schedule, StageTheme.orange, 'Wartet auf Versand'),
     };
     final date = dateValue(job['createdAt']);

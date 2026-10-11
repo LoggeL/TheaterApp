@@ -74,10 +74,17 @@ class Poll {
   int get totalVotes => options.fold(0, (n, o) => n + o.votes);
   String get voteCountLabel =>
       totalVotes == 1 ? '1 Stimme' : '$totalVotes Stimmen';
-  bool get isClosed =>
+  bool get isClosed => isClosedAt(DateTime.now());
+
+  /// Whether voting has ended at [now], e.g. `controller.now`.
+  bool isClosedAt(DateTime now) =>
       closed ||
       confirmedOptionId != null ||
-      (closesAt != null && !closesAt!.isAfter(DateTime.now()));
+      (closesAt != null && !closesAt!.isAfter(now));
+
+  /// Whether an audience was chosen; none means everyone may vote.
+  bool get hasAudience =>
+      roleIds.isNotEmpty || personIds.isNotEmpty || productionIds.isNotEmpty;
   factory Poll.fromJson(JsonMap json) => Poll(
     id: textValue(json['id']),
     title: textValue(json['title']),

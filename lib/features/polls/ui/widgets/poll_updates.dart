@@ -37,7 +37,7 @@ class _PollUpdatesState extends State<PollUpdates> {
 
   void _scheduleDeadline() {
     _deadline?.cancel();
-    final now = DateTime.now();
+    final now = widget.controller.now;
     final deadlines =
         widget.controller.polls
             .where(

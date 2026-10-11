@@ -122,11 +122,29 @@ void main() {
     expect(find.text('Zum Formular'), findsOneWidget);
     expect(find.text('example.com'), findsOneWidget);
     expect(find.text('1 von 3 gelesen'), findsOneWidget);
-    expect(find.text('Robin Spielmann, Toni Lichtblick'), findsOneWidget);
+    expect(find.text('Noch nicht gelesen (2)'), findsOneWidget);
+    expect(find.widgetWithText(Chip, 'Robin Spielmann'), findsOneWidget);
+    expect(find.widgetWithText(Chip, 'Toni Lichtblick'), findsOneWidget);
+    expect(find.text('Gelesen (1)'), findsOneWidget);
     await tester.ensureVisible(find.text('2 Personen per Push erinnern'));
     await tester.tap(find.text('2 Personen per Push erinnern'));
     await tester.pumpAndSettle();
+    expect(find.text('2 Personen per Push erinnern?'), findsOneWidget);
+    expect(
+      find.text('Noch nicht gelesen haben: Robin Spielmann, Toni Lichtblick.'),
+      findsOneWidget,
+    );
+    expect(
+      server.actionBodies.where((b) => b['action'] == 'message.remind'),
+      isEmpty,
+    );
+    await tester.tap(find.text('Erinnern'));
+    await tester.pumpAndSettle();
     expect(server.actionBodies.last, {'action': 'message.remind', 'id': 'm1'});
+    // Only one reminder per message and session.
+    final reminded = find.widgetWithText(FilledButton, 'Erinnerung gesendet');
+    expect(reminded, findsOneWidget);
+    expect(tester.widget<FilledButton>(reminded).onPressed, isNull);
   });
 
   testWidgets('the composer validates links and sends roles with the link', (
@@ -168,6 +186,14 @@ void main() {
     expect(find.textContaining('Erreicht 1 Person: Technik'), findsOneWidget);
     await tester.ensureVisible(find.text('Mitteilung veröffentlichen'));
     await tester.tap(find.text('Mitteilung veröffentlichen'));
+    await tester.pumpAndSettle();
+    // Push is on, so the reach is confirmed first.
+    expect(
+      find.text('Mitteilung an 1 Person veröffentlichen?'),
+      findsOneWidget,
+    );
+    expect(server.actionBodies, isEmpty);
+    await tester.tap(find.text('Veröffentlichen'));
     await tester.pumpAndSettle();
     final sent = server.actionBodies.last;
     expect(sent['action'], 'message.send');

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -44,7 +45,22 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
     _roleIds = {...?widget.poll?.roleIds};
     _personIds = {...?widget.poll?.personIds};
     _productionIds = {...?widget.poll?.productionIds};
+    _initial = jsonEncode(_payload());
   }
+
+  /// The form as sent to the server, also used to detect unsaved changes.
+  late final String _initial;
+  JsonMap _payload() => {
+    'title': _title.text,
+    'description': _description.text,
+    'anonymous': _anonymous,
+    'roleIds': _roleIds.toList(),
+    'personIds': _personIds.toList(),
+    'productionIds': _productionIds.toList(),
+    'options': _options.map((o) => {'label': o.text}).toList(),
+    'closesAt': _closes?.toUtc().toIso8601String(),
+  };
+  bool get _dirty => jsonEncode(_payload()) != _initial;
 
   @override
   void dispose() {
@@ -69,20 +85,23 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
     }
     setState(() => _busy = true);
     try {
-      await widget.controller.performAction({
+      final outcome = await widget.controller.performAction({
         'action': 'poll.save',
         'id': widget.poll?.id,
         'version': widget.poll?.version,
-        'title': _title.text,
-        'description': _description.text,
-        'anonymous': _anonymous,
-        'roleIds': _roleIds.toList(),
-        'personIds': _personIds.toList(),
-        'productionIds': _productionIds.toList(),
-        'options': _options.map((o) => {'label': o.text}).toList(),
-        'closesAt': _closes?.toUtc().toIso8601String(),
+        ..._payload(),
       });
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        showDone(
+          context,
+          outcomeText(
+            outcome,
+            done: 'Abstimmung gespeichert',
+            queued: 'Abstimmung vorgemerkt – wird bei Verbindung gesendet',
+          ),
+        );
+        Navigator.pop(context);
+      }
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
@@ -91,214 +110,223 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => AdminPage(
-    controller: widget.controller,
-    title: widget.poll == null
-        ? 'Abstimmung erstellen'
-        : 'Abstimmung bearbeiten',
-    children: (context) => [
-      Form(
-        key: _form,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextFormField(
-              controller: _title,
-              maxLength: 250,
-              decoration: const InputDecoration(labelText: 'Frage'),
-              validator: (v) => v == null || v.trim().isEmpty
-                  ? 'Bitte eine Frage eingeben.'
-                  : null,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _description,
-              minLines: 2,
-              maxLines: 6,
-              maxLength: 3000,
-              decoration: const InputDecoration(labelText: 'Beschreibung'),
-            ),
-            const SizedBox(height: 8),
-            AudiencePicker(
-              controller: widget.controller,
-              label: 'Wer darf abstimmen?',
-              allowEveryone: _personIds.isEmpty && _productionIds.isEmpty,
-              selected: _roleIds,
-              onChanged: (value) => setState(() => _roleIds = value),
-            ),
-            const SizedBox(height: 16),
-            ProductionAudiencePicker(
-              controller: widget.controller,
-              selected: _productionIds,
-              onChanged: (value) => setState(() => _productionIds = value),
-            ),
-            const SizedBox(height: 16),
-            PersonPicker(
-              controller: widget.controller,
-              selected: _personIds,
-              onChanged: (value) => setState(() => _personIds = value),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Abstimmen dürfen: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SectionTitle('Abstimmungsart'),
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(
-                  value: true,
-                  label: Text('Anonym'),
-                  icon: Icon(Icons.visibility_off_outlined),
+  Widget build(BuildContext context) => DiscardGuard(
+    dirty: _dirty && !_busy,
+    child: AdminPage(
+      controller: widget.controller,
+      title: widget.poll == null
+          ? 'Abstimmung erstellen'
+          : 'Abstimmung bearbeiten',
+      children: (context) => [
+        Form(
+          key: _form,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: _title,
+                maxLength: 250,
+                decoration: const InputDecoration(labelText: 'Frage'),
+                onChanged: (_) => setState(() {}),
+                validator: (v) => v == null || v.trim().isEmpty
+                    ? 'Bitte eine Frage eingeben.'
+                    : null,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _description,
+                minLines: 2,
+                maxLines: 6,
+                maxLength: 3000,
+                decoration: const InputDecoration(
+                  labelText: 'Beschreibung (optional)',
                 ),
-                ButtonSegment(
-                  value: false,
-                  label: Text('Namentlich'),
-                  icon: Icon(Icons.people_outline),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 8),
+              AudiencePicker(
+                controller: widget.controller,
+                label: 'Wer darf abstimmen?',
+                allowEveryone: _personIds.isEmpty && _productionIds.isEmpty,
+                selected: _roleIds,
+                onChanged: (value) => setState(() => _roleIds = value),
+              ),
+              const SizedBox(height: 16),
+              ProductionAudiencePicker(
+                controller: widget.controller,
+                selected: _productionIds,
+                onChanged: (value) => setState(() => _productionIds = value),
+              ),
+              const SizedBox(height: 16),
+              PersonPicker(
+                controller: widget.controller,
+                selected: _personIds,
+                onChanged: (value) => setState(() => _personIds = value),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Abstimmen dürfen: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SectionTitle('Abstimmungsart'),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                    value: true,
+                    label: Text('Anonym'),
+                    icon: Icon(Icons.visibility_off_outlined),
+                  ),
+                  ButtonSegment(
+                    value: false,
+                    label: Text('Namentlich'),
+                    icon: Icon(Icons.people_outline),
+                  ),
+                ],
+                selected: {_anonymous},
+                onSelectionChanged: _fixed || _busy
+                    ? null
+                    : (selection) =>
+                          setState(() => _anonymous = selection.single),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _anonymous
+                    ? 'Nur die Stimmenzahlen werden angezeigt.'
+                    : 'Alle Mitglieder sehen die Namen bei der gewählten Antwort.',
+              ),
+              if (_fixed) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  'Die Abstimmungsart bleibt nach der ersten Stimme erhalten.',
                 ),
               ],
-              selected: {_anonymous},
-              onSelectionChanged: _fixed || _busy
-                  ? null
-                  : (selection) =>
-                        setState(() => _anonymous = selection.single),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _anonymous
-                  ? 'Nur die Stimmenzahlen werden angezeigt.'
-                  : 'Alle Mitglieder sehen die Namen bei der gewählten Antwort.',
-            ),
-            if (_fixed) ...[
-              const SizedBox(height: 8),
-              const Text(
-                'Die Abstimmungsart bleibt nach der ersten Stimme erhalten.',
-              ),
-            ],
-            const SectionTitle('Antworten'),
-            for (var i = 0; i < _options.length; i++)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: _options[i],
-                        enabled: !_fixed && !_busy,
-                        maxLength: 200,
-                        decoration: InputDecoration(
-                          labelText: 'Antwort ${i + 1}',
-                        ),
-                        validator: (v) => v == null || v.trim().isEmpty
-                            ? 'Bitte eine Antwort eingeben.'
-                            : null,
-                      ),
-                    ),
-                    if (!_fixed && _options.length > 2)
-                      IconButton(
-                        tooltip: 'Antwort entfernen',
-                        onPressed: _busy
-                            ? null
-                            : () {
-                                final removed = _options[i];
-                                setState(() => _options.removeAt(i));
-                                WidgetsBinding.instance.addPostFrameCallback(
-                                  (_) => removed.dispose(),
-                                );
-                              },
-                        icon: const Icon(Icons.close),
-                      ),
-                  ],
-                ),
-              ),
-            if (!_fixed && _options.length < 12)
-              TextButton.icon(
-                onPressed: _busy
-                    ? null
-                    : () =>
-                          setState(() => _options.add(TextEditingController())),
-                icon: const Icon(Icons.add),
-                label: const Text('Antwort hinzufügen'),
-              ),
-            if (_fixed)
-              const Text(
-                'Die Antworten bleiben nach der ersten Stimme erhalten.',
-              ),
-            const SizedBox(height: 16),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Enddatum festlegen'),
-              value: _closes != null,
-              onChanged: _busy
-                  ? null
-                  : (enabled) {
-                      final now = DateTime.now();
-                      setState(
-                        () => _closes = enabled
-                            ? DateTime(now.year, now.month, now.day + 7, 20)
-                            : null,
-                      );
-                    },
-            ),
-            if (_closes != null)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Enddatum und Uhrzeit'),
-                subtitle: Text(
-                  _closes == null
-                      ? 'Ohne Frist'
-                      : DateFormat(
-                          'd. MMMM yyyy · HH:mm',
-                          'de',
-                        ).format(_closes!),
-                ),
-                trailing: _closes == null
-                    ? const Icon(Icons.calendar_month)
-                    : IconButton(
-                        tooltip: 'Frist entfernen',
-                        onPressed: () => setState(() => _closes = null),
-                        icon: const Icon(Icons.close),
-                      ),
-                onTap: _busy
-                    ? null
-                    : () async {
-                        final now = DateTime.now();
-                        final day = await showDatePicker(
-                          context: context,
-                          initialDate: _closes?.isAfter(now) == true
-                              ? _closes!
-                              : now.add(const Duration(days: 7)),
-                          firstDate: now,
-                          lastDate: DateTime(2100),
-                        );
-                        if (day == null || !context.mounted) return;
-                        final time = await showTimePicker(
-                          context: context,
-                          initialTime: TimeOfDay.fromDateTime(
-                            _closes ?? DateTime(2026, 1, 1, 20),
+              const SectionTitle('Antworten'),
+              for (var i = 0; i < _options.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _options[i],
+                          enabled: !_fixed && !_busy,
+                          maxLength: 200,
+                          decoration: InputDecoration(
+                            labelText: 'Antwort ${i + 1}',
                           ),
+                          onChanged: (_) => setState(() {}),
+                          validator: (v) => v == null || v.trim().isEmpty
+                              ? 'Bitte eine Antwort eingeben.'
+                              : null,
+                        ),
+                      ),
+                      if (!_fixed && _options.length > 2)
+                        IconButton(
+                          tooltip: 'Antwort entfernen',
+                          onPressed: _busy
+                              ? null
+                              : () {
+                                  final removed = _options[i];
+                                  setState(() => _options.removeAt(i));
+                                  WidgetsBinding.instance.addPostFrameCallback(
+                                    (_) => removed.dispose(),
+                                  );
+                                },
+                          icon: const Icon(Icons.close),
+                        ),
+                    ],
+                  ),
+                ),
+              if (!_fixed && _options.length < 12)
+                TextButton.icon(
+                  onPressed: _busy
+                      ? null
+                      : () => setState(
+                          () => _options.add(TextEditingController()),
+                        ),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Antwort hinzufügen'),
+                ),
+              if (_fixed)
+                const Text(
+                  'Die Antworten bleiben nach der ersten Stimme erhalten.',
+                ),
+              const SizedBox(height: 16),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Enddatum festlegen'),
+                value: _closes != null,
+                onChanged: _busy
+                    ? null
+                    : (enabled) {
+                        final now = DateTime.now();
+                        setState(
+                          () => _closes = enabled
+                              ? DateTime(now.year, now.month, now.day + 7, 20)
+                              : null,
                         );
-                        if (time != null && mounted) {
-                          setState(
-                            () => _closes = DateTime(
-                              day.year,
-                              day.month,
-                              day.day,
-                              time.hour,
-                              time.minute,
-                            ),
-                          );
-                        }
                       },
               ),
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _busy ? null : _save,
-              child: Text(_busy ? 'Wird gespeichert …' : 'Speichern'),
-            ),
-          ],
+              if (_closes != null)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Enddatum und Uhrzeit'),
+                  subtitle: Text(
+                    _closes == null
+                        ? 'Ohne Frist'
+                        : DateFormat(
+                            'd. MMMM yyyy · HH:mm',
+                            'de',
+                          ).format(_closes!),
+                  ),
+                  trailing: _closes == null
+                      ? const Icon(Icons.calendar_month)
+                      : IconButton(
+                          tooltip: 'Frist entfernen',
+                          onPressed: () => setState(() => _closes = null),
+                          icon: const Icon(Icons.close),
+                        ),
+                  onTap: _busy
+                      ? null
+                      : () async {
+                          final now = DateTime.now();
+                          final day = await showDatePicker(
+                            context: context,
+                            initialDate: _closes?.isAfter(now) == true
+                                ? _closes!
+                                : now.add(const Duration(days: 7)),
+                            firstDate: now,
+                            lastDate: DateTime(2100),
+                          );
+                          if (day == null || !context.mounted) return;
+                          final time = await showTimePicker(
+                            context: context,
+                            initialTime: TimeOfDay.fromDateTime(
+                              _closes ?? DateTime(2026, 1, 1, 20),
+                            ),
+                          );
+                          if (time != null && mounted) {
+                            setState(
+                              () => _closes = DateTime(
+                                day.year,
+                                day.month,
+                                day.day,
+                                time.hour,
+                                time.minute,
+                              ),
+                            );
+                          }
+                        },
+                ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: _busy ? null : _save,
+                child: Text(_busy ? 'Wird gespeichert …' : 'Speichern'),
+              ),
+            ],
+          ),
         ),
-      ),
-    ],
+      ],
+    ),
   );
 }
