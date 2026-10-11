@@ -30,7 +30,7 @@ class _DraftSlot {
 
 class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
   static const durations = [5, 10, 15, 20, 30, 45, 60];
-  static const maxSlots = 100;
+  static const maxSlots = 100, maxCapacity = 50;
   late final TextEditingController _title, _description, _place;
   late String _kind;
   late Set<String> _roleIds;
@@ -41,7 +41,10 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
   TimeOfDay _from = const TimeOfDay(hour: 10, minute: 0),
       _to = const TimeOfDay(hour: 12, minute: 0);
   int _minutes = 15, _capacity = 1;
-  bool _busy = false;
+  bool _busy = false, _saved = false;
+
+  /// The pool as opened, to tell whether anything changed since.
+  late final String _initial;
 
   @override
   void initState() {
@@ -69,7 +72,27 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
     _day = DateUtils.dateOnly(
       _slots.isEmpty ? next : _slots.last.start.add(const Duration(days: 1)),
     );
+    _initial = _fingerprint();
+    for (final field in [_title, _description, _place]) {
+      field.addListener(_edited);
+    }
   }
+
+  void _edited() => setState(() {});
+
+  String _fingerprint() => [
+    _title.text,
+    _description.text,
+    _place.text,
+    _kind,
+    (_roleIds.toList()..sort()).join(','),
+    (_personIds.toList()..sort()).join(','),
+    (_productionIds.toList()..sort()).join(','),
+    for (final s in _slots)
+      '${s.id}|${s.start.toIso8601String()}|${s.end.toIso8601String()}|${s.capacity}',
+  ].join('\n');
+
+  bool get _dirty => !_saved && _fingerprint() != _initial;
 
   @override
   void dispose() {
@@ -109,27 +132,26 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
     setState(() => from ? _from = time : _to = time);
   }
 
+  /// A note about the input; [showProblem] is for failed actions.
+  void _hint(String message) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(message)));
+
   void _add() {
     final windows = _windows;
     if (windows.isEmpty) {
-      showProblem(
-        context,
-        '„Bis“ muss mindestens $_minutes Minuten nach „Von“ liegen.',
-      );
+      _hint('„Bis“ muss mindestens $_minutes Minuten nach „Von“ liegen.');
       return;
     }
     if (!windows.first.$1.isAfter(widget.controller.now)) {
-      showProblem(context, 'Die Zeitfenster müssen in der Zukunft liegen.');
+      _hint('Die Zeitfenster müssen in der Zukunft liegen.');
       return;
     }
     final fresh = windows
         .where((w) => !_slots.any((s) => s.start.isAtSameMomentAs(w.$1)))
         .toList();
     if (_slots.length + fresh.length > maxSlots) {
-      showProblem(
-        context,
-        'Ein Terminfinder kann höchstens $maxSlots Zeitfenster haben.',
-      );
+      _hint('Ein Terminfinder kann höchstens $maxSlots Zeitfenster haben.');
       return;
     }
     setState(() {
@@ -151,11 +173,11 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
 
   Future<void> _save() async {
     if (_title.text.trim().isEmpty) {
-      showProblem(context, 'Bitte einen Titel eingeben.');
+      _hint('Bitte einen Titel eingeben.');
       return;
     }
     if (_slots.isEmpty) {
-      showProblem(context, 'Bitte mindestens ein Zeitfenster hinzufügen.');
+      _hint('Bitte mindestens ein Zeitfenster hinzufügen.');
       return;
     }
     setState(() => _busy = true);
@@ -181,7 +203,10 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
             },
         ],
       });
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        setState(() => _saved = true);
+        Navigator.pop(context);
+      }
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
@@ -192,194 +217,234 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
   @override
   Widget build(BuildContext context) {
     final windows = _windows;
-    return AdminPage(
-      controller: widget.controller,
-      title: widget.pool == null
-          ? 'Terminfinder anlegen'
-          : 'Terminfinder bearbeiten',
-      children: (context) => [
-        TextField(
-          controller: _title,
-          maxLength: 200,
-          decoration: const InputDecoration(
-            labelText: 'Titel',
-            hintText: 'z. B. Fototermin',
+    return DiscardGuard(
+      dirty: _dirty,
+      child: AdminPage(
+        controller: widget.controller,
+        title: widget.pool == null
+            ? 'Terminfinder anlegen'
+            : 'Terminfinder bearbeiten',
+        children: (context) => [
+          TextField(
+            controller: _title,
+            maxLength: 200,
+            decoration: const InputDecoration(
+              labelText: 'Titel',
+              hintText: 'z. B. Fototermin',
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _description,
-          minLines: 2,
-          maxLines: 6,
-          maxLength: 3000,
-          decoration: const InputDecoration(labelText: 'Beschreibung'),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _place,
-          decoration: const InputDecoration(labelText: 'Ort'),
-        ),
-        const SizedBox(height: 20),
-        DropdownButtonFormField<String>(
-          key: const ValueKey('slot-pool-kind'),
-          initialValue: _kind,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Art des Termins'),
-          items: eventTypes.entries
-              .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
-              .toList(),
-          onChanged: (s) => setState(() => _kind = s!),
-        ),
-        const SizedBox(height: 20),
-        AudiencePicker(
-          controller: widget.controller,
-          label: 'Eingeladene Rollen',
-          allowEveryone: _personIds.isEmpty && _productionIds.isEmpty,
-          selected: _roleIds,
-          onChanged: (value) => setState(() => _roleIds = value),
-        ),
-        const SizedBox(height: 16),
-        ProductionAudiencePicker(
-          controller: widget.controller,
-          selected: _productionIds,
-          onChanged: (value) => setState(() => _productionIds = value),
-        ),
-        const SizedBox(height: 16),
-        PersonPicker(
-          controller: widget.controller,
-          selected: _personIds,
-          onChanged: (value) => setState(() => _personIds = value),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Eingeladen: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SectionTitle('Zeitfenster erzeugen'),
-        Card(
-          child: Column(
-            children: [
-              ListTile(
-                leading: const Icon(Icons.calendar_month),
-                title: const Text('Datum'),
-                subtitle: Text(
-                  DateFormat('EEEE, d. MMMM yyyy', 'de').format(_day),
-                ),
-                onTap: _busy ? null : _pickDay,
-              ),
-              const Divider(),
-              ListTile(
-                key: const ValueKey('slot-from'),
-                leading: const Icon(Icons.schedule),
-                title: const Text('Von'),
-                subtitle: Text('${_from.format24()} Uhr'),
-                onTap: _busy ? null : () => _pickTime(true),
-              ),
-              const Divider(),
-              ListTile(
-                key: const ValueKey('slot-to'),
-                leading: const Icon(Icons.schedule_outlined),
-                title: const Text('Bis'),
-                subtitle: Text('${_to.format24()} Uhr'),
-                onTap: _busy ? null : () => _pickTime(false),
-              ),
-            ],
+          const SizedBox(height: 12),
+          TextField(
+            controller: _description,
+            minLines: 2,
+            maxLines: 6,
+            maxLength: 3000,
+            decoration: const InputDecoration(labelText: 'Beschreibung'),
           ),
-        ),
-        const SizedBox(height: 16),
-        DropdownButtonFormField<int>(
-          key: const ValueKey('slot-minutes'),
-          initialValue: _minutes,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Dauer je Slot'),
-          items: [
-            for (final m in durations)
-              DropdownMenuItem(value: m, child: Text('$m Minuten')),
-          ],
-          onChanged: (v) => setState(() => _minutes = v!),
-        ),
-        const SizedBox(height: 16),
-        DropdownButtonFormField<int>(
-          key: const ValueKey('slot-capacity'),
-          initialValue: _capacity,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Plätze je Slot'),
-          items: [
-            for (var i = 1; i <= 50; i++)
-              DropdownMenuItem(
-                value: i,
-                child: Text(i == 1 ? '1 Platz' : '$i Plätze'),
-              ),
-          ],
-          onChanged: (v) => setState(() => _capacity = v!),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          windows.isEmpty
-              ? 'Mit diesen Angaben entsteht noch kein Zeitfenster.'
-              : 'Ergibt ${windows.length == 1 ? '1 Zeitfenster' : '${windows.length} Zeitfenster'} '
-                    'von ${DateFormat.Hm('de').format(windows.first.$1)} '
-                    'bis ${DateFormat.Hm('de').format(windows.last.$2)} Uhr.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: _busy ? null : _add,
-          icon: const Icon(Icons.add),
-          label: const Text('Slots hinzufügen'),
-        ),
-        SectionTitle(
-          _slots.isEmpty ? 'Zeitfenster' : 'Zeitfenster (${_slots.length})',
-        ),
-        if (_slots.isEmpty)
+          const SizedBox(height: 12),
+          TextField(
+            controller: _place,
+            decoration: const InputDecoration(labelText: 'Ort'),
+          ),
+          const SizedBox(height: 20),
+          DropdownButtonFormField<String>(
+            key: const ValueKey('slot-pool-kind'),
+            initialValue: _kind,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Art des Termins'),
+            items: eventTypes.entries
+                .map(
+                  (e) => DropdownMenuItem(value: e.key, child: Text(e.value)),
+                )
+                .toList(),
+            onChanged: (s) => setState(() => _kind = s!),
+          ),
+          const SizedBox(height: 20),
+          AudiencePicker(
+            controller: widget.controller,
+            label: 'Eingeladene Rollen',
+            allowEveryone: _personIds.isEmpty && _productionIds.isEmpty,
+            selected: _roleIds,
+            onChanged: (value) => setState(() => _roleIds = value),
+          ),
+          const SizedBox(height: 16),
+          ProductionAudiencePicker(
+            controller: widget.controller,
+            selected: _productionIds,
+            onChanged: (value) => setState(() => _productionIds = value),
+          ),
+          const SizedBox(height: 16),
+          PersonPicker(
+            controller: widget.controller,
+            selected: _personIds,
+            onChanged: (value) => setState(() => _personIds = value),
+          ),
+          const SizedBox(height: 8),
           Text(
-            'Lege oben Datum und Uhrzeit fest und füge die Zeitfenster hinzu. '
-            'Mehrere Tage kannst du nacheinander hinzufügen.',
+            'Eingeladen: ${widget.controller.audienceLabel(_roleIds, _personIds, _productionIds)}',
             style: Theme.of(context).textTheme.bodySmall,
-          )
-        else
+          ),
+          const SectionTitle('Zeitfenster erzeugen'),
           Card(
             child: Column(
               children: [
-                for (var i = 0; i < _slots.length; i++) ...[
-                  if (i > 0) const Divider(),
-                  ListTile(
-                    title: Text(
-                      '${slotDay(_slots[i].start)}, '
-                      '${DateFormat.Hm('de').format(_slots[i].start)}–'
-                      '${DateFormat.Hm('de').format(_slots[i].end)}',
-                    ),
-                    subtitle: Text(
-                      _slots[i].booked > 0
-                          ? '${_slots[i].booked} von ${_slots[i].capacity} gebucht'
-                          : _slots[i].capacity == 1
-                          ? '1 Platz'
-                          : '${_slots[i].capacity} Plätze',
-                    ),
-                    trailing: _slots[i].booked > 0
-                        ? const Tooltip(
-                            message: 'Gebuchte Zeitfenster bleiben erhalten',
-                            child: Icon(Icons.lock_outline),
-                          )
-                        : IconButton(
-                            tooltip: 'Zeitfenster entfernen',
-                            onPressed: _busy
-                                ? null
-                                : () => setState(() => _slots.removeAt(i)),
-                            icon: const Icon(Icons.close),
-                          ),
+                ListTile(
+                  leading: const Icon(Icons.calendar_month),
+                  title: const Text('Datum'),
+                  subtitle: Text(
+                    DateFormat('EEEE, d. MMMM yyyy', 'de').format(_day),
                   ),
-                ],
+                  onTap: _busy ? null : _pickDay,
+                ),
+                const Divider(),
+                ListTile(
+                  key: const ValueKey('slot-from'),
+                  leading: const Icon(Icons.schedule),
+                  title: const Text('Von'),
+                  subtitle: Text('${_from.format24()} Uhr'),
+                  onTap: _busy ? null : () => _pickTime(true),
+                ),
+                const Divider(),
+                ListTile(
+                  key: const ValueKey('slot-to'),
+                  leading: const Icon(Icons.schedule_outlined),
+                  title: const Text('Bis'),
+                  subtitle: Text('${_to.format24()} Uhr'),
+                  onTap: _busy ? null : () => _pickTime(false),
+                ),
               ],
             ),
           ),
-        const SizedBox(height: 24),
-        FilledButton.icon(
-          onPressed: _busy ? null : _save,
-          icon: const Icon(Icons.save_outlined),
-          label: Text(_busy ? 'Wird gespeichert …' : 'Speichern'),
-        ),
-      ],
+          const SizedBox(height: 16),
+          DropdownButtonFormField<int>(
+            key: const ValueKey('slot-minutes'),
+            initialValue: _minutes,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Dauer je Slot'),
+            items: [
+              for (final m in durations)
+                DropdownMenuItem(value: m, child: Text('$m Minuten')),
+            ],
+            onChanged: (v) => setState(() => _minutes = v!),
+          ),
+          const SizedBox(height: 16),
+          _CapacityStepper(
+            value: _capacity,
+            max: maxCapacity,
+            onChanged: _busy ? null : (v) => setState(() => _capacity = v),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            windows.isEmpty
+                ? 'Mit diesen Angaben entsteht noch kein Zeitfenster.'
+                : 'Ergibt ${windows.length == 1 ? '1 Zeitfenster' : '${windows.length} Zeitfenster'} '
+                      'von ${DateFormat.Hm('de').format(windows.first.$1)} '
+                      'bis ${DateFormat.Hm('de').format(windows.last.$2)} Uhr.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _add,
+            icon: const Icon(Icons.add),
+            label: const Text('Slots hinzufügen'),
+          ),
+          SectionTitle(
+            _slots.isEmpty ? 'Zeitfenster' : 'Zeitfenster (${_slots.length})',
+          ),
+          if (_slots.isEmpty)
+            Text(
+              'Lege oben Datum und Uhrzeit fest und füge die Zeitfenster hinzu. '
+              'Mehrere Tage kannst du nacheinander hinzufügen.',
+              style: Theme.of(context).textTheme.bodySmall,
+            )
+          else
+            Card(
+              child: Column(
+                children: [
+                  for (var i = 0; i < _slots.length; i++) ...[
+                    if (i > 0) const Divider(),
+                    ListTile(
+                      title: Text(
+                        '${slotDay(_slots[i].start)}, '
+                        '${DateFormat.Hm('de').format(_slots[i].start)}–'
+                        '${DateFormat.Hm('de').format(_slots[i].end)}',
+                      ),
+                      subtitle: Text(
+                        _slots[i].booked > 0
+                            ? '${_slots[i].booked} von ${_slots[i].capacity} gebucht'
+                            : _slots[i].capacity == 1
+                            ? '1 Platz'
+                            : '${_slots[i].capacity} Plätze',
+                      ),
+                      trailing: _slots[i].booked > 0
+                          ? const Tooltip(
+                              message: 'Gebuchte Zeitfenster bleiben erhalten',
+                              child: Icon(Icons.lock_outline),
+                            )
+                          : IconButton(
+                              tooltip: 'Zeitfenster entfernen',
+                              onPressed: _busy
+                                  ? null
+                                  : () => setState(() => _slots.removeAt(i)),
+                              icon: const Icon(Icons.close),
+                            ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: _busy ? null : _save,
+            icon: const Icon(Icons.save_outlined),
+            label: Text(_busy ? 'Wird gespeichert …' : 'Speichern'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Places per slot as a −/+ stepper.
+class _CapacityStepper extends StatelessWidget {
+  const _CapacityStepper({
+    required this.value,
+    required this.max,
+    required this.onChanged,
+  });
+  final int value, max;
+  final ValueChanged<int>? onChanged;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InputDecorator(
+      decoration: const InputDecoration(labelText: 'Plätze je Slot'),
+      child: Row(
+        children: [
+          IconButton.outlined(
+            tooltip: 'Ein Platz weniger',
+            onPressed: onChanged == null || value <= 1
+                ? null
+                : () => onChanged!(value - 1),
+            icon: const Icon(Icons.remove),
+          ),
+          Expanded(
+            child: Text(
+              value == 1 ? '1 Platz' : '$value Plätze',
+              key: const ValueKey('slot-capacity'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium,
+            ),
+          ),
+          IconButton.outlined(
+            tooltip: 'Ein Platz mehr',
+            onPressed: onChanged == null || value >= max
+                ? null
+                : () => onChanged!(value + 1),
+            icon: const Icon(Icons.add),
+          ),
+        ],
+      ),
     );
   }
 }

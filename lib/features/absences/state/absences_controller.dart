@@ -2,9 +2,10 @@ part of '../../../core/app_controller.dart';
 
 /// Reporting and removing absences.
 extension AbsencesController on AppController {
-  /// A rejected absence stays in the outbox as failed instead of throwing, so
-  /// it counts as [ActionOutcome.queued] there.
-  Future<ActionOutcome> addAbsence(
+  /// Reports an absence. Resolves to [ActionOutcome.queued] while it waits
+  /// for a connection, and to null when the server rejected it: that entry
+  /// then stays in the outbox as failed, for review, instead of throwing.
+  Future<ActionOutcome?> addAbsence(
     DateTime from,
     DateTime to,
     String reason,
@@ -28,6 +29,8 @@ extension AbsencesController on AppController {
       'to': dateOnly(to),
       'reason': reason.trim(),
     });
+    final added = _outbox.where((a) => !previous.contains(a.id));
+    if (added.any((a) => a.failed)) return null;
     return _outcomeSince(previous);
   }
 
