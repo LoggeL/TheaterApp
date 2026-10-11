@@ -58,7 +58,7 @@ void main() {
     await tester.tap(find.text('1 neue Registrierung wartet auf Zuordnung'));
     await tester.pumpAndSettle();
     expect(find.byType(AccountsAdminScreen), findsOneWidget);
-    expect(find.text('1 Konten'), findsOneWidget);
+    expect(find.text('1 Konto'), findsOneWidget);
     expect(find.text('Prüfen & verknüpfen'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());

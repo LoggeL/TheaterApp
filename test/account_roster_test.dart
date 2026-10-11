@@ -149,7 +149,7 @@ void main() {
         expect(find.text('alex@example.test'), findsNothing);
         await tester.enterText(find.byType(TextField), 'Graf');
         await tester.pumpAndSettle();
-        expect(find.text('1 Personen'), findsOneWidget);
+        expect(find.text('1 Person'), findsOneWidget);
         await tester.ensureVisible(find.text('Konto verknüpfen'));
         await tester.tap(find.text('Konto verknüpfen'));
         await tester.pumpAndSettle();

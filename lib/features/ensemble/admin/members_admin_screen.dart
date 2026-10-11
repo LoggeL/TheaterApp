@@ -6,6 +6,8 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/member_avatar.dart';
 import '../../../shared/widgets/page_header.dart';
+import '../../../shared/widgets/state_pill.dart';
+import '../../accounts/domain/account_roster.dart';
 import 'member_editor_screen.dart';
 
 class MembersAdminScreen extends StatefulWidget {
@@ -17,6 +19,59 @@ class MembersAdminScreen extends StatefulWidget {
 
 class _MembersAdminScreenState extends State<MembersAdminScreen> {
   String _search = '';
+
+  /// App accounts by person id; null until loaded or when offline, which
+  /// hides the account pills.
+  Map<int, JsonMap>? _accounts;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAccounts();
+  }
+
+  Future<void> _loadAccounts() async {
+    try {
+      final data = await widget.controller.remote('/admin/accounts');
+      if (!mounted) return;
+      setState(
+        () => _accounts = {
+          for (final a in jsonList(data['accounts']).map(jsonMap))
+            if (a['personId'] != null) intValue(a['personId']): a,
+        },
+      );
+    } catch (_) {
+      // The list works without account details.
+    }
+  }
+
+  Future<void> _open(JsonMap? member) async {
+    await openPage(
+      context,
+      MemberEditorScreen(controller: widget.controller, member: member),
+    );
+    if (mounted) await _loadAccounts();
+  }
+
+  Widget _accountPill(BuildContext context, JsonMap m) {
+    final scheme = Theme.of(context).colorScheme;
+    final a = _accounts![intValue(m['id'])];
+    return StatePill(
+      accountStatus(a),
+      color: switch (a?['status']) {
+        'approved' => scheme.secondary,
+        null => scheme.onSurfaceVariant,
+        'pending' => scheme.primary,
+        _ => scheme.error,
+      },
+      icon: switch (a?['status']) {
+        'approved' => Icons.check,
+        null => Icons.link_off,
+        _ => Icons.info_outline,
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) => AdminPage(
     controller: widget.controller,
@@ -24,10 +79,7 @@ class _MembersAdminScreenState extends State<MembersAdminScreen> {
     actions: [
       IconButton(
         tooltip: 'Person anlegen',
-        onPressed: () => openPage(
-          context,
-          MemberEditorScreen(controller: widget.controller),
-        ),
+        onPressed: () => _open(null),
         icon: const Icon(Icons.person_add_outlined),
       ),
     ],
@@ -71,16 +123,22 @@ class _MembersAdminScreenState extends State<MembersAdminScreen> {
             initials: textValue(m['initials']),
           ),
           title: Text(textValue(m['name'])),
-          subtitle: Text(
-            widget.controller.roleNames(
-              jsonList(m['roleIds']).map((r) => r.toString()),
-            ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.controller.roleNames(
+                  jsonList(m['roleIds']).map((r) => r.toString()),
+                ),
+              ),
+              if (_accounts != null) ...[
+                const SizedBox(height: 6),
+                _accountPill(context, m),
+              ],
+            ],
           ),
           trailing: const Icon(Icons.edit_outlined),
-          onTap: () => openPage(
-            context,
-            MemberEditorScreen(controller: widget.controller, member: m),
-          ),
+          onTap: () => _open(m),
         ),
       ),
     ),

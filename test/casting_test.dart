@@ -397,4 +397,44 @@ void main() {
     expect(director.dy, lessThan(500));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('removing team members can be undone, open roles stay neutral', (
+    tester,
+  ) async {
+    final server = castingServer();
+    await pumpCasting(tester, server);
+    final context = tester.element(find.byType(CastingScreen));
+    final scheme = Theme.of(context).colorScheme;
+    final openRole = tester.widget<Card>(
+      find.byKey(const ValueKey('casting-role-MIRA')),
+    );
+    expect(openRole.color, isNot(scheme.errorContainer.withValues(alpha: .4)));
+    expect(find.text('3 Rollen offen'), findsOneWidget);
+
+    await tapVisible(
+      tester,
+      find.byTooltip('Toni Lichtblick aus dem Team entfernen'),
+    );
+    expect(castChanges(server).last, {
+      'kind': 'member',
+      'personId': 3,
+      'on': false,
+    });
+    expect(
+      find.text('Toni Lichtblick ist nicht mehr im Team.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('casting-team-3')), findsNothing);
+    await tester.tap(find.text('Rückgängig'));
+    await tester.pumpAndSettle();
+    expect(castChanges(server).last, {
+      'kind': 'member',
+      'personId': 3,
+      'on': true,
+      'function': 'Licht',
+    });
+    final toni = find.byKey(const ValueKey('casting-team-3'));
+    expect(find.descendant(of: toni, matching: find.text('Licht')), findsOne);
+    expect(tester.takeException(), isNull);
+  });
 }

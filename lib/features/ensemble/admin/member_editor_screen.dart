@@ -9,10 +9,20 @@ import '../../../shared/widgets/page_header.dart';
 import '../../casting/ui/person_productions.dart';
 import 'roles_admin_screen.dart';
 
+/// Creates or edits a person. When a new person was saved, the route pops
+/// with their id (null while the creation still waits for a connection).
 class MemberEditorScreen extends StatefulWidget {
-  const MemberEditorScreen({super.key, required this.controller, this.member});
+  const MemberEditorScreen({
+    super.key,
+    required this.controller,
+    this.member,
+    this.initialName,
+  });
   final AppController controller;
   final JsonMap? member;
+
+  /// Prefills the name of a new person, e.g. from a registration.
+  final String? initialName;
   @override
   State<MemberEditorScreen> createState() => _MemberEditorScreenState();
 }
@@ -21,16 +31,35 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
   late final TextEditingController _name;
   late bool _active;
   late Set<String> _roles;
-  bool _busy = false;
+  late final String _initialName;
+  late final bool _initialActive;
+  late final Set<String> _initialRoles;
+  bool _busy = false, _saved = false, _touched = false;
   @override
   void initState() {
     super.initState();
-    _name = TextEditingController(text: textValue(widget.member?['name']));
-    _active = widget.member?['active'] != false;
-    _roles = jsonList(
+    _initialName = widget.member == null
+        ? (widget.initialName ?? '').trim()
+        : textValue(widget.member?['name']);
+    _name = TextEditingController(text: _initialName)
+      ..addListener(
+        () => setState(() => _touched |= _name.text != _initialName),
+      );
+    _active = _initialActive = widget.member?['active'] != false;
+    _initialRoles = jsonList(
       widget.member?['roleIds'],
     ).map((r) => r.toString()).toSet();
+    _roles = {..._initialRoles};
   }
+
+  bool get _nameMissing => _name.text.trim().isEmpty;
+
+  bool get _dirty =>
+      !_saved &&
+      (_name.text.trim() != _initialName.trim() ||
+          _active != _initialActive ||
+          _roles.length != _initialRoles.length ||
+          !_roles.containsAll(_initialRoles));
 
   @override
   void dispose() {
@@ -39,10 +68,12 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
   }
 
   Future<void> _save() async {
-    if (_name.text.trim().isEmpty) return;
+    if (_nameMissing) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final known = widget.controller.members.map((m) => m.id).toSet();
     setState(() => _busy = true);
     try {
-      await widget.controller.performAction({
+      final outcome = await widget.controller.performAction({
         'action': 'member.save',
         'id': widget.member?['id'],
         'version': widget.member?['version'] ?? 1,
@@ -50,7 +81,30 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
         'active': _active,
         'roleIds': _roles.toList(),
       });
-      if (mounted) Navigator.pop(context);
+      if (!mounted) return;
+      // A new person has an id once the server took it and the list reloaded.
+      final created = widget.member != null
+          ? null
+          : widget.controller.members
+                .where(
+                  (m) => !known.contains(m.id) && m.name == _name.text.trim(),
+                )
+                .map((m) => m.id)
+                .singleOrNull;
+      setState(() => _saved = true);
+      Navigator.pop(context, created);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            outcomeText(
+              outcome,
+              done: 'Person gespeichert.',
+              queued:
+                  'Person vorgemerkt – wird übertragen, sobald die Verbindung steht.',
+            ),
+          ),
+        ),
+      );
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
@@ -72,11 +126,17 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
     try {
       // The server only deletes unlinked people: linked logins go first via
       // the account endpoint, which also removes the Firebase identity.
-      final data = await widget.controller.remote('/admin/accounts');
-      final accounts = jsonList(data['accounts'])
-          .map(jsonMap)
-          .where((a) => intValue(a['personId'], -1) == personId)
-          .toList();
+      // Without that list (offline) only deactivating is possible.
+      List<JsonMap>? accounts;
+      try {
+        final data = await widget.controller.remote('/admin/accounts');
+        accounts = jsonList(data['accounts'])
+            .map(jsonMap)
+            .where((a) => intValue(a['personId'], -1) == personId)
+            .toList();
+      } catch (_) {
+        if (member['active'] == false) rethrow;
+      }
       if (!mounted) return;
       final choice = await showDialog<String>(
         context: context,
@@ -92,7 +152,7 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
         await _save();
         return;
       }
-      for (final a in accounts) {
+      for (final a in accounts!) {
         await widget.controller.remote(
           '/admin/accounts/${Uri.encodeComponent(textValue(a['uid']))}',
           method: 'DELETE',
@@ -183,61 +243,71 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => AdminPage(
-    controller: widget.controller,
-    title: widget.member == null ? 'Person anlegen' : 'Person bearbeiten',
-    children: (context) => [
-      TextField(
-        controller: _name,
-        decoration: const InputDecoration(labelText: 'Name'),
-        textCapitalization: TextCapitalization.words,
-      ),
-      const SizedBox(height: 20),
-      const SectionTitle('Rollen'),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final r in widget.controller.personRoles)
-            FilterChip(
-              label: Text(textValue(r['name'])),
-              selected: _roles.contains(r['id']),
-              onSelected: _busy
-                  ? null
-                  : (selected) => setState(() {
-                      if (selected) {
-                        _roles.add(textValue(r['id']));
-                      } else {
-                        _roles.remove(r['id']);
-                      }
-                    }),
-            ),
-        ],
-      ),
-      TextButton.icon(
-        onPressed: () =>
-            openPage(context, RolesAdminScreen(controller: widget.controller)),
-        icon: const Icon(Icons.edit_outlined),
-        label: const Text('Rollen anpassen'),
-      ),
-      const SizedBox(height: 16),
-      SwitchListTile(
-        value: _active,
-        onChanged: (v) => setState(() => _active = v),
-        title: const Text('Aktives Mitglied'),
-      ),
-      const SizedBox(height: 28),
-      FilledButton(
-        onPressed: _busy ? null : _save,
-        child: const Text('Speichern'),
-      ),
-      if (widget.member != null)
-        PersonProductions(
-          controller: widget.controller,
-          personId: intValue(widget.member!['id']),
+  Widget build(BuildContext context) => DiscardGuard(
+    dirty: _dirty && !_busy,
+    child: AdminPage(
+      controller: widget.controller,
+      title: widget.member == null ? 'Person anlegen' : 'Person bearbeiten',
+      children: (context) => [
+        TextFormField(
+          controller: _name,
+          decoration: InputDecoration(
+            labelText: 'Name',
+            errorText: _nameMissing && _touched
+                ? 'Bitte einen Namen eingeben.'
+                : null,
+          ),
+          textCapitalization: TextCapitalization.words,
         ),
-      if (_deletable) ...[const SizedBox(height: 48), _dangerZone(context)],
-    ],
+        const SizedBox(height: 20),
+        const SectionTitle('Rollen'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final r in widget.controller.personRoles)
+              FilterChip(
+                label: Text(textValue(r['name'])),
+                selected: _roles.contains(r['id']),
+                onSelected: _busy
+                    ? null
+                    : (selected) => setState(() {
+                        if (selected) {
+                          _roles.add(textValue(r['id']));
+                        } else {
+                          _roles.remove(r['id']);
+                        }
+                      }),
+              ),
+          ],
+        ),
+        TextButton.icon(
+          onPressed: () => openPage(
+            context,
+            RolesAdminScreen(controller: widget.controller),
+          ),
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('Rollen anpassen'),
+        ),
+        const SizedBox(height: 16),
+        SwitchListTile(
+          value: _active,
+          onChanged: (v) => setState(() => _active = v),
+          title: const Text('Aktives Mitglied'),
+        ),
+        if (widget.member != null)
+          PersonProductions(
+            controller: widget.controller,
+            personId: intValue(widget.member!['id']),
+          ),
+        const SizedBox(height: 28),
+        FilledButton(
+          onPressed: _busy || _nameMissing ? null : _save,
+          child: const Text('Speichern'),
+        ),
+        if (_deletable) ...[const SizedBox(height: 48), _dangerZone(context)],
+      ],
+    ),
   );
 }
 
@@ -251,7 +321,10 @@ class _DeleteMemberDialog extends StatefulWidget {
   });
   final String name;
   final bool active;
-  final List<JsonMap> accounts;
+
+  /// The person's app accounts; null when they could not be loaded, which
+  /// leaves only deactivating.
+  final List<JsonMap>? accounts;
   @override
   State<_DeleteMemberDialog> createState() => _DeleteMemberDialogState();
 }
@@ -271,7 +344,9 @@ class _DeleteMemberDialogState extends State<_DeleteMemberDialog> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final accounts = widget.accounts
+    final known = widget.accounts;
+    if (known == null) return _offline(context);
+    final accounts = known
         .map((a) => textValue(a['email'], textValue(a['name'])))
         .join(', ');
     const items = [
@@ -296,7 +371,7 @@ class _DeleteMemberDialogState extends State<_DeleteMemberDialog> {
             const SizedBox(height: 8),
             for (final item in [
               ...items,
-              widget.accounts.isEmpty
+              known.isEmpty
                   ? 'Es ist kein App-Konto verknüpft.'
                   : 'Verknüpfte App-Konten samt Anmeldung und Geräten: $accounts',
             ])
@@ -347,4 +422,26 @@ class _DeleteMemberDialogState extends State<_DeleteMemberDialog> {
       ],
     );
   }
+
+  /// Without a connection the linked accounts are unknown, so the person
+  /// cannot be deleted yet; deactivating works offline.
+  Widget _offline(BuildContext context) => AlertDialog(
+    title: Text('${widget.name} löschen?'),
+    content: const Text(
+      'Die verknüpften App-Konten konnten gerade nicht geladen werden. '
+      'Endgültig löschen geht erst wieder mit Verbindung. Deaktivieren kannst '
+      'du die Person schon jetzt: Dann bleibt alles erhalten, sie erscheint '
+      'nicht mehr in Auswahllisten und ihr App-Zugang ist gesperrt.',
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Abbrechen'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, 'deactivate'),
+        child: const Text('Nur deaktivieren'),
+      ),
+    ],
+  );
 }

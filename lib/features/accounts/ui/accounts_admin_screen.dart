@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_controller.dart';
-import '../../../core/identity.dart';
 import '../../../core/models.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
@@ -25,7 +24,10 @@ class AccountsAdminScreen extends StatefulWidget {
 }
 
 class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
-  late Future<JsonMap> _data;
+  // The last loaded roster stays visible while a reload runs.
+  JsonMap? _data;
+  Object? _loadError;
+  bool _loading = false;
   late String _view = widget.initialView, _filter = widget.initialFilter;
   String _query = '';
   final _search = TextEditingController();
@@ -33,7 +35,8 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _loading = true;
+    _fetch();
   }
 
   @override
@@ -42,8 +45,27 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
     super.dispose();
   }
 
-  void _load() {
-    _data = widget.controller.remote('/admin/accounts');
+  Future<void> _load() {
+    setState(() => _loading = true);
+    return _fetch();
+  }
+
+  /// Loads the roster; a failure keeps the previous data and is reported.
+  Future<void> _fetch() async {
+    try {
+      final data = await widget.controller.remote('/admin/accounts');
+      if (!mounted) return;
+      setState(() {
+        _data = data;
+        _loadError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      if (_data != null) showProblem(context, e);
+      setState(() => _loadError = e);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   void _select(String view, [String filter = 'all']) {
@@ -54,9 +76,8 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
   }
 
   Future<void> _refresh() async {
-    setState(_load);
-    await _data;
-    await widget.controller.refresh();
+    await _load();
+    if (mounted) await refreshWithFeedback(context, widget.controller);
   }
 
   Future<void> _approve(
@@ -64,26 +85,21 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
     AccountRoster roster, {
     int? personId,
   }) async {
-    // Refresh the selectable person list as well as the admin-only account list.
-    try {
-      await widget.controller.refresh();
-      if (!mounted) return;
-      await openPage(
-        context,
-        AccountApprovalScreen(
-          controller: widget.controller,
-          account: a,
-          accounts: roster.accounts,
-          initialPersonId: personId,
-        ),
-      );
-      if (mounted) setState(_load);
-    } catch (e) {
-      if (mounted) showProblem(context, e);
-    }
+    // The approval screen refreshes the selectable person list itself.
+    await openPage(
+      context,
+      AccountApprovalScreen(
+        controller: widget.controller,
+        account: a,
+        accounts: roster.accounts,
+        initialPersonId: personId,
+      ),
+    );
+    if (mounted) await _load();
   }
 
-  Future<void> _change(JsonMap a, String status) async {
+  /// Changes the account status; returns whether the server took it.
+  Future<bool> _change(JsonMap a, String status) async {
     try {
       await widget.controller.performAction({
         'action': 'account.status',
@@ -91,9 +107,46 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
         'version': a['version'],
         'status': status,
       });
-      if (mounted) setState(_load);
+      if (mounted) await _load();
+      return true;
     } catch (e) {
       if (mounted) showProblem(context, e);
+      return false;
+    }
+  }
+
+  String _accountName(JsonMap a) =>
+      textValue(a['name'], textValue(a['email'], 'dieses Konto'));
+
+  Future<void> _suspend(JsonMap a) async {
+    final confirmed = await confirmDestructive(
+      context,
+      title: 'Zugang sperren?',
+      message:
+          '${_accountName(a)} kann die App danach nicht mehr nutzen, bis du '
+          'den Zugang wieder freigibst. Die Person im Ensemble bleibt erhalten.',
+      confirmLabel: 'Sperren',
+    );
+    if (!confirmed || !mounted) return;
+    if (!await _change(a, 'suspended') || !mounted) return;
+    final uid = a['uid'];
+    showDone(
+      context,
+      'Zugang von ${_accountName(a)} gesperrt.',
+      actionLabel: 'Rückgängig',
+      onAction: () {
+        // The suspension raised the version; undo with the reloaded account.
+        final fresh = jsonList(
+          _data?['accounts'],
+        ).map(jsonMap).where((x) => x['uid'] == uid).firstOrNull;
+        if (fresh != null && mounted) _release(fresh);
+      },
+    );
+  }
+
+  Future<void> _release(JsonMap a) async {
+    if (await _change(a, 'approved') && mounted) {
+      showDone(context, 'Zugang von ${_accountName(a)} wieder freigegeben.');
     }
   }
 
@@ -111,8 +164,9 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
       setState(() {
         _view = 'accounts';
         _filter = 'pending';
-        _load();
       });
+      await _load();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Erneute Prüfung vorgemerkt.')),
       );
@@ -185,28 +239,16 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
         : Icons.info_outline,
   );
   Future<void> _delete(JsonMap a) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Konto löschen?'),
-        content: Text(
+    final ok = await confirmDestructive(
+      context,
+      title: 'Konto löschen?',
+      message:
           'Das Anmeldekonto ${textValue(a['email'], textValue(a['name']))} wird gelöscht. '
           'Die Person im Ensemble mit ihren Rückmeldungen und Besetzungen bleibt erhalten. '
           'Eine erneute Registrierung braucht wieder eine Freigabe.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Abbrechen'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Löschen'),
-          ),
-        ],
-      ),
+      confirmLabel: 'Löschen',
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
     try {
       await widget.controller.remote(
         '/admin/accounts/${Uri.encodeComponent(textValue(a['uid']))}',
@@ -214,10 +256,8 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
         body: {'version': a['version']},
       );
       if (!mounted) return;
-      setState(_load);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Konto gelöscht.')));
+      showDone(context, 'Konto gelöscht.');
+      await _load();
     } catch (e) {
       if (mounted) showProblem(context, e);
     }
@@ -242,7 +282,11 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
         ? null
         : PopupMenuButton<String>(
             tooltip: 'Zugang verwalten',
-            onSelected: (s) => s == 'delete' ? _delete(a) : _change(a, s),
+            onSelected: (s) => switch (s) {
+              'delete' => _delete(a),
+              'suspended' => _suspend(a),
+              _ => _release(a),
+            },
             itemBuilder: (_) => [
               if (a['status'] == 'approved')
                 const PopupMenuItem(
@@ -412,7 +456,7 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
                 productionId: textValue(production['id']),
               ),
             );
-            if (mounted) setState(_load);
+            if (mounted) await _load();
           },
         ),
       ),
@@ -428,33 +472,37 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
         actions: [
           IconButton(
             tooltip: 'Aktualisieren',
-            onPressed: () => _refresh().catchError((Object e) {
-              if (context.mounted) showProblem(context, e);
-            }),
+            onPressed: _loading ? null : _refresh,
             icon: const Icon(Icons.refresh),
           ),
         ],
+        bottom: _loading && _data != null
+            ? const PreferredSize(
+                preferredSize: Size.fromHeight(3),
+                child: LinearProgressIndicator(minHeight: 3),
+              )
+            : null,
       ),
       body: widget.controller.user?.isAdmin != true
           ? const Center(child: Text('Admin-Zugang erforderlich.'))
-          : FutureBuilder<JsonMap>(
-              future: _data,
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
+          : Builder(
+              builder: (context) {
+                final data = _data;
+                if (data == null && _loading) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (data == null) {
                   return EmptyState(
                     icon: Icons.cloud_off_outlined,
                     title: 'Konten nicht geladen',
-                    message: identityError(snapshot.error!),
+                    message: userMessage(_loadError ?? 'unbekannt'),
                     action: OutlinedButton(
-                      onPressed: () => setState(_load),
+                      onPressed: _load,
                       child: const Text('Erneut versuchen'),
                     ),
                   );
                 }
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final roster = AccountRoster(snapshot.data!);
+                final roster = AccountRoster(data);
                 final people = roster.members
                     .where(
                       (m) =>
@@ -543,7 +591,8 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
                                 'people': 'Personen (${roster.members.length})',
                                 'accounts':
                                     'Konten (${roster.accounts.length})',
-                                'roles': 'Rollen (${roster.roles.length})',
+                                'roles':
+                                    'Drehbuchrollen (${roster.roles.length})',
                               }.entries)
                                 ChoiceChip(
                                   label: Text(entry.value),
@@ -592,7 +641,7 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
                                               'rejected': 'Abgelehnt',
                                             }
                                           : {
-                                              'all': 'Alle Rollen',
+                                              'all': 'Alle Drehbuchrollen',
                                               'unassigned': 'Ohne Besetzung',
                                             })
                                       .entries)
@@ -606,14 +655,16 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
                           ),
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 18),
-                            child: Text(
-                              '$count ${_view == 'people'
-                                  ? 'Personen'
-                                  : _view == 'accounts'
-                                  ? 'Konten'
-                                  : 'Rollen'}',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
+                            child: Text(switch (_view) {
+                              'people' =>
+                                count == 1 ? '1 Person' : '$count Personen',
+                              'accounts' =>
+                                count == 1 ? '1 Konto' : '$count Konten',
+                              _ =>
+                                count == 1
+                                    ? '1 Drehbuchrolle'
+                                    : '$count Drehbuchrollen',
+                            }, style: Theme.of(context).textTheme.bodySmall),
                           ),
                           if (count == 0)
                             EmptyState(

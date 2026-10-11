@@ -60,7 +60,12 @@ class _CastingScreenState extends State<CastingScreen> {
       .where((p) => p['id'] == widget.productionId)
       .firstOrNull;
 
-  Future<void> _apply(List<JsonMap> changes, {String? done}) async {
+  /// Sends [changes]; [undo] reverts them from the confirmation SnackBar.
+  Future<void> _apply(
+    List<JsonMap> changes, {
+    String? done,
+    List<JsonMap>? undo,
+  }) async {
     setState(() => _pending++);
     try {
       await _controller.performAction({
@@ -69,9 +74,12 @@ class _CastingScreenState extends State<CastingScreen> {
         'changes': changes,
       });
       if (mounted && done != null) {
-        ScaffoldMessenger.of(
+        showDone(
           context,
-        ).showSnackBar(SnackBar(content: Text(done)));
+          done,
+          actionLabel: undo == null ? null : 'Rückgängig',
+          onAction: undo == null ? null : () => _apply(undo),
+        );
       }
     } catch (e) {
       if (mounted) showProblem(context, e);
@@ -157,60 +165,68 @@ class _CastingScreenState extends State<CastingScreen> {
                       : normalizeName(a.name).compareTo(normalizeName(b.name));
                 });
           final theme = Theme.of(context);
-          return SafeArea(
-            child: SizedBox(
-              height: MediaQuery.sizeOf(context).height * .8,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                    child: Text(title, style: theme.textTheme.titleLarge),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-                    child: TextField(
-                      key: const ValueKey('casting-person-search'),
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.search),
-                        hintText: 'Person suchen',
+          // The keyboard shrinks the sheet so the search and results stay
+          // visible above it.
+          final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+          return Padding(
+            padding: EdgeInsets.only(bottom: keyboard),
+            child: SafeArea(
+              child: SizedBox(
+                height: (MediaQuery.sizeOf(context).height * .8 - keyboard)
+                    .clamp(220.0, double.infinity),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      child: Text(title, style: theme.textTheme.titleLarge),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                      child: TextField(
+                        key: const ValueKey('casting-person-search'),
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.search),
+                          hintText: 'Person suchen',
+                        ),
+                        onChanged: (v) => setSheetState(() => query = v),
                       ),
-                      onChanged: (v) => setSheetState(() => query = v),
                     ),
-                  ),
-                  Expanded(
-                    child: ListView(
-                      children: [
-                        if (current != null && removeLabel != null)
-                          ListTile(
-                            leading: const Icon(Icons.person_remove_outlined),
-                            title: Text(removeLabel),
-                            onTap: () =>
-                                Navigator.pop(context, const _Choice(null)),
-                          ),
-                        for (final m in people)
-                          ListTile(
-                            key: ValueKey('casting-person-${m.id}'),
-                            leading: _avatar(m.id),
-                            title: Text(m.name),
-                            subtitle: _personHint(cast, m, suggestion),
-                            trailing: m.id == current
-                                ? Icon(
-                                    Icons.check_circle,
-                                    color: theme.colorScheme.primary,
-                                  )
-                                : null,
-                            onTap: () => Navigator.pop(context, _Choice(m.id)),
-                          ),
-                        if (people.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.all(24),
-                            child: Text('Keine passende Person gefunden.'),
-                          ),
-                      ],
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          if (current != null && removeLabel != null)
+                            ListTile(
+                              leading: const Icon(Icons.person_remove_outlined),
+                              title: Text(removeLabel),
+                              onTap: () =>
+                                  Navigator.pop(context, const _Choice(null)),
+                            ),
+                          for (final m in people)
+                            ListTile(
+                              key: ValueKey('casting-person-${m.id}'),
+                              leading: _avatar(m.id),
+                              title: Text(m.name),
+                              subtitle: _personHint(cast, m, suggestion),
+                              trailing: m.id == current
+                                  ? Icon(
+                                      Icons.check_circle,
+                                      color: theme.colorScheme.primary,
+                                    )
+                                  : null,
+                              onTap: () =>
+                                  Navigator.pop(context, _Choice(m.id)),
+                            ),
+                          if (people.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(24),
+                              child: Text('Keine passende Person gefunden.'),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           );
@@ -602,14 +618,13 @@ class _CastingScreenState extends State<CastingScreen> {
           normalizeName(role.actor) != normalizeName(_name(personId ?? -1)))
         'Drehbuch: ${role.actor}',
     ];
+    // Open roles stand out by a neutral tint; red is kept for the summary.
     return Card(
       key: ValueKey('casting-role-${role.id}'),
-      color: open ? scheme.errorContainer.withValues(alpha: .4) : null,
+      color: open ? scheme.surfaceContainerHighest.withValues(alpha: .6) : null,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: open
-            ? BorderSide(color: scheme.error.withValues(alpha: .6))
-            : BorderSide.none,
+        side: open ? BorderSide(color: scheme.outlineVariant) : BorderSide.none,
       ),
       clipBehavior: Clip.antiAlias,
       child: ListTile(
@@ -617,8 +632,8 @@ class _CastingScreenState extends State<CastingScreen> {
         leading: open
             ? CircleAvatar(
                 radius: 20,
-                backgroundColor: scheme.error.withValues(alpha: .12),
-                child: Icon(Icons.person_add_alt, color: scheme.error),
+                backgroundColor: scheme.primary.withValues(alpha: .1),
+                child: Icon(Icons.person_add_alt, color: scheme.primary),
               )
             : _avatar(personId),
         title: Text(
@@ -634,7 +649,10 @@ class _CastingScreenState extends State<CastingScreen> {
             Text(
               open ? 'Noch nicht besetzt' : _name(personId),
               style: open
-                  ? TextStyle(color: scheme.error, fontWeight: FontWeight.w700)
+                  ? TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                    )
                   : null,
             ),
             if (details.isNotEmpty)
@@ -643,7 +661,7 @@ class _CastingScreenState extends State<CastingScreen> {
         ),
         trailing: Icon(
           open ? Icons.add_circle_outline : Icons.edit_outlined,
-          color: open ? scheme.error : scheme.onSurfaceVariant,
+          color: open ? scheme.primary : scheme.onSurfaceVariant,
         ),
         onTap: () => _castRole(cast, role, suggestion),
       ),
@@ -700,9 +718,15 @@ class _CastingScreenState extends State<CastingScreen> {
             personId: id,
             subtitle: 'Darf den gemeinsamen Fokus im Drehbuch setzen',
             removeTooltip: '${_name(id)} aus der Regie entfernen',
-            onRemove: () => _apply([
-              {'kind': 'director', 'personId': id, 'on': false},
-            ]),
+            onRemove: () => _apply(
+              [
+                {'kind': 'director', 'personId': id, 'on': false},
+              ],
+              done: '${_name(id)} ist nicht mehr in der Regie.',
+              undo: [
+                {'kind': 'director', 'personId': id, 'on': true},
+              ],
+            ),
           ),
       ]),
     Padding(
@@ -748,9 +772,22 @@ class _CastingScreenState extends State<CastingScreen> {
             personId: id,
             subtitle: cast.functions[id] ?? 'Funktion ergänzen',
             removeTooltip: '${_name(id)} aus dem Team entfernen',
-            onRemove: () => _apply([
-              {'kind': 'member', 'personId': id, 'on': false},
-            ]),
+            onRemove: () => _apply(
+              [
+                {'kind': 'member', 'personId': id, 'on': false},
+              ],
+              done: '${_name(id)} ist nicht mehr im Team.',
+              undo: [
+                {
+                  'kind': 'member',
+                  'personId': id,
+                  'on': true,
+                  // Removing also dropped the function; undo brings it back.
+                  if (cast.functions[id] != null)
+                    'function': cast.functions[id],
+                },
+              ],
+            ),
             onTap: () async {
               final label = await _editFunction(
                 _name(id),

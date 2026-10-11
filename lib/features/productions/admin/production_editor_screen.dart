@@ -9,6 +9,9 @@ import '../../../shared/widgets/page_header.dart';
 import '../../casting/domain/casting.dart';
 import '../../casting/ui/casting_screen.dart';
 
+/// Creates or edits a production. After creating one, the route pops with
+/// the new production's id (null while it still waits for a connection), so
+/// the caller can continue in its editor.
 class ProductionEditorScreen extends StatefulWidget {
   const ProductionEditorScreen({
     super.key,
@@ -25,13 +28,14 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
   late final TextEditingController _title, _subtitle;
   // Casting changes elsewhere raise the version; it is re-read on return.
   late int _version;
-  bool _busy = false;
+  bool _busy = false, _touched = false;
+
+  bool get _titleMissing => _title.text.trim().isEmpty;
   @override
   void initState() {
     super.initState();
-    _title = TextEditingController(
-      text: textValue(widget.production?['title']),
-    );
+    _title = TextEditingController(text: textValue(widget.production?['title']))
+      ..addListener(() => setState(() => _touched = true));
     _subtitle = TextEditingController(
       text: textValue(widget.production?['subtitle']),
     );
@@ -62,6 +66,10 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
   }
 
   Future<void> _save() async {
+    if (_titleMissing) return;
+    final known = widget.controller.productionRecords
+        .map((p) => p['id'])
+        .toSet();
     setState(() => _busy = true);
     try {
       await widget.controller.performAction({
@@ -73,8 +81,16 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
       });
       if (widget.production?['id'] != null) {
         await widget.controller.loadScript(textValue(widget.production!['id']));
+        if (mounted) Navigator.pop(context);
+        return;
       }
-      if (mounted) Navigator.pop(context);
+      // The new production has an id once the server took it.
+      final created = widget.controller.productionRecords
+          .map((p) => p['id'])
+          .where((id) => !known.contains(id))
+          .map((id) => textValue(id))
+          .singleOrNull;
+      if (mounted) Navigator.pop(context, created);
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
@@ -102,11 +118,19 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
   @override
   Widget build(BuildContext context) => AdminPage(
     controller: widget.controller,
-    title: 'Produktion bearbeiten',
+    title: widget.production == null
+        ? 'Produktion anlegen'
+        : 'Produktion bearbeiten',
     children: (context) => [
       TextField(
         controller: _title,
-        decoration: const InputDecoration(labelText: 'Titel'),
+        textCapitalization: TextCapitalization.sentences,
+        decoration: InputDecoration(
+          labelText: 'Titel',
+          errorText: _titleMissing && _touched
+              ? 'Bitte einen Titel eingeben.'
+              : null,
+        ),
       ),
       const SizedBox(height: 20),
       TextField(
@@ -154,8 +178,10 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
         ),
       const SizedBox(height: 24),
       FilledButton(
-        onPressed: _busy ? null : _save,
-        child: const Text('Speichern'),
+        onPressed: _busy || _titleMissing ? null : _save,
+        child: Text(
+          widget.production == null ? 'Produktion anlegen' : 'Speichern',
+        ),
       ),
       if (widget.production != null) ...[
         const SizedBox(height: 20),
