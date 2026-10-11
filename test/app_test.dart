@@ -56,10 +56,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Heute'), findsOneWidget);
-    expect(find.text('Dein Probenplan.'), findsNothing);
+    expect(find.text('Termine.'), findsNothing);
     await tester.tap(find.text('Termine'));
     await tester.pumpAndSettle();
-    expect(find.text('Dein Probenplan.'), findsOneWidget);
+    expect(find.text('Termine.'), findsOneWidget);
     expect(tester.takeException(), isNull);
     final card = find.byType(EventCard).first;
     await tester.tap(card);

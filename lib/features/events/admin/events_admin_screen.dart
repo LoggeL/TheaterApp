@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:intl/intl.dart';
 
 import '../../../core/app_controller.dart';
@@ -7,7 +6,6 @@ import '../../../core/models.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/page_header.dart';
-import '../../slots/ui/slot_pools_screen.dart';
 import '../domain/event_dates.dart';
 import '../domain/event_format.dart';
 import '../ui/event_card.dart';
@@ -22,24 +20,10 @@ class EventsAdminScreen extends StatefulWidget {
 }
 
 class _EventsAdminScreenState extends State<EventsAdminScreen> {
-  bool _calendar = false, _showPast = true;
-  DateTime _day = DateUtils.dateOnly(DateTime.now());
-  final _upcoming = GlobalKey();
+  bool _calendar = false, _showPast = false;
+  late DateTime _day = DateUtils.dateOnly(widget.controller.now);
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToUpcoming());
-  }
-
-  /// Opens at the next events; the past stays reachable above them.
-  void _jumpToUpcoming() {
-    final target = _upcoming.currentContext;
-    if (!mounted || target == null) return;
-    Scrollable.ensureVisible(target);
-  }
-
-  /// Chronological cards with a heading whenever the month changes.
+  /// Cards with a heading whenever the month changes.
   List<Widget> _months(
     BuildContext context,
     List<TheaterEvent> events, {
@@ -92,134 +76,124 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
           '${e.fromSlotPool ? ' · Terminfinder' : ''}',
         ),
         // Slot pool events follow their bookings and are edited in the pool.
-        trailing: e.fromSlotPool
-            ? IconButton(
-                tooltip: 'Im Terminfinder öffnen',
-                onPressed: () =>
-                    openSlotPool(context, widget.controller, e.slotPoolId!),
-                icon: const Icon(Icons.edit_calendar_outlined),
-              )
-            : IconButton(
-                tooltip: 'Termin bearbeiten',
-                onPressed: () => openPage(
-                  context,
-                  EventEditorScreen(controller: widget.controller, event: e),
-                ),
-                icon: const Icon(Icons.edit_outlined),
-              ),
+        trailing: IconButton(
+          tooltip: e.fromSlotPool
+              ? 'Im Terminfinder öffnen'
+              : 'Termin bearbeiten',
+          onPressed: () => editEvent(context, widget.controller, e),
+          icon: Icon(
+            e.fromSlotPool ? Icons.edit_calendar_outlined : Icons.edit_outlined,
+          ),
+        ),
         onTap: () => openEvent(context, widget.controller, e.id),
       ),
     ),
   );
 
+  int _byStart(TheaterEvent a, TheaterEvent b) =>
+      (a.startsAt ?? DateTime(9999)).compareTo(b.startsAt ?? DateTime(9999));
+
   @override
-  Widget build(BuildContext context) => AdminPage(
-    controller: widget.controller,
-    title: 'Termine verwalten',
-    // All cards exist up front so the list can open at the upcoming ones.
-    cacheExtent: _calendar ? null : const ScrollCacheExtent.pixels(100000),
-    actions: [
-      IconButton(
-        tooltip: 'Termin anlegen',
-        onPressed: () =>
-            openPage(context, EventEditorScreen(controller: widget.controller)),
-        icon: const Icon(Icons.add),
-      ),
-    ],
-    children: (context) {
-      final day = widget.controller.events
-          .where((e) => eventOnDay(e, _day))
-          .toList();
-      final now = widget.controller.now;
-      final past = [
-        for (final e in widget.controller.events)
-          if (eventIsPast(e, now)) e,
-      ];
-      final upcoming = [
-        for (final e in widget.controller.events)
-          if (!eventIsPast(e, now)) e,
-      ];
-      return [
-        SegmentedButton<bool>(
-          segments: const [
-            ButtonSegment(
-              value: false,
-              label: Text('Liste'),
-              icon: Icon(Icons.view_agenda_outlined),
-            ),
-            ButtonSegment(
-              value: true,
-              label: Text('Kalender'),
-              icon: Icon(Icons.calendar_month_outlined),
-            ),
-          ],
-          selected: {_calendar},
-          onSelectionChanged: (value) =>
-              setState(() => _calendar = value.first),
-        ),
-        const SizedBox(height: 16),
-        if (_calendar) ...[
-          RehearsalCalendar(
-            selected: _day,
-            onSelected: (value) => setState(() => _day = value),
-            events: widget.controller.events,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            DateFormat.yMMMMEEEEd('de').format(_day),
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 12),
-          if (day.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                'An diesem Tag ist nichts geplant.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-          for (final e in day) _event(context, e),
-          OutlinedButton.icon(
+  Widget build(BuildContext context) => Scaffold(
+    // The one way to create an event; in the calendar on the selected day.
+    floatingActionButton: widget.controller.user?.isAdmin == true
+        ? FloatingActionButton.extended(
             onPressed: () => openPage(
               context,
               EventEditorScreen(
                 controller: widget.controller,
-                initialDay: _day,
+                initialDay: _calendar ? _day : null,
               ),
             ),
             icon: const Icon(Icons.add),
             label: Text(
-              'Termin am ${DateFormat('d. MMMM', 'de').format(_day)} anlegen',
+              _calendar
+                  ? 'Termin am ${DateFormat('d. MMMM', 'de').format(_day)} anlegen'
+                  : 'Termin anlegen',
             ),
-          ),
-        ] else ...[
-          FilledButton.icon(
-            onPressed: () => openPage(
-              context,
-              EventEditorScreen(controller: widget.controller),
-            ),
-            icon: const Icon(Icons.add),
-            label: const Text('Termin anlegen'),
-          ),
-          if (past.isNotEmpty) ...[
-            SectionTitle(
-              'Vergangen (${past.length})',
-              trailing: TextButton(
-                onPressed: () => setState(() => _showPast = !_showPast),
-                child: Text(_showPast ? 'Ausblenden' : 'Einblenden'),
+          )
+        : null,
+    body: AdminPage(
+      controller: widget.controller,
+      title: 'Termine verwalten',
+      children: (context) {
+        final day = widget.controller.events
+            .where((e) => eventOnDay(e, _day))
+            .toList();
+        final now = widget.controller.now;
+        final upcoming = [
+          for (final e in widget.controller.events)
+            if (!eventIsPast(e, now)) e,
+        ]..sort(_byStart);
+        // The most recent past events first.
+        final past = [
+          for (final e in widget.controller.events)
+            if (eventIsPast(e, now)) e,
+        ]..sort((a, b) => _byStart(b, a));
+        return [
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(
+                value: false,
+                label: Text('Liste'),
+                icon: Icon(Icons.view_agenda_outlined),
               ),
+              ButtonSegment(
+                value: true,
+                label: Text('Kalender'),
+                icon: Icon(Icons.calendar_month_outlined),
+              ),
+            ],
+            selected: {_calendar},
+            onSelectionChanged: (value) =>
+                setState(() => _calendar = value.first),
+          ),
+          const SizedBox(height: 16),
+          if (_calendar) ...[
+            RehearsalCalendar(
+              selected: _day,
+              onSelected: (value) => setState(() => _day = value),
+              events: widget.controller.events,
+              today: now,
             ),
-            if (_showPast) ..._months(context, past, past: true),
-          ],
-          SectionTitle('Kommend (${upcoming.length})', key: _upcoming),
-          if (upcoming.isEmpty)
+            const SizedBox(height: 12),
             Text(
-              'Keine kommenden Termine.',
-              style: Theme.of(context).textTheme.bodySmall,
+              DateFormat.yMMMMEEEEd('de').format(_day),
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-          ..._months(context, upcoming),
-        ],
-      ];
-    },
+            const SizedBox(height: 12),
+            if (day.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  nothingPlannedOn(_day),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            for (final e in day) _event(context, e),
+          ] else ...[
+            SectionTitle('Kommend (${upcoming.length})'),
+            if (upcoming.isEmpty)
+              Text(
+                'Keine kommenden Termine.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ..._months(context, upcoming),
+            if (past.isNotEmpty) ...[
+              SectionTitle(
+                'Vergangen (${past.length})',
+                trailing: TextButton(
+                  onPressed: () => setState(() => _showPast = !_showPast),
+                  child: Text(_showPast ? 'Ausblenden' : 'Einblenden'),
+                ),
+              ),
+              if (_showPast) ..._months(context, past, past: true),
+            ],
+          ],
+          // Room for the button so it never covers the last entry.
+          const SizedBox(height: 72),
+        ];
+      },
+    ),
   );
 }

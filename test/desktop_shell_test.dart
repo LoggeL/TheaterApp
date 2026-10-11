@@ -57,7 +57,7 @@ void main() {
       findsOneWidget,
     );
     await selectSection(tester, 'Termine');
-    expect(find.text('Dein Probenplan.'), findsOneWidget);
+    expect(find.text('Termine.'), findsOneWidget);
     expect(find.byType(EventDetailContent), findsOneWidget);
     expect(find.byKey(const ValueKey('desktop-route-frame')), findsNothing);
     expect(tester.takeException(), isNull);

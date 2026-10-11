@@ -3,8 +3,14 @@ import 'package:intl/intl.dart';
 
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
+import '../../../shared/feedback.dart';
+import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/page_header.dart';
+import '../../absences/ui/absences_screen.dart';
+import '../../slots/domain/slot_pool.dart';
+import '../../slots/ui/slot_pools_screen.dart';
+import '../admin/event_editor_screen.dart';
 import '../domain/event_dates.dart';
 import '../domain/event_format.dart';
 import '../domain/event_types.dart';
@@ -24,21 +30,60 @@ class ScheduleScreen extends StatefulWidget {
 class _ScheduleScreenState extends State<ScheduleScreen> {
   int _filter = 0;
   bool _calendar = false;
-  DateTime _day = DateTime.now();
+  late DateTime _day = DateUtils.dateOnly(widget.controller.now);
+
+  /// The month the calendar shows; paging it changes nothing else.
+  late DateTime _month = DateTime(_day.year, _day.month);
   String? _selectedEventId;
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.controller,
-    builder: (context, _) => LayoutBuilder(
-      builder: (context, constraints) => _buildSchedule(
-        context,
-        constraints.maxWidth >= 1000 &&
-            MediaQuery.textScalerOf(context).scale(14) <= 21,
+    builder: (context, _) => Scaffold(
+      backgroundColor: Colors.transparent,
+      floatingActionButton: widget.controller.user?.isAdmin == true
+          ? FloatingActionButton.extended(
+              // Other tabs of the shell have buttons of their own.
+              heroTag: 'schedule-create-event',
+              onPressed: () => openPage(
+                context,
+                EventEditorScreen(
+                  controller: widget.controller,
+                  initialDay: _calendar ? _day : null,
+                ),
+              ),
+              icon: const Icon(Icons.add),
+              label: const Text('Termin anlegen'),
+            )
+          : null,
+      body: LayoutBuilder(
+        builder: (context, constraints) => _buildSchedule(
+          context,
+          constraints.maxWidth >= 1000 &&
+              MediaQuery.textScalerOf(context).scale(14) <= 21,
+        ),
       ),
     ),
   );
 
   static const _filters = ['Kommend', 'Offen', 'Zugesagt', 'Vergangen'];
+
+  /// Why a filter is empty, in the words of that filter.
+  static const _emptyMessages = [
+    'Gerade stehen keine Termine an.',
+    'Du hast auf alle kommenden Termine geantwortet.',
+    'Du hast noch keinem kommenden Termin zugesagt.',
+    'Es gibt noch keine vergangenen Termine.',
+  ];
+
+  String get _emptyMessage =>
+      _calendar ? nothingPlannedOn(_day) : _emptyMessages[_filter];
+
+  /// Shows [day] and brings its month into the calendar.
+  void _showDay(DateTime day) {
+    _day = day;
+    _month = DateTime(day.year, day.month);
+  }
 
   bool _matches(TheaterEvent e, int filter, DateTime now) {
     final future = e.startsAt == null || (e.endsAt ?? e.startsAt!).isAfter(now);
@@ -129,16 +174,108 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     onSelectionChanged: (value) => setState(() => _calendar = value.first),
   );
 
-  Widget _buildSchedule(BuildContext context, bool desktop) {
-    final now = DateTime.now();
-    final events =
-        widget.controller.events.where((e) {
-          return _calendar ? eventOnDay(e, _day) : _matches(e, _filter, now);
-        }).toList()..sort(
-          (a, b) => (a.startsAt ?? DateTime(9999)).compareTo(
-            b.startsAt ?? DateTime(9999),
+  /// Scheduling tasks beside the plan itself.
+  Widget _moreMenu() => PopupMenuButton<String>(
+    tooltip: 'Weitere Optionen',
+    icon: const Icon(Icons.more_vert),
+    onSelected: (choice) => openPage(
+      context,
+      choice == 'slots'
+          ? SlotPoolsScreen(controller: widget.controller)
+          : AddAbsenceScreen(controller: widget.controller),
+    ),
+    itemBuilder: (context) => const [
+      PopupMenuItem(
+        value: 'slots',
+        child: ListTile(
+          leading: Icon(Icons.event_available_outlined),
+          title: Text('Terminfinder'),
+        ),
+      ),
+      PopupMenuItem(
+        value: 'absence',
+        child: ListTile(
+          leading: Icon(Icons.beach_access_outlined),
+          title: Text('Abwesenheit melden'),
+        ),
+      ),
+    ],
+  );
+
+  /// 'Termine.' with the menu and the view toggle; on narrow screens and
+  /// with large text the toggle moves below the title so nothing gets
+  /// squeezed.
+  Widget _header(BuildContext context, {bool toggle = true}) => LayoutBuilder(
+    builder: (context, constraints) {
+      final stacked =
+          toggle &&
+          (constraints.maxWidth < 360 ||
+              MediaQuery.textScalerOf(context).scale(14) > 20);
+      if (!stacked) {
+        return PageHeader(
+          'Termine.',
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [if (toggle) _viewToggle(), _moreMenu()],
           ),
         );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          PageHeader('Termine.', trailing: _moreMenu()),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: _viewToggle(),
+          ),
+        ],
+      );
+    },
+  );
+
+  /// Shown while a slot pool still waits for the member's choice.
+  Widget? _slotBanner(BuildContext context) {
+    final pools = slotPoolsToChoose(widget.controller);
+    if (pools.isEmpty) return null;
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      color: scheme.primaryContainer,
+      margin: const EdgeInsets.only(bottom: 16),
+      child: ListTile(
+        leading: Icon(
+          Icons.event_available_outlined,
+          color: scheme.onPrimaryContainer,
+        ),
+        title: Text(
+          'Terminfinder: Wähle noch ein Zeitfenster',
+          style: TextStyle(
+            color: scheme.onPrimaryContainer,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        subtitle: Text(
+          pools.map((p) => p.title).join(' · '),
+          style: TextStyle(color: scheme.onPrimaryContainer),
+        ),
+        trailing: Icon(Icons.chevron_right, color: scheme.onPrimaryContainer),
+        onTap: () =>
+            openPage(context, SlotPoolsScreen(controller: widget.controller)),
+      ),
+    );
+  }
+
+  int _byStart(TheaterEvent a, TheaterEvent b) =>
+      (a.startsAt ?? DateTime(9999)).compareTo(b.startsAt ?? DateTime(9999));
+
+  Widget _buildSchedule(BuildContext context, bool desktop) {
+    final now = widget.controller.now;
+    final pastFirst = !_calendar && _filter == 3;
+    final events =
+        widget.controller.events.where((e) {
+            return _calendar ? eventOnDay(e, _day) : _matches(e, _filter, now);
+          }).toList()
+          // The most recent past events come first.
+          ..sort((a, b) => pastFirst ? _byStart(b, a) : _byStart(a, b));
     final nextId = widget.controller.events
         .where((e) => e.startsAt != null && !eventIsPast(e, now))
         .fold<TheaterEvent?>(
@@ -148,8 +285,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         )
         ?.id;
     if (desktop) return _desktop(context, events, nextId);
+    final banner = _slotBanner(context);
+    final admin = widget.controller.user?.isAdmin == true;
     return RefreshIndicator(
-      onRefresh: widget.controller.refresh,
+      onRefresh: () => refreshWithFeedback(context, widget.controller),
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
@@ -159,24 +298,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Dein Probenplan.',
-                          style: Theme.of(context).textTheme.headlineMedium,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      _viewToggle(),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
+                  _header(context),
+                  ?banner,
                   if (_calendar) ...[
                     RehearsalCalendar(
                       selected: _day,
-                      onSelected: (day) => setState(() => _day = day),
+                      displayedMonth: _month,
+                      onMonthChanged: (month) => setState(() => _month = month),
+                      onSelected: (day) => setState(() => _showDay(day)),
                       events: widget.controller.events,
+                      today: now,
                     ),
                     Text(
                       DateFormat.yMMMMEEEEd('de').format(_day),
@@ -193,11 +324,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ),
           ),
           if (events.isEmpty)
-            const SliverToBoxAdapter(
+            SliverToBoxAdapter(
               child: EmptyState(
                 icon: Icons.event_available_outlined,
                 title: 'Hier ist alles ruhig.',
-                message: 'Für diese Auswahl gibt es keine Termine.',
+                message: _emptyMessage,
               ),
             )
           else
@@ -237,7 +368,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 },
               ),
             ),
-          const SliverToBoxAdapter(child: SizedBox(height: 26)),
+          // Room for the create button below the last card.
+          SliverToBoxAdapter(child: SizedBox(height: admin ? 88 : 26)),
         ],
       ),
     );
@@ -252,20 +384,23 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         events.where((event) => event.id == _selectedEventId).firstOrNull ??
         events.firstOrNull;
     if (_selectedEventId == null && !_calendar && selected?.startsAt != null) {
-      _day = selected!.startsAt!.toLocal();
+      _showDay(selected!.startsAt!.toLocal());
     }
     // Keep identity across controller refreshes, including replacement objects.
     _selectedEventId = selected?.id;
+    final banner = _slotBanner(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
-          child: Text(
-            'Dein Probenplan.',
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
+          child: _header(context, toggle: false),
         ),
+        if (banner != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22),
+            child: banner,
+          ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(22, 0, 22, 22),
@@ -276,7 +411,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   width: 350,
                   child: Card(
                     child: RefreshIndicator(
-                      onRefresh: widget.controller.refresh,
+                      onRefresh: () =>
+                          refreshWithFeedback(context, widget.controller),
                       child: ListView(
                         key: const PageStorageKey('schedule-agenda'),
                         primary: false,
@@ -285,15 +421,23 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         children: [
                           RehearsalCalendar(
                             selected: _day,
+                            displayedMonth: _month,
+                            onMonthChanged: (month) =>
+                                setState(() => _month = month),
                             onSelected: (day) => setState(() {
-                              _day = day;
+                              _showDay(day);
                               _calendar = true;
                               _selectedEventId = null;
                             }),
                             events: widget.controller.events,
+                            today: widget.controller.now,
                           ),
                           const Divider(height: 24),
-                          _filterChips(context, DateTime.now(), wrap: true),
+                          _filterChips(
+                            context,
+                            widget.controller.now,
+                            wrap: true,
+                          ),
                           const SizedBox(height: 18),
                           Text(
                             _calendar
@@ -303,11 +447,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           ),
                           const SizedBox(height: 12),
                           if (events.isEmpty)
-                            const EmptyState(
+                            EmptyState(
                               icon: Icons.event_available_outlined,
                               title: 'Hier ist alles ruhig.',
-                              message:
-                                  'Für diese Auswahl gibt es keine Termine.',
+                              message: _emptyMessage,
                             ),
                           for (final event in events)
                             Padding(
@@ -321,7 +464,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                 onTap: () => setState(() {
                                   _selectedEventId = event.id;
                                   if (event.startsAt != null) {
-                                    _day = event.startsAt!.toLocal();
+                                    _showDay(event.startsAt!.toLocal());
                                   }
                                 }),
                               ),
@@ -336,10 +479,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   child: Card(
                     clipBehavior: Clip.antiAlias,
                     child: selected == null
-                        ? const EmptyState(
+                        ? EmptyState(
                             icon: Icons.event_available_outlined,
                             title: 'Kein Termin ausgewählt',
-                            message: 'Wähle einen anderen Tag oder Filter.',
+                            message: _calendar
+                                ? nothingPlannedOn(_day)
+                                : 'Wähle einen anderen Tag oder Filter.',
                           )
                         : EventDetailContent(
                             key: ValueKey(selected.id),
@@ -375,7 +520,7 @@ class _AgendaTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final now = DateTime.now();
+    final now = controller.now;
     final past = eventIsPast(event, now);
     final marker = eventMarker(event, now, isNext: isNext);
     final prominent = !past && isProminentKind(event.kind);

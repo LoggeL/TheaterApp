@@ -1,6 +1,7 @@
 import 'package:intl/intl.dart';
 
 import '../../../core/models.dart';
+import 'rsvp_status.dart';
 
 String eventDate(TheaterEvent event) => event.startsAt == null
     ? 'Datum noch offen'
@@ -12,9 +13,10 @@ String eventTime(TheaterEvent event) => event.time.isNotEmpty
     ? 'Uhrzeit offen'
     : '${DateFormat.Hm('de').format(event.startsAt!)}${event.endsAt == null ? '' : '–${DateFormat.Hm('de').format(event.endsAt!)}'} Uhr';
 
-String statusText(String status) => switch (status) {
-  'yes' => 'Dabei',
-  'late' => 'Später',
-  'no' => 'Abwesend',
-  _ => 'Offen',
-};
+/// The response as shown in badges and lists, in the shared vocabulary.
+String statusText(String status) => RsvpStatus.fromWire(status).label;
+
+/// The empty text for a calendar day, e.g. 'Am Montag, 12. Oktober ist
+/// nichts geplant.'
+String nothingPlannedOn(DateTime day) =>
+    'Am ${DateFormat('EEEE, d. MMMM', 'de').format(day)} ist nichts geplant.';

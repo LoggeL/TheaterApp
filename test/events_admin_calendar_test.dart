@@ -29,7 +29,8 @@ void main() {
     await tester.tap(find.text('Kalender'));
     await tester.pumpAndSettle();
     expect(find.byType(RehearsalCalendar), findsOneWidget);
-    final today = DateUtils.dateOnly(DateTime.now());
+    // The calendar starts at the controller's today.
+    final today = DateUtils.dateOnly(fixedNow);
     final planned = controller.events.where((e) => eventOnDay(e, today));
     expect(find.byTooltip('Termin bearbeiten'), findsNWidgets(planned.length));
     final create = find.text(
@@ -148,7 +149,7 @@ void main() {
     }
   });
 
-  testWidgets('event management lists past and upcoming chronologically', (
+  testWidgets('event management lists upcoming first and the past collapsed', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(800, 900);
@@ -184,7 +185,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    // Opens at the upcoming events, with the past reachable above.
+    // Opens at the upcoming events; the past waits collapsed below them.
     expect(find.text('Kommend (2)'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text('Kommend (2)')).dy,
@@ -194,11 +195,19 @@ void main() {
     double y(String title) =>
         tester.getTopLeft(find.text(title, skipOffstage: false)).dy;
     expect(y('Leseprobe'), lessThan(y('Premiere')));
-    expect(y('Altprobe'), lessThan(y('Abbau')));
-    expect(y('Abbau'), lessThan(y('Kommend (2)')));
-    expect(find.text('Vergangen (10)', skipOffstage: false), findsOneWidget);
+    expect(find.text('OKTOBER 2026', skipOffstage: false), findsOneWidget);
+    expect(y('Premiere'), lessThan(y('Vergangen (10)')));
+    expect(find.text('Abbau', skipOffstage: false), findsNothing);
+    expect(find.byType(FloatingActionButton), findsOneWidget);
+    expect(find.byTooltip('Termin anlegen'), findsNothing);
+    await tester.ensureVisible(find.text('Einblenden', skipOffstage: false));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Einblenden'));
+    await tester.pumpAndSettle();
+    // The most recent past events come first.
+    expect(y('Abbau'), lessThan(y('Altprobe')));
+    expect(y('Vergangen (10)'), lessThan(y('Abbau')));
     expect(find.text('JUNI 2026', skipOffstage: false), findsOneWidget);
-    expect(find.text('OKTOBER 2026'), findsOneWidget);
     await tester.ensureVisible(find.text('Ausblenden', skipOffstage: false));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Ausblenden'));

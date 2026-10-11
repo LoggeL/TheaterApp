@@ -30,7 +30,7 @@ class EventCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final now = DateTime.now();
+    final now = controller.now;
     final past = eventIsPast(event, now);
     final marker = eventMarker(event, now, isNext: isNext);
     final prominent = !past && isProminentKind(event.kind);
@@ -53,98 +53,102 @@ class EventCard extends StatelessWidget {
         onTap: () => openEvent(context, controller, event.id),
         child: Padding(
           padding: const EdgeInsets.all(17),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 48,
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: .1),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      event.startsAt == null
-                          ? '–'
-                          : DateFormat('dd').format(event.startsAt!),
-                      style: TextStyle(
-                        fontSize: 23,
-                        fontWeight: FontWeight.w800,
-                        color: accent,
-                      ),
-                    ),
-                    Text(
-                      event.startsAt == null
-                          ? 'OFFEN'
-                          : DateFormat(
-                              'EEE',
-                              'de',
-                            ).format(event.startsAt!).toUpperCase(),
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (marker != null || prominent) ...[
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          if (marker != null) EventMarker(marker),
-                          if (prominent) EventKindPill(event.kind),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    Text(
-                      event.title,
-                      style: prominent
-                          ? theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            )
-                          : theme.textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(
-                          eventKindIcon(event.kind),
-                          size: 14,
+          child: LayoutBuilder(
+            builder: (context, constraints) => Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 48,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: .1),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        event.startsAt == null
+                            ? '–'
+                            : DateFormat('dd').format(event.startsAt!),
+                        style: TextStyle(
+                          fontSize: 23,
+                          fontWeight: FontWeight.w800,
                           color: accent,
                         ),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: Text(
-                            '${eventTypeLabel(event.kind)} · ${eventTime(event)}',
-                            style: theme.textTheme.bodySmall,
-                          ),
+                      ),
+                      Text(
+                        event.startsAt == null
+                            ? 'OFFEN'
+                            : DateFormat(
+                                'EEE',
+                                'de',
+                              ).format(event.startsAt!).toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Text(event.place, style: theme.textTheme.bodySmall),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              RsvpStatusBadge(
-                status: event.response,
-                expectedArrivalAt: event.expectedArrivalAt,
-                locked: responsesClosed(controller, event),
-                emphasizeOpen: !past && !event.fromSlotPool,
-              ),
-            ],
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (marker != null || prominent) ...[
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (marker != null) EventMarker(marker),
+                            if (prominent) EventKindPill(event.kind),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      Text(
+                        event.title,
+                        style: prominent
+                            ? theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              )
+                            : theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(
+                            eventKindIcon(event.kind),
+                            size: 14,
+                            color: accent,
+                          ),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(
+                              '${eventTypeLabel(event.kind)} · ${eventTime(event)}',
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(event.place, style: theme.textTheme.bodySmall),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                RsvpStatusBadge(
+                  status: event.response,
+                  expectedArrivalAt: event.expectedArrivalAt,
+                  locked: responsesClosed(controller, event),
+                  emphasizeOpen: !past && !event.fromSlotPool,
+                  // The words need room the title cannot spare on small phones.
+                  showLabel: constraints.maxWidth >= 270,
+                ),
+              ],
+            ),
           ),
         ),
       ),

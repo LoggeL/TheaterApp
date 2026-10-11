@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/app_controller.dart';
 import '../../../../core/models.dart';
+import '../../../../shared/feedback.dart';
 import 'rsvp_actions.dart';
 import 'rsvp_status_badge.dart';
 
@@ -33,11 +34,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
       );
       if (mounted) setState(() => _editingLate = false);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.toString())));
-      }
+      if (mounted) showProblem(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -71,6 +68,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
     if (widget.compact) {
       return Semantics(
         selected: selected,
+        inMutuallyExclusiveGroup: true,
         child: OutlinedButton.icon(
           onPressed: enabled ? action : null,
           style: OutlinedButton.styleFrom(
@@ -93,47 +91,55 @@ class _RsvpPanelState extends State<RsvpPanel> {
     }
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: Material(
-        color: selected
-            ? color.withValues(alpha: .11)
-            : Theme.of(context).cardColor,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(
-            color: selected
-                ? color.withValues(alpha: .45)
-                : Theme.of(
-                    context,
-                  ).colorScheme.outlineVariant.withValues(alpha: .5),
+      // One of three exclusive choices, announced like a radio button.
+      child: Semantics(
+        container: true,
+        button: true,
+        selected: selected,
+        inMutuallyExclusiveGroup: true,
+        enabled: enabled,
+        child: Material(
+          color: selected
+              ? color.withValues(alpha: .11)
+              : Theme.of(context).cardColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(
+              color: selected
+                  ? color.withValues(alpha: .45)
+                  : Theme.of(
+                      context,
+                    ).colorScheme.outlineVariant.withValues(alpha: .5),
+            ),
           ),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: enabled ? action : null,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-            child: Row(
-              children: [
-                Icon(icon, color: color),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: enabled ? action : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+              child: Row(
+                children: [
+                  Icon(icon, color: color),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                ),
-                Icon(
-                  selected
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  color: selected
-                      ? color
-                      : Theme.of(context).colorScheme.outline,
-                ),
-              ],
+                  Icon(
+                    selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    color: selected
+                        ? color
+                        : Theme.of(context).colorScheme.outline,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -247,24 +253,34 @@ class _RsvpPanelState extends State<RsvpPanel> {
           const SizedBox(height: 12),
           const Text('Voraussichtlich da ab'),
           const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.schedule),
-              title: Text(
-                _arrival == null
-                    ? 'Uhrzeit optional'
-                    : '${DateFormat.Hm('de').format(_arrival!)} Uhr',
+          if (e.startsAt == null || e.endsAt == null)
+            Text(
+              e.startsAt == null
+                  ? 'Für diesen Termin steht noch keine Uhrzeit fest, '
+                        'deshalb bleibt deine Ankunft offen.'
+                  : 'Für diesen Termin ist keine Endzeit eingetragen, '
+                        'deshalb bleibt deine Ankunft offen.',
+              style: Theme.of(context).textTheme.bodySmall,
+            )
+          else
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.schedule),
+                title: Text(
+                  _arrival == null
+                      ? 'Uhrzeit optional'
+                      : '${DateFormat.Hm('de').format(_arrival!)} Uhr',
+                ),
+                onTap: _pickTime,
+                trailing: _arrival == null
+                    ? const Icon(Icons.edit_outlined)
+                    : IconButton(
+                        tooltip: 'Uhrzeit entfernen',
+                        onPressed: () => setState(() => _arrival = null),
+                        icon: const Icon(Icons.close),
+                      ),
               ),
-              onTap: _pickTime,
-              trailing: _arrival == null
-                  ? const Icon(Icons.edit_outlined)
-                  : IconButton(
-                      tooltip: 'Uhrzeit entfernen',
-                      onPressed: () => setState(() => _arrival = null),
-                      icon: const Icon(Icons.close),
-                    ),
             ),
-          ),
           const SizedBox(height: 16),
           FilledButton(
             onPressed: _busy ? null : () => _save('late'),
