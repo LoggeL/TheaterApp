@@ -7,6 +7,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../data/api_client.dart';
 import 'app_controller.dart';
 import '../app/brand.dart';
 import 'identity.dart';
@@ -252,11 +253,13 @@ class DeviceServices {
   Future<void> _initializePushOnce() async {
     if (_firebaseReady) return;
     if (!Brand.pushEnabled) {
-      throw StateError('Push ist für diesen Build nicht eingerichtet.');
+      throw const ApiException('Push ist für diesen Build nicht eingerichtet.');
     }
     await FirebaseConfiguration.initialize();
     if (!await FirebaseMessaging.instance.isSupported()) {
-      throw StateError('Dieser Browser unterstützt keine Push-Mitteilungen.');
+      throw const ApiException(
+        'Dieser Browser unterstützt keine Push-Mitteilungen.',
+      );
     }
     if (!kIsWeb) {
       FirebaseMessaging.onBackgroundMessage(firebaseBackgroundMessage);
@@ -305,7 +308,7 @@ class DeviceServices {
       return 'Benachrichtigungen sind in den Geräteeinstellungen deaktiviert.';
     }
     if (kIsWeb && FirebaseConfiguration.vapidKey.isEmpty) {
-      throw StateError('Der Web-Push-Schlüssel fehlt.');
+      throw const ApiException('Der Web-Push-Schlüssel fehlt.');
     }
     final token = await FirebaseMessaging.instance.getToken(
       vapidKey: kIsWeb ? FirebaseConfiguration.vapidKey : null,

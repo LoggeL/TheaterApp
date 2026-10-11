@@ -3,19 +3,27 @@ import 'package:flutter/material.dart';
 
 import '../../core/app_controller.dart';
 import '../../core/device_services.dart';
+import '../../shared/feedback.dart';
 
+/// Asks once per account for push permission after sign-in. The caller waits
+/// for other startup dialogs first; the prompt itself only appears while the
+/// shell is the visible route, never on top of a page or another dialog.
+/// Browsers and Android explain the request before the system asks.
 Future<void> requestPushOnOpen(
   BuildContext context,
   AppController controller,
   DeviceServices devices,
 ) async {
   final session = controller.sessionEpoch;
-  if (!await devices.preparePushPrompt() ||
-      !context.mounted ||
-      controller.sessionEpoch != session) {
+  bool stillOnTop() =>
+      context.mounted &&
+      controller.sessionEpoch == session &&
+      ModalRoute.isCurrentOf(context) != false;
+  if (!stillOnTop() || !await devices.preparePushPrompt() || !stillOnTop()) {
     return;
   }
-  if (!kIsWeb) {
+  final explain = kIsWeb || defaultTargetPlatform == TargetPlatform.android;
+  if (!explain) {
     await controller.setPreference('pushPromptSeen', true);
     try {
       await devices.enablePush();
@@ -25,6 +33,7 @@ Future<void> requestPushOnOpen(
     return;
   }
   // Browsers require a user gesture. Initializing FCM happens before the dialog.
+  if (!context.mounted) return;
   await showDialog<void>(
     context: context,
     builder: (_) => _PushPrompt(controller: controller, devices: devices),
@@ -72,7 +81,7 @@ class _PushPromptState extends State<_PushPrompt> {
                       setState(() => _result = message);
                     }
                   } catch (e) {
-                    if (mounted) setState(() => _result = e.toString());
+                    if (mounted) setState(() => _result = userMessage(e));
                   } finally {
                     if (mounted) setState(() => _busy = false);
                   }

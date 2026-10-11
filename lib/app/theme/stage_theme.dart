@@ -7,6 +7,18 @@ abstract final class StageTheme {
   static const cream = Color(0xFFF8F6F0);
   static const green = Color(0xFF32775D);
   static const violet = Color(0xFF74619B);
+
+  /// Accent for text and icons on [ink] cards (e.g. the next-event card).
+  static const onInkAccent = Color(0xFFFFA584);
+
+  /// Cards and input fields in the dark theme.
+  static const inkCard = Color(0xFF222923);
+
+  /// Background of selected chips, segments and navigation indicators.
+  static Color selectedTint(Brightness brightness) =>
+      brightness == Brightness.dark
+      ? const Color(0xFF65311F)
+      : const Color(0xFFFFE4D8);
   static ThemeData build(Brightness brightness) {
     final dark = brightness == Brightness.dark;
     final scheme =
@@ -14,7 +26,7 @@ abstract final class StageTheme {
           seedColor: orange,
           brightness: brightness,
         ).copyWith(
-          primary: dark ? const Color(0xFFFFA584) : const Color(0xFFB83E16),
+          primary: dark ? onInkAccent : const Color(0xFFB83E16),
           surface: dark ? const Color(0xFF171C19) : cream,
           onSurface: dark ? const Color(0xFFF2F3ED) : ink,
           secondary: dark ? const Color(0xFF9ED6B6) : green,
@@ -55,12 +67,12 @@ abstract final class StageTheme {
       cardTheme: CardThemeData(
         elevation: 0,
         margin: EdgeInsets.zero,
-        color: dark ? const Color(0xFF222923) : Colors.white,
+        color: dark ? inkCard : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: dark ? const Color(0xFF222923) : Colors.white,
+        fillColor: dark ? inkCard : Colors.white,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 18,
           vertical: 17,
@@ -96,11 +108,9 @@ abstract final class StageTheme {
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        height: 78,
+        height: 68,
         backgroundColor: dark ? const Color(0xFF1F2521) : Colors.white,
-        indicatorColor: dark
-            ? const Color(0xFF65311F)
-            : const Color(0xFFFFE4D8),
+        indicatorColor: selectedTint(brightness),
         labelTextStyle: const WidgetStatePropertyAll(
           TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
         ),
@@ -132,7 +142,7 @@ abstract final class StageTheme {
         labelStyle: base.textTheme.labelLarge?.copyWith(
           fontWeight: FontWeight.w600,
         ),
-        selectedColor: dark ? const Color(0xFF65311F) : const Color(0xFFFFE4D8),
+        selectedColor: selectedTint(brightness),
         showCheckmark: false,
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
@@ -146,7 +156,7 @@ abstract final class StageTheme {
           ),
           backgroundColor: WidgetStateProperty.resolveWith(
             (states) => states.contains(WidgetState.selected)
-                ? (dark ? const Color(0xFF65311F) : const Color(0xFFFFE4D8))
+                ? selectedTint(brightness)
                 : null,
           ),
         ),

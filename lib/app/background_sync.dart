@@ -3,7 +3,8 @@ import 'dart:async';
 import '../core/app_controller.dart';
 
 /// Refreshes the session every 45 seconds and when the app resumes, with at
-/// most one automatic refresh in flight.
+/// most one automatic refresh in flight. These refreshes are silent: they
+/// never show the progress bar.
 class BackgroundSync {
   BackgroundSync(this.controller, {required this.isStarting});
   final AppController controller;
@@ -34,7 +35,7 @@ class BackgroundSync {
     }
     final task = controller.usesFirebase && !controller.hasAccess
         ? controller.refreshIdentityAccess()
-        : controller.refresh();
+        : controller.refresh(silent: true);
     _automaticRefresh = task;
     try {
       await task;

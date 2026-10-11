@@ -11,23 +11,33 @@ void showProblem(BuildContext context, Object error) => ScaffoldMessenger.of(
   context,
 ).showSnackBar(SnackBar(content: Text(userMessage(error))));
 
-Future<void> runAction(
+/// Runs [action] and reports the result in a SnackBar: [message] on success,
+/// or [queuedMessage] when the action completed with [ActionOutcome.queued]
+/// (the change waits for a connection). Errors show a readable German text.
+Future<void> runAction<T>(
   BuildContext context,
-  Future<void> Function() action, {
+  Future<T> Function() action, {
   String? message,
+  String? queuedMessage,
 }) async {
   try {
-    await action();
-    if (context.mounted && message != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+    // Commands like `respond` complete with an ActionOutcome.
+    final Object? result = await action();
+    final text = result is ActionOutcome && queuedMessage != null
+        ? outcomeText(
+            result,
+            done: message ?? queuedMessage,
+            queued: queuedMessage,
+          )
+        : message;
+    if (context.mounted && text != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
     }
   } catch (e) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(e.toString()),
+          content: Text(userMessage(e)),
           duration: const Duration(seconds: 6),
         ),
       );

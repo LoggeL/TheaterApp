@@ -9,7 +9,9 @@ import '../features/events/ui/event_detail_screen.dart';
 import '../features/messages/ui/message_detail_screen.dart';
 import '../features/scripts/ui/script_reader_screen.dart';
 import '../features/slots/ui/slot_pool_screen.dart';
+import '../shared/feedback.dart';
 import '../shared/navigation.dart';
+import 'shell/app_section.dart';
 
 /// Opens notification and link targets. Targets that arrive before the
 /// member has access wait until [takePending] hands them back.
@@ -43,42 +45,43 @@ class DeepLinkRouter {
       return;
     }
     _pendingTarget = null;
-    if (target.attendance != null && target.recipientUid != null) {
-      unawaited(_respondToTarget(target));
-    }
-    final context = navigator.currentContext!;
-    if (target.kind == 'events') {
-      openPage(
-        context,
+    final (section, page) = switch (target.kind) {
+      'events' => (
+        AppSection.schedule,
         EventDetailScreen(controller: controller, eventId: target.id),
-      );
-    } else if (target.kind == 'accounts') {
+      ),
       // New registrations: only admins can act on them.
-      if (controller.user?.isAdmin != true) return;
-      openPage(
-        context,
+      'accounts' when controller.user?.isAdmin == true => (
+        AppSection.admin,
         AccountsAdminScreen(
           controller: controller,
           initialView: 'accounts',
           initialFilter: 'pending',
         ),
-      );
-    } else if (target.kind == 'slots') {
-      openPage(
-        context,
+      ),
+      'slots' => (
+        AppSection.schedule,
         SlotPoolScreen(controller: controller, poolId: target.id),
-      );
-    } else if (target.kind == 'messages') {
-      openPage(
-        context,
+      ),
+      'messages' => (
+        AppSection.messages,
         MessageTargetScreen(controller: controller, messageId: target.id),
-      );
-    } else {
-      openPage(
-        context,
+      ),
+      'productions' => (
+        AppSection.scripts,
         ScriptReaderScreen(controller: controller, productionId: target.id),
-      );
+      ),
+      _ => (null, null),
+    };
+    if (section == null || page == null) return;
+    if (target.attendance != null && target.recipientUid != null) {
+      unawaited(_respondToTarget(target));
     }
+    // One target at a time: the page opens above its section's start.
+    final context = navigator.currentContext!;
+    selectSection(context, section);
+    navigator.currentState!.popUntil((route) => route.isFirst);
+    openPage(context, page);
   }
 
   Future<void> _respondToTarget(AppTarget target) async {
@@ -90,7 +93,7 @@ class DeepLinkRouter {
         target.recipientUid!,
       );
     } catch (error) {
-      message = error.toString();
+      message = userMessage(error);
     }
     if (isMounted()) {
       messenger.currentState?.showSnackBar(SnackBar(content: Text(message)));
