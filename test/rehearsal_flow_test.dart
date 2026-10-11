@@ -129,6 +129,8 @@ void main() {
   testWidgets('save and view scenes uses the newly captured presence offline', (
     tester,
   ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final server = TestServer();
     server.data['events'] = [rehearsal()];
     server.data['members'] = jsonList(server.data['members']).take(2).toList();
@@ -154,9 +156,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(DropdownButton<String>).first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Da').last);
+    // Unrecorded people come first: Alex (1) before Robin (2).
+    await tester.tap(
+      find.descendant(
+        of: find.byType(SegmentedButton<bool>).first,
+        matching: find.text('Da'),
+      ),
+    );
     await tester.pumpAndSettle();
     final combinedSave = find.text('Speichern und Szenen ansehen');
     await tester.ensureVisible(combinedSave);

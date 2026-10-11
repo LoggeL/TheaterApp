@@ -73,7 +73,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    for (final label in ['1 Dabei', '1 Später', '1 Nicht dabei', '2 Offen']) {
+    for (final label in ['1 Zugesagt', '1 Später', '1 Abgesagt', '2 Offen']) {
       expect(find.bySemanticsLabel(label), findsOneWidget, reason: label);
     }
     expect(find.text('3 von 5 haben sich zurückgemeldet'), findsOneWidget);
@@ -93,7 +93,7 @@ void main() {
     expect(find.text('ab $local Uhr'), findsOneWidget);
 
     // A count filters the list down to its group; tapping again resets.
-    await tester.tap(find.bySemanticsLabel('1 Nicht dabei'));
+    await tester.tap(find.bySemanticsLabel('1 Abgesagt'));
     await tester.pumpAndSettle();
     expect(find.text('Toni Lichtblick'), findsOneWidget);
     expect(find.text('Kim Kulisse'), findsNothing);
@@ -111,11 +111,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Sam Vorhang'), findsOneWidget);
 
+    // The reminder names its recipients and waits for confirmation.
+    final sent = server.actionBodies.length;
     await tester.tap(find.text('Offene erinnern'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        '2 Personen bekommen eine Push-Erinnerung an diesen Termin: '
+        'Kim Kulisse, Sam Vorhang.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Abbrechen'));
+    await tester.pumpAndSettle();
+    expect(server.actionBodies, hasLength(sent));
+    await tester.tap(find.text('Offene erinnern'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Erinnerung senden'));
     await tester.pumpAndSettle();
     expect(server.actionBodies.last['action'], 'event.remindOpen');
     expect(server.actionBodies.last['eventId'], 'rehearsal');
-    expect(find.text('Erinnerung an 2 Personen vorgemerkt.'), findsOneWidget);
+    expect(find.text('Erinnerung an 2 Personen gesendet.'), findsOneWidget);
     expect(tester.takeException(), isNull);
     semantics.dispose();
     await tester.pumpWidget(const SizedBox());

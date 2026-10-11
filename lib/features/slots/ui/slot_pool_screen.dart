@@ -51,38 +51,6 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
     }
   }
 
-  Future<bool> _confirm(
-    String title,
-    String message,
-    String confirm, {
-    bool destructive = false,
-  }) async =>
-      await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          scrollable: true,
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Abbrechen'),
-            ),
-            FilledButton(
-              style: destructive
-                  ? FilledButton.styleFrom(
-                      backgroundColor: Theme.of(ctx).colorScheme.error,
-                      foregroundColor: Theme.of(ctx).colorScheme.onError,
-                    )
-                  : null,
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(confirm),
-            ),
-          ],
-        ),
-      ) ==
-      true;
-
   Future<void> _book(SlotPool pool, TimeSlot slot) => _run({
     'action': 'slot.book',
     'poolId': pool.id,
@@ -90,11 +58,13 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
   }, done: 'Gebucht: ${slotLabel(slot)}');
 
   Future<void> _cancel(SlotPool pool, TimeSlot slot) async {
-    if (!await _confirm(
-      'Zeitfenster freigeben?',
-      'Dein Zeitfenster ${slotLabel(slot)} wird für andere frei. '
+    if (!await confirmDestructive(
+      context,
+      title: 'Zeitfenster freigeben?',
+      message:
+          'Dein Zeitfenster ${slotLabel(slot)} wird für andere frei. '
           'Der Termin verschwindet aus deinem Kalender.',
-      'Freigeben',
+      confirmLabel: 'Freigeben',
     )) {
       return;
     }
@@ -115,16 +85,70 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
     });
   }
 
+  /// The assign flow started from a person: choose the slot for them.
+  Future<void> _assignPerson(SlotPool pool, TheaterMember member) async {
+    final now = _controller.now;
+    final slots = pool.slots
+        .where((s) => !s.startedAt(now) && !s.full)
+        .toList();
+    final slot = await showModalBottomSheet<TimeSlot>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * .7,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+                child: Text(
+                  'Zeitfenster für ${member.name}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              if (slots.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Text('Kein Zeitfenster mehr frei.'),
+                ),
+              for (final s in slots)
+                ListTile(
+                  leading: const Icon(Icons.schedule),
+                  title: Text(slotLabel(s)),
+                  subtitle: Text(
+                    s.free == 1 ? '1 Platz frei' : '${s.free} Plätze frei',
+                  ),
+                  onTap: () => Navigator.pop(context, s),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (slot == null || !mounted) return;
+    await _run({
+      'action': 'slot.assign',
+      'poolId': pool.id,
+      'personId': member.id,
+      'slotId': slot.id,
+    }, done: '${member.name} eingetragen: ${slotLabel(slot)}');
+  }
+
   Future<void> _remove(
     SlotPool pool,
     TimeSlot slot,
     ({int personId, String name}) person,
   ) async {
-    if (!await _confirm(
-      '${person.name} entfernen?',
-      '${person.name} wird aus dem Zeitfenster ${slotLabel(slot)} entfernt '
+    if (!await confirmDestructive(
+      context,
+      title: '${person.name} entfernen?',
+      message:
+          '${person.name} wird aus dem Zeitfenster ${slotLabel(slot)} entfernt '
           'und kann danach selbst neu buchen.',
-      'Entfernen',
+      confirmLabel: 'Entfernen',
     )) {
       return;
     }
@@ -161,12 +185,13 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
               : 'Buchung geschlossen.',
         );
       case 'delete':
-        if (!await _confirm(
-          'Terminfinder löschen?',
-          'Der Terminfinder, alle Buchungen und die daraus erzeugten Termine '
-              'werden für alle entfernt.',
-          'Löschen',
-          destructive: true,
+        if (!await confirmDestructive(
+          context,
+          title: 'Terminfinder löschen?',
+          message:
+              'Der Terminfinder, alle Buchungen und die daraus erzeugten '
+              'Termine werden für alle entfernt.',
+          confirmLabel: 'Löschen',
         )) {
           return;
         }
@@ -555,11 +580,28 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
           childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
           expandedCrossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              missing.isEmpty
-                  ? 'Alle Eingeladenen haben ein Zeitfenster.'
-                  : missing.map((m) => m.name).join(', '),
-            ),
+            if (missing.isEmpty)
+              const Text('Alle Eingeladenen haben ein Zeitfenster.')
+            else ...[
+              Text(
+                'Tippe auf eine Person, um ihr ein Zeitfenster zuzuweisen.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final m in missing)
+                    ActionChip(
+                      avatar: const Icon(Icons.person_add_alt, size: 18),
+                      label: Text(m.name),
+                      tooltip: '${m.name} ein Zeitfenster zuweisen',
+                      onPressed: _busy ? null : () => _assignPerson(pool, m),
+                    ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

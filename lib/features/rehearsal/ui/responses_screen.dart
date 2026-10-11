@@ -11,6 +11,7 @@ import '../../../shared/widgets/member_avatar.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/state_pill.dart';
 import '../../events/domain/event_format.dart';
+import '../../events/domain/rsvp_status.dart';
 import '../../events/ui/event_style.dart';
 import 'attendance_screen.dart';
 import 'scene_planner_screen.dart';
@@ -25,7 +26,7 @@ String memberResponseLabel(AppController c, String eventId, int memberId) {
   );
   return status == 'late'
       ? 'Später · ${arrival == null ? 'Uhrzeit offen' : DateFormat.Hm('de').format(arrival.toLocal())}'
-      : statusText(status);
+      : RsvpStatus.fromWire(status).label;
 }
 
 /// Who is coming to an event, who is not and who still has to answer.
@@ -43,12 +44,7 @@ class ResponsesAdminScreen extends StatefulWidget {
 
 const _responseOrder = ['yes', 'late', 'no', 'open'];
 
-String _responseCountLabel(String status) => switch (status) {
-  'yes' => 'Dabei',
-  'late' => 'Später',
-  'no' => 'Nicht dabei',
-  _ => 'Offen',
-};
+String _responseCountLabel(String status) => RsvpStatus.fromWire(status).label;
 
 IconData _responseIcon(String status) => switch (status) {
   'yes' => Icons.thumb_up_alt,
@@ -68,21 +64,51 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
           .firstOrNull ??
       widget.event;
 
-  Future<void> _remind(int open) async {
+  /// Asks before the push goes out, naming who will get it.
+  Future<void> _remind(List<TheaterMember> people) async {
+    final open = people.length;
+    const shown = 8;
+    final names = [
+      ...people.take(shown).map((m) => m.name),
+      if (open > shown) 'und ${open - shown} weitere',
+    ].join(', ');
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: const Text('Offene erinnern?'),
+        content: Text(
+          '${open == 1 ? 'Eine Person bekommt' : '$open Personen bekommen'} '
+          'eine Push-Erinnerung an diesen Termin: $names.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Erinnerung senden'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     setState(() => _busy = true);
     try {
-      await widget.controller.performAction({
+      final outcome = await widget.controller.performAction({
         'action': 'event.remindOpen',
         'eventId': widget.event.id,
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              open == 1
-                  ? 'Erinnerung an 1 Person vorgemerkt.'
-                  : 'Erinnerung an $open Personen vorgemerkt.',
-            ),
+        final who = open == 1 ? '1 Person' : '$open Personen';
+        showDone(
+          context,
+          outcomeText(
+            outcome,
+            done: 'Erinnerung an $who gesendet.',
+            queued:
+                'Erinnerung an $who vorgemerkt – wird bei Verbindung gesendet.',
           ),
         );
       }
@@ -160,7 +186,7 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
               ? open
               : 0,
           busy: _busy,
-          onRemind: _remind,
+          onRemind: () => _remind(groups['open']!),
         ),
         if (_filter != null)
           Padding(
@@ -245,7 +271,7 @@ class _ResponseSummary extends StatelessWidget {
   /// People without an answer who can be reminded now; 0 hides the button.
   final int remindable;
   final bool busy;
-  final ValueChanged<int> onRemind;
+  final VoidCallback onRemind;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -341,7 +367,7 @@ class _ResponseSummary extends StatelessWidget {
               Align(
                 alignment: AlignmentDirectional.centerStart,
                 child: FilledButton.tonalIcon(
-                  onPressed: busy ? null : () => onRemind(remindable),
+                  onPressed: busy ? null : onRemind,
                   icon: const Icon(Icons.notifications_active_outlined),
                   label: const Text('Offene erinnern'),
                 ),
