@@ -4,8 +4,10 @@ import '../core/app_controller.dart';
 import '../core/controller/pending_action.dart';
 import '../core/identity.dart';
 
-/// A readable German message for an error shown to the member.
-String userMessage(Object error) => identityError(error);
+/// A readable German message for an error shown to the member. A plain
+/// [String] is already such a message and is shown unchanged.
+String userMessage(Object error) =>
+    error is String ? error : identityError(error);
 
 void showProblem(BuildContext context, Object error) => ScaffoldMessenger.of(
   context,

@@ -39,8 +39,9 @@ class _PushAdminScreenState extends State<PushAdminScreen> {
     super.dispose();
   }
 
-  void _reload() =>
-      setState(() => _data = widget.controller.remote('/admin/push'));
+  void _reload() => setState(() {
+    _data = widget.controller.remote('/admin/push');
+  });
 
   /// What still keeps the push from being sent.
   List<String> get _missing => [

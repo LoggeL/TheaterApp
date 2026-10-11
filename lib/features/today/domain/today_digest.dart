@@ -68,7 +68,9 @@ class TodayDigest {
       unread: unreadMessages(controller).toList(),
       pollsToVote: toVote,
       votedPoll: toVote.isEmpty
-          ? controller.polls.where((p) => !p.isClosed).firstOrNull
+          ? controller.polls
+                .where((p) => !p.isClosedAt(controller.now))
+                .firstOrNull
           : null,
       slotPools: slotPoolsToChoose(controller),
       registrations: controller.user?.isAdmin == true
