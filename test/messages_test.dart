@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
+import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/messages/messages.dart';
 
@@ -145,6 +146,65 @@ void main() {
     final reminded = find.widgetWithText(FilledButton, 'Erinnerung gesendet');
     expect(reminded, findsOneWidget);
     expect(tester.widget<FilledButton>(reminded).onPressed, isNull);
+  });
+
+  testWidgets('the last reminder comes from the server and blocks briefly', (
+    tester,
+  ) async {
+    JsonMap reminded(int minutesAgo) => message(
+      'm1',
+      'Anmeldung',
+      read: true,
+      extra: {
+        'recipientIds': [1, 2, 3],
+        'readerIds': [1],
+        'lastRemindedAt': DateTime(
+          2026,
+          9,
+          12,
+          12,
+        ).subtract(Duration(minutes: minutesAgo)).toUtc().toIso8601String(),
+        'remindCount': 2,
+      },
+    );
+    final (server, dynamic created) = await setUpController(
+      tester,
+      messages: [reminded(3)],
+    );
+    final controller = created as AppController;
+    server.data['capabilities'] = {
+      'pushConfigured': true,
+      'features': ['nudges'],
+    };
+    await controller.refresh();
+    Future<void> show(JsonMap m) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StageTheme.build(Brightness.light),
+          home: MessageDetailScreen(controller: controller, message: m),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await show(reminded(3));
+    expect(find.text('Zuletzt erinnert: heute, 11:57 (2×)'), findsOneWidget);
+    final button = find.widgetWithText(FilledButton, 'Erinnerung gesendet');
+    expect(tester.widget<FilledButton>(button).onPressed, isNull);
+
+    // After the cooldown the next reminder may go out.
+    server.data['messages'] = [reminded(30)];
+    await controller.refresh();
+    await tester.pumpAndSettle();
+    expect(find.text('Zuletzt erinnert: heute, 11:30 (2×)'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, '2 Personen per Push erinnern'),
+          )
+          .onPressed,
+      isNotNull,
+    );
   });
 
   testWidgets('the composer validates links and sends roles with the link', (

@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../shared/feedback.dart';
+import '../../../shared/nudges.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/member_avatar.dart';
 import 'widgets/message_audience.dart';
@@ -59,7 +60,8 @@ class _MessageTargetScreenState extends State<MessageTargetScreen> {
 }
 
 /// Messages already reminded about, per controller and thus per app session,
-/// so nobody gets the same reminder twice.
+/// so nobody gets the same reminder twice. Only used for older servers;
+/// servers with `nudges` report `lastRemindedAt` and enforce a cooldown.
 final _reminded = Expando<Set<String>>('reminded messages');
 
 class MessageDetailScreen extends StatefulWidget {
@@ -119,17 +121,23 @@ class _MessageDetailScreenState extends State<MessageDetailScreen> {
     if (!confirmed || !mounted) return;
     setState(() => _busy = true);
     try {
-      final outcome = await widget.controller.performAction({
+      final result = await widget.controller.performActionWithResult({
         'action': 'message.remind',
         'id': widget.message['id'],
       });
       _remindedHere.add(textValue(widget.message['id']));
       if (mounted) {
+        final count = result.data?['recipients'];
+        final reached = count is num
+            ? count == 1
+                  ? '1 Person'
+                  : '${count.toInt()} Personen'
+            : people;
         showDone(
           context,
           outcomeText(
-            outcome,
-            done: 'Erinnerung an $people gesendet.',
+            result.outcome,
+            done: 'Erinnerung an $reached gesendet.',
             queued: 'Erinnerung an $people vorgemerkt.',
           ),
         );
@@ -250,7 +258,12 @@ class _MessageDetailScreenState extends State<MessageDetailScreen> {
                     controller: c,
                     message: m,
                     busy: _busy,
-                    reminded: _remindedHere.contains(textValue(m['id'])),
+                    reminded: c.supports('nudges')
+                        ? remindCoolingDown(
+                            dateValue(m['lastRemindedAt'])?.toLocal(),
+                            c.now,
+                          )
+                        : _remindedHere.contains(textValue(m['id'])),
                     onRemind: _remind,
                   ),
                 ],
@@ -313,7 +326,8 @@ class _ReadStatus extends StatelessWidget {
   final JsonMap message;
   final bool busy;
 
-  /// Already reminded in this session; the button stays disabled.
+  /// Just reminded (within the server's cooldown, or in this session on
+  /// older servers); the button stays disabled.
   final bool reminded;
   final void Function(int open, List<String> names) onRemind;
   @override
@@ -408,6 +422,17 @@ class _ReadStatus extends StatelessWidget {
                       ? '1 Person per Push erinnern'
                       : '$open Personen per Push erinnern',
                 ),
+              ),
+            ],
+            if (dateValue(message['lastRemindedAt']) case final last?) ...[
+              const SizedBox(height: 8),
+              Text(
+                lastRemindedLabel(
+                  last,
+                  intValue(message['remindCount']),
+                  controller.now,
+                ),
+                style: theme.textTheme.bodySmall,
               ),
             ],
           ],

@@ -139,14 +139,18 @@ class EventCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                RsvpStatusBadge(
-                  status: event.response,
-                  expectedArrivalAt: event.expectedArrivalAt,
-                  locked: responsesClosed(controller, event),
-                  emphasizeOpen: !past && !event.fromSlotPool,
-                  // The words need room the title cannot spare on small phones.
-                  showLabel: constraints.maxWidth >= 270,
-                ),
+                if (!event.addressedToMe)
+                  const NotInvitedPill()
+                else
+                  RsvpStatusBadge(
+                    status: event.response,
+                    expectedArrivalAt: event.expectedArrivalAt,
+                    locked: responsesClosed(controller, event),
+                    emphasizeOpen: !past && !event.fromSlotPool,
+                    // The words need room the title cannot spare on small
+                    // phones.
+                    showLabel: constraints.maxWidth >= 270,
+                  ),
               ],
             ),
           ),

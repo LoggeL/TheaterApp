@@ -83,3 +83,44 @@ test('messages carry an optional web link', t => {
   action({ action: 'message.send', title: 'Ohne', body: 'Link', audience: 'all', link: '' });
   assert.equal(app.snapshot('sam').messages.find(x => x.title === 'Ohne').link, undefined);
 });
+
+test('authors have read their own message, count as readers and are not reminded', t => {
+  const { app, store, action, sam, kim } = setup(t);
+  const admin = store.account('admin').personId;
+  const id = action({ action: 'message.send', title: 'Alle', body: 'Treffen', audience: 'all' }).id;
+  const own = app.snapshot('admin').messages.find(m => m.id === id);
+  assert.equal(own.read, true);
+  assert.equal(own.addressedToMe, true);
+  assert.deepEqual(own.readerIds, [admin]);
+  assert.equal(app.snapshot('sam').messages[0].read, false);
+  assert.equal(app.snapshot('sam').messages[0].addressedToMe, true);
+  assert.equal(action({ action: 'message.remind', id }).recipients, 3);
+  const job = store.all('pushJobs').find(j => j.title === 'Erinnerung: Alle');
+  assert.deepEqual(job.recipientPersonIds.sort(), [sam, store.account('tech').personId, kim].sort());
+  // A message the admin only sees through the admin bypass is not addressed to them.
+  const other = action({ action: 'message.send', title: 'Kim', body: 'Nur Kim', audience: 'selected', recipientPersonIds: [kim] }).id;
+  const view = app.snapshot('admin').messages.find(m => m.id === other);
+  assert.equal(view.addressedToMe, false);
+  assert.deepEqual(view.readerIds, []);
+});
+
+test('reminders have a 10-minute cooldown, a visible history for admins and go with the message', t => {
+  const { app, store, action } = setup(t);
+  let at = now;
+  app.clock = () => at;
+  const id = action({ action: 'message.send', title: 'Kabel', body: 'Bitte mitbringen', audience: 'all' }).id;
+  assert.deepEqual([app.snapshot('admin').messages[0].lastRemindedAt, app.snapshot('admin').messages[0].remindCount], [null, 0]);
+  const first = action({ action: 'message.remind', id });
+  assert.equal(first.lastRemindedAt, now.toISOString());
+  at = new Date(+now + 9 * 60000);
+  assert.throws(() => action({ action: 'message.remind', id }), e => e.status === 409 && e.code === 'cooldown' && /gerade erst rausgegangen/.test(e.message));
+  at = new Date(+now + 10 * 60000);
+  assert.equal(action({ action: 'message.remind', id }).lastRemindedAt, at.toISOString());
+  const seen = app.snapshot('admin').messages[0];
+  assert.deepEqual([seen.lastRemindedAt, seen.remindCount], [at.toISOString(), 2]);
+  assert.equal('lastRemindedAt' in app.snapshot('sam').messages[0], false);
+  assert.equal('remindCount' in app.snapshot('sam').messages[0], false);
+  assert.equal(store.get('messages', id).version, undefined, 'nudges never touch the message record');
+  action({ action: 'message.delete', id });
+  assert.equal(store.get('nudges', `message:${id}`), null);
+});

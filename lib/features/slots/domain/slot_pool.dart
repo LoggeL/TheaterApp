@@ -47,6 +47,9 @@ class SlotPool {
     this.version = 1,
     this.slots = const [],
     this.myBooking,
+    this.addressedToMe,
+    this.lastRemindedAt,
+    this.remindCount = 0,
   });
   final String id, title, description, place, kind;
   final List<String> roleIds;
@@ -56,6 +59,14 @@ class SlotPool {
   final int version;
   final List<TimeSlot> slots;
   final String? myBooking;
+
+  /// Whether the signed-in person is invited; null from older servers.
+  final bool? addressedToMe;
+
+  /// When an admin last reminded the people without a booking, and how often
+  /// (servers with `nudges`).
+  final DateTime? lastRemindedAt;
+  final int remindCount;
   TimeSlot? get mySlot => slots.where((s) => s.id == myBooking).firstOrNull;
 
   /// Whether any slot can still be booked by someone without a slot.
@@ -81,6 +92,11 @@ class SlotPool {
           TimeSlot.fromJson(s),
     ]..sort((a, b) => a.startsAt.compareTo(b.startsAt)),
     myBooking: json['myBooking']?.toString(),
+    addressedToMe: json['addressedToMe'] is bool
+        ? json['addressedToMe'] as bool
+        : null,
+    lastRemindedAt: dateValue(json['lastRemindedAt'])?.toLocal(),
+    remindCount: intValue(json['remindCount']),
   );
 }
 
@@ -88,7 +104,9 @@ List<SlotPool> slotPoolsOf(AppController controller) =>
     controller.slotPools.map(SlotPool.fromJson).toList();
 
 /// Only invited people may book; admins see every pool without being invited.
+/// Newer servers mark the pools meant for the person (`addressedToMe`).
 bool invitedToSlotPool(AppController controller, SlotPool pool) {
+  if (pool.addressedToMe != null) return pool.addressedToMe!;
   final user = controller.user;
   if (user?.personId == null) return false;
   return TheaterMember(

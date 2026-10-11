@@ -139,3 +139,77 @@ test('deleting this and all following occurrences of a series', t => {
   assert.deepEqual(action({ action: 'event.delete', id: ids[1], version: 1 }).ids, [ids[1]]);
   assert.deepEqual(seriesEvents(store, store.get('events', ids[0]).seriesId).map(e => e.id), [ids[0], ids[2]]);
 });
+
+const edit = (store, id, extra) => { const e = store.get('events', id); return { action: 'event.save', id, version: e.version, title: e.title, description: e.description, startsAt: e.startsAt, endsAt: e.endsAt, place: e.place, type: e.type, roleIds: e.roleIds, personIds: e.personIds, productionIds: e.productionIds, ...extra }; };
+
+test('editing this and all following occurrences applies only the changed fields', t => {
+  const { store, action } = setup(t);
+  const { ids } = action(series({ every: 'week', until: '2026-12-01' }, { place: 'Kolpingheim' }));
+  action(edit(store, ids[3], { title: 'Sonderprobe' }));
+  assert.throws(() => action(edit(store, ids[1], { series: 'all' })), { status: 400 });
+  const single = action(series(undefined)).id;
+  assert.throws(() => action(edit(store, single, { series: 'following' })), e => e.status === 400 && /keiner Terminserie/.test(e.message));
+
+  const result = action(edit(store, ids[1], { place: 'Saal', series: 'following' }));
+  assert.deepEqual(result.ids, ids.slice(1));
+  assert.equal(result.id, ids[1]);
+  assert.deepEqual(ids.map(id => store.get('events', id).place), ['Kolpingheim', ...ids.slice(1).map(() => 'Saal')]);
+  assert.equal(store.get('events', ids[3]).title, 'Sonderprobe', 'an own edit survives a place-only series edit');
+  assert.deepEqual(ids.map(id => store.get('events', id).version), [1, 2, 2, 3, ...ids.slice(4).map(() => 2)]);
+  assert.ok(ids.slice(2).every(id => berlin(store.get('events', id).startsAt) === 'Di., 19:00'), 'times stay');
+  // The last occurrence has no followers and is saved on its own.
+  assert.deepEqual(action(edit(store, ids[11], { place: 'Aula', series: 'following' })).ids, [ids[11]]);
+});
+
+test('a series time change keeps the Berlin wall-clock time across the October switch', t => {
+  const { store, action } = setup(t);
+  const { ids } = action(series({ every: 'week', until: '2026-12-01' }));
+  action(edit(store, ids[0], { startsAt: '2026-09-15T17:30:00Z', endsAt: '2026-09-15T20:00:00Z', series: 'following' }));
+  const events = ids.map(id => store.get('events', id));
+  assert.ok(events.every(e => berlin(e.startsAt) === 'Di., 19:30' && berlin(e.endsAt) === 'Di., 22:00'));
+  assert.deepEqual([events[5].startsAt, events[6].startsAt], ['2026-10-20T17:30:00.000Z', '2026-10-27T18:30:00.000Z']);
+  // A new production resets the scenes of the following occurrences.
+  store.put('productions', 'winter', { id: 'winter', title: 'Winterstück', roles: [], version: 1 });
+  store.put('events', ids[8], { ...store.get('events', ids[8]), productionId: 'old', sceneIds: ['s1'] });
+  action(edit(store, ids[6], { productionId: 'winter', series: 'following' }));
+  assert.deepEqual([store.get('events', ids[8]).productionId, store.get('events', ids[8]).sceneIds], ['winter', []]);
+  assert.equal(store.get('events', ids[5]).productionId, null);
+});
+
+test('a series edit is announced with one push and one email', async t => {
+  const { app, store, action, sam } = setup(t);
+  for (const uid of ['sam', 'tech']) store.put('devices', uid, { id: uid, uid, token: `token-${uid}`, platform: 'web' });
+  const { ids } = action(series({ every: 'week', until: '2026-12-01' }, { personIds: [sam] }));
+  action({ action: 'attendance', eventId: ids[1], status: 'yes' }, 'sam');
+  app.emailEnabled = true;
+  for (const kind of ['pushJobs', 'emailJobs']) for (const j of store.all(kind)) store.delete(kind, j.id);
+  const result = action(edit(store, ids[1], { place: 'Saal', series: 'following', push: true }));
+  assert.deepEqual([result.pushQueued, result.pushSkipped], [true, null]);
+  const jobs = store.all('pushJobs');
+  assert.equal(jobs.length, 1);
+  assert.deepEqual([jobs[0].title, jobs[0].body, jobs[0].data, jobs[0].announce, jobs[0].change, jobs[0].series.count], ['Terminserie geändert: Probe', 'Gilt für 11 Termine ab Di., 22.09.2026, 19:00 Uhr · Saal', { eventId: ids[1] }, 'changed', true, 11]);
+  const emails = store.all('emailJobs');
+  assert.equal(emails.length, 1);
+  const mail = eventEmail(emails[0], store.get('events', ids[1]), 'https://app.example.com');
+  assert.equal(mail.subject, 'Terminserie geändert: Probe');
+  assert.match(mail.text, /\n\nGilt für 11 Termine ab Di\., 22\.09\.2026, 19:00 Uhr · Saal\.\n\n/);
+  assert.ok(!/Erster Termin/.test(mail.text));
+  const calls = [];
+  await deliverPush({ pushEnabled: true, store }, { sendEachForMulticast: async p => { calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) }; } });
+  assert.deepEqual(calls.map(p => [p.tokens, p.notification.title]), [[['token-sam'], 'Terminserie geändert: Probe']]);
+
+  // Without the push switch the usual change notice is sent once for the series.
+  for (const kind of ['pushJobs', 'emailJobs']) for (const j of store.all(kind)) store.delete(kind, j.id);
+  action(edit(store, ids[2], { place: 'Aula', series: 'following' }));
+  assert.deepEqual(store.all('pushJobs').map(j => [j.title, j.announce, j.change, j.series.count]), [['Terminserie geändert: Probe', undefined, true, 10]]);
+  assert.equal(store.all('emailJobs').length, 1);
+});
+
+test('a series edit without changes leaves the following occurrences alone', t => {
+  const { store, action } = setup(t);
+  const { ids } = action(series({ every: 'week', until: '2026-12-01' }));
+  for (const kind of ['pushJobs', 'emailJobs']) for (const j of store.all(kind)) store.delete(kind, j.id);
+  assert.deepEqual(action(edit(store, ids[1], { series: 'following' })).ids, [ids[1]]);
+  assert.deepEqual(ids.slice(2).map(id => store.get('events', id).version), ids.slice(2).map(() => 1));
+  assert.ok(store.all('pushJobs').every(j => !j.series));
+});

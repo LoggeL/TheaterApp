@@ -83,6 +83,17 @@ class EventKindPill extends StatelessWidget {
   );
 }
 
+/// Marks an event an admin receives without being invited to it.
+class NotInvitedPill extends StatelessWidget {
+  const NotInvitedPill({super.key});
+  @override
+  Widget build(BuildContext context) => StatePill(
+    'Nicht eingeladen',
+    color: Theme.of(context).colorScheme.onSurfaceVariant,
+    icon: Icons.person_off_outlined,
+  );
+}
+
 /// Colour of an own response: yes, late, no; anything else counts as open.
 Color responseColor(String status, {bool dark = false}) => switch (status) {
   'yes' => dark ? const Color(0xFFA8D6B6) : StageTheme.green,

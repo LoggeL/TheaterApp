@@ -1,12 +1,14 @@
-import { customReminderMinutes, defaultReminders, eventNotificationBody } from './event-notification.mjs';
-import { seriesOccurrences, seriesSummary } from './event-series.mjs';
+import { berlinDateTime, customReminderMinutes, defaultReminders, eventNotificationBody } from './event-notification.mjs';
+import { berlinParts, fromBerlin, seriesOccurrences, seriesSummary } from './event-series.mjs';
 import { compareProductionsNewestFirst } from './production-order.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 
+// Machine-readable reasons next to the German message; clients branch on `code`, never on the text.
+const defaultCodes = { 400: 'invalid', 401: 'unauthenticated', 403: 'forbidden', 404: 'not_found', 409: 'conflict', 413: 'too_large' };
 export class AppError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  constructor(status, message, code = defaultCodes[status] ?? 'error') { super(message); this.status = status; this.code = code; }
 }
-const fail = (status, message) => { throw new AppError(status, message); };
+const fail = (status, message, code) => { throw new AppError(status, message, code); };
 const text = (value, max = 250) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 const required = (value, label, max) => text(value, max) || fail(400, `${label} fehlt.`);
 const now = () => new Date().toISOString();
@@ -21,6 +23,18 @@ export const changePushWindowDays = 14;
 // Participation is only summarized for recent, binding events.
 export const participationWindowDays = 183;
 const voluntaryEventTypes = ['social'];
+// Admin reminders (nudges) per message, event, poll or slot pool are rate-limited.
+export const remindCooldownMs = 10 * 60 * 1000;
+// Declines this close to the start are pushed to admins and the production's directors.
+export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
+// Additive API features this server supports; clients only offer what is listed here.
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit']);
+const seriesFields = ['title', 'description', 'place', 'type', 'locked', 'roleIds', 'personIds', 'productionIds', 'productionId'];
+// Legacy records may lack fields; compare them as event.save would store them.
+const sameValue = (field, x, y) => {
+  const norm = v => field.endsWith('Ids') ? list(v) : field === 'locked' ? v === true : field === 'type' ? v ?? 'rehearsal' : field === 'productionId' ? v || null : v ?? '';
+  return JSON.stringify(norm(x)) === JSON.stringify(norm(y));
+};
 // Target audiences are person roles; an empty list addresses everyone.
 export const inRoles = (member, roleIds) => !list(roleIds).length || list(member?.roleIds).some(x => list(roleIds).includes(x));
 // A production's ensemble: its cast, its directors and people added by hand (crew).
@@ -122,16 +136,16 @@ export class Theater {
   }
   account(uid, admin = false) {
     const a = this.store.account(uid);
-    if (!a || a.status !== 'approved' || !a.personId || !a.identityReady || this.store.get('members', a.personId)?.active !== true) fail(403, 'Dein Theaterzugang ist noch nicht freigegeben oder wurde gesperrt.');
+    if (!a || a.status !== 'approved' || !a.personId || !a.identityReady || this.store.get('members', a.personId)?.active !== true) fail(403, 'Dein Theaterzugang ist noch nicht freigegeben oder wurde gesperrt.', 'access');
     if (admin && a.role !== 'admin') fail(403, 'Hierfür ist ein Admin-Zugang erforderlich.');
     return a;
   }
   // Ids of deleted people are never handed out again (see forgetMember).
   nextPersonId() { return Math.max(0, this.store.get('settings', 'lastPersonId')?.id ?? 0, ...this.store.all('members').map(m => m.id)) + 1; }
   snapshot(uid) {
-    const a = this.account(uid); const admin = a.role === 'admin';
+    const a = this.account(uid); const admin = a.role === 'admin', member = this.store.get('members', a.personId), nudges = admin ? this.nudges() : null;
     const responses = this.store.all('responses');
-    const events = this.store.all('events').filter(e => this.canSee(a, e)).map(e => ({ ...e, eventDate: day(e.startsAt), people: responses.filter(r => r.eventId === e.id && ['yes', 'late'].includes(r.status)).length }));
+    const events = this.store.all('events').filter(e => this.canSee(a, e)).map(e => ({ ...e, eventDate: day(e.startsAt), people: responses.filter(r => r.eventId === e.id && ['yes', 'late'].includes(r.status)).length, addressedToMe: inAudience(member, e, this.store), ...(admin ? this.reminded(nudges, 'event', e.id) : {}) }));
     const own = responses.filter(r => r.personId === a.personId);
     const checkinsByEvent = {}, memberAttendanceByEvent = {}, arrivalsByEvent = {};
     if (admin) {
@@ -142,14 +156,14 @@ export class Theater {
       }
     }
     const receipts = this.store.all('receipts').filter(r => r.personId === a.personId);
-    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a), slotPools: this.slotPools(a), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id), ...(admin ? this.messageReach(m) : {}) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true }, serverTime: now() };
+    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a, nudges), slotPools: this.slotPools(a, nudges), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) || m.authorId === a.personId, addressedToMe: this.messageAddresses(member, m), ...(admin ? { ...this.messageReach(m), ...this.reminded(nudges, 'message', m.id) } : {}) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true, features: [...apiFeatures] }, serverTime: now() };
   }
   /** Slot pools ("Terminfinder"): invited people book one time slot each. */
-  slotPools(a) {
-    const bookings = this.store.all('slotBookings');
+  slotPools(a, nudges = a.role === 'admin' ? this.nudges() : null) {
+    const bookings = this.store.all('slotBookings'), member = this.store.get('members', a.personId);
     return this.store.all('slotPools').filter(p => this.canSee(a, p)).map(p => {
       const own = bookings.find(b => b.poolId === p.id && b.personId === a.personId);
-      return { ...p, myBooking: own?.slotId ?? null, slots: p.slots.map(slot => {
+      return { ...p, addressedToMe: inAudience(member, p, this.store), ...(nudges ? this.reminded(nudges, 'slotPool', p.id) : {}), myBooking: own?.slotId ?? null, slots: p.slots.map(slot => {
         const people = bookings.filter(b => b.poolId === p.id && b.slotId === slot.id).map(b => ({ personId: b.personId, name: this.store.get('members', b.personId)?.name ?? 'Ehemaliges Mitglied' })).sort((x, y) => x.name.localeCompare(y.name, 'de'));
         return { ...slot, booked: people.length, people };
       }) };
@@ -169,20 +183,21 @@ export class Theater {
     if (slotId === null) { if (previous) { s.delete('slotBookings', key); this.syncSlotEvent(pool, pool.slots.find(x => x.id === previous.slotId)); } return; }
     const slot = pool.slots.find(x => x.id === slotId);
     if (!slot) fail(404, 'Zeitfenster nicht gefunden.');
-    if (Date.parse(slot.startsAt) <= +this.clock()) fail(409, 'Dieses Zeitfenster hat schon begonnen.');
+    if (Date.parse(slot.startsAt) <= +this.clock()) fail(409, 'Dieses Zeitfenster hat schon begonnen.', 'closed');
     if (previous?.slotId === slotId) return;
-    if (s.all('slotBookings').filter(b => b.poolId === pool.id && b.slotId === slotId).length >= slot.capacity) fail(409, 'Dieses Zeitfenster ist schon voll.');
+    if (s.all('slotBookings').filter(b => b.poolId === pool.id && b.slotId === slotId).length >= slot.capacity) fail(409, 'Dieses Zeitfenster ist schon voll.', 'full');
     s.put('slotBookings', key, { poolId: pool.id, slotId, personId, bookedAt: now() });
     if (previous) this.syncSlotEvent(pool, pool.slots.find(x => x.id === previous.slotId));
     this.syncSlotEvent(pool, slot);
   }
-  polls(a) {
-    const votes = this.store.all('pollVotes');
+  polls(a, nudges = a.role === 'admin' ? this.nudges() : null) {
+    const votes = this.store.all('pollVotes'), member = this.store.get('members', a.personId);
     return this.store.all('polls').filter(p => !p.deleted && this.canSee(a, p)).map(p => {
       const own = votes.find(v => v.pollId === p.id && v.personId === a.personId);
       const responses = votes.filter(v => v.pollId === p.id);
-      const anonymous = p.anonymous !== false;
-      return { ...p, anonymous, closed: p.closed || (!!p.closesAt && Date.parse(p.closesAt) <= +this.clock()), choice: own?.optionId ?? null, totalVotes: responses.length, options: p.options.map(o => {
+      const anonymous = p.anonymous !== false, eligible = nudges ? new Set(this.audienceIds(p)) : null;
+      // Admins see how many can vote and how many of them did; who voted stays hidden for anonymous polls.
+      return { ...p, anonymous, closed: this.pollClosed(p), choice: own?.optionId ?? null, totalVotes: responses.length, addressedToMe: inAudience(member, p, this.store), ...(nudges ? { eligibleCount: eligible.size, eligibleVotes: responses.filter(v => eligible.has(v.personId)).length, ...this.reminded(nudges, 'poll', p.id) } : {}), options: p.options.map(o => {
         const selected = responses.filter(v => v.optionId === o.id);
         return { id: o.id, label: o.label, votes: selected.length, ...(!anonymous ? { voters: selected.map(v => ({ personId: v.personId, name: this.store.get('members', v.personId)?.name ?? 'Ehemaliges Mitglied' })).sort((a, b) => a.name.localeCompare(b.name, 'de')) } : {}) };
       }) };
@@ -190,10 +205,27 @@ export class Theater {
   }
   canSee(a, item) { return a.role === 'admin' || inAudience(this.store.get('members', a.personId), item, this.store); }
   // Roles are resolved when reading, so later role members see the message too.
-  canReadMessage(a, m) {
-    if (a.role === 'admin' || m.audience === 'all' || list(m.recipientPersonIds).includes(a.personId)) return true;
-    const member = this.store.get('members', a.personId);
+  canReadMessage(a, m) { return a.role === 'admin' || this.messageAddresses(this.store.get('members', a.personId), m); }
+  /** Whether a message is addressed to the member, without the admin bypass. */
+  messageAddresses(member, m) {
+    if (m.audience === 'all' || (member?.id != null && list(m.recipientPersonIds).includes(member.id))) return true;
     return (list(m.roleIds).length > 0 && inRoles(member, m.roleIds)) || (list(m.productionIds).length > 0 && inAudience(member, { productionIds: m.productionIds }, this.store));
+  }
+  /** Active members an event, poll or slot pool is addressed to. */
+  audienceIds(item) { return this.store.all('members').filter(m => m.active !== false && inAudience(m, item, this.store)).map(m => m.id); }
+  pollClosed(p) { return p.closed || (!!p.closesAt && Date.parse(p.closesAt) <= +this.clock()); }
+  /** Last admin reminders, keyed `<kind>:<targetId>` (kind: message, event, poll, slotPool). */
+  nudges() { return new Map(this.store.db.prepare("SELECT id, data FROM entities WHERE kind = 'nudges'").all().map(r => [r.id, JSON.parse(r.data)])); }
+  reminded(nudges, kind, targetId) { const n = nudges.get(`${kind}:${targetId}`); return { lastRemindedAt: n?.at ?? null, remindCount: n?.count ?? 0 }; }
+  /** Rejects a reminder within the cooldown; nudges never bump the target's version (queued emails would go stale). */
+  checkCooldown(kind, targetId) {
+    const last = this.store.get('nudges', `${kind}:${targetId}`);
+    if (last && +this.clock() - Date.parse(last.at) < remindCooldownMs) fail(409, 'Die letzte Erinnerung ist gerade erst rausgegangen. Bitte später erneut versuchen.', 'cooldown');
+  }
+  recordNudge(a, kind, targetId, recipients) {
+    const key = `${kind}:${targetId}`, at = new Date(+this.clock()).toISOString();
+    this.store.put('nudges', key, { at, by: a.personId, recipients, count: (this.store.get('nudges', key)?.count ?? 0) + 1 });
+    return at;
   }
   /** Active members a message or push is addressed to: everyone, or roles, ensembles and named people. */
   messageRecipients(m) {
@@ -207,7 +239,8 @@ export class Theater {
   messageReach(m) {
     const recipientIds = this.messageRecipients(m);
     const read = new Set(this.store.all('receipts').filter(r => r.messageId === m.id).map(r => r.personId));
-    return { recipientIds, readerIds: recipientIds.filter(x => read.has(x)) };
+    // Authors have read their own message (computed, so older messages are covered too).
+    return { recipientIds, readerIds: recipientIds.filter(x => read.has(x) || (m.authorId != null && x === m.authorId)) };
   }
   /** Validated audience of an admin message or push. */
   messageTarget(b) {
@@ -244,14 +277,17 @@ export class Theater {
   adminData(uid) { this.account(uid, true); return { accounts: this.store.accounts(), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst) }; }
   eventDetails(uid, eventId) {
     this.account(uid, true);
-    if (!this.store.get('events', eventId)) fail(404, 'Termin nicht gefunden.');
-    return { responses: this.store.all('responses').filter(r => r.eventId === eventId), checkins: this.store.all('checkins').filter(r => r.eventId === eventId), absences: this.store.all('absences').filter(x => { const d = day(this.store.get('events', eventId).startsAt); return x.from <= d && x.to >= d; }) };
+    const e = this.store.get('events', eventId);
+    if (!e) fail(404, 'Termin nicht gefunden.');
+    const d = day(e.startsAt), responses = this.store.all('responses').filter(r => r.eventId === eventId), absences = this.store.all('absences').filter(x => x.from <= d && x.to >= d);
+    const invitedIds = this.audienceIds(e), answered = new Set(responses.filter(r => ['yes', 'late', 'no'].includes(r.status)).map(r => r.personId)), absent = new Set(absences.map(x => x.personId));
+    return { responses, checkins: this.store.all('checkins').filter(r => r.eventId === eventId), absences, invitedIds, openIds: invitedIds.filter(x => !answered.has(x)), absentIds: invitedIds.filter(x => absent.has(x)), ...this.reminded(this.nudges(), 'event', eventId) };
   }
   /** Deletes a login and its link; the person and their theater data stay. `deleteIdentity` removes the Firebase user. */
   async deleteAccount(uid, targetUid, version, deleteIdentity = null) {
     const check = () => {
       const a = this.account(uid, true), target = this.store.account(targetUid);
-      if (!target || target.version !== version) fail(409, 'Das Konto hat sich geändert. Bitte neu laden.');
+      if (!target || target.version !== version) fail(409, 'Das Konto hat sich geändert. Bitte neu laden.', 'version_conflict');
       if (target.uid === a.uid) fail(409, 'Das eigene Konto hier nicht löschen.');
       if (target.role === 'admin' && target.status === 'approved' && this.store.accounts().filter(x => x.status === 'approved' && x.role === 'admin').length <= 1) fail(409, 'Der letzte Admin muss erhalten bleiben.');
     };
@@ -301,7 +337,7 @@ export class Theater {
     return this.store.transaction(() => {
       const a = this.account(uid);
       const previous = this.store.db.prepare('SELECT hash,result FROM requests WHERE uid=? AND request_id=?').get(uid, requestId);
-      if (previous) { if (previous.hash !== hash) fail(409, 'Dieser Änderungsschlüssel wurde bereits für andere Daten benutzt.'); return JSON.parse(previous.result); }
+      if (previous) { if (previous.hash !== hash) fail(409, 'Dieser Änderungsschlüssel wurde bereits für andere Daten benutzt.', 'request_reused'); return JSON.parse(previous.result); }
       const result = { ok: true, ...this.apply(a, body) };
       this.store.db.prepare('INSERT INTO requests VALUES(?,?,?,?,?)').run(uid, requestId, hash, JSON.stringify(result), now());
       this.store.audit(uid, text(body.action), body.eventId ?? body.uid ?? body.id ?? result.id ?? '');
@@ -314,33 +350,63 @@ export class Theater {
       case 'attendance': {
         const e = s.get('events', b.eventId);
         if (!e || !this.canSee(a, e)) fail(404, 'Termin nicht gefunden.');
-        if (e.slotPoolId) fail(409, 'Diesen Termin bitte im Terminfinder umbuchen oder freigeben.');
-        if (e.locked || Date.parse(e.endsAt) < +this.clock()) fail(409, 'Die Rückmeldefrist ist vorbei.');
+        if (e.slotPoolId) fail(409, 'Diesen Termin bitte im Terminfinder umbuchen oder freigeben.', 'closed');
+        if (e.locked || Date.parse(e.endsAt) < +this.clock()) fail(409, 'Die Rückmeldefrist ist vorbei.', 'closed');
         if (!['yes', 'late', 'no', 'open'].includes(b.status)) fail(400, 'Ungültige Rückmeldung.');
-        if (['no', 'open'].includes(b.status) && Date.parse(e.startsAt) - declineCutoffMs <= +this.clock()) fail(409, 'Ab einer Stunde vor Beginn ist keine Absage mehr möglich.');
+        if (['no', 'open'].includes(b.status) && Date.parse(e.startsAt) - declineCutoffMs <= +this.clock()) fail(409, 'Ab einer Stunde vor Beginn ist keine Absage mehr möglich.', 'closed');
+        const previous = s.get('responses', `${e.id}:${a.personId}`)?.status;
         const expectedArrivalAt = b.status === 'late' && b.expectedArrivalAt ? date(b.expectedArrivalAt) : null;
         if (expectedArrivalAt && (expectedArrivalAt <= e.startsAt || expectedArrivalAt >= e.endsAt)) fail(400, 'Die Ankunft muss zwischen Beginn und Ende der Probe liegen.');
         const r = { eventId: e.id, personId: a.personId, status: b.status, expectedArrivalAt, reason: b.status === 'no' ? text(b.reason, 600) : '', updatedAt: now() };
-        s.put('responses', `${e.id}:${a.personId}`, r); return { response: r };
+        s.put('responses', `${e.id}:${a.personId}`, r);
+        if (b.status === 'no' && previous !== 'no') this.notifyLateDecline(e, a.personId);
+        return { response: r };
       }
       case 'absence.create': {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(b.from ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(b.to ?? '') || b.from > b.to || day(`${b.from}T12:00:00Z`) !== b.from || day(`${b.to}T12:00:00Z`) !== b.to) fail(400, 'Bitte einen gültigen Zeitraum angeben.');
         const entry = { id: id(), personId: a.personId, from: b.from, to: b.to, reason: text(b.reason, 600) };
         s.put('absences', entry.id, entry);
-        for (const e of s.all('events')) if (!e.locked && !e.slotPoolId && inAudience(s.get('members', a.personId), e, s) && Date.parse(e.startsAt) - declineCutoffMs > +this.clock() && day(e.startsAt) >= b.from && day(e.startsAt) <= b.to) s.put('responses', `${e.id}:${a.personId}`, { eventId: e.id, personId: a.personId, status: 'no', reason: entry.reason, expectedArrivalAt: null, updatedAt: now() });
-        return { id: entry.id };
+        // Declines written here carry the absence id, so deleting the absence can reopen them.
+        // A decline that already exists stays the member's own (with its own reason).
+        const declinedEventIds = [];
+        for (const e of s.all('events')) {
+          if (e.locked || e.slotPoolId || !inAudience(s.get('members', a.personId), e, s) || Date.parse(e.startsAt) - declineCutoffMs <= +this.clock() || day(e.startsAt) < b.from || day(e.startsAt) > b.to) continue;
+          if (s.get('responses', `${e.id}:${a.personId}`)?.status === 'no') continue;
+          s.put('responses', `${e.id}:${a.personId}`, { eventId: e.id, personId: a.personId, status: 'no', reason: entry.reason, expectedArrivalAt: null, absenceId: entry.id, updatedAt: now() });
+          declinedEventIds.push(e.id);
+          this.notifyLateDecline(e, a.personId);
+        }
+        return { id: entry.id, declinedEventIds };
       }
-      case 'absence.delete': { const x = s.get('absences', b.id); if (!x || x.personId !== a.personId) fail(404, 'Abwesenheit nicht gefunden.'); s.delete('absences', b.id); return {}; }
+      case 'absence.delete': {
+        // An absence that is already gone counts as deleted; `reopen` withdraws the declines it wrote.
+        const x = s.get('absences', b.id);
+        if (x && x.personId !== a.personId) fail(404, 'Abwesenheit nicht gefunden.');
+        if (x) s.delete('absences', b.id);
+        if (b.reopen !== true) return {};
+        const reopenedEventIds = [];
+        if (x) for (const r of s.all('responses').filter(r => r.personId === a.personId && r.absenceId === x.id && r.status === 'no')) {
+          const e = s.get('events', r.eventId);
+          if (!e || e.locked || e.slotPoolId || Date.parse(e.startsAt) - declineCutoffMs <= +this.clock()) continue;
+          // Another absence still covering the day keeps the decline, now on its behalf.
+          const other = s.all('absences').find(o => o.personId === a.personId && o.from <= day(e.startsAt) && o.to >= day(e.startsAt));
+          if (other) { s.put('responses', `${r.eventId}:${a.personId}`, { ...r, reason: other.reason, absenceId: other.id }); continue; }
+          s.delete('responses', `${r.eventId}:${a.personId}`); reopenedEventIds.push(r.eventId);
+        }
+        return { reopenedEventIds };
+      }
       case 'settings.reminders': {
         const v = b.value ?? {}, customMinutes = v.customMinutes ?? null;
         if (customMinutes !== null && (!Number.isInteger(customMinutes) || customMinutes < customReminderMinutes.min || customMinutes > customReminderMinutes.max)) fail(400, 'Bitte eine Vorlaufzeit zwischen 15 Minuten und einer Woche wählen.');
         const emailEnabled = v.emailEnabled === undefined ? s.get('reminders', a.personId)?.emailEnabled === true : v.emailEnabled === true;
         if (emailEnabled && (!this.emailEnabled || !a.emailVerified)) fail(409, 'Termin-E-Mails benötigen einen eingerichteten Versand und eine bestätigte E-Mail-Adresse.');
-        s.put('reminders', a.personId, { dayBefore: v.dayBefore === true, twoHours: v.twoHours === true, changes: v.changes === true, emailEnabled, customMinutes }); return {};
+        // Older clients send the whole record without newer keys; those keep their stored value.
+        const lateDeclines = v.lateDeclines === undefined ? s.get('reminders', a.personId)?.lateDeclines !== false : v.lateDeclines === true;
+        s.put('reminders', a.personId, { dayBefore: v.dayBefore === true, twoHours: v.twoHours === true, changes: v.changes === true, emailEnabled, customMinutes, lateDeclines }); return {};
       }
       case 'account.approve': {
         admin(); const target = s.account(required(b.uid, 'Konto')); const member = s.get('members', Number(b.personId));
-        if (!target || target.status !== 'pending' || target.version !== b.version) fail(409, 'Die Kontoanfrage hat sich geändert. Bitte neu laden.');
+        if (!target || target.status !== 'pending' || target.version !== b.version) fail(409, 'Die Kontoanfrage hat sich geändert. Bitte neu laden.', 'version_conflict');
         if (!target.identityReady) fail(409, 'Die E-Mail-Adresse muss zuerst bestätigt werden.');
         if (target.nameProvided === false) fail(409, 'Das Konto muss zuerst einen Namen zur Zuordnung angeben.');
         if (!member?.active) fail(400, 'Bitte eine aktive Person auswählen.');
@@ -350,7 +416,7 @@ export class Theater {
       }
       case 'account.status': {
         admin(); const target = s.account(b.uid);
-        if (!target || target.version !== b.version) fail(409, 'Das Konto hat sich geändert.');
+        if (!target || target.version !== b.version) fail(409, 'Das Konto hat sich geändert.', 'version_conflict');
         if (target.uid === a.uid) fail(409, 'Den eigenen Zugang hier nicht sperren.');
         if (!['rejected', 'suspended', 'approved'].includes(b.status)) fail(400, 'Ungültiger Kontostatus.');
         if (b.status === 'approved' && (!target.personId || !target.identityReady)) fail(409, 'Das Konto benötigt erst eine bestätigte Identität und Personenzuordnung.');
@@ -359,14 +425,14 @@ export class Theater {
       }
       case 'account.reconsider': {
         admin(); const target = s.account(b.uid);
-        if (!target || target.version !== b.version) fail(409, 'Das Konto hat sich geändert.');
+        if (!target || target.version !== b.version) fail(409, 'Das Konto hat sich geändert.', 'version_conflict');
         if (target.status !== 'rejected') fail(409, 'Nur abgelehnte Konten können erneut geprüft werden.');
         const { approvedAt, approvedBy, ...pending } = target;
         s.saveAccount({ ...pending, status: 'pending', personId: null, role: 'member', version: target.version + 1 }); return {};
       }
       case 'profile.save': {
         const m = s.get('members', a.personId);
-        if ((m.profileVersion ?? 0) !== b.profileVersion) fail(409, 'Dein Profil wurde inzwischen geändert. Bitte neu laden.');
+        if ((m.profileVersion ?? 0) !== b.profileVersion) fail(409, 'Dein Profil wurde inzwischen geändert. Bitte neu laden.', 'version_conflict');
         const avatarId = b.avatarId || null;
         if (avatarId) {
           const image = s.get('media', avatarId);
@@ -378,7 +444,7 @@ export class Theater {
       case 'member.save': {
         admin(); const memberId = b.id == null ? this.nextPersonId() : Number(b.id), old = s.get('members', memberId);
         if (b.id != null && !old) fail(404, 'Person nicht gefunden.');
-        if (old && old.version !== b.version && (old.version ?? 1) !== b.version) fail(409, 'Die Person wurde zwischenzeitlich geändert.');
+        if (old && old.version !== b.version && (old.version ?? 1) !== b.version) fail(409, 'Die Person wurde zwischenzeitlich geändert.', 'version_conflict');
         const name = required(b.name, 'Name');
         if (memberId === a.personId && b.active === false) fail(409, 'Den eigenen Zugang hier nicht deaktivieren.');
         const roleIds = b.roleIds === undefined ? list(old?.roleIds) : [...new Set(list(b.roleIds))];
@@ -391,14 +457,14 @@ export class Theater {
         admin(); const memberId = Number(b.id), m = s.get('members', memberId);
         if (!m) fail(404, 'Person nicht gefunden.');
         if (memberId === a.personId) fail(409, 'Die eigene Person kann nicht gelöscht werden.');
-        if (b.version !== undefined && (m.version ?? 1) !== b.version) fail(409, 'Die Person wurde zwischenzeitlich geändert.');
+        if (b.version !== undefined && (m.version ?? 1) !== b.version) fail(409, 'Die Person wurde zwischenzeitlich geändert.', 'version_conflict');
         if (s.accounts().some(x => x.personId === memberId)) fail(409, 'Diese Person ist noch mit einem App-Konto verknüpft. Bitte das Konto zuerst löschen.');
         this.forgetMember(memberId); return {};
       }
       case 'personRole.save': {
         admin(); const roleId = b.id || id(), old = s.get('personRoles', roleId);
         if (b.id && !old) fail(404, 'Rolle nicht gefunden.');
-        if (old && old.version !== b.version) fail(409, 'Die Rolle wurde inzwischen geändert.');
+        if (old && old.version !== b.version) fail(409, 'Die Rolle wurde inzwischen geändert.', 'version_conflict');
         const name = required(b.name, 'Rollenname', 60);
         if (s.all('personRoles').some(r => r.id !== roleId && r.name.toLocaleLowerCase('de') === name.toLocaleLowerCase('de'))) fail(409, 'Diese Rolle gibt es bereits.');
         s.put('personRoles', roleId, { id: roleId, name, version: (old?.version ?? 0) + 1 }); return { id: roleId };
@@ -406,14 +472,14 @@ export class Theater {
       case 'personRole.delete': {
         admin(); const r = s.get('personRoles', b.id);
         if (!r) fail(404, 'Rolle nicht gefunden.');
-        if (r.version !== b.version) fail(409, 'Die Rolle wurde inzwischen geändert.');
+        if (r.version !== b.version) fail(409, 'Die Rolle wurde inzwischen geändert.', 'version_conflict');
         if (s.all('members').some(m => list(m.roleIds).includes(r.id))) fail(409, 'Diese Rolle ist noch Personen zugeordnet. Bitte die Zuordnungen zuerst entfernen.');
         s.delete('personRoles', r.id); return {};
       }
       case 'poll.save': {
         admin(); const pollId = b.id || id(), old = s.get('polls', pollId);
         if (b.id && (!old || old.deleted)) fail(404, 'Abstimmung nicht gefunden.');
-        if (old && old.version !== b.version) fail(409, 'Die Abstimmung wurde inzwischen geändert.');
+        if (old && old.version !== b.version) fail(409, 'Die Abstimmung wurde inzwischen geändert.', 'version_conflict');
         const labels = list(b.options).map(o => required(o.label, 'Antwort', 200));
         if (labels.length < 2 || labels.length > 12 || new Set(labels.map(x => x.toLocaleLowerCase('de'))).size !== labels.length) fail(400, 'Bitte 2 bis 12 unterschiedliche Antworten eingeben.');
         const hasVotes = old && s.all('pollVotes').some(v => v.pollId === pollId);
@@ -427,27 +493,52 @@ export class Theater {
         const roleIds = b.roleIds === undefined ? list(old?.roleIds) : this.audience(b.roleIds);
         const personIds = b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds);
         const productionIds = b.productionIds === undefined ? list(old?.productionIds) : this.productionAudience(b.productionIds);
-        s.put('polls', pollId, { id: pollId, title: required(b.title, 'Frage'), description: text(b.description, 3000), roleIds, personIds, productionIds, anonymous, options, closesAt, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 });
-        return { id: pollId };
+        const poll = s.put('polls', pollId, { id: pollId, title: required(b.title, 'Frage'), description: text(b.description, 3000), roleIds, personIds, productionIds, anonymous, options, closesAt, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 });
+        // A push announces new polls only; `pollId` data opens the poll and has no email mirror.
+        const push = b.push === true && !old;
+        if (push) this.enqueuePush({ title: `Neue Abstimmung: ${poll.title}`, body: closesAt ? `Abstimmen bis ${berlinDateTime(closesAt)}` : 'Deine Stimme ist gefragt.', data: { pollId }, roleIds, personIds, productionIds });
+        return { id: pollId, pushQueued: push && this.pushEnabled };
       }
       case 'poll.vote': {
         const p = s.get('polls', b.pollId);
         if (!p || p.deleted || !this.canSee(a, p)) fail(404, 'Abstimmung nicht gefunden.');
-        if (p.closed || (p.closesAt && Date.parse(p.closesAt) <= +this.clock())) fail(409, 'Die Abstimmung ist bereits beendet.');
+        if (this.pollClosed(p)) fail(409, 'Die Abstimmung ist bereits beendet.', 'closed');
         if (!p.options.some(o => o.id === b.optionId)) fail(400, 'Diese Antwort gehört nicht zur Abstimmung.');
         s.put('pollVotes', `${p.id}:${a.personId}`, { pollId: p.id, personId: a.personId, optionId: b.optionId, updatedAt: now() }); return {};
       }
       case 'poll.close': {
         admin(); const p = s.get('polls', b.id);
         if (!p || p.deleted) fail(404, 'Abstimmung nicht gefunden.');
-        if (p.version !== b.version) fail(409, 'Die Abstimmung wurde inzwischen geändert.');
-        s.put('polls', p.id, { ...p, closed: b.closed !== false, closesAt: b.closed === false ? null : p.closesAt, version: p.version + 1 }); return {};
+        if (p.version !== b.version) fail(409, 'Die Abstimmung wurde inzwischen geändert.', 'version_conflict');
+        // Reopening drops the deadline unless a new, future one is given.
+        const closesAt = b.closed !== false ? p.closesAt : b.closesAt ? date(b.closesAt) : null;
+        if (b.closed === false && closesAt && Date.parse(closesAt) <= +this.clock()) fail(400, 'Das Abstimmungsende muss in der Zukunft liegen.');
+        s.put('polls', p.id, { ...p, closed: b.closed !== false, closesAt, version: p.version + 1 }); return {};
+      }
+      case 'poll.delete': {
+        // Soft delete, so older snapshots' filters keep working; the votes go for good.
+        admin(); const p = s.get('polls', b.id);
+        if (!p || p.deleted) return {};
+        if (p.version !== b.version) fail(409, 'Die Abstimmung wurde inzwischen geändert.', 'version_conflict');
+        s.put('polls', p.id, { ...p, deleted: true, version: p.version + 1 });
+        this.forgetPollVotes(p.id); s.delete('nudges', `poll:${p.id}`); return {};
+      }
+      case 'poll.remindOpen': {
+        // Nudges only the addressed people who have not voted yet.
+        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.', 'push_unavailable');
+        const p = s.get('polls', b.id); if (!p || p.deleted) fail(404, 'Abstimmung nicht gefunden.');
+        if (this.pollClosed(p)) fail(409, 'Die Abstimmung ist bereits beendet.', 'closed');
+        this.checkCooldown('poll', p.id);
+        const open = this.audienceIds(p).filter(x => !s.get('pollVotes', `${p.id}:${x}`));
+        if (!open.length) fail(409, 'Alle haben schon abgestimmt.', 'nothing_open');
+        this.enqueuePush({ title: `Abstimmung offen: ${p.title}`, body: p.closesAt ? `Abstimmen bis ${berlinDateTime(p.closesAt)}` : 'Deine Stimme ist gefragt.', data: { pollId: p.id }, recipientPersonIds: open, remindPoll: true });
+        return { queued: true, recipients: open.length, lastRemindedAt: this.recordNudge(a, 'poll', p.id, open.length) };
       }
       case 'event.save': {
         admin(); const eventId = b.id || id(), old = s.get('events', eventId);
         if (b.id && !old) fail(404, 'Termin nicht gefunden.');
-        if (old?.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.');
-        if (old && (old.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.');
+        if (old?.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.', 'closed');
+        if (old && (old.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.', 'version_conflict');
         const startsAt = date(b.startsAt), endsAt = date(b.endsAt);
         if (endsAt <= startsAt) fail(400, 'Das Ende muss nach dem Beginn liegen.');
         if (b.productionId && !s.get('productions', b.productionId)) fail(400, 'Produktion nicht gefunden.');
@@ -458,6 +549,8 @@ export class Theater {
         const personIds = b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds);
         const productionIds = b.productionIds === undefined ? list(old?.productionIds) : this.productionAudience(b.productionIds);
         if (b.repeat != null && old) fail(400, 'Eine Wiederholung lässt sich nur beim Anlegen eines Termins festlegen.');
+        if (b.series !== undefined && b.series !== 'following') fail(400, 'Unbekannte Auswahl für die Terminserie.');
+        if (b.series === 'following' && !old?.seriesId) fail(400, 'Dieser Termin gehört zu keiner Terminserie.');
         const e = { id: eventId, title: required(b.title, 'Titel'), description: text(b.description ?? old?.description, 5000), startsAt, endsAt, place: text(b.place), type: eventTypes.includes(b.type) ? b.type : 'rehearsal', locked: b.locked === true, productionId: b.productionId || null, sceneIds: b.productionId ? sceneIds : [], roleIds, personIds, productionIds, ...(old?.seriesId ? { seriesId: old.seriesId } : {}), version: (old?.version ?? 0) + 1 };
         if (b.repeat != null) {
           // A series is a set of independent events sharing a seriesId; each is
@@ -471,23 +564,37 @@ export class Theater {
           const notice = { title: `Neue Terminserie: ${e.title}`, body: seriesSummary(occurrences, b.repeat.every), data: { eventId }, roleIds, personIds, productionIds, newEvent: true, series };
           if (b.push === true) this.enqueuePush({ ...notice, announce: 'new' });
           else this.enqueueEmail(notice);
-          return { id: eventId, ids: events.map(x => x.id), pushQueued: b.push === true && this.pushEnabled };
+          return { id: eventId, ids: events.map(x => x.id), pushQueued: b.push === true && this.pushEnabled, pushSkipped: b.push === true && !this.pushEnabled ? 'disabled' : null };
         }
         this.storeEvent(e);
         // An explicit push replaces the automatic change notification; its email mirror keeps the usual rules.
         const near = at => { const until = Date.parse(at) - +this.clock(); return until > 0 && until <= changePushWindowDays * 86400000; };
+        const pushSkipped = soon => b.push !== true ? null : !this.pushEnabled ? 'disabled' : soon ? null : 'far_future';
+        if (b.series === 'following') {
+          // "This and all following": later occurrences take over only the fields changed
+          // here, so their own edits survive; times move by the Berlin wall-clock delta.
+          const followers = this.seriesFollowers(old, e);
+          if (followers.length) {
+            const touched = [old.startsAt, startsAt, ...followers.flatMap(x => [x.before.startsAt, x.after.startsAt])];
+            // Moving a near event far away still concerns those who expect it soon.
+            const soon = touched.some(near);
+            const notice = { title: `Terminserie geändert: ${e.title}`, body: `Gilt für ${followers.length + 1} Termine ab ${eventNotificationBody(e)}`, data: { eventId }, roleIds, personIds, productionIds, change: true, soon, series: { id: old.seriesId, count: followers.length + 1 } };
+            this.enqueuePush(b.push === true ? { ...notice, announce: 'changed' } : notice);
+            return { id: eventId, ids: [eventId, ...followers.map(x => x.after.id)], pushQueued: b.push === true && this.pushEnabled && soon, pushSkipped: pushSkipped(soon) };
+          }
+        }
         // Moving a near event far away still concerns those who expect it soon.
         const soon = !old || near(old.startsAt) || near(startsAt);
         const kind = old ? { change: true, soon } : { newEvent: true };
         if (b.push === true) this.enqueuePush({ title: `${old ? 'Termin geändert' : 'Neuer Termin'}: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, ...kind, announce: old ? 'changed' : 'new' });
         else if (old) this.enqueuePush({ title: `Termin aktualisiert: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, change: true, soon });
         else this.enqueueEmail({ data: { eventId }, roleIds, personIds, productionIds, newEvent: true });
-        return { id: eventId, pushQueued: b.push === true && this.pushEnabled && soon };
+        return { id: eventId, ...(b.series === 'following' ? { ids: [eventId] } : {}), pushQueued: b.push === true && this.pushEnabled && soon, pushSkipped: pushSkipped(soon) };
       }
       case 'event.delete': {
         admin(); const e = s.get('events', b.id); if (!e) fail(404, 'Termin nicht gefunden.');
-        if (e.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.');
-        if ((e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.');
+        if (e.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.', 'closed');
+        if ((e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.', 'version_conflict');
         if (b.series !== undefined && b.series !== 'following') fail(400, 'Unbekannte Auswahl für die Terminserie.');
         if (b.series !== 'following' || !e.seriesId) {
           this.enqueueEmail({ data: { eventId: e.id }, roleIds: e.roleIds, personIds: e.personIds, productionIds: e.productionIds, cancelled: true, event: cancelledEvent(e) });
@@ -509,7 +616,7 @@ export class Theater {
           const memberId = Number(c.id), key = `${b.eventId}:${memberId}`, old = s.get('checkins', key);
           if (!s.get('members', memberId)?.active) fail(400, 'Person nicht verfügbar.');
           if (c.present !== null && typeof c.present !== 'boolean') fail(400, 'Anwesenheit muss da, fehlt oder nicht erfasst sein.');
-          if ((old?.version ?? 0) !== (c.version ?? 0)) fail(409, 'Ein Anwesenheitseintrag wurde gleichzeitig geändert. Bitte neu laden.');
+          if ((old?.version ?? 0) !== (c.version ?? 0)) fail(409, 'Ein Anwesenheitseintrag wurde gleichzeitig geändert. Bitte neu laden.', 'version_conflict');
           s.put('checkins', key, { eventId: b.eventId, personId: memberId, present: c.present, version: (old?.version ?? 0) + 1, updatedAt: now() });
         }
         return {};
@@ -517,7 +624,7 @@ export class Theater {
       case 'event.script': {
         admin(); const e = s.get('events', b.eventId); if (!e) fail(404, 'Termin nicht gefunden.');
         // Installed older clients do not yet send an event version.
-        if (b.version !== undefined && (e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.');
+        if (b.version !== undefined && (e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.', 'version_conflict');
         const doc = b.productionId ? s.get('scripts', b.productionId) : null;
         if (b.productionId && !doc) fail(400, 'Drehbuch nicht gefunden.');
         const sceneIds = [...new Set(list(b.sceneIds).map(String))];
@@ -527,7 +634,7 @@ export class Theater {
       case 'production.archive': {
         admin(); const p = s.get('productions', b.id);
         if (!p) fail(404, 'Produktion nicht gefunden.');
-        if ((p.version ?? 1) !== b.version) fail(409, 'Die Produktion wurde zwischenzeitlich geändert.');
+        if ((p.version ?? 1) !== b.version) fail(409, 'Die Produktion wurde zwischenzeitlich geändert.', 'version_conflict');
         if (typeof b.archived !== 'boolean') fail(400, 'Bitte einen gültigen Archivstatus wählen.');
         s.put('productions', p.id, { ...p, archived: b.archived, version: (p.version ?? 1) + 1 });
         return {};
@@ -535,7 +642,7 @@ export class Theater {
       case 'production.save': {
         admin(); const productionId = b.id || id(), old = s.get('productions', productionId);
         if (b.id && !old) fail(404, 'Produktion nicht gefunden.');
-        if (old && (old.version ?? 1) !== b.version) fail(409, 'Die Produktion wurde zwischenzeitlich geändert.');
+        if (old && (old.version ?? 1) !== b.version) fail(409, 'Die Produktion wurde zwischenzeitlich geändert.', 'version_conflict');
         // Omitted casting or directors stay as they are (casting is edited with production.cast).
         const casting = b.casting === undefined ? { ...old?.casting } : {};
         for (const [roleId, memberId] of Object.entries(b.casting ?? {})) {
@@ -571,7 +678,7 @@ export class Theater {
           switch (c?.kind) {
             case 'role': {
               const role = list(p.roles).find(r => r.id === c.roleId) ?? fail(400, 'Rolle gehört nicht zur Produktion.');
-              if (c.previous !== undefined && (casting[role.id] ?? null) !== (c.previous == null ? null : Number(c.previous))) fail(409, `Die Rolle „${role.name || role.id}“ wurde inzwischen anders besetzt. Bitte neu laden.`);
+              if (c.previous !== undefined && (casting[role.id] ?? null) !== (c.previous == null ? null : Number(c.previous))) fail(409, `Die Rolle „${role.name || role.id}“ wurde inzwischen anders besetzt. Bitte neu laden.`, 'version_conflict');
               if (c.personId == null) delete casting[role.id];
               else casting[role.id] = person(c.personId, casting[role.id] === Number(c.personId));
               break;
@@ -606,41 +713,49 @@ export class Theater {
         const m = { id: id(), title: required(b.title, 'Betreff'), body: required(b.body, 'Nachricht', 10000), ...(link ? { link, linkLabel: text(b.linkLabel, 80) } : {}), ...target, authorId: a.personId, authorName: s.get('members', a.personId).name, createdAt: now() };
         s.put('messages', m.id, m);
         if (b.push === true) this.enqueuePush({ title: m.title, body: m.body.slice(0, 200), data: { messageId: m.id }, recipientPersonIds: recipients });
-        return { id: m.id, pushQueued: b.push === true && this.pushEnabled };
+        return { id: m.id, pushQueued: b.push === true && this.pushEnabled, recipients: recipients.length };
       }
       case 'message.remind': {
         // Nudges only the recipients who have not opened the message yet.
-        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.');
+        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.', 'push_unavailable');
         const m = s.get('messages', b.id); if (!m) fail(404, 'Mitteilung nicht gefunden.');
+        this.checkCooldown('message', m.id);
         const { recipientIds, readerIds } = this.messageReach(m);
-        const open = recipientIds.filter(x => !readerIds.includes(x));
-        if (!open.length) fail(409, 'Alle Empfänger haben die Mitteilung schon gelesen.');
+        const open = recipientIds.filter(x => !readerIds.includes(x) && x !== m.authorId);
+        if (!open.length) fail(409, 'Alle Empfänger haben die Mitteilung schon gelesen.', 'nothing_open');
         this.enqueuePush({ title: `Erinnerung: ${m.title}`, body: m.body.slice(0, 200), data: { messageId: m.id }, recipientPersonIds: open });
-        return { queued: true, recipients: open.length };
+        return { queued: true, recipients: open.length, lastRemindedAt: this.recordNudge(a, 'message', m.id, open.length) };
       }
       case 'event.remindOpen': {
         // Nudges only the invited people who have not answered the event yet.
-        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.');
+        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.', 'push_unavailable');
         const e = s.get('events', b.eventId); if (!e) fail(404, 'Termin nicht gefunden.');
-        if (e.locked || e.slotPoolId || Date.parse(e.endsAt ?? e.startsAt) < +this.clock()) fail(409, 'Für diesen Termin sind keine Rückmeldungen mehr möglich.');
-        const open = s.all('members').filter(m => m.active !== false && inAudience(m, e, s) && !['yes', 'late', 'no'].includes(s.get('responses', `${e.id}:${m.id}`)?.status)).map(m => m.id);
-        if (!open.length) fail(409, 'Alle Eingeladenen haben sich schon zurückgemeldet.');
+        if (e.locked || e.slotPoolId || Date.parse(e.endsAt ?? e.startsAt) < +this.clock()) fail(409, 'Für diesen Termin sind keine Rückmeldungen mehr möglich.', 'closed');
+        this.checkCooldown('event', e.id);
+        const open = this.audienceIds(e).filter(x => !['yes', 'late', 'no'].includes(s.get('responses', `${e.id}:${x}`)?.status));
+        if (!open.length) fail(409, 'Alle Eingeladenen haben sich schon zurückgemeldet.', 'nothing_open');
         this.enqueuePush({ title: `Rückmeldung fehlt: ${e.title}`, body: eventNotificationBody(e), data: { eventId: e.id }, recipientPersonIds: open, remindOpen: true });
-        return { queued: true, recipients: open.length };
+        return { queued: true, recipients: open.length, lastRemindedAt: this.recordNudge(a, 'event', e.id, open.length) };
       }
       case 'message.delete': {
-        admin(); const m = s.get('messages', b.id); if (!m) fail(404, 'Mitteilung nicht gefunden.');
+        // A message that is already gone counts as deleted.
+        admin(); const m = s.get('messages', b.id); if (!m) return {};
         for (const r of s.all('receipts').filter(r => r.messageId === m.id)) s.delete('receipts', `${r.messageId}:${r.personId}`);
-        s.delete('messages', m.id); return {};
+        s.delete('messages', m.id); s.delete('nudges', `message:${m.id}`); return {};
       }
       case 'message.readAll': {
         for (const m of s.all('messages').filter(m => this.canReadMessage(a, m))) if (!s.get('receipts', `${m.id}:${a.personId}`)) s.put('receipts', `${m.id}:${a.personId}`, { messageId: m.id, personId: a.personId, readAt: now() });
         return {};
       }
-      case 'message.read': { const m = s.get('messages', b.id); if (!m || !this.canReadMessage(a, m)) fail(404, 'Mitteilung nicht gefunden.'); s.put('receipts', `${m.id}:${a.personId}`, { messageId: m.id, personId: a.personId, readAt: now() }); return {}; }
+      case 'message.read': {
+        // Reading a message deleted meanwhile is done; one that exists but is not addressed stays hidden.
+        const m = s.get('messages', b.id); if (!m) return {};
+        if (!this.canReadMessage(a, m)) fail(404, 'Mitteilung nicht gefunden.');
+        s.put('receipts', `${m.id}:${a.personId}`, { messageId: m.id, personId: a.personId, readAt: now() }); return {};
+      }
       case 'comment.save': {
         const doc = s.get('scripts', b.productionId);
-        if (!doc || doc.revision !== b.revision || !doc.cues.some(c => c.id === b.cueId)) fail(409, 'Diese Textstelle gehört nicht zur aktuellen Fassung.');
+        if (!doc || doc.revision !== b.revision || !doc.cues.some(c => c.id === b.cueId)) fail(409, 'Diese Textstelle gehört nicht zur aktuellen Fassung.', 'version_conflict');
         const commentId = b.id || id(), old = s.get('comments', commentId);
         if (b.id && (!old || old.authorId !== a.personId)) fail(403, 'Du kannst nur eigene Kommentare bearbeiten.');
         const comment = { id: commentId, productionId: b.productionId, cueId: b.cueId, revision: b.revision, text: required(b.text, 'Kommentar', 3000), authorId: a.personId, authorName: this.profile(a).displayName, createdAt: old?.createdAt ?? now(), updatedAt: now() };
@@ -650,7 +765,7 @@ export class Theater {
       case 'slotPool.save': {
         admin(); const poolId = b.id || id(), old = s.get('slotPools', poolId);
         if (b.id && !old) fail(404, 'Terminfinder nicht gefunden.');
-        if (old && old.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.');
+        if (old && old.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.', 'version_conflict');
         const input = list(b.slots);
         if (!input.length || input.length > 100) fail(400, 'Bitte 1 bis 100 Zeitfenster anlegen.');
         const slots = input.map(x => {
@@ -672,47 +787,80 @@ export class Theater {
         s.put('slotPools', poolId, pool);
         for (const slot of slots) this.syncSlotEvent(pool, slot);
         if (!old) this.enqueuePush({ title: `Terminfinder: ${pool.title}`, body: 'Bitte wähle dein Zeitfenster.', data: { slotPoolId: poolId }, roleIds, personIds, productionIds });
+        // People booked into a future slot hear when its time moves (`slotPoolId` data: no email mirror, own title).
+        for (const slot of slots) {
+          const before = old?.slots.find(x => x.id === slot.id), booked = bookings.filter(x => x.slotId === slot.id).map(x => x.personId);
+          if (before && booked.length && (before.startsAt !== slot.startsAt || before.endsAt !== slot.endsAt) && Date.parse(slot.startsAt) > +this.clock()) this.enqueuePush({ title: `Terminfinder: ${pool.title}`, body: `Zeitfenster verschoben: ${eventNotificationBody({ ...slot, place: pool.place })}`, data: { slotPoolId: poolId }, recipientPersonIds: booked });
+        }
         return { id: poolId };
       }
       case 'slotPool.close': {
         admin(); const pool = s.get('slotPools', b.id);
         if (!pool) fail(404, 'Terminfinder nicht gefunden.');
-        if (pool.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.');
+        if (pool.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.', 'version_conflict');
         s.put('slotPools', pool.id, { ...pool, closed: b.closed !== false, version: pool.version + 1 }); return {};
       }
       case 'slotPool.delete': {
         admin(); const pool = s.get('slotPools', b.id);
         if (!pool) fail(404, 'Terminfinder nicht gefunden.');
-        if (pool.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.');
-        for (const x of s.all('slotBookings').filter(x => x.poolId === pool.id)) s.delete('slotBookings', `${pool.id}:${x.personId}`);
+        if (pool.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.', 'version_conflict');
+        const bookings = s.all('slotBookings').filter(x => x.poolId === pool.id);
+        // Future bookings are cancelled with a notice; the pool is gone, so there is no deep link.
+        for (const slot of pool.slots.filter(x => Date.parse(x.startsAt) > +this.clock())) {
+          const booked = bookings.filter(x => x.slotId === slot.id).map(x => x.personId);
+          if (booked.length) this.enqueuePush({ title: `Terminfinder entfällt: ${pool.title}`, body: `Dein Zeitfenster entfällt: ${eventNotificationBody({ ...slot, place: pool.place })}`, data: {}, recipientPersonIds: booked });
+        }
+        for (const x of bookings) s.delete('slotBookings', `${pool.id}:${x.personId}`);
         for (const slot of pool.slots) this.syncSlotEvent(pool, slot);
-        s.delete('slotPools', pool.id); return {};
+        s.delete('slotPools', pool.id); s.delete('nudges', `slotPool:${pool.id}`); return {};
+      }
+      case 'slotPool.remindOpen': {
+        // Nudges invitees without a booking while a future slot is still free.
+        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.', 'push_unavailable');
+        const pool = s.get('slotPools', b.id); if (!pool) fail(404, 'Terminfinder nicht gefunden.');
+        const bookings = s.all('slotBookings').filter(x => x.poolId === pool.id);
+        if (pool.closed || !pool.slots.some(x => Date.parse(x.startsAt) > +this.clock() && bookings.filter(y => y.slotId === x.id).length < x.capacity)) fail(409, 'In diesem Terminfinder ist kein freies Zeitfenster mehr buchbar.', 'closed');
+        this.checkCooldown('slotPool', pool.id);
+        const open = this.audienceIds(pool).filter(x => !bookings.some(y => y.personId === x));
+        if (!open.length) fail(409, 'Alle Eingeladenen haben schon ein Zeitfenster gebucht.', 'nothing_open');
+        this.enqueuePush({ title: `Terminfinder: ${pool.title}`, body: 'Bitte wähle noch dein Zeitfenster.', data: { slotPoolId: pool.id }, recipientPersonIds: open, remindSlot: true });
+        return { queued: true, recipients: open.length, lastRemindedAt: this.recordNudge(a, 'slotPool', pool.id, open.length) };
       }
       case 'slot.book': case 'slot.cancel': {
         const pool = s.get('slotPools', b.poolId);
         if (!pool || !inAudience(s.get('members', a.personId), pool, s)) fail(404, 'Terminfinder nicht gefunden.');
-        if (pool.closed) fail(409, 'Die Buchung ist geschlossen.');
+        if (pool.closed) fail(409, 'Die Buchung ist geschlossen.', 'closed');
         const own = s.get('slotBookings', `${pool.id}:${a.personId}`), ownSlot = pool.slots.find(x => x.id === own?.slotId);
-        if (ownSlot && Date.parse(ownSlot.startsAt) <= +this.clock()) fail(409, 'Dein Zeitfenster hat schon begonnen.');
+        if (ownSlot && Date.parse(ownSlot.startsAt) <= +this.clock()) fail(409, 'Dein Zeitfenster hat schon begonnen.', 'closed');
         this.bookSlot(pool, a.personId, b.action === 'slot.book' ? required(b.slotId, 'Zeitfenster') : null); return {};
       }
       case 'slot.assign': {
         admin(); const pool = s.get('slotPools', b.poolId), personId = Number(b.personId);
         if (!pool) fail(404, 'Terminfinder nicht gefunden.');
         if (!s.get('members', personId)?.active && b.slotId !== null) fail(400, 'Person nicht verfügbar.');
-        this.bookSlot(pool, personId, b.slotId === null ? null : required(b.slotId, 'Zeitfenster')); return {};
+        const before = s.get('slotBookings', `${pool.id}:${personId}`)?.slotId ?? null, beforeSlot = pool.slots.find(x => x.id === before);
+        this.bookSlot(pool, personId, b.slotId === null ? null : required(b.slotId, 'Zeitfenster'));
+        // The person hears about an admin's change to their future slot; their own changes stay quiet.
+        const after = s.get('slotBookings', `${pool.id}:${personId}`)?.slotId ?? null, slot = pool.slots.find(x => x.id === after);
+        let push = null;
+        if (personId !== a.personId && after !== before) {
+          if (slot) push = `Du bist eingeteilt: ${eventNotificationBody({ ...slot, place: pool.place })}`;
+          else if (beforeSlot && Date.parse(beforeSlot.startsAt) > +this.clock()) push = 'Dein Zeitfenster wurde freigegeben.';
+        }
+        if (push) this.enqueuePush({ title: `Terminfinder: ${pool.title}`, body: push, data: { slotPoolId: pool.id }, recipientPersonIds: [personId] });
+        return { pushQueued: !!push && this.pushEnabled };
       }
       case 'email.test': { if (!this.emailEnabled || !a.emailVerified) fail(409, 'Der E-Mail-Versand benötigt eine bestätigte Anmeldeadresse.'); this.enqueueEmail({ test: true, data: {}, recipientPersonIds: [a.personId] }); return { queued: true }; }
       case 'push.send': {
         // An on-demand push without a stored message, e.g. "Probe fällt aus, Details folgen".
-        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.');
+        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.', 'push_unavailable');
         const title = required(b.title, 'Titel', 120), body = required(b.body, 'Text', 500);
         const { recipients } = this.messageTarget(b);
         const reached = new Set(s.accounts().filter(x => x.status === 'approved' && recipients.includes(x.personId)).map(x => x.uid));
         this.enqueuePush({ title, body, data: {}, recipientPersonIds: recipients, manual: true, authorName: s.get('members', a.personId)?.name ?? a.name });
         return { queued: true, recipients: recipients.length, withDevice: new Set(s.all('devices').filter(d => reached.has(d.uid)).map(d => d.uid)).size };
       }
-      case 'push.test': { if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.'); this.enqueuePush({ title: 'Theater-App', body: 'Deine Testbenachrichtigung ist da.', data: {}, recipientPersonIds: [a.personId] }); return { queued: true }; }
+      case 'push.test': { if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.', 'push_unavailable'); this.enqueuePush({ title: 'Theater-App', body: 'Deine Testbenachrichtigung ist da.', data: {}, recipientPersonIds: [a.personId] }); return { queued: true }; }
       default: fail(400, 'Diese Aktion wird nicht unterstützt.');
     }
   }
@@ -735,9 +883,9 @@ export class Theater {
     const canDirect = a.role === 'admin' || list(p.directorMemberIds).includes(a.personId);
     if (!body) return { ...current, canDirect };
     if (a.role !== 'admin' && !list(p.directorMemberIds).includes(a.personId)) fail(403, 'Du hast keine Regieberechtigung für dieses Stück.');
-    if (body.revision !== doc.revision) fail(409, 'Die Drehbuchfassung hat sich geändert.');
+    if (body.revision !== doc.revision) fail(409, 'Die Drehbuchfassung hat sich geändert.', 'version_conflict');
     if (body.cueId != null && !doc.cues.some(c => c.id === body.cueId)) fail(400, 'Textstelle nicht gefunden.');
-    if (body.sequence != null && body.sequence !== current.sequence) fail(409, 'Die Regiemarkierung wurde zwischenzeitlich geändert.');
+    if (body.sequence != null && body.sequence !== current.sequence) fail(409, 'Die Regiemarkierung wurde zwischenzeitlich geändert.', 'version_conflict');
     const cue = doc.cues.find(c => c.id === body.cueId);
     return { ...this.store.put('focus', productionId, { productionId, revision: doc.revision, sequence: current.sequence + 1, cueId: body.cueId ?? null, cueOrdinal: cue?.ordinal ?? null, sceneId: cue?.sceneId ?? null, updatedBy: uid, director: { id: uid, name: this.profile(a).displayName }, updatedAt: now() }), canDirect };
   }
@@ -753,12 +901,54 @@ export class Theater {
     const s = this.store, eventId = e.id;
     s.put('events', eventId, e);
     for (const r of s.all('responses').filter(r => r.eventId === eventId && r.expectedArrivalAt && (r.expectedArrivalAt <= e.startsAt || r.expectedArrivalAt >= e.endsAt))) s.put('responses', `${eventId}:${r.personId}`, { ...r, expectedArrivalAt: null });
-    for (const absence of s.all('absences')) if (inAudience(s.get('members', absence.personId), e, s) && absence.from <= day(e.startsAt) && absence.to >= day(e.startsAt) && !s.get('responses', `${eventId}:${absence.personId}`)) s.put('responses', `${eventId}:${absence.personId}`, { eventId, personId: absence.personId, status: 'no', expectedArrivalAt: null, reason: absence.reason, updatedAt: now() });
+    for (const absence of s.all('absences')) if (inAudience(s.get('members', absence.personId), e, s) && absence.from <= day(e.startsAt) && absence.to >= day(e.startsAt) && !s.get('responses', `${eventId}:${absence.personId}`)) s.put('responses', `${eventId}:${absence.personId}`, { eventId, personId: absence.personId, status: 'no', expectedArrivalAt: null, reason: absence.reason, absenceId: absence.id, updatedAt: now() });
     return e;
   }
+  /**
+   * Later, not yet ended occurrences of the series take over the fields changed from `old` to `e`.
+   * Times move by the Europe/Berlin wall-clock delta (days and minutes), so DST switches keep the time.
+   */
+  seriesFollowers(old, e) {
+    const s = this.store, at = +this.clock();
+    const changed = seriesFields.filter(f => !sameValue(f, old[f], e[f]));
+    const shift = (from, to) => {
+      const x = berlinParts(Date.parse(from)), y = berlinParts(Date.parse(to));
+      return { days: Math.round((Date.UTC(y.y, y.m, y.d) - Date.UTC(x.y, x.m, x.d)) / 86400000), minutes: y.h * 60 + y.mi - (x.h * 60 + x.mi) };
+    };
+    const move = (value, { days, minutes }) => { const p = berlinParts(Date.parse(value)); return new Date(fromBerlin({ ...p, d: p.d + days, h: 0, mi: p.h * 60 + p.mi + minutes })).toISOString(); };
+    const start = shift(old.startsAt, e.startsAt), end = shift(old.endsAt, e.endsAt), retime = start.days || start.minutes || end.days || end.minutes;
+    // Nothing to take over: the following occurrences keep their versions and nobody hears of a series change.
+    if (!changed.length && !retime) return [];
+    return s.all('events').filter(x => x.seriesId === old.seriesId && x.id !== e.id && !x.slotPoolId && Date.parse(x.startsAt) > Date.parse(old.startsAt) && Date.parse(x.endsAt) > at)
+      .sort((x, y) => x.startsAt.localeCompare(y.startsAt)).map(before => {
+        const next = { ...before, version: (before.version ?? 1) + 1 };
+        for (const f of changed) next[f] = e[f];
+        if (changed.includes('productionId')) next.sceneIds = [];
+        if (retime) {
+          next.startsAt = move(before.startsAt, start); next.endsAt = move(before.endsAt, end);
+          if (next.endsAt <= next.startsAt) next.endsAt = new Date(Date.parse(next.startsAt) + Date.parse(e.endsAt) - Date.parse(e.startsAt)).toISOString();
+        }
+        return { before, after: this.storeEvent(next) };
+      });
+  }
+  /** Tells admins and the production's directors when someone cancels within a day of the start; once per person and start time. */
+  notifyLateDecline(e, personId) {
+    const s = this.store, until = Date.parse(e.startsAt) - +this.clock();
+    if (!this.pushEnabled || until <= 0 || until > lateDeclineWindowMs) return;
+    const key = `${e.id}:${e.startsAt}:${personId}:lateDecline`;
+    if (s.get('reminderSent', key)) return;
+    const directors = list(s.get('productions', e.productionId)?.directorMemberIds).map(Number);
+    const recipients = [...new Set([...s.accounts().filter(x => x.status === 'approved' && x.role === 'admin' && x.personId != null).map(x => x.personId), ...directors])]
+      .filter(x => x !== personId && s.get('reminders', x)?.lateDeclines !== false);
+    if (!recipients.length) return;
+    // Never the reason: it may be health information on a lock screen.
+    this.enqueuePush({ title: `Kurzfristige Absage: ${e.title}`, body: `${s.get('members', personId)?.name ?? 'Jemand'} kommt nicht · ${eventNotificationBody(e)}`, data: { eventId: e.id }, recipientPersonIds: recipients, fixedText: true, email: false });
+    s.put('reminderSent', key, { at: now() });
+  }
+  forgetPollVotes(pollId) { this.store.db.prepare("DELETE FROM entities WHERE kind = 'pollVotes' AND json_extract(data, '$.pollId') = ?").run(pollId); }
   removeEvent(eventId) {
     const s = this.store;
-    s.delete('events', eventId);
+    s.delete('events', eventId); s.delete('nudges', `event:${eventId}`);
     for (const kind of ['responses', 'checkins']) for (const item of s.all(kind).filter(x => x.eventId === eventId)) s.delete(kind, `${item.eventId}:${item.personId}`);
   }
   /**
@@ -780,7 +970,7 @@ export class Theater {
     };
     for (const pool of s.all('slotPools')) {
       if (!named(pool)) { removeBookings(pool, x => x.personId !== personId); continue; }
-      if (onlyThem(pool)) { removeBookings(pool); s.delete('slotPools', pool.id); continue; }
+      if (onlyThem(pool)) { removeBookings(pool); s.delete('slotPools', pool.id); s.delete('nudges', `slotPool:${pool.id}`); continue; }
       s.put('slotPools', pool.id, { ...pool, personIds: others(pool.personIds), version: pool.version + 1 });
       removeBookings(pool, x => x.personId !== personId);
     }
@@ -788,9 +978,8 @@ export class Theater {
       if (onlyThem(e)) this.removeEvent(e.id);
       else s.put('events', e.id, { ...e, personIds: others(e.personIds), version: (e.version ?? 1) + 1 });
     }
-    const forgetVotes = pollId => s.db.prepare("DELETE FROM entities WHERE kind = 'pollVotes' AND json_extract(data, '$.pollId') = ?").run(pollId);
     for (const p of s.all('polls').filter(named)) {
-      if (onlyThem(p)) { forgetVotes(p.id); s.delete('polls', p.id); }
+      if (onlyThem(p)) { this.forgetPollVotes(p.id); s.delete('polls', p.id); s.delete('nudges', `poll:${p.id}`); }
       else s.put('polls', p.id, { ...p, personIds: others(p.personIds), version: p.version + 1 });
     }
     for (const v of s.all('pollVotes').filter(v => v.personId === personId)) {
@@ -805,7 +994,7 @@ export class Theater {
       const next = { ...m, recipientPersonIds: others(m.recipientPersonIds), ...(author ? { authorId: null, authorName: 'Ehemaliges Mitglied' } : {}) };
       if (m.audience === 'all' || !onlyThem({ ...next, personIds: next.recipientPersonIds })) { s.put('messages', m.id, next); continue; }
       for (const r of s.all('receipts').filter(r => r.messageId === m.id)) s.delete('receipts', `${r.messageId}:${r.personId}`);
-      s.delete('messages', m.id);
+      s.delete('messages', m.id); s.delete('nudges', `message:${m.id}`);
     }
     for (const p of s.all('productions')) {
       const casting = Object.fromEntries(Object.entries(p.casting ?? {}).filter(([, x]) => Number(x) !== personId));
@@ -820,13 +1009,15 @@ export class Theater {
     // Reminder keys are `${eventId}:${startsAt}:${personId}:${kind}`; startsAt contains colons itself.
     for (const { id: key } of s.db.prepare("SELECT id FROM entities WHERE kind = 'reminderSent'").all()) if (key.split(':').at(-2) === String(personId)) s.delete('reminderSent', key);
     s.delete('reminders', personId);
+    for (const { id: key, data } of s.db.prepare("SELECT id, data FROM entities WHERE kind = 'nudges'").all()) { const n = JSON.parse(data); if (n.by === personId) s.put('nudges', key, { ...n, by: null }); }
     // An orphaned profile image is purged by the retention job (it also removes the file).
     for (const m of s.all('media').filter(m => m.ownerPersonId === personId)) s.put('media', m.id, { ...m, ownerPersonId: null });
     s.delete('members', personId);
     s.put('settings', 'lastPersonId', { id: Math.max(personId, s.get('settings', 'lastPersonId')?.id ?? 0) });
   }
   enqueuePush(message) {
-    if (message.data?.eventId) this.enqueueEmail(message);
+    // Event jobs are mirrored to email unless they opt out (`email: false`).
+    if (message.data?.eventId && message.email !== false) this.enqueueEmail(message);
     if (!this.pushEnabled) return;
     const job = { id: id(), ...message, attempts: 0, status: 'pending', createdAt: now(), nextAttemptAt: now() };
     this.store.put('pushJobs', job.id, job);

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -5,6 +7,7 @@ import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
+import '../../../shared/nudges.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/member_avatar.dart';
@@ -13,6 +16,7 @@ import '../../../shared/widgets/state_pill.dart';
 import '../../events/domain/event_format.dart';
 import '../../events/domain/rsvp_status.dart';
 import '../../events/ui/event_style.dart';
+import '../data/event_details_api.dart';
 import 'attendance_screen.dart';
 import 'scene_planner_screen.dart';
 
@@ -58,6 +62,35 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
   final Set<String> _collapsed = {};
   bool _busy = false;
 
+  /// Reasons, absences and the invitees from the server; null until loaded
+  /// and in the demo, offline or on failure (the snapshot view stays).
+  EventDetails? _details;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (widget.controller.isDemo) return;
+    try {
+      final details = await EventDetailsApi(
+        widget.controller,
+      ).load(widget.event.id);
+      if (mounted) setState(() => _details = details);
+    } catch (_) {
+      // Keep showing what the snapshot knows.
+    }
+  }
+
+  Future<void> _refresh() async {
+    await Future.wait([
+      refreshWithFeedback(context, widget.controller),
+      _load(),
+    ]);
+  }
+
   TheaterEvent get _event =>
       widget.controller.events
           .where((e) => e.id == widget.event.id)
@@ -84,16 +117,18 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
     if (!confirmed || !mounted) return;
     setState(() => _busy = true);
     try {
-      final outcome = await widget.controller.performAction({
+      final result = await widget.controller.performActionWithResult({
         'action': 'event.remindOpen',
         'eventId': widget.event.id,
       });
+      unawaited(_load());
       if (mounted) {
-        final who = open == 1 ? '1 Person' : '$open Personen';
+        final count = intValue(result.data?['recipients'], open);
+        final who = count == 1 ? '1 Person' : '$count Personen';
         showDone(
           context,
           outcomeText(
-            outcome,
+            result.outcome,
             done: 'Erinnerung an $who gesendet.',
             queued:
                 'Erinnerung an $who vorgemerkt – wird bei Verbindung gesendet.',
@@ -111,23 +146,34 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
   Widget build(BuildContext context) => AdminPage(
     controller: widget.controller,
     title: 'Rückmeldungen',
+    onRefresh: _refresh,
     children: (context) {
       final controller = widget.controller, event = _event;
+      final details = _details;
       final responses = jsonMap(controller.memberAttendanceByEvent[event.id]);
       final arrivals = jsonMap(controller.arrivalsByEvent[event.id]);
       final groups = {for (final s in _responseOrder) s: <TheaterMember>[]};
+      final invited = details?.invitedIds;
       for (final m in controller.members.where(
         (m) =>
             m.active &&
-            m.inAudience(
-              event.roleIds,
-              event.personIds,
-              controller.ensemblesOf(event.productionIds),
-            ),
+            (invited?.contains(m.id) ??
+                m.inAudience(
+                  event.roleIds,
+                  event.personIds,
+                  controller.ensemblesOf(event.productionIds),
+                )),
       )) {
+        // The snapshot stays the source of the statuses: it is refreshed far
+        // more often than the details, which could show a stale answer.
         final status = textValue(responses[m.id.toString()], 'open');
         groups[hasResponse(status) ? status : 'open']!.add(m);
       }
+      final now = controller.now;
+      final lastReminded = details?.lastRemindedAt ?? event.lastRemindedAt;
+      final remindCount = details?.lastRemindedAt != null
+          ? details!.remindCount
+          : event.remindCount;
       DateTime? arrival(TheaterMember m) =>
           dateValue(arrivals[m.id.toString()])?.toLocal();
       int byName(TheaterMember a, TheaterMember b) =>
@@ -173,7 +219,13 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
                   controller.canRespondTo(event)
               ? open
               : 0,
-          busy: _busy,
+          busy:
+              _busy ||
+              (controller.supports('nudges') &&
+                  remindCoolingDown(lastReminded, now)),
+          lastReminded: lastReminded == null
+              ? null
+              : lastRemindedLabel(lastReminded, remindCount, now),
           onRemind: () => _remind(groups['open']!),
         ),
         if (_filter != null)
@@ -216,6 +268,8 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
                           : 'ab ${DateFormat.Hm('de').format(at)} Uhr';
                     }
                   : null,
+              reason: status == 'no' ? (m) => details?.reasons[m.id] : null,
+              absent: details?.absentIds ?? const {},
             ),
           ],
         const SectionTitle('Weiter planen'),
@@ -251,6 +305,7 @@ class _ResponseSummary extends StatelessWidget {
     required this.remindable,
     required this.busy,
     required this.onRemind,
+    this.lastReminded,
   });
   final Map<String, int> counts;
   final String? filter;
@@ -260,6 +315,9 @@ class _ResponseSummary extends StatelessWidget {
   final int remindable;
   final bool busy;
   final VoidCallback onRemind;
+
+  /// "Zuletzt erinnert: …" once anyone reminded the open people.
+  final String? lastReminded;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -361,6 +419,10 @@ class _ResponseSummary extends StatelessWidget {
                 ),
               ),
             ],
+            if (lastReminded != null) ...[
+              const SizedBox(height: 8),
+              Text(lastReminded!, style: theme.textTheme.bodySmall),
+            ],
           ],
         ),
       ),
@@ -456,6 +518,8 @@ class _ResponseSection extends StatelessWidget {
     required this.expanded,
     required this.onToggle,
     this.detail,
+    this.reason,
+    this.absent = const {},
   });
   final AppController controller;
   final String status;
@@ -463,6 +527,12 @@ class _ResponseSection extends StatelessWidget {
   final bool expanded;
   final VoidCallback onToggle;
   final String? Function(TheaterMember)? detail;
+
+  /// The decline reason of a person, if they gave one.
+  final String? Function(TheaterMember)? reason;
+
+  /// People who reported an absence for the event day.
+  final Set<int> absent;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -532,6 +602,8 @@ class _ResponseSection extends StatelessWidget {
                                   controller: controller,
                                   member: m,
                                   detail: detail?.call(m),
+                                  reason: reason?.call(m),
+                                  absent: absent.contains(m.id),
                                   color: color,
                                 ),
                               ),
@@ -552,11 +624,14 @@ class _ResponsePerson extends StatelessWidget {
     required this.member,
     required this.color,
     this.detail,
+    this.reason,
+    this.absent = false,
   });
   final AppController controller;
   final TheaterMember member;
   final Color color;
-  final String? detail;
+  final String? detail, reason;
+  final bool absent;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -582,6 +657,18 @@ class _ResponsePerson extends StatelessWidget {
                 if (detail != null) ...[
                   const SizedBox(height: 6),
                   StatePill(detail!, color: color, icon: Icons.schedule),
+                ],
+                if (reason != null) ...[
+                  const SizedBox(height: 4),
+                  Text('Grund: $reason', style: theme.textTheme.bodySmall),
+                ],
+                if (absent) ...[
+                  const SizedBox(height: 6),
+                  StatePill(
+                    'Abwesend gemeldet',
+                    color: theme.colorScheme.onSurfaceVariant,
+                    icon: Icons.beach_access_outlined,
+                  ),
                 ],
               ],
             ),

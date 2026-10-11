@@ -90,7 +90,7 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
     if (!mounted) return;
     setState(() => _busy = true);
     try {
-      final outcome = await widget.controller.performAction({
+      final result = await widget.controller.performActionWithResult({
         'action': 'message.send',
         'title': _title.text,
         'body': _body.text,
@@ -100,11 +100,16 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
         'push': _withPush,
       });
       if (mounted) {
+        final recipients = result.data?['recipients'];
         showDone(
           context,
           outcomeText(
-            outcome,
-            done: 'Mitteilung veröffentlicht.',
+            result.outcome,
+            done: recipients is num
+                ? recipients == 1
+                      ? 'An 1 Person veröffentlicht.'
+                      : 'An ${recipients.toInt()} Personen veröffentlicht.'
+                : 'Mitteilung veröffentlicht.',
             queued: 'Mitteilung zur Übertragung vorgemerkt.',
           ),
         );

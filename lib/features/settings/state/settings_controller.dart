@@ -29,6 +29,10 @@ extension SettingsController on AppController {
             'emailEnabled',
           ])
             key: value[key] ?? false,
+          // Older servers would store the unknown key; newer ones keep it
+          // when an older app leaves it out.
+          if (supports('lateDeclines'))
+            'lateDeclines': value['lateDeclines'] ?? true,
           'customMinutes': customMinutes,
         },
       });

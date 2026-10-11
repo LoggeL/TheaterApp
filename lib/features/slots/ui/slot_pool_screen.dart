@@ -9,6 +9,7 @@ import '../../../core/models.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/layout/content_width.dart';
 import '../../../shared/navigation.dart';
+import '../../../shared/nudges.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/state_pill.dart';
@@ -33,14 +34,21 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
   bool _busy = false;
   AppController get _controller => widget.controller;
 
-  Future<bool> _run(JsonMap action, {String? done}) async {
+  /// Sends [action]; [done] or, given the server's reply, [doneWith] names
+  /// the result.
+  Future<bool> _run(
+    JsonMap action, {
+    String? done,
+    String? Function(JsonMap? data)? doneWith,
+  }) async {
     setState(() => _busy = true);
     try {
-      await _controller.performAction(action);
-      if (mounted && done != null) {
+      final result = await _controller.performActionWithResult(action);
+      final text = doneWith?.call(result.data) ?? done;
+      if (mounted && text != null) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text(done)));
+        ).showSnackBar(SnackBar(content: Text(text)));
       }
       return true;
     } catch (e) {
@@ -74,15 +82,28 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
     }, done: 'Zeitfenster freigegeben.');
   }
 
+  /// " · benachrichtigt" once the server queued a push for the person.
+  static String _notified(JsonMap? data) =>
+      data?['pushQueued'] == true ? ' · benachrichtigt' : '';
+
   Future<void> _assign(SlotPool pool, TimeSlot slot) async {
     final personId = await _pickPerson(pool, slot);
     if (personId == null || !mounted) return;
-    await _run({
-      'action': 'slot.assign',
-      'poolId': pool.id,
-      'personId': personId,
-      'slotId': slot.id,
-    });
+    final name = _controller.members
+        .where((m) => m.id == personId)
+        .firstOrNull
+        ?.name;
+    await _run(
+      {
+        'action': 'slot.assign',
+        'poolId': pool.id,
+        'personId': personId,
+        'slotId': slot.id,
+      },
+      doneWith: (data) => data?['pushQueued'] == true && name != null
+          ? '$name eingetragen: ${slotLabel(slot)}${_notified(data)}'
+          : null,
+    );
   }
 
   /// The assign flow started from a person: choose the slot for them.
@@ -129,12 +150,37 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
       ),
     );
     if (slot == null || !mounted) return;
-    await _run({
-      'action': 'slot.assign',
-      'poolId': pool.id,
-      'personId': member.id,
-      'slotId': slot.id,
-    }, done: '${member.name} eingetragen: ${slotLabel(slot)}');
+    await _run(
+      {
+        'action': 'slot.assign',
+        'poolId': pool.id,
+        'personId': member.id,
+        'slotId': slot.id,
+      },
+      doneWith: (data) =>
+          '${member.name} eingetragen: ${slotLabel(slot)}${_notified(data)}',
+    );
+  }
+
+  /// Pushes a reminder to the invitees who have not booked yet.
+  Future<void> _remindOpen(SlotPool pool, int open) async {
+    if (!await confirmAction(
+      context,
+      title: 'Offene erinnern?',
+      message:
+          '${open == 1 ? 'Eine Person ohne Zeitfenster bekommt' : '$open Personen ohne Zeitfenster bekommen'} '
+          'eine Push-Erinnerung an diesen Terminfinder.',
+      confirmLabel: 'Erinnerung senden',
+    )) {
+      return;
+    }
+    await _run(
+      {'action': 'slotPool.remindOpen', 'id': pool.id},
+      doneWith: (data) {
+        final count = intValue(data?['recipients'], open);
+        return 'Erinnerung an ${count == 1 ? '1 Person' : '$count Personen'} gesendet.';
+      },
+    );
   }
 
   Future<void> _remove(
@@ -152,12 +198,17 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
     )) {
       return;
     }
-    await _run({
-      'action': 'slot.assign',
-      'poolId': pool.id,
-      'personId': person.personId,
-      'slotId': null,
-    });
+    await _run(
+      {
+        'action': 'slot.assign',
+        'poolId': pool.id,
+        'personId': person.personId,
+        'slotId': null,
+      },
+      doneWith: (data) => data?['pushQueued'] == true
+          ? '${person.name} entfernt · benachrichtigt'
+          : null,
+    );
   }
 
   Future<void> _menu(SlotPool pool, String choice) async {
@@ -564,46 +615,78 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
         .toList();
     final missing = invited.where((m) => !booked.contains(m.id)).toList();
     if (invited.isEmpty) return const SizedBox.shrink();
+    final now = _controller.now, last = pool.lastRemindedAt;
+    final remindable =
+        _controller.supports('slotNotices') &&
+        _controller.pushConfigured &&
+        !pool.closed &&
+        pool.hasFreeSlotAt(now) &&
+        missing.isNotEmpty;
+    final coolingDown =
+        _controller.supports('nudges') && remindCoolingDown(last, now);
+    final card = Card(
+      child: ExpansionTile(
+        shape: const Border(),
+        leading: const Icon(Icons.groups_outlined),
+        title: Text(
+          '${invited.length - missing.length} von ${invited.length} '
+          'Eingeladenen haben gebucht',
+        ),
+        subtitle: missing.isEmpty
+            ? null
+            : Text('Noch ohne Zeitfenster: ${missing.length}'),
+        childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (missing.isEmpty)
+            const Text('Alle Eingeladenen haben ein Zeitfenster.')
+          else ...[
+            Text(
+              'Tippe auf eine Person, um ihr ein Zeitfenster zuzuweisen.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final m in missing)
+                  ActionChip(
+                    avatar: const Icon(Icons.person_add_alt, size: 18),
+                    label: Text(m.name),
+                    tooltip: '${m.name} ein Zeitfenster zuweisen',
+                    onPressed: _busy ? null : () => _assignPerson(pool, m),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.only(top: 12),
-      child: Card(
-        child: ExpansionTile(
-          shape: const Border(),
-          leading: const Icon(Icons.groups_outlined),
-          title: Text(
-            '${invited.length - missing.length} von ${invited.length} '
-            'Eingeladenen haben gebucht',
-          ),
-          subtitle: missing.isEmpty
-              ? null
-              : Text('Noch ohne Zeitfenster: ${missing.length}'),
-          childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
-          expandedCrossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (missing.isEmpty)
-              const Text('Alle Eingeladenen haben ein Zeitfenster.')
-            else ...[
-              Text(
-                'Tippe auf eine Person, um ihr ein Zeitfenster zuzuweisen.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final m in missing)
-                    ActionChip(
-                      avatar: const Icon(Icons.person_add_alt, size: 18),
-                      label: Text(m.name),
-                      tooltip: '${m.name} ein Zeitfenster zuweisen',
-                      onPressed: _busy ? null : () => _assignPerson(pool, m),
-                    ),
-                ],
-              ),
-            ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          card,
+          if (remindable) ...[
+            const SizedBox(height: 10),
+            FilledButton.tonalIcon(
+              onPressed: _busy || coolingDown
+                  ? null
+                  : () => _remindOpen(pool, missing.length),
+              icon: const Icon(Icons.notifications_active_outlined),
+              label: Text('Offene erinnern (${missing.length})'),
+            ),
           ],
-        ),
+          if (last != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              lastRemindedLabel(last, pool.remindCount, now),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ],
       ),
     );
   }

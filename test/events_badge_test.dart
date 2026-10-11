@@ -1,7 +1,18 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/events/events.dart';
 
 import 'app_controller_test.dart' show TestServer, signIn;
+
+/// An admin with a person record in role-1.
+class _AdminServer extends TestServer {
+  @override
+  JsonMap get user => {
+    ...super.user,
+    'personId': 1,
+    'roleIds': ['role-1'],
+  };
+}
 
 void main() {
   test(
@@ -36,4 +47,43 @@ void main() {
       controller.dispose();
     },
   );
+
+  for (final flagged in [true, false]) {
+    test(
+      'admins only count events they are invited to '
+      '(${flagged ? 'server flag' : 'fallback for older servers'})',
+      () async {
+        final now = DateTime.now();
+        JsonMap event(String id, List<String> roles, {bool? addressed}) => {
+          'id': id,
+          'title': id,
+          'startsAt': now
+              .add(const Duration(days: 2))
+              .toUtc()
+              .toIso8601String(),
+          'endsAt': now
+              .add(const Duration(days: 2, hours: 2))
+              .toUtc()
+              .toIso8601String(),
+          'roleIds': roles,
+          if (flagged) 'addressedToMe': ?addressed,
+        };
+        final server = _AdminServer();
+        server.data['attendanceByEvent'] = {};
+        server.data['events'] = [
+          event('mine', ['role-1'], addressed: true),
+          event('technik', ['role-3'], addressed: false),
+          event('all', [], addressed: true),
+        ];
+        final controller = server.controller();
+        await signIn(controller);
+        expect(unansweredSoon(controller, now), 2);
+        expect(
+          controller.events.firstWhere((e) => e.id == 'technik').addressedToMe,
+          isFalse,
+        );
+        controller.dispose();
+      },
+    );
+  }
 }

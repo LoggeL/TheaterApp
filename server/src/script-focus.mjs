@@ -55,7 +55,7 @@ export class ScriptFocusBridge {
     if (body) {
       const doc = t.store.get('scripts', productionId);
       if (!current.canDirect) throw new AppError(403, 'Du hast keine Regieberechtigung für dieses Stück.');
-      if (body.revision !== doc.revision || (body.sequence != null && body.sequence !== t.focus(uid, productionId).sequence)) throw new AppError(409, 'Fassung oder Regiemarkierung wurde zwischenzeitlich geändert.');
+      if (body.revision !== doc.revision || (body.sequence != null && body.sequence !== t.focus(uid, productionId).sequence)) throw new AppError(409, 'Fassung oder Regiemarkierung wurde zwischenzeitlich geändert.', 'version_conflict');
       const cue = doc.cues.find(c => c.id === body.cueId);
       if (body.cueId != null && !cue) throw new AppError(400, 'Textstelle nicht gefunden.');
       if (!this.password) throw new AppError(409, 'Für die gemeinsame Skript-Regie fehlt die Serverkonfiguration.');

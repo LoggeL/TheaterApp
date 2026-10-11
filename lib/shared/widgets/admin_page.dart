@@ -14,6 +14,7 @@ class AdminPage extends StatelessWidget {
     this.scrollController,
     this.cacheExtent,
     this.floatingActionButton,
+    this.onRefresh,
   });
   final AppController controller;
   final String title;
@@ -26,6 +27,9 @@ class AdminPage extends StatelessWidget {
 
   /// The page's create action, shown to admins only.
   final Widget? floatingActionButton;
+
+  /// Pull to refresh; refreshes the snapshot when not set.
+  final Future<void> Function()? onRefresh;
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
@@ -40,7 +44,9 @@ class AdminPage extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 840),
                 child: RefreshIndicator(
-                  onRefresh: () => refreshWithFeedback(context, controller),
+                  onRefresh:
+                      onRefresh ??
+                      () => refreshWithFeedback(context, controller),
                   child: ListView(
                     controller: scrollController,
                     scrollCacheExtent: cacheExtent,

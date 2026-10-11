@@ -58,6 +58,11 @@ class Poll {
     this.roleIds = const [],
     this.personIds = const [],
     this.productionIds = const [],
+    this.addressedToMe,
+    this.eligibleCount,
+    this.eligibleVotes,
+    this.lastRemindedAt,
+    this.remindCount = 0,
   });
   final String id, title, description;
   final List<PollOption> options;
@@ -71,6 +76,21 @@ class Poll {
   String get privacyLabel => anonymous ? 'Anonym' : 'Namentlich';
   final DateTime? closesAt;
   final int version;
+
+  /// Whether the signed-in person may vote; null from older servers, where
+  /// the audience has to be checked on the device.
+  final bool? addressedToMe;
+
+  /// Active members who may vote (admins on servers with `pollRemind`).
+  final int? eligibleCount;
+
+  /// Votes from people in the audience; admins outside it may vote too.
+  final int? eligibleVotes;
+
+  /// When an admin last reminded the open voters, and how often (servers
+  /// with `nudges`).
+  final DateTime? lastRemindedAt;
+  final int remindCount;
   int get totalVotes => options.fold(0, (n, o) => n + o.votes);
   String get voteCountLabel =>
       totalVotes == 1 ? '1 Stimme' : '$totalVotes Stimmen';
@@ -108,6 +128,17 @@ class Poll {
     productionIds: jsonList(
       json['productionIds'],
     ).map((e) => e.toString()).toList(),
+    addressedToMe: json['addressedToMe'] is bool
+        ? json['addressedToMe'] as bool
+        : null,
+    eligibleCount: json['eligibleCount'] is num
+        ? (json['eligibleCount'] as num).toInt()
+        : null,
+    eligibleVotes: json['eligibleVotes'] is num
+        ? (json['eligibleVotes'] as num).toInt()
+        : null,
+    lastRemindedAt: dateValue(json['lastRemindedAt']),
+    remindCount: intValue(json['remindCount']),
   );
   Poll withChoice(String optionId, {PollVoter? voter}) => Poll(
     id: id,
@@ -144,7 +175,15 @@ class Poll {
     roleIds: roleIds,
     personIds: personIds,
     productionIds: productionIds,
+    addressedToMe: addressedToMe,
+    eligibleCount: eligibleCount,
+    eligibleVotes: eligibleVotes,
+    lastRemindedAt: lastRemindedAt,
+    remindCount: remindCount,
   );
+
+  // Every field read in [Poll.fromJson] must survive [toJson]: queued votes
+  // are projected through this round trip.
   JsonMap toJson() => {
     'id': id,
     'title': title,
@@ -159,5 +198,11 @@ class Poll {
     'anonymous': anonymous,
     'closesAt': closesAt?.toUtc().toIso8601String(),
     'version': version,
+    if (addressedToMe != null) 'addressedToMe': addressedToMe,
+    if (eligibleCount != null) 'eligibleCount': eligibleCount,
+    if (eligibleVotes != null) 'eligibleVotes': eligibleVotes,
+    if (lastRemindedAt != null)
+      'lastRemindedAt': lastRemindedAt!.toUtc().toIso8601String(),
+    if (remindCount != 0) 'remindCount': remindCount,
   };
 }

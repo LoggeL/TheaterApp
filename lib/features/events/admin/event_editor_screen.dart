@@ -216,12 +216,52 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     if (d != null && mounted) setState(() => _until = d);
   }
 
+  /// Whether a change of a series occurrence can also reach the following
+  /// ones (servers with `seriesEdit`).
+  bool get _canEditFollowing =>
+      widget.event?.inSeries == true &&
+      widget.controller.supports('seriesEdit');
+
+  /// 'single' or 'following' for an occurrence of a series; null when
+  /// cancelled.
+  Future<String?> _confirmSeriesSave() => showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Serientermin ändern?'),
+      content: const Text(
+        'Der Termin gehört zu einer Serie. Geänderte Angaben kannst du auch '
+        'für alle folgenden Termine übernehmen.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Abbrechen'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, 'following'),
+          child: const Text('Diesen und alle folgenden'),
+        ),
+        // The narrower choice is the safe default.
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, 'single'),
+          child: const Text('Nur diesen Termin'),
+        ),
+      ],
+    ),
+  );
+
   Future<void> _save() async {
+    String? scope;
+    if (_canEditFollowing) {
+      scope = await _confirmSeriesSave();
+      if (scope == null || !mounted) return;
+    }
+    final following = scope == 'following';
     setState(() => _busy = true);
     final push = _push && widget.controller.pushConfigured && _changeIsNear;
     final series = _series;
     try {
-      final outcome = await widget.controller.performAction({
+      final result = await widget.controller.performActionWithResult({
         'action': 'event.save',
         'id': widget.event?.id,
         'version': widget.event?.version,
@@ -242,23 +282,44 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         'push': push,
         if (series != null)
           'repeat': {'every': _repeat!.wire, 'until': seriesUntilValue(_until)},
+        if (following) 'series': 'following',
       });
       if (!mounted) return;
-      final what = series == null ? 'Termin' : 'Terminserie';
+      final outcome = result.outcome, data = result.data;
+      final what = series != null
+          ? 'Terminserie'
+          : following
+          ? 'Serie'
+          : 'Termin';
+      final changed = jsonList(data?['ids']).length;
+      final saved = following && changed > 1
+          ? '$changed Termine der Serie gespeichert'
+          : '$what gespeichert';
+      // Without a reply (queued, demo, older server) the request decides.
+      final skipped = switch (data?['pushSkipped']) {
+        'far_future' =>
+          ' – kein Push, der Termin liegt mehr als $changePushWindowDays Tage entfernt.',
+        'disabled' => ' – kein Push, der Versand ist nicht eingerichtet.',
+        _ => ' – ohne Push.',
+      };
       showDone(
         context,
         push
             ? outcomeText(
                 outcome,
-                done: '$what gespeichert, Benachrichtigung wird verschickt.',
+                done: data?['pushQueued'] == false
+                    ? '$saved$skipped'
+                    : '$saved, Benachrichtigung wird verschickt.',
                 queued:
                     '$what vorgemerkt, Benachrichtigung folgt nach der Übertragung.',
               )
             : outcomeText(
                 outcome,
-                done: series == null
-                    ? 'Termin gespeichert'
-                    : 'Terminserie mit ${series.starts.length} Terminen angelegt',
+                done: series != null
+                    ? 'Terminserie mit ${series.starts.length} Terminen angelegt'
+                    : following
+                    ? saved
+                    : 'Termin gespeichert',
                 queued: '$what vorgemerkt – wird bei Verbindung übertragen.',
               ),
       );
@@ -363,7 +424,9 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Teil einer Serie – Änderungen gelten nur für diesen Termin.',
+                      _canEditFollowing
+                          ? 'Teil einer Serie – beim Speichern wählst du, ob die Änderungen auch für die folgenden Termine gelten.'
+                          : 'Teil einer Serie – Änderungen gelten nur für diesen Termin.',
                       style: theme.textTheme.bodySmall,
                     ),
                   ),

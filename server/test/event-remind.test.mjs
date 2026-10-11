@@ -55,3 +55,22 @@ test('open reminders fail clearly without push', t => {
   const { action } = setup(t, false);
   assert.throws(() => action({ action: 'event.remindOpen', eventId: 'probe' }), { status: 409 });
 });
+
+test('event reminders are rate-limited and their history is shown to admins only', t => {
+  const { store, app, action } = setup(t);
+  let at = now;
+  app.clock = () => at;
+  const result = action({ action: 'event.remindOpen', eventId: 'probe' });
+  assert.equal(result.lastRemindedAt, now.toISOString());
+  assert.throws(() => action({ action: 'event.remindOpen', eventId: 'probe' }), { status: 409, code: 'cooldown' });
+  assert.equal(store.get('events', 'probe').version, 1, 'queued emails stay current');
+  const admin = app.snapshot('admin').events.find(e => e.id === 'probe');
+  assert.deepEqual([admin.lastRemindedAt, admin.remindCount], [now.toISOString(), 1]);
+  assert.equal('lastRemindedAt' in app.snapshot('sam').events.find(e => e.id === 'probe'), false);
+  assert.equal(app.eventDetails('admin', 'probe').lastRemindedAt, now.toISOString());
+  at = new Date(+now + 11 * 60000);
+  assert.equal(action({ action: 'event.remindOpen', eventId: 'probe' }).recipients, 3);
+  assert.equal(store.get('nudges', 'event:probe').count, 2);
+  action({ action: 'event.delete', id: 'probe', version: 1 });
+  assert.equal(store.get('nudges', 'event:probe'), null);
+});

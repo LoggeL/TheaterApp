@@ -509,6 +509,7 @@ extension SessionController on AppController {
       'twoHours': true,
       'changes': true,
       'emailEnabled': false,
+      'lateDeclines': true,
     };
     _customReminderMinutes = null;
   }

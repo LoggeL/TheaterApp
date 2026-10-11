@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../src/store.mjs';
-import { Theater } from '../src/theater.mjs';
+import { Theater, apiFeatures } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
 
 function setup(t) {
@@ -191,4 +191,83 @@ test('role audiences limit events, polls and messages for members', t => {
   assert.throws(() => action({ action: 'note.save', title: 'Packliste', body: 'Kabel', roleIds: [tech], published: true }), { status: 400 });
   assert.throws(() => action({ action: 'note.delete', id: 'x', version: 1 }), { status: 400 });
   action({ action: 'attendance', eventId, status: 'yes' }, 'sam');
+});
+
+test('the snapshot lists the supported API features next to the existing capabilities', t => {
+  const { app, approve } = setup(t); approve();
+  for (const uid of ['admin', 'sam']) {
+    const { capabilities, apiVersion } = app.snapshot(uid);
+    assert.equal(apiVersion, 1);
+    assert.deepEqual(capabilities.features, [...apiFeatures]);
+    assert.deepEqual(Object.keys(capabilities).slice(0, 6), ['pushConfigured', 'emailConfigured', 'firebaseAuth', 'checkins', 'admin', 'sampleData']);
+  }
+  assert.deepEqual([...apiFeatures].sort(), ['absenceOutcome', 'addressedToMe', 'errorCodes', 'eventDetailsV2', 'lateDeclines', 'nudges', 'pollDelete', 'pollPush', 'pollRemind', 'seriesEdit', 'slotNotices']);
+});
+
+test('event saves explain a skipped push and message sends count their recipients', t => {
+  const { app, action, approve } = setup(t); approve();
+  const far = { action: 'event.save', title: 'Hauptprobe', startsAt: '2026-10-02T17:00:00Z', endsAt: '2026-10-02T19:00:00Z' };
+  const id = action(far).id;
+  assert.deepEqual(action({ ...far, id, version: 1, push: true }), { ok: true, id, pushQueued: false, pushSkipped: 'disabled' });
+  app.pushEnabled = true;
+  const result = action({ ...far, id, version: 2, push: true });
+  assert.equal(result.pushQueued, false);
+  assert.equal(result.pushSkipped, 'far_future');
+  assert.deepEqual([action({ ...far, id, version: 3 }).pushSkipped, action({ ...far, id, version: 4, startsAt: '2026-09-20T17:00:00Z', endsAt: '2026-09-20T19:00:00Z', push: true }).pushSkipped], [null, null]);
+  assert.equal(action({ action: 'message.send', title: 'Hallo', body: 'Alle', audience: 'all' }).recipients, 2);
+});
+
+test('rejections carry machine-readable codes', t => {
+  const { app, action, approve, event, memberId } = setup(t);
+  const code = (fn, status, value) => assert.throws(fn, e => e.status === status && e.code === value);
+  code(() => app.snapshot('sam'), 403, 'access');
+  approve();
+  const eventId = event();
+  code(() => action({ action: 'event.save', id: eventId, version: 2, title: 'X', startsAt: '2026-09-17T17:00:00Z', endsAt: '2026-09-17T19:00:00Z' }), 409, 'version_conflict');
+  const locked = action({ action: 'event.save', title: 'Fest', locked: true, startsAt: '2026-09-17T17:00:00Z', endsAt: '2026-09-17T19:00:00Z' }).id;
+  code(() => action({ action: 'attendance', eventId: locked, status: 'yes' }, 'sam'), 409, 'closed');
+  const poolId = action({ action: 'slotPool.save', title: 'Fotos', slots: [{ startsAt: '2026-09-20T10:00:00Z', endsAt: '2026-09-20T10:15:00Z', capacity: 1 }] }).id;
+  const slotId = app.snapshot('admin').slotPools[0].slots[0].id;
+  action({ action: 'slot.book', poolId, slotId });
+  code(() => action({ action: 'slot.book', poolId, slotId }, 'sam'), 409, 'full');
+  code(() => action({ action: 'member.save', name: 'X' }, 'sam'), 403, 'forbidden');
+  code(() => action({ action: 'attendance', eventId: 'missing', status: 'yes' }, 'sam'), 404, 'not_found');
+  code(() => action({ action: 'attendance', eventId, status: 'maybe' }, 'sam'), 400, 'invalid');
+  code(() => action({ action: 'message.remind', id: 'x' }), 409, 'push_unavailable');
+  action({ action: 'member.save', name: 'Kim' }, 'admin', 'reused');
+  code(() => action({ action: 'member.save', name: 'Kai' }, 'admin', 'reused'), 409, 'request_reused');
+  code(() => action({ action: 'member.delete', id: memberId, version: 99 }), 409, 'version_conflict');
+});
+
+test('targets that are already gone count as done', t => {
+  const { action, approve, store } = setup(t); approve();
+  const id = action({ action: 'message.send', title: 'Weg', body: 'Gleich gelöscht', audience: 'all' }).id;
+  action({ action: 'message.delete', id });
+  assert.deepEqual(action({ action: 'message.read', id }, 'sam'), { ok: true });
+  assert.deepEqual(action({ action: 'message.delete', id }), { ok: true });
+  assert.deepEqual(action({ action: 'absence.delete', id: 'missing' }, 'sam'), { ok: true });
+  assert.deepEqual(action({ action: 'absence.delete', id: 'missing', reopen: true }, 'sam'), { ok: true, reopenedEventIds: [] });
+  // Existing but not addressed stays hidden.
+  const secret = action({ action: 'message.send', title: 'Privat', body: 'Nur Leitung', audience: 'selected', recipientPersonIds: [1] }).id;
+  assert.throws(() => action({ action: 'message.read', id: secret }, 'sam'), { status: 404, code: 'not_found' });
+  const absence = action({ action: 'absence.create', from: '2026-09-20', to: '2026-09-21' }, 'sam').id;
+  assert.throws(() => action({ action: 'absence.delete', id: absence }), { status: 404 });
+  assert.ok(store.get('absences', absence));
+});
+
+test('HTTP errors carry a code only for our own errors, never on 500', async t => {
+  const { app } = setup(t);
+  const server = createHttpServer({ theater: app, verifyToken: async token => ({ uid: token, email: `${token}@example.com`, email_verified: true }) });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(() => new Promise(r => server.close(r)));
+  const get = async (path, token) => { const r = await fetch(`http://127.0.0.1:${server.address().port}/api/mobile/v1${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} }); return [r.status, await r.json()]; };
+  assert.deepEqual(await get('/snapshot'), [401, { error: 'Bitte zuerst anmelden.', code: 'unauthenticated' }]);
+  assert.deepEqual(await get('/snapshot', 'sam'), [403, { error: 'Dein Theaterzugang ist noch nicht freigegeben oder wurde gesperrt.', code: 'access' }]);
+  assert.equal((await get('/admin/events/missing', 'admin'))[1].code, 'not_found');
+  app.snapshot = () => { throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' }); };
+  const [status, body] = await get('/snapshot', 'admin');
+  assert.equal(status, 500);
+  assert.deepEqual(Object.keys(body), ['error']);
+  app.snapshot = () => { throw Object.assign(new Error('Fremder Fehler'), { status: 409, code: 'ERR_FOREIGN' }); };
+  assert.deepEqual(await get('/snapshot', 'admin'), [409, { error: 'Fremder Fehler' }]);
 });

@@ -4,8 +4,11 @@ import '../../../core/models.dart';
 /// Whether [message] is addressed to [user].
 ///
 /// Members only receive messages meant for them. Admins receive every
-/// message together with its reach (`recipientIds`), which then decides.
+/// message; the server marks the ones meant for them (`addressedToMe`).
+/// Older servers do not, so there the reach (`recipientIds`) decides.
 bool messageAddressedTo(AppUser? user, JsonMap message) {
+  final flag = message['addressedToMe'];
+  if (flag is bool) return flag;
   if (user?.isAdmin != true || !message.containsKey('recipientIds')) {
     return true;
   }
@@ -15,7 +18,9 @@ bool messageAddressedTo(AppUser? user, JsonMap message) {
 }
 
 /// Whether [message] still waits to be read by [user]. The author's own
-/// messages and, for admins, messages to other people never count.
+/// messages and, for admins, messages to other people never count. Newer
+/// servers already report the author's own messages as read; the author
+/// check stays for older ones.
 bool messageUnreadFor(AppUser? user, JsonMap message) {
   final personId = user?.personId;
   return message['read'] != true &&

@@ -44,20 +44,28 @@ extension ProjectionController on AppController {
       case 'poll.vote':
         view['polls'] = jsonList(view['polls']).map((e) {
           final poll = Poll.fromJson(jsonMap(e));
+          // Keep fields the model does not know, e.g. from a newer server.
           return poll.id == body['pollId']
-              ? poll
-                    .withChoice(
-                      textValue(body['optionId']),
-                      voter: _user?.personId == null
-                          ? null
-                          : PollVoter(
-                              personId: _user!.personId!,
-                              name: _user!.name,
-                            ),
-                    )
-                    .toJson()
+              ? {
+                  ...jsonMap(e),
+                  ...poll
+                      .withChoice(
+                        textValue(body['optionId']),
+                        voter: _user?.personId == null
+                            ? null
+                            : PollVoter(
+                                personId: _user!.personId!,
+                                name: _user!.name,
+                              ),
+                      )
+                      .toJson(),
+                }
               : e;
         }).toList();
+      case 'poll.delete':
+        view['polls'] = jsonList(
+          view['polls'],
+        ).where((e) => jsonMap(e)['id'] != body['id']).toList();
       case 'absence.create':
         view['absences'] = [
           ...jsonList(view['absences']),

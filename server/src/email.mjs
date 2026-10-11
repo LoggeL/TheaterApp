@@ -36,12 +36,13 @@ export function emailFromEnvironment(env = process.env) {
 export function eventEmail(job, event, appOrigin) {
   const link = new URL('/', appOrigin);
   if (link.protocol !== 'https:' || link.username || link.password) throw new Error('HTTPS app origin required');
-  const subject = (job.test ? 'Theater-App: Test-E-Mail' : `${job.cancelled ? job.seriesCount ? 'Termine abgesagt' : 'Termin abgesagt' : job.series ? 'Neue Terminserie' : job.newEvent ? 'Neuer Termin' : job.change ? 'Termin aktualisiert' : job.remindOpen ? 'Rückmeldung fehlt' : 'Erinnerung'}: ${event.title}`).replace(/[\r\n]/g, ' ').slice(0, 200);
+  const subject = (job.test ? 'Theater-App: Test-E-Mail' : `${job.cancelled ? job.seriesCount ? 'Termine abgesagt' : 'Termin abgesagt' : job.series && job.change ? 'Terminserie geändert' : job.series ? 'Neue Terminserie' : job.newEvent ? 'Neuer Termin' : job.change ? 'Termin aktualisiert' : job.remindOpen ? 'Rückmeldung fehlt' : 'Erinnerung'}: ${event.title}`).replace(/[\r\n]/g, ' ').slice(0, 200);
   if (event) link.searchParams.set('target', `theaterapp://app/events/${encodeURIComponent(event.id)}`);
   // A series is announced (or cancelled) by a single email about its next occurrence.
   const body = job.test ? 'Deine Test-E-Mail ist da.'
     : job.cancelled && job.seriesCount ? `${job.seriesCount} Termine der Serie entfallen, ab ${eventNotificationBody(event)}.`
-      : job.series && !job.cancelled ? `${job.body} Erster Termin: ${eventNotificationBody(event)}` : eventNotificationBody(event);
+      : job.series && job.change ? `${job.body}.` // "Gilt für n Termine ab <first changed occurrence>"
+        : job.series && !job.cancelled ? `${job.body} Erster Termin: ${eventNotificationBody(event)}` : eventNotificationBody(event);
   const footer = 'Termin-E-Mails kannst du in der App unter Darstellung & Erinnerungen ausschalten.';
   return { subject, text: `${subject}\n\n${body}\n\nTheater-App öffnen: ${link.href}\n\n${footer}`,
     html: `<!doctype html><html lang="de"><body><h1>${escapeHtml(subject)}</h1><p>${escapeHtml(body)}</p><p><a href="${escapeHtml(link.href)}">Theater-App öffnen</a></p><p>${escapeHtml(footer)}</p></body></html>` };

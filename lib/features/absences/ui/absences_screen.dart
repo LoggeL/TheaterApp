@@ -23,17 +23,39 @@ class AbsencesScreen extends StatelessWidget {
   final AppController controller;
 
   Future<void> _delete(BuildContext context, Absence absence) async {
-    final confirmed = await confirmDestructive(
-      context,
-      title: 'Abwesenheit entfernen?',
-      message:
-          'Bereits gespeicherte Absagen bleiben bestehen. Ändere sie bei Bedarf im jeweiligen Termin.',
-      confirmLabel: 'Entfernen',
-    );
-    if (!confirmed || !context.mounted) return;
+    final reopenable =
+        controller.supports('absenceOutcome') &&
+        !absence.id.startsWith('local:');
+    final bool? reopen;
+    if (reopenable) {
+      reopen = await showDialog<bool>(
+        context: context,
+        builder: (context) => const _DeleteAbsenceDialog(),
+      );
+      if (reopen == null) return;
+    } else {
+      final confirmed = await confirmDestructive(
+        context,
+        title: 'Abwesenheit entfernen?',
+        message:
+            'Bereits gespeicherte Absagen bleiben bestehen. Ändere sie bei Bedarf im jeweiligen Termin.',
+        confirmLabel: 'Entfernen',
+      );
+      if (!confirmed) return;
+      reopen = false;
+    }
+    if (!context.mounted) return;
     try {
-      await controller.deleteAbsence(absence.id);
-      if (context.mounted) showDone(context, 'Abwesenheit entfernt.');
+      final result = await controller.deleteAbsence(absence.id, reopen: reopen);
+      final reopened = jsonList(result.data?['reopenedEventIds']).length;
+      if (context.mounted) {
+        showDone(
+          context,
+          reopened == 0
+              ? 'Abwesenheit entfernt.'
+              : 'Abwesenheit entfernt · ${_events(reopened)} wieder geöffnet.',
+        );
+      }
     } catch (e) {
       if (context.mounted) showProblem(context, e);
     }
@@ -119,6 +141,58 @@ class AbsencesScreen extends StatelessWidget {
   );
 }
 
+/// Confirms removing an absence and asks whether the events it declined
+/// should be reopened (servers with `absenceOutcome`). Resolves to null when
+/// the member cancels, else to the reopen choice.
+class _DeleteAbsenceDialog extends StatefulWidget {
+  const _DeleteAbsenceDialog();
+  @override
+  State<_DeleteAbsenceDialog> createState() => _DeleteAbsenceDialogState();
+}
+
+class _DeleteAbsenceDialogState extends State<_DeleteAbsenceDialog> {
+  bool _reopen = true;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AlertDialog(
+      scrollable: true,
+      title: const Text('Abwesenheit entfernen?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Termine, die beim Melden automatisch abgesagt wurden, kannst du wieder öffnen. Gesperrte Termine und solche, die bald beginnen, bleiben abgesagt.',
+          ),
+          const SizedBox(height: 8),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _reopen,
+            onChanged: (value) => setState(() => _reopen = value ?? false),
+            title: const Text('Abgesagte Termine wieder öffnen'),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          autofocus: true,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Abbrechen'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: scheme.error,
+            foregroundColor: scheme.onError,
+          ),
+          onPressed: () => Navigator.pop(context, _reopen),
+          child: const Text('Entfernen'),
+        ),
+      ],
+    );
+  }
+}
+
 class _AbsenceCard extends StatelessWidget {
   const _AbsenceCard({required this.absence, required this.onDelete});
   final Absence absence;
@@ -194,43 +268,51 @@ class _AddAbsenceScreenState extends State<AddAbsenceScreen> {
       range.start,
       range.end,
     ).length;
-    final previous = controller.outbox.map((a) => a.id).toSet();
     setState(() => _saving = true);
     try {
-      final outcome = await controller.addAbsence(
+      final result = await controller.addAbsence(
         range.start,
         range.end,
         _reason.text.trim(),
       );
       if (!mounted) return;
-      if (outcome == null) {
-        final rejected = controller.outbox
-            .where((a) => a.failed && !previous.contains(a.id))
-            .firstOrNull;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            duration: const Duration(seconds: 6),
-            content: Text(
-              'Die Abwesenheit wurde nicht gespeichert: '
-              '${rejected?.lastError ?? 'Der Server hat sie abgelehnt.'}',
-            ),
-          ),
-        );
-        return;
-      }
-      final suffix = declined == 0 ? '' : ' · ${_events(declined)} abgesagt';
+      // The server knows best which events it declined (Berlin dates, events
+      // this device has not loaded yet); the preview is the fallback.
+      final serverIds = result.data?['declinedEventIds'];
+      final ids = jsonList(serverIds).map((e) => '$e').toList();
+      final count = serverIds is List ? ids.length : declined;
+      final suffix = count == 0 ? '' : ' · ${_events(count)} abgesagt';
+      final navigator = Navigator.of(context);
+      final shown = [
+        for (final event in controller.events)
+          if (ids.contains(event.id)) event,
+      ];
       showDone(
         context,
         outcomeText(
-          outcome,
+          result.outcome,
           done: 'Abwesenheit gespeichert$suffix',
           queued:
               'Abwesenheit vorgemerkt$suffix – wird bei Verbindung gesendet',
         ),
+        actionLabel: shown.isEmpty ? null : 'Termine ansehen',
+        onAction: () => showModalBottomSheet<void>(
+          context: navigator.context,
+          showDragHandle: true,
+          builder: (_) => _DeclinedEventsSheet(events: shown),
+        ),
       );
-      Navigator.pop(context);
+      navigator.pop();
     } catch (e) {
-      if (mounted) showProblem(context, e);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 6),
+          content: Text(
+            'Die Abwesenheit wurde nicht gespeichert: ${userMessage(e)}',
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -303,6 +385,34 @@ class _AddAbsenceScreenState extends State<AddAbsenceScreen> {
       ),
     );
   }
+}
+
+/// The events the server declined for a newly reported absence.
+class _DeclinedEventsSheet extends StatelessWidget {
+  const _DeclinedEventsSheet({required this.events});
+  final List<TheaterEvent> events;
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: ListView(
+      shrinkWrap: true,
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            'Abgesagte Termine',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+        for (final event in events)
+          ListTile(
+            leading: const Icon(Icons.event_busy_outlined),
+            title: Text(event.title),
+            subtitle: Text(eventDate(event)),
+          ),
+      ],
+    ),
+  );
 }
 
 /// Preview of the events the chosen period declines.

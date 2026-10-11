@@ -151,6 +151,7 @@ class EventDetailContent extends StatelessWidget {
                 ),
               if (eventIsPast(event, now))
                 StatePill('Vorbei', color: muted, icon: Icons.history),
+              if (!event.addressedToMe) const NotInvitedPill(),
             ],
           ),
           SizedBox(height: embedded ? 16 : 24),
@@ -178,6 +179,16 @@ class EventDetailContent extends StatelessWidget {
           SizedBox(height: embedded ? 16 : 24),
           if (event.fromSlotPool)
             SlotEventNotice(controller: controller, event: event)
+          else if (!event.addressedToMe)
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.person_off_outlined),
+                title: Text('Du bist nicht eingeladen'),
+                subtitle: Text(
+                  'Der Termin richtet sich an andere. Du siehst ihn, weil du Admin bist.',
+                ),
+              ),
+            )
           else
             RsvpPanel(
               key: ValueKey(event.id),

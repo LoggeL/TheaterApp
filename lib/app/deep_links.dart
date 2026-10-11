@@ -7,6 +7,7 @@ import '../core/device_services.dart';
 import '../features/accounts/ui/accounts_admin_screen.dart';
 import '../features/events/ui/event_detail_screen.dart';
 import '../features/messages/ui/message_detail_screen.dart';
+import '../features/polls/ui/poll_detail_screen.dart';
 import '../features/scripts/ui/script_reader_screen.dart';
 import '../features/slots/ui/slot_pool_screen.dart';
 import '../shared/feedback.dart';
@@ -66,6 +67,10 @@ class DeepLinkRouter {
       'messages' => (
         AppSection.messages,
         MessageTargetScreen(controller: controller, messageId: target.id),
+      ),
+      'polls' => (
+        AppSection.messages,
+        PollDetailScreen(controller: controller, pollId: target.id),
       ),
       'productions' => (
         AppSection.scripts,

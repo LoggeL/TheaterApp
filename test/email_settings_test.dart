@@ -106,4 +106,66 @@ void main() {
       controller.dispose();
     },
   );
+
+  for (final (role, flagged, shown) in [
+    ('admin', true, true),
+    ('admin', false, false),
+    ('member', true, false),
+  ]) {
+    testWidgets('short-notice decline alerts: $role, '
+        '${flagged ? 'with' : 'without'} the flag', (tester) async {
+      tester.view.physicalSize = const Size(1000, 2000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final server = _RoleServer(role);
+      server.data['capabilities'] = {
+        if (flagged) 'features': ['lateDeclines'],
+      };
+      final controller = server.controller();
+      await signIn(controller);
+      final devices = DeviceServices(
+        controller,
+        onTarget: (_) {},
+        onForegroundMessage: (_) {},
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SettingsScreen(controller: controller, devices: devices),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final toggle = find.widgetWithText(
+        SwitchListTile,
+        'Kurzfristige Absagen melden',
+      );
+      expect(toggle, shown ? findsOneWidget : findsNothing);
+      if (shown) {
+        expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(
+          jsonMap(server.actionBodies.last['value'])['lateDeclines'],
+          isFalse,
+        );
+      } else {
+        // Older servers never get the unknown key.
+        await controller.saveReminders(controller.reminders);
+        expect(
+          jsonMap(
+            server.actionBodies.last['value'],
+          ).containsKey('lateDeclines'),
+          flagged,
+        );
+      }
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    });
+  }
+}
+
+class _RoleServer extends TestServer {
+  _RoleServer(this.role);
+  final String role;
+  @override
+  JsonMap get user => {...super.user, 'role': role};
 }

@@ -54,7 +54,7 @@ test('one-day reminder defaults off, two-hour reminder defaults on, opt-in survi
   const { store, theater, a } = setup(t);
   const now = new Date('2026-09-14T12:00:00Z');
   store.put('events', 'e', { id: 'e', title: 'Abbau', startsAt: '2026-09-15T11:00:00Z', place: 'Kolpingheim' });
-  assert.deepEqual(theater.snapshot('admin').reminders, { dayBefore: false, twoHours: true, changes: true, emailEnabled: false, customMinutes: null });
+  assert.deepEqual(theater.snapshot('admin').reminders, { dayBefore: false, twoHours: true, changes: true, emailEnabled: false, customMinutes: null, lateDeclines: true });
   scheduleReminders(theater, now);
   assert.equal(store.all('pushJobs').length, 0);
   store.put('events', 'e', { ...store.get('events', 'e'), startsAt: '2026-09-14T13:30:00Z' });
@@ -150,4 +150,98 @@ test('role audiences limit reminders and pushes to invited members', async t => 
   assert.equal(store.all('pushJobs').find(j => j.title === 'Termin aktualisiert').status, 'no_devices');
   store.put('members', a.personId, { ...store.get('members', a.personId), roleIds: ['role-light'] });
   scheduleReminders(theater, now); assert.equal(store.all('pushJobs').filter(j => j.title === 'Lichtprobe').length, 1);
+});
+
+test('new polls can be pushed once with a polls deep link', async t => {
+  const { store, theater } = setup(t);
+  let n = 0; const act = body => theater.action('admin', body, `poll-${++n}`);
+  for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
+  const body = { action: 'poll.save', title: 'Probenwochenende', options: [{ label: 'Ja' }, { label: 'Nein' }], closesAt: '2030-06-14T17:00:00Z', push: true };
+  const created = act(body);
+  assert.equal(created.pushQueued, true);
+  const [job] = store.all('pushJobs');
+  assert.deepEqual([job.title, job.body, job.data], ['Neue Abstimmung: Probenwochenende', 'Abstimmen bis Fr., 14.06.2030, 19:00 Uhr', { pollId: created.id }]);
+  assert.equal(store.all('emailJobs').length, 0);
+  assert.deepEqual(act({ ...body, id: created.id, version: 1, title: 'Probenwochenende?' }), { ok: true, id: created.id, pushQueued: false });
+  assert.equal(store.all('pushJobs').length, 1, 'edits are never pushed');
+  assert.equal(act({ ...body, closesAt: null, push: undefined }).pushQueued, false);
+  act({ ...body, title: 'Ohne Frist', closesAt: null });
+  assert.equal(store.all('pushJobs').find(j => j.title === 'Neue Abstimmung: Ohne Frist').body, 'Deine Stimme ist gefragt.');
+  const calls = [];
+  await deliverPush(theater, { sendEachForMulticast: async p => { calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) }; } }, 'https://theater.example');
+  const sent = calls.find(p => p.notification?.title === 'Neue Abstimmung: Probenwochenende');
+  assert.equal(new URL(sent.webpush.fcmOptions.link).searchParams.get('target'), `theaterapp://app/polls/${created.id}`);
+  assert.deepEqual(sent.data, { pollId: created.id });
+});
+
+function lateSetup(t) {
+  const store = new Store(); t.after(() => store.close());
+  const theater = new Theater(store, { pushEnabled: true, emailEnabled: true, bootstrapEmail: 'admin@example.com', clock: () => new Date('2026-09-12T12:00:00Z') });
+  theater.session({ uid: 'admin', name: 'Admin', email: 'admin@example.com', email_verified: true });
+  let n = 0; const act = (body, uid = 'admin') => theater.action(uid, body, `late-${++n}`);
+  const person = (uid, name) => {
+    const id = act({ action: 'member.save', name }).id;
+    theater.session({ uid, name, email: `${uid}@example.com`, email_verified: true });
+    act({ action: 'account.approve', uid, personId: id, version: 1, role: 'member' });
+    return id;
+  };
+  const admin = store.account('admin').personId, sam = person('sam', 'Sam'), director = person('dir', 'Regie'), kim = person('kim', 'Kim');
+  store.put('productions', 'winter', { id: 'winter', title: 'Winterstück', roles: [], directorMemberIds: [director], version: 1 });
+  const event = startsAt => act({ action: 'event.save', title: 'Probe', startsAt, endsAt: new Date(Date.parse(startsAt) + 7200000).toISOString(), place: 'Saal', productionId: 'winter' }).id;
+  const late = () => store.all('pushJobs').filter(j => j.title.startsWith('Kurzfristige Absage'));
+  for (const kind of ['pushJobs', 'emailJobs']) for (const j of store.all(kind)) store.delete(kind, j.id);
+  return { store, theater, act, admin, sam, director, kim, event, late };
+}
+
+test('short-notice declines notify admins and directors without the reason or quick answers', async t => {
+  const { store, theater, act, admin, sam, director, event, late } = lateSetup(t);
+  const soon = event('2026-09-12T15:00:00Z');
+  for (const kind of ['pushJobs', 'emailJobs']) for (const j of store.all(kind)) store.delete(kind, j.id);
+  act({ action: 'attendance', eventId: soon, status: 'no', reason: 'Krank' }, 'sam');
+  const [job] = late();
+  assert.equal(late().length, 1);
+  assert.deepEqual(job.recipientPersonIds.sort(), [admin, director].sort());
+  assert.ok(!job.recipientPersonIds.includes(sam));
+  assert.deepEqual([job.title, job.body, job.data, job.fixedText, job.email], ['Kurzfristige Absage: Probe', 'Sam kommt nicht · Sa., 12.09.2026, 17:00 Uhr · Saal', { eventId: soon }, true, false]);
+  assert.ok(!JSON.stringify(job).includes('Krank'));
+  assert.equal(store.all('emailJobs').length, 0, 'no email mirror');
+  assert.ok(store.get('reminderSent', `${soon}:2026-09-12T15:00:00.000Z:${sam}:lateDecline`));
+
+  theater.device('admin', 'admin-android-token-with-actions', 'android', false, true);
+  const calls = [];
+  await deliverPush(theater, { sendEachForMulticast: async p => { calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) }; } });
+  const android = calls.find(p => p.tokens.includes('admin-android-token-with-actions'));
+  assert.equal(android.data.title, 'Kurzfristige Absage: Probe');
+  assert.equal(android.data.attendanceActions, undefined);
+  assert.equal(android.data.eventId, soon);
+
+  // yes → no → yes → no is announced once.
+  act({ action: 'attendance', eventId: soon, status: 'yes' }, 'sam');
+  act({ action: 'attendance', eventId: soon, status: 'no' }, 'sam');
+  act({ action: 'attendance', eventId: soon, status: 'no', reason: 'Doch nicht' }, 'sam');
+  assert.equal(late().length, 1);
+});
+
+test('declines further ahead stay quiet; absences and opt-outs are respected', t => {
+  const { store, act, admin, sam, director, kim, event, late } = lateSetup(t);
+  const later = event('2026-09-15T15:00:00Z');
+  act({ action: 'attendance', eventId: later, status: 'no' }, 'sam');
+  assert.equal(late().length, 0, 'three days ahead is not short notice');
+
+  // Older clients send the whole record without the new key; the stored opt-out survives.
+  act({ action: 'settings.reminders', value: { dayBefore: false, twoHours: true, changes: true, lateDeclines: false } });
+  act({ action: 'settings.reminders', value: { dayBefore: true, twoHours: true, changes: true } });
+  assert.equal(store.get('reminders', admin).lateDeclines, false);
+  assert.equal(store.get('reminders', admin).dayBefore, true);
+  act({ action: 'settings.reminders', value: { dayBefore: false } }, 'sam');
+  assert.equal(store.get('reminders', sam).lateDeclines, true);
+
+  const soon = event('2026-09-12T20:00:00Z');
+  act({ action: 'absence.create', from: '2026-09-12', to: '2026-09-12' }, 'kim');
+  assert.deepEqual(late().map(j => j.recipientPersonIds), [[director]]);
+  assert.equal(late()[0].body.startsWith('Kim kommt nicht'), true);
+  assert.equal(store.get('responses', `${soon}:${kim}`).status, 'no');
+  // The director declining is not told about their own decline.
+  act({ action: 'attendance', eventId: soon, status: 'no' }, 'dir');
+  assert.equal(late().length, 1, 'the only remaining recipient is the director themselves');
 });

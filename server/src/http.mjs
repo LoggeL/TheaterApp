@@ -117,7 +117,8 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
     } catch (e) {
       const status = e.status && e.status >= 400 && e.status < 600 ? e.status : 500;
       if (status === 500) console.error('Request failed:', e.code ?? e.name, e.message);
-      if (!res.headersSent) json(res, status, { error: status === 500 ? 'Die Änderung konnte nicht verarbeitet werden. Bitte erneut versuchen.' : e.message });
+      // Only our own errors carry a machine-readable code; Node's `e.code` (e.g. SQLITE_BUSY) never leaks.
+      if (!res.headersSent) json(res, status, status === 500 ? { error: 'Die Änderung konnte nicht verarbeitet werden. Bitte erneut versuchen.' } : { error: e.message, ...(e instanceof AppError && e.code ? { code: e.code } : {}) });
       else res.end();
     }
   });

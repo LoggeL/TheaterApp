@@ -12,6 +12,7 @@ import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/features/events/events.dart';
 import 'package:theater_app/features/messages/messages.dart';
+import 'package:theater_app/features/polls/polls.dart';
 import 'package:theater_app/shared/feedback.dart';
 import 'package:theater_app/shared/navigation.dart';
 
@@ -73,6 +74,41 @@ void main() {
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
     expect(find.text('Start'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
+
+  testWidgets('a poll link selects Mitteilungen and opens the poll', (
+    tester,
+  ) async {
+    final c = await demoController();
+    final navigator = GlobalKey<NavigatorState>();
+    final messenger = GlobalKey<ScaffoldMessengerState>();
+    final selection = ValueNotifier(AppSection.today.index);
+    addTearDown(selection.dispose);
+    await tester.pumpWidget(
+      AppNavigationScope(
+        selection: selection,
+        controller: c,
+        child: MaterialApp(
+          navigatorKey: navigator,
+          scaffoldMessengerKey: messenger,
+          home: const Scaffold(body: Text('Start')),
+        ),
+      ),
+    );
+    DeepLinkRouter(
+      controller: c,
+      navigator: navigator,
+      messenger: messenger,
+      isMounted: () => true,
+    ).handle(AppTarget.fromData({'pollId': 'p1'})!);
+    await tester.pumpAndSettle();
+    expect(selection.value, AppSection.messages.index);
+    expect(
+      tester.widget<PollDetailScreen>(find.byType(PollDetailScreen)).pollId,
+      'p1',
+    );
     await tester.pumpWidget(const SizedBox());
     c.dispose();
   });

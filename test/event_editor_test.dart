@@ -208,4 +208,52 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });
+
+  for (final flagged in [true, false]) {
+    testWidgets(
+      'saving a series occurrence ${flagged ? 'asks' : 'does not ask'} '
+      'about the following ones',
+      (tester) async {
+        late String id;
+        final (server, controller) = await open(
+          tester,
+          event: (c) => c.events.firstWhere((e) => e.id == id),
+          prepare: (server) {
+            final event = (server.data['events'] as List)
+                .cast<JsonMap>()
+                .firstWhere((e) => e['slotPoolId'] == null);
+            event['seriesId'] = 'series-1';
+            id = event['id'] as String;
+            if (flagged) {
+              server.data['capabilities'] = {
+                'features': ['seriesEdit'],
+              };
+            }
+          },
+        );
+        await tester.enterText(
+          find.widgetWithText(TextField, 'Titel'),
+          'Neuer Titel',
+        );
+        final save = find.text('Termin speichern');
+        await tester.ensureVisible(save);
+        await tester.pumpAndSettle();
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        if (flagged) {
+          expect(find.text('Serientermin ändern?'), findsOneWidget);
+          await tester.tap(find.text('Diesen und alle folgenden'));
+          await tester.pumpAndSettle();
+          expect(server.actionBodies.last['series'], 'following');
+        } else {
+          expect(find.text('Serientermin ändern?'), findsNothing);
+          expect(server.actionBodies.last.containsKey('series'), isFalse);
+        }
+        expect(server.actionBodies.last['title'], 'Neuer Titel');
+        expect(find.byType(EventEditorScreen), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+        controller.dispose();
+      },
+    );
+  }
 }

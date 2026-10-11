@@ -435,4 +435,127 @@ void main() {
       ]);
     },
   );
+
+  group('error codes', () {
+    /// Rejects every action with [status], [message] and [code]; counts the
+    /// snapshot requests.
+    (TestServer, List<int>) rejecting(int status, String message, String code) {
+      final server = TestServer(), snapshots = [0];
+      server.override = (request) {
+        final path = request.url.path;
+        if (path.contains('/snapshot')) snapshots[0]++;
+        if (!path.contains('/actions')) return null;
+        return Future.value(
+          jsonResponse({'error': message, 'code': code}, status),
+        );
+      };
+      return (server, snapshots);
+    }
+
+    test(
+      'a closed attendance is dropped from the outbox and still throws',
+      () async {
+        final (server, _) = rejecting(
+          409,
+          'Die Rückmeldefrist ist abgelaufen.',
+          'closed',
+        );
+        final controller = server.controller();
+        addTearDown(controller.dispose);
+        await signIn(controller);
+        await expectLater(
+          controller.respond('demo-rehearsal', 'yes'),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.code, 'code', 'closed')
+                .having(
+                  (e) => e.message,
+                  'message',
+                  'Die Rückmeldefrist ist abgelaufen.',
+                ),
+          ),
+        );
+        expect(controller.outbox, isEmpty);
+        expect(controller.events.first.response, 'open');
+        expect(controller.error, isNull);
+      },
+    );
+
+    test('a version conflict stays failed and reloads the snapshot', () async {
+      final (server, snapshots) = rejecting(
+        409,
+        'Der Termin wurde zwischenzeitlich geändert.',
+        'version_conflict',
+      );
+      final controller = server.controller();
+      addTearDown(controller.dispose);
+      await signIn(controller);
+      final before = snapshots[0];
+      await expectLater(
+        controller.performAction({
+          'action': 'event.save',
+          'id': 'demo-rehearsal',
+          'version': 1,
+          'title': 'Neu',
+        }),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.message,
+            'message',
+            'Inzwischen geändert – aktueller Stand geladen.',
+          ),
+        ),
+      );
+      expect(snapshots[0], greaterThan(before));
+      final failed = controller.outbox.single;
+      expect(failed.failed, isTrue);
+      expect(failed.lastErrorCode, 'version_conflict');
+      expect(failed.lastError, 'Der Termin wurde zwischenzeitlich geändert.');
+    });
+
+    test('a code on an admin change keeps the entry for review', () async {
+      final (server, _) = rejecting(409, 'Bitte neu laden.', 'closed');
+      final controller = server.controller();
+      addTearDown(controller.dispose);
+      await signIn(controller);
+      await expectLater(
+        controller.performAction({'action': 'poll.save', 'title': 'x'}),
+        throwsA(isA<ApiException>()),
+      );
+      expect(controller.failedCount, 1);
+    });
+
+    test('an old-style error without code behaves as before', () async {
+      final server = TestServer();
+      final controller = server.controller();
+      addTearDown(controller.dispose);
+      await signIn(controller);
+      server.actionStatus = 409;
+      await expectLater(
+        controller.respond('demo-rehearsal', 'yes'),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.code, 'code', isNull)
+              .having((e) => e.statusCode, 'statusCode', 409),
+        ),
+      );
+      expect(controller.failedCount, 1);
+      expect(controller.outbox.single.retryable, isTrue);
+    });
+
+    test('server codes are parsed, stray values ignored', () async {
+      final server = TestServer();
+      server.override = (request) => request.url.path.contains('/snapshot')
+          ? Future.value(
+              jsonResponse({'error': 'kaputt', 'code': 'SQLITE BUSY!'}, 500),
+            )
+          : null;
+      final api = ApiClient(client: MockClient(server.handle));
+      await expectLater(
+        api.snapshot('https://theater.example.invalid', 't'),
+        throwsA(isA<ApiException>().having((e) => e.code, 'code', isNull)),
+      );
+      api.close();
+    });
+  });
 }

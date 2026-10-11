@@ -175,4 +175,38 @@ void main() {
       expect(digest.scriptEvent, isNull);
     });
   });
+
+  for (final flagged in [true, false]) {
+    test(
+      'an event the admin is not invited to is never the next one '
+      '(${flagged ? 'server flag' : 'fallback for older servers'})',
+      () async {
+        final server = _InvitedAdminServer()
+          ..data['events'] = [
+            {
+              ..._event('technik', 1),
+              'roleIds': ['role-3'],
+              if (flagged) 'addressedToMe': false,
+            },
+            {..._event('mine', 2), if (flagged) 'addressedToMe': true},
+          ];
+        final digest = await _digest(server);
+        expect(digest.next?.id, 'mine');
+        expect(digest.openResponses, isEmpty);
+        // Still visible below, marked as not invited.
+        expect(digest.laterEvents.map((e) => e.id), ['technik']);
+        expect(digest.laterEvents.single.needsResponse, isFalse);
+      },
+    );
+  }
+}
+
+/// The admin test account with a person record in role-1.
+class _InvitedAdminServer extends TestServer {
+  @override
+  JsonMap get user => {
+    ...super.user,
+    'personId': 1,
+    'roleIds': ['role-1'],
+  };
 }

@@ -6,29 +6,70 @@ extension SyncController on AppController {
   /// server rejected the change; otherwise says whether it is already
   /// confirmed ([ActionOutcome.synced]) or still waits in the outbox
   /// ([ActionOutcome.queued]).
-  Future<ActionOutcome> performAction(JsonMap body) async {
-    final previous = _outbox.map((a) => a.id).toSet();
-    await _enqueue(body);
-    final failed = _outbox
-        .where((a) => a.failed && !previous.contains(a.id))
-        .firstOrNull;
-    if (failed != null) {
-      throw ApiException(
-        failed.lastError ?? 'Die Änderung wurde abgelehnt.',
-        statusCode: 409,
-      );
-    }
-    return _outcomeSince(previous);
+  Future<ActionOutcome> performAction(JsonMap body) async =>
+      (await performActionWithResult(body)).outcome;
+
+  /// Like [performAction], but also hands over the server's reply (for
+  /// example `pushQueued` or `recipients`) once the change is confirmed.
+  Future<ActionResult> performActionWithResult(JsonMap body) async {
+    final id = await _enqueue(body);
+    return _resultOf(id);
   }
 
-  /// [ActionOutcome.queued] while an entry added after [previous] was taken is
-  /// still in the outbox. Demo changes never enter the outbox.
-  ActionOutcome _outcomeSince(Set<String> previous) =>
-      !_isDemo && _outbox.any((a) => !previous.contains(a.id))
-      ? ActionOutcome.queued
-      : ActionOutcome.synced;
+  /// The result of the outbox entry [id] right after it was handed over:
+  /// throws its rejection, else reports whether it is still queued.
+  ActionResult _resultOf(String id) {
+    final rejection = _rejections.remove(id);
+    if (rejection != null) throw rejection;
+    final pending = _outbox.where((a) => a.id == id).firstOrNull;
+    if (pending != null && pending.failed) {
+      throw ApiException(
+        pending.lastErrorCode == 'version_conflict'
+            ? 'Inzwischen geändert – aktueller Stand geladen.'
+            : pending.lastError ?? 'Die Änderung wurde abgelehnt.',
+        statusCode: pending.lastStatus ?? 409,
+        code: pending.lastErrorCode,
+      );
+    }
+    final data = _results.remove(id);
+    // Demo changes never enter the outbox.
+    if (!_isDemo && pending != null) {
+      return const ActionResult(ActionOutcome.queued);
+    }
+    return ActionResult(ActionOutcome.synced, data);
+  }
 
-  Future<void> _enqueue(JsonMap payload) async {
+  /// Error codes that make a member's own change pointless to send again:
+  /// it is dropped from the outbox right away instead of staying as failed.
+  static const _selfResolvingCodes = {
+    'closed',
+    'not_found',
+    'full',
+    'nothing_open',
+    'cooldown',
+  };
+  static const _selfResolvingActions = {
+    'attendance',
+    'poll.vote',
+    'slot.book',
+    'slot.cancel',
+    'message.read',
+    'absence.delete',
+    'message.remind',
+    'event.remindOpen',
+    'poll.remindOpen',
+    'slotPool.remindOpen',
+  };
+
+  /// Keeps only the newest [limit] entries of a transient result map.
+  void _trim(Map<String, Object> entries, [int limit = 50]) {
+    while (entries.length > limit) {
+      entries.remove(entries.keys.first);
+    }
+  }
+
+  /// Queues [payload], sends it when possible and returns its outbox id.
+  Future<String> _enqueue(JsonMap payload) async {
     if (_user == null) {
       throw const ApiException('Bitte zuerst anmelden.', statusCode: 401);
     }
@@ -60,7 +101,7 @@ extension SyncController on AppController {
       _rebuild();
       await _persistCore(generation);
       _notify();
-      return;
+      return action.id;
     }
     _outbox.add(action);
     try {
@@ -71,11 +112,12 @@ extension SyncController on AppController {
         'Die Änderung konnte nicht sicher auf diesem Gerät gespeichert werden. Bitte erneut versuchen.',
       );
     }
-    if (!_current(generation)) return;
+    if (!_current(generation)) return action.id;
     _rebuild();
     _notify();
     await _drain(generation);
     if (_current(generation) && !_isOffline) await refresh();
+    return action.id;
   }
 
   Future<void> _drain(int generation) {
@@ -110,6 +152,8 @@ extension SyncController on AppController {
         );
         _mutationVersion++;
         _outbox.removeWhere((e) => e.id == action.id);
+        _results[action.id] = result;
+        _trim(_results);
         _isOffline = false;
         try {
           await _persistCore(generation);
@@ -118,6 +162,7 @@ extension SyncController on AppController {
           // memory, too: retrying an acknowledged request is safe server-side.
           if (_current(generation)) {
             _baseSnapshot = previousSnapshot;
+            _results.remove(action.id);
             _outbox.insert(0, action);
             _error =
                 'Die Serverbestätigung konnte lokal nicht gespeichert werden. Die Änderung bleibt zur sicheren Wiederholung vorgemerkt.';
@@ -146,14 +191,38 @@ extension SyncController on AppController {
           _notify();
           return;
         }
+        final code = error.code;
+        if (code != null &&
+            _selfResolvingCodes.contains(code) &&
+            _selfResolvingActions.contains(action.payload['action'])) {
+          // A deadline passed, a slot filled up or the target is gone:
+          // sending it again cannot help. Drop it (the refresh that follows
+          // every send loads the current state) and report it to the caller.
+          _outbox.removeWhere((e) => e.id == action.id);
+          _rejections[action.id] = error;
+          _trim(_rejections);
+          await _persistCore(generation);
+          if (_current(generation)) {
+            _rebuild();
+            _notify();
+          }
+          continue;
+        }
         // Invalid/forbidden/conflicting actions are visible and rolled back,
         // rather than retried forever or shown as successfully synchronized.
+        // A `version_conflict` keeps the entry, too: its payload is the
+        // member's draft. The refresh after sending loads the current state.
         var afterRejectedAction = false;
         final rejectedEventId = _versionedEventId(action.payload);
         _outbox = _outbox.map((pending) {
           if (pending.id == action.id) {
             afterRejectedAction = true;
-            return pending.withStatus('failed', _error);
+            return pending.withStatus(
+              'failed',
+              _error,
+              error.statusCode,
+              error.code,
+            );
           }
           if (afterRejectedAction &&
               !pending.failed &&
@@ -338,10 +407,31 @@ extension SyncController on AppController {
     final attendance = jsonMap(view['attendanceByEvent']),
         reasons = jsonMap(view['declineReasons']);
     final arrivals = jsonMap(view['expectedArrivals']);
+    // Ensembles and the own member record decide the audience fallback below.
+    _productions = jsonList(view['productions']).map((e) {
+      final production = Production.fromJson(jsonMap(e));
+      return _scripts[production.id] == null
+          ? production
+          : production.withScript(_scripts[production.id]!);
+    }).toList()..sort(Production.compareNewestFirst);
+    _members = jsonList(
+      view['members'],
+    ).map((e) => TheaterMember.fromJson(jsonMap(e))).toList();
+    final me = _audienceMember();
     _events =
         jsonList(view['events']).map((e) {
-          final event = TheaterEvent.fromJson(jsonMap(e));
+          final json = jsonMap(e);
+          final event = TheaterEvent.fromJson(json);
           return event.copyWith(
+            // Older servers send no `addressedToMe`; admins receive every
+            // event there, so the event's audience decides for them.
+            addressedToMe: json.containsKey('addressedToMe') || me == null
+                ? null
+                : me.inAudience(
+                    event.roleIds,
+                    event.personIds,
+                    ensemblesOf(event.productionIds),
+                  ),
             response: textValue(attendance[event.id], event.response),
             declineReason: textValue(reasons[event.id], event.declineReason),
             expectedArrivalAt: dateValue(arrivals[event.id])?.toLocal(),
@@ -362,18 +452,12 @@ extension SyncController on AppController {
       view['polls'],
     ).map((e) => Poll.fromJson(jsonMap(e))).toList();
     _slotPools = List.unmodifiable(jsonList(view['slotPools']).map(jsonMap));
-    _productions = jsonList(view['productions']).map((e) {
-      final production = Production.fromJson(jsonMap(e));
-      return _scripts[production.id] == null
-          ? production
-          : production.withScript(_scripts[production.id]!);
-    }).toList()..sort(Production.compareNewestFirst);
-    _members = jsonList(
-      view['members'],
-    ).map((e) => TheaterMember.fromJson(jsonMap(e))).toList();
+    final reminders = jsonMap(view['reminders']);
     _reminders = {
       for (final key in ['dayBefore', 'twoHours', 'changes', 'emailEnabled'])
-        key: jsonMap(view['reminders'])[key] == true,
+        key: reminders[key] == true,
+      // Short-notice decline alerts are on unless switched off.
+      'lateDeclines': reminders['lateDeclines'] != false,
     };
     final customMinutes = jsonMap(view['reminders'])['customMinutes'];
     _customReminderMinutes = customMinutes is num
@@ -383,5 +467,15 @@ extension SyncController on AppController {
     _checkinVersions = jsonMap(view['checkinVersions']);
     _capabilities = jsonMap(view['capabilities']);
     _view = view;
+  }
+
+  /// The signed-in admin as a member, to decide audiences that older servers
+  /// do not decide for them; null for members (the server only sends what
+  /// they are invited to) and for admins without a person record.
+  TheaterMember? _audienceMember() {
+    final user = _user, personId = user?.personId;
+    if (user == null || !user.isAdmin || personId == null) return null;
+    return _members.where((m) => m.id == personId).firstOrNull ??
+        TheaterMember(id: personId, name: user.name, roleIds: user.roleIds);
   }
 }

@@ -83,3 +83,42 @@ test('deadline closes exactly at the configured instant and expired descriptions
   action({ ...body, id, version: 1, anonymous: false, description: 'Ergebnis dokumentiert' });
   assert.equal(Date.parse(store.get('polls', id).closesAt), Date.parse(body.closesAt));
 });
+
+test('admins see how many may vote on an anonymous poll, but never who voted', t => {
+  const { store, theater, action, body } = setup(t);
+  const id = action(body).id;
+  action({ action: 'poll.vote', pollId: id, optionId: store.get('polls', id).options[1].id }, 'member');
+  const view = theater.snapshot('owner').polls[0];
+  assert.deepEqual([view.eligibleCount, view.totalVotes, view.addressedToMe], [2, 1, true]);
+  assert(!JSON.stringify(view).includes('Mara Beispiel'));
+  assert(!JSON.stringify(view).includes('"personId"'));
+});
+
+test('deleted polls disappear with their votes; reopening can set a new deadline', t => {
+  const { store, theater, action, body, setClock } = setup(t);
+  const id = action(body).id;
+  action({ action: 'poll.vote', pollId: id, optionId: store.get('polls', id).options[0].id }, 'member');
+  assert.throws(() => action({ action: 'poll.delete', id, version: 1 }, 'member'), { status: 403 });
+  assert.throws(() => action({ action: 'poll.delete', id, version: 7 }), { status: 409, code: 'version_conflict' });
+  store.put('nudges', `poll:${id}`, { at: '2026-10-05T11:00:00.000Z', by: 1, recipients: 1, count: 1 });
+  action({ action: 'poll.delete', id, version: 1 });
+  assert.equal(store.get('polls', id).deleted, true);
+  assert.equal(store.get('polls', id).version, 2);
+  assert.equal(store.all('pollVotes').length, 0);
+  assert.equal(store.get('nudges', `poll:${id}`), null);
+  for (const uid of ['owner', 'member']) assert.equal(theater.snapshot(uid).polls.length, 0);
+  assert.deepEqual(action({ action: 'poll.delete', id, version: 1 }), { ok: true }, 'already deleted is fine');
+  assert.throws(() => action({ action: 'poll.vote', pollId: id, optionId: store.get('polls', id).options[0].id }, 'member'), { status: 404 });
+
+  const other = action(body).id;
+  action({ action: 'poll.close', id: other, version: 1 });
+  assert.throws(() => action({ action: 'poll.close', id: other, version: 2, closed: false, closesAt: '2026-10-05T11:00:00Z' }), { status: 400 });
+  action({ action: 'poll.close', id: other, version: 2, closed: false, closesAt: '2026-10-08T18:00:00Z' });
+  assert.deepEqual([store.get('polls', other).closed, store.get('polls', other).closesAt], [false, '2026-10-08T18:00:00.000Z']);
+  setClock('2026-10-07T12:00:00Z');
+  assert.equal(theater.snapshot('member').polls[0].closed, false);
+  // Without a new deadline, reopening still removes it as before.
+  action({ action: 'poll.close', id: other, version: 3 });
+  action({ action: 'poll.close', id: other, version: 4, closed: false });
+  assert.equal(store.get('polls', other).closesAt, null);
+});

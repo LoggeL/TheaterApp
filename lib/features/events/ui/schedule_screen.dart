@@ -88,7 +88,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   bool _matches(TheaterEvent e, int filter, DateTime now) {
     final future = e.startsAt == null || (e.endsAt ?? e.startsAt!).isAfter(now);
     return switch (filter) {
-      1 => future && e.response == 'open' && widget.controller.canRespondTo(e),
+      1 =>
+        future &&
+            e.response == 'open' &&
+            e.addressedToMe &&
+            widget.controller.canRespondTo(e),
       2 => future && const {'yes', 'late'}.contains(e.response),
       3 => !future,
       _ => future,
@@ -277,7 +281,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           // The most recent past events come first.
           ..sort((a, b) => pastFirst ? _byStart(b, a) : _byStart(a, b));
     final nextId = widget.controller.events
-        .where((e) => e.startsAt != null && !eventIsPast(e, now))
+        .where(
+          (e) => e.startsAt != null && e.addressedToMe && !eventIsPast(e, now),
+        )
         .fold<TheaterEvent?>(
           null,
           (next, e) =>
@@ -526,7 +532,10 @@ class _AgendaTile extends StatelessWidget {
     final prominent = !past && isProminentKind(event.kind);
     final accent = past ? scheme.onSurfaceVariant : eventAccent(context, event);
     final pending =
-        !past && event.response == 'open' && controller.canRespondTo(event);
+        !past &&
+        event.response == 'open' &&
+        event.addressedToMe &&
+        controller.canRespondTo(event);
     final tile = Material(
       color: selected
           ? scheme.primaryContainer
@@ -568,6 +577,8 @@ class _AgendaTile extends StatelessWidget {
         ),
         trailing: pending
             ? RsvpStatusBadge(status: event.response, emphasizeOpen: true)
+            : !past && !event.addressedToMe
+            ? const NotInvitedPill()
             : const Icon(Icons.chevron_right),
         onTap: onTap,
       ),

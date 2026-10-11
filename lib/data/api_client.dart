@@ -7,9 +7,13 @@ import 'package:http/http.dart' as http;
 import '../core/models.dart';
 
 class ApiException implements Exception {
-  const ApiException(this.message, {this.statusCode = 0});
+  const ApiException(this.message, {this.statusCode = 0, this.code});
   final String message;
   final int statusCode;
+
+  /// The server's machine-readable reason, e.g. `closed` or
+  /// `version_conflict`; null for older servers and local errors.
+  final String? code;
   bool get isUnauthorized => statusCode == 401;
   bool get retryable =>
       statusCode == 0 ||
@@ -120,6 +124,7 @@ class ApiClient {
               ? serverMessage
               : 'Die Anfrage wurde vom Server abgelehnt (${response.statusCode}).',
           statusCode: response.statusCode,
+          code: _errorCode(decoded['code']),
         );
       }
       return decoded;
@@ -160,10 +165,17 @@ class ApiClient {
       if (response.statusCode != 200) {
         final body = await response.stream.bytesToString().timeout(timeout);
         String message = 'Das Bild konnte nicht geladen werden.';
+        String? code;
         try {
-          message = textValue(jsonMap(jsonDecode(body))['error'], message);
+          final decoded = jsonMap(jsonDecode(body));
+          message = textValue(decoded['error'], message);
+          code = _errorCode(decoded['code']);
         } catch (_) {}
-        throw ApiException(message, statusCode: response.statusCode);
+        throw ApiException(
+          message,
+          statusCode: response.statusCode,
+          code: code,
+        );
       }
       final chunks = <List<int>>[];
       var size = 0;
@@ -225,6 +237,12 @@ class ApiClient {
         token: token,
       );
   void close() => _client.close();
+
+  /// A short machine-readable error code; anything else is ignored.
+  static String? _errorCode(Object? value) =>
+      value is String && RegExp(r'^[a-z_]{1,40}$').hasMatch(value)
+      ? value
+      : null;
 }
 
 class MediaData {

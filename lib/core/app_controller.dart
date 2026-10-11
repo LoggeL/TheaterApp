@@ -158,6 +158,13 @@ class AppController extends ChangeNotifier {
   List<Production> _productions = [];
   List<TheaterMember> _members = [];
   List<PendingAction> _outbox = [];
+
+  /// Server replies of confirmed changes, by outbox id, until they are read.
+  final Map<String, JsonMap> _results = {};
+
+  /// Rejections whose outbox entry was removed right away because sending
+  /// it again cannot help, by outbox id, until they are read.
+  final Map<String, ApiException> _rejections = {};
   final Map<String, ScriptDocument> _scripts = {};
   final Map<String, FocusState> _demoFocus = {};
   final Set<String> _loadingScripts = {};
@@ -172,6 +179,7 @@ class AppController extends ChangeNotifier {
     'twoHours': true,
     'changes': true,
     'emailEnabled': false,
+    'lateDeclines': true,
   };
 
   /// Personal reminder lead time in minutes; null when switched off.
@@ -217,6 +225,11 @@ class AppController extends ChangeNotifier {
       _capabilities['push'] == true;
 
   bool get emailConfigured => _capabilities['emailConfigured'] == true;
+
+  /// Whether the server announced [feature] in `capabilities.features`.
+  /// Older servers announce nothing, so new options stay hidden there.
+  bool supports(String feature) =>
+      jsonList(_capabilities['features']).contains(feature);
 
   void _notify() {
     if (!_disposed) notifyListeners();

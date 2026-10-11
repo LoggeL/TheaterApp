@@ -4,7 +4,8 @@ import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/features/sync/sync.dart';
 
-import 'app_controller_test.dart' show TestServer, fixedNow, signIn;
+import 'app_controller_test.dart'
+    show TestServer, fixedNow, jsonResponse, signIn;
 
 void main() {
   test('the remaining count after a sync reads naturally', () {
@@ -82,6 +83,49 @@ void main() {
     expect(find.text('Lokale Demo'), findsOneWidget);
     expect(find.text('Jetzt synchronisieren'), findsNothing);
     expect(find.text('Technische Details'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('retrying is only offered when it can still help', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final server = TestServer();
+    var code = 'version_conflict';
+    server.override = (request) => request.url.path.contains('/actions')
+        ? Future.value(jsonResponse({'error': 'Geändert.', 'code': code}, 409))
+        : null;
+    final controller = server.controller();
+    await signIn(controller);
+    await expectLater(
+      controller.performAction({'action': 'poll.save', 'title': 'a'}),
+      throwsA(anything),
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: SyncScreen(controller: controller)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Änderung bearbeiten'));
+    await tester.pumpAndSettle();
+    expect(find.text('Erneut versuchen'), findsNothing);
+    expect(find.text('Änderung verwerfen'), findsOneWidget);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+
+    // A rejection without a code (older server) can still be retried.
+    server.override = null;
+    server.actionStatus = 409;
+    await expectLater(
+      controller.performAction({'action': 'poll.save', 'title': 'b'}),
+      throwsA(anything),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Änderung bearbeiten').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Erneut versuchen'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });

@@ -153,3 +153,24 @@ test('account and scene writes roll back if recording the audit fails after muta
   assert.equal(requestCount(), requests);
   assert.equal(auditCount(), audits);
 });
+
+test('event details list invited, open and absent people with decline reasons for admins only', t => {
+  const { store, app, action, eventId, memberId } = setup(t);
+  const admin = store.account('admin').personId;
+  const kim = action({ action: 'member.save', name: 'Kim' }).id;
+  app.session({ uid: 'kim', name: 'Kim', email: 'kim@example.invalid', email_verified: true });
+  action({ action: 'account.approve', uid: 'kim', personId: kim, version: 1, role: 'member' });
+  const former = action({ action: 'member.save', name: 'Früher' }).id;
+  action({ action: 'member.save', id: former, name: 'Früher', active: false, version: 1 });
+  action({ action: 'attendance', eventId, status: 'no', reason: 'Krank' }, 'member');
+  action({ action: 'absence.create', from: '2030-10-09', to: '2030-10-09', reason: 'Urlaub' }, 'kim');
+  const details = app.eventDetails('admin', eventId);
+  assert.deepEqual(details.invitedIds.sort(), [admin, memberId, kim].sort());
+  assert.deepEqual(details.openIds, [admin]);
+  assert.deepEqual(details.absentIds, [kim]);
+  assert.equal(details.responses.find(r => r.personId === memberId).reason, 'Krank');
+  assert.deepEqual(details.absences.map(x => x.personId), [kim]);
+  assert.deepEqual([details.lastRemindedAt, details.remindCount], [null, 0]);
+  assert.deepEqual(details.checkins, []);
+  assert.throws(() => app.eventDetails('member', eventId), { status: 403, code: 'forbidden' });
+});

@@ -5,7 +5,7 @@ import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/features/slots/slots.dart';
 
-import 'app_controller_test.dart' show TestServer, signIn;
+import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
 import 'slots_test.dart' show SlotServer, pool, firstSlot;
 
 void main() {
@@ -162,6 +162,76 @@ void main() {
       'slotId': 's1',
     });
     expect(find.text('Kim Kulisse eingetragen: $firstSlot'), findsOneWidget);
+    await finish(tester, controller);
+  });
+
+  for (final flagged in [true, false]) {
+    testWidgets(
+      'the open reminder ${flagged ? 'appears with' : 'stays hidden without'} '
+      'the server flag',
+      (tester) async {
+        await surface(tester, const Size(400, 2000));
+        final server = SlotServer(role: 'admin')
+          ..data['slotPools'] = [
+            pool(personIds: [4, 2]),
+          ]
+          ..data['capabilities'] = {
+            'pushConfigured': true,
+            if (flagged) 'features': ['slotNotices'],
+          };
+        final controller = await start(server);
+        await tester.pumpWidget(
+          screen(SlotPoolScreen(controller: controller, poolId: 'pool-1')),
+        );
+        await tester.pumpAndSettle();
+        final remind = find.text('Offene erinnern (2)');
+        expect(remind, flagged ? findsOneWidget : findsNothing);
+        if (flagged) {
+          await tester.ensureVisible(remind);
+          await tester.tap(remind);
+          await tester.pumpAndSettle();
+          expect(find.textContaining('2 Personen ohne Zeitfenster'), findsOne);
+          await tester.tap(find.text('Erinnerung senden'));
+          await tester.pumpAndSettle();
+          expect(server.actionBodies.last, {
+            'action': 'slotPool.remindOpen',
+            'id': 'pool-1',
+          });
+          expect(find.text('Erinnerung an 2 Personen gesendet.'), findsOne);
+        }
+        await finish(tester, controller);
+      },
+    );
+  }
+
+  testWidgets('an assignment names the push the person got', (tester) async {
+    await surface(tester, const Size(400, 2000));
+    final server = SlotServer(role: 'admin')
+      ..data['slotPools'] = [
+        pool(personIds: [4]),
+      ];
+    server.override = (request) => request.url.path.contains('/actions')
+        ? Future.value(jsonResponse({'ok': true, 'pushQueued': true}))
+        : null;
+    final controller = await start(server);
+    await tester.pumpWidget(
+      screen(SlotPoolScreen(controller: controller, poolId: 'pool-1')),
+    );
+    await tester.tap(find.text('Noch ohne Zeitfenster: 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ActionChip, 'Kim Kulisse'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.text(firstSlot),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Kim Kulisse eingetragen: $firstSlot · benachrichtigt'),
+      findsOneWidget,
+    );
     await finish(tester, controller);
   });
 }

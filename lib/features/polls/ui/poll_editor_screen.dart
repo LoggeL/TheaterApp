@@ -28,7 +28,15 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
   late Set<int> _personIds;
   late Set<String> _productionIds;
   bool _busy = false;
+
+  /// Announce a new poll by push (servers with `pollPush`).
+  bool _push = true;
   final _form = GlobalKey<FormState>();
+
+  bool get _canPush =>
+      widget.poll == null &&
+      widget.controller.supports('pollPush') &&
+      widget.controller.pushConfigured;
   bool get _fixed => (widget.poll?.totalVotes ?? 0) > 0;
   @override
   void initState() {
@@ -84,20 +92,29 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
       return;
     }
     setState(() => _busy = true);
+    final push = _canPush && _push;
     try {
-      final outcome = await widget.controller.performAction({
+      final result = await widget.controller.performActionWithResult({
         'action': 'poll.save',
         'id': widget.poll?.id,
         'version': widget.poll?.version,
         ..._payload(),
+        if (push) 'push': true,
       });
       if (mounted) {
+        final notified = result.data?['pushQueued'];
         showDone(
           context,
           outcomeText(
-            outcome,
-            done: 'Abstimmung gespeichert',
-            queued: 'Abstimmung vorgemerkt – wird bei Verbindung gesendet',
+            result.outcome,
+            done: !push
+                ? 'Abstimmung gespeichert'
+                : notified == false
+                ? 'Abstimmung gespeichert – ohne Push'
+                : 'Abstimmung gespeichert, Benachrichtigung wird verschickt.',
+            queued: push
+                ? 'Abstimmung vorgemerkt, Benachrichtigung folgt nach der Übertragung.'
+                : 'Abstimmung vorgemerkt – wird bei Verbindung gesendet',
           ),
         );
         Navigator.pop(context);
@@ -317,6 +334,17 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
                             );
                           }
                         },
+                ),
+              if (_canPush)
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.notifications_active_outlined),
+                  title: const Text('Per Push informieren'),
+                  subtitle: const Text(
+                    'Alle, die abstimmen dürfen, bekommen eine Benachrichtigung.',
+                  ),
+                  value: _push,
+                  onChanged: _busy ? null : (v) => setState(() => _push = v),
                 ),
               const SizedBox(height: 24),
               FilledButton(

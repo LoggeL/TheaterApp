@@ -6,7 +6,8 @@ import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/rehearsal/rehearsal.dart';
 
-import 'app_controller_test.dart' show TestServer, signIn;
+import 'app_controller_test.dart'
+    show TestServer, signIn, fixedNow, jsonResponse;
 
 class _MemberServer extends TestServer {
   @override
@@ -207,4 +208,138 @@ void main() {
       controller.dispose();
     });
   }
+
+  testWidgets('details show decline reasons, absences and the last reminder', (
+    tester,
+  ) async {
+    await surface(tester, const Size(1000, 2400));
+    final server = TestServer();
+    _seed(server);
+    server.data['capabilities'] = {
+      'pushConfigured': true,
+      'features': ['eventDetailsV2', 'nudges'],
+    };
+    server.override = (request) {
+      if (!request.url.path.contains('/admin/events/rehearsal')) return null;
+      return Future.value(
+        jsonResponse({
+          'responses': [
+            {'personId': 1, 'status': 'yes', 'reason': ''},
+            {'personId': 2, 'status': 'late', 'reason': ''},
+            {'personId': 3, 'status': 'no', 'reason': 'Krank'},
+          ],
+          'checkins': [],
+          'absences': [
+            {
+              'id': 'a1',
+              'personId': 3,
+              'from': '2026-09-13',
+              'to': '2026-09-14',
+            },
+          ],
+          // Sam is no longer invited; the server knows best.
+          'invitedIds': [1, 2, 3, 4],
+          'openIds': [4],
+          'absentIds': [3],
+          'lastRemindedAt': fixedNow
+              .subtract(const Duration(minutes: 5))
+              .toUtc()
+              .toIso8601String(),
+          'remindCount': 2,
+        }),
+      );
+    };
+    final controller = server.controller();
+    await signIn(controller);
+    await tester.pumpWidget(
+      screen(
+        ResponsesAdminScreen(
+          controller: controller,
+          event: controller.events.single,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Grund: Krank'), findsOneWidget);
+    expect(find.text('Abwesend gemeldet'), findsOneWidget);
+    expect(find.text('Sam Vorhang'), findsNothing);
+    expect(find.text('3 von 4 haben sich zurückgemeldet'), findsOneWidget);
+    expect(find.text('Zuletzt erinnert: heute, 11:55 (2×)'), findsOneWidget);
+    // Within the server's cooldown the button waits.
+    final remind = tester.widget<ButtonStyleButton>(
+      find.ancestor(
+        of: find.text('Offene erinnern'),
+        matching: find.bySubtype<ButtonStyleButton>(),
+      ),
+    );
+    expect(remind.onPressed, isNull);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('answers come from the snapshot, not from older details', (
+    tester,
+  ) async {
+    await surface(tester, const Size(1000, 2400));
+    final server = TestServer();
+    _seed(server);
+    server.override = (request) {
+      if (!request.url.path.contains('/admin/events/rehearsal')) return null;
+      // Loaded before Kim reopened the decline; the snapshot is newer.
+      return Future.value(
+        jsonResponse({
+          'responses': [
+            {'personId': 3, 'status': 'no', 'reason': 'Krank'},
+            {'personId': 4, 'status': 'no', 'reason': 'Alt'},
+          ],
+          'checkins': [],
+          'absences': [],
+        }),
+      );
+    };
+    final controller = server.controller();
+    await signIn(controller);
+    await tester.pumpWidget(
+      screen(
+        ResponsesAdminScreen(
+          controller: controller,
+          event: controller.events.single,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('3 von 5 haben sich zurückgemeldet'), findsOneWidget);
+    expect(find.text('Grund: Krank'), findsOneWidget);
+    expect(find.text('Grund: Alt'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('a failing details request keeps the snapshot view', (
+    tester,
+  ) async {
+    await surface(tester, const Size(1000, 2400));
+    final server = TestServer();
+    _seed(server);
+    server.override = (request) => request.url.path.contains('/admin/events/')
+        ? Future.value(jsonResponse({'error': 'kaputt'}, 500))
+        : null;
+    final controller = server.controller();
+    await signIn(controller);
+    await tester.pumpWidget(
+      screen(
+        ResponsesAdminScreen(
+          controller: controller,
+          event: controller.events.single,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('3 von 5 haben sich zurückgemeldet'), findsOneWidget);
+    expect(find.textContaining('Grund:'), findsNothing);
+    expect(find.text('Offene erinnern'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
 }

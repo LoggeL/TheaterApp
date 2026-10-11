@@ -34,10 +34,12 @@ class TodayDigest {
   factory TodayDigest.from(AppController controller) {
     final now = controller.now;
     final upcoming = upcomingEvents(controller, now);
-    final next = upcoming.firstOrNull;
+    // Admins also receive events they are not invited to; those are never
+    // "Dein nächster Termin" but still appear among the later events.
+    final next = upcoming.where((e) => e.addressedToMe).firstOrNull;
     final soon = now.add(responseBadgeWindow);
     final open = upcoming
-        .skip(1)
+        .where((e) => e != next)
         .where(
           (e) =>
               e.needsResponse &&
@@ -58,17 +60,15 @@ class TodayDigest {
       openResponses: shownOpen,
       moreOpenResponses: open.length - shownOpen.length,
       // Events answerable above are not repeated in the preview.
-      laterEvents: upcoming.length <= 1
-          ? const []
-          : upcoming
-                .skip(1)
-                .where((e) => !shownIds.contains(e.id))
-                .take(maxLaterEvents)
-                .toList(),
+      laterEvents: upcoming
+          .where((e) => e != next && !shownIds.contains(e.id))
+          .take(maxLaterEvents)
+          .toList(),
       unread: unreadMessages(controller).toList(),
       pollsToVote: toVote,
       // Only a poll the member actually voted in counts as done; admins
-      // also receive polls they were never asked to vote in.
+      // also receive polls they were never asked to vote in (newer servers
+      // mark those with `addressedToMe`).
       votedPoll: toVote.isEmpty
           ? controller.polls
                 .where(

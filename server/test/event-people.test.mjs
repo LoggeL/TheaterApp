@@ -159,3 +159,51 @@ test('changes to events more than two weeks ahead are not pushed', async t => {
   action(event({ id, version: 4, ...far, personIds: [sam], title: 'Wieder verschoben' }));
   assert.deepEqual(await deliver(), ['token-sam']);
 });
+
+test('absences report the declined events by Berlin date and can reopen them', t => {
+  const { app, store, action, sam } = setup(t);
+  // 23:30 UTC on the 14th is already the 15th in Berlin.
+  const night = action(event({ title: 'Nachtprobe', startsAt: '2026-09-14T23:30:00Z', endsAt: '2026-09-15T01:00:00Z' })).id;
+  const day14 = action(event({ title: 'Tagprobe', startsAt: '2026-09-14T10:00:00Z', endsAt: '2026-09-14T12:00:00Z' })).id;
+  const own = action(event({ title: 'Eigene Absage', startsAt: '2026-09-15T10:00:00Z', endsAt: '2026-09-15T12:00:00Z' })).id;
+  const changed = action(event({ title: 'Doch dabei', startsAt: '2026-09-15T14:00:00Z', endsAt: '2026-09-15T16:00:00Z' })).id;
+  const again = action(event({ title: 'Neu begründet', startsAt: '2026-09-15T17:00:00Z', endsAt: '2026-09-15T19:00:00Z' })).id;
+  const soon = action(event({ title: 'Gleich', startsAt: '2026-09-14T22:30:00Z', endsAt: '2026-09-14T23:00:00Z' })).id;
+  const tech = action(event({ title: 'Lichtprobe', startsAt: '2026-09-15T08:00:00Z', endsAt: '2026-09-15T09:00:00Z', roleIds: ['role-3'] })).id;
+  action({ action: 'attendance', eventId: own, status: 'no', reason: 'Arzttermin' }, 'sam');
+
+  const result = action({ action: 'absence.create', from: '2026-09-15', to: '2026-09-15', reason: 'Urlaub' }, 'sam');
+  assert.deepEqual(result.declinedEventIds.sort(), [night, changed, again, soon].sort());
+  assert.ok(!result.declinedEventIds.includes(day14) && !result.declinedEventIds.includes(tech));
+  assert.equal(store.get('responses', `${night}:${sam}`).absenceId, result.id);
+  assert.deepEqual([store.get('responses', `${own}:${sam}`).reason, store.get('responses', `${own}:${sam}`).absenceId], ['Arzttermin', undefined], 'an own decline stays untouched');
+
+  action({ action: 'attendance', eventId: changed, status: 'yes' }, 'sam');
+  action({ action: 'attendance', eventId: again, status: 'no', reason: 'Familienfeier' }, 'sam');
+  app.clock = () => new Date('2026-09-14T22:00:00Z'); // `soon` is now inside the decline cutoff, `night` not yet
+  assert.deepEqual(action({ action: 'absence.delete', id: result.id, reopen: true }, 'sam').reopenedEventIds, [night]);
+  assert.equal(store.get('responses', `${night}:${sam}`), null);
+  assert.deepEqual([own, changed, again, soon].map(id => store.get('responses', `${id}:${sam}`).status), ['no', 'yes', 'no', 'no']);
+  assert.equal(store.get('absences', result.id), null);
+});
+
+test('deleting an absence without reopen keeps its declines; new events get tagged declines', t => {
+  const { store, action, sam } = setup(t);
+  const { id } = action({ action: 'absence.create', from: '2026-09-13', to: '2026-09-13' }, 'sam');
+  const eventId = action(event()).id;
+  assert.equal(store.get('responses', `${eventId}:${sam}`).absenceId, id);
+  assert.deepEqual(action({ action: 'absence.delete', id }, 'sam'), { ok: true });
+  assert.equal(store.get('responses', `${eventId}:${sam}`).status, 'no');
+});
+
+test('reopening keeps a decline that another absence still covers', t => {
+  const { store, action, sam } = setup(t);
+  const eventId = action(event({ startsAt: '2026-09-16T10:00:00Z', endsAt: '2026-09-16T12:00:00Z' })).id;
+  const first = action({ action: 'absence.create', from: '2026-09-15', to: '2026-09-16', reason: 'Urlaub' }, 'sam');
+  const second = action({ action: 'absence.create', from: '2026-09-16', to: '2026-09-17', reason: 'Dienstreise' }, 'sam');
+  assert.deepEqual([first.declinedEventIds, second.declinedEventIds], [[eventId], []]);
+  assert.deepEqual(action({ action: 'absence.delete', id: first.id, reopen: true }, 'sam').reopenedEventIds, []);
+  assert.deepEqual([store.get('responses', `${eventId}:${sam}`).status, store.get('responses', `${eventId}:${sam}`).absenceId, store.get('responses', `${eventId}:${sam}`).reason], ['no', second.id, 'Dienstreise']);
+  assert.deepEqual(action({ action: 'absence.delete', id: second.id, reopen: true }, 'sam').reopenedEventIds, [eventId]);
+  assert.equal(store.get('responses', `${eventId}:${sam}`), null);
+});

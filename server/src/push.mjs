@@ -32,14 +32,16 @@ export function scheduleReminders(theater, now = new Date()) {
 
 // Changes only reach people who already answered the event, and only for events
 // within the next two weeks (`soon`); open invitations stay quiet.
-// A reminder for open invitations (`remindOpen`) skips everyone who answered meanwhile.
+// A reminder for open invitations (`remindOpen`) skips everyone who answered meanwhile;
+// poll and slot reminders (`remindPoll`, `remindSlot`) skip who voted or booked meanwhile.
 const answered = (s, job, personId) => ['yes', 'late', 'no'].includes(s.get('responses', `${job.data?.eventId}:${personId}`)?.status);
 
 export async function deliverPush(theater, messaging, appOrigin = process.env.APP_ORIGIN) {
   if (!theater.pushEnabled || !messaging) return;
   const s = theater.store;
   for (const job of s.all('pushJobs').filter(j => j.status === 'pending' && Date.parse(j.nextAttemptAt) <= Date.now()).slice(0, 20)) {
-    const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && s.get('members', a.personId)?.active && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId)) && (!job.adminsOnly || a.role === 'admin') && inAudience(s.get('members', a.personId), job, s) && (!job.change || job.announce || (s.get('reminders', a.personId)?.changes ?? true)) && (!job.change || (job.soon !== false && answered(s, job, a.personId))) && (!job.remindOpen || !answered(s, job, a.personId)));
+    const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && s.get('members', a.personId)?.active && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId)) && (!job.adminsOnly || a.role === 'admin') && inAudience(s.get('members', a.personId), job, s) && (!job.change || job.announce || (s.get('reminders', a.personId)?.changes ?? true)) && (!job.change || (job.soon !== false && answered(s, job, a.personId))) && (!job.remindOpen || !answered(s, job, a.personId))
+      && (!job.remindPoll || !s.get('pollVotes', `${job.data?.pollId}:${a.personId}`)) && (!job.remindSlot || !s.get('slotBookings', `${job.data?.slotPoolId}:${a.personId}`)));
     const uids = new Set(accounts.map(a => a.uid));
     const devices = s.all('devices').filter(d => uids.has(d.uid));
     if (!devices.length) { s.put('pushJobs', job.id, { ...job, status: 'no_devices', finishedAt: new Date().toISOString() }); continue; }
@@ -54,12 +56,13 @@ export async function deliverPush(theater, messaging, appOrigin = process.env.AP
         for (let i = 0; i < groupDevices.length; i += 500) {
           const chunk = groupDevices.slice(i, i + 500);
           const custom = group !== 'standard';
-          const event = job.data?.eventId ? s.get('events', job.data.eventId) : null;
+          // Fixed texts (e.g. late declines to the direction) keep their title and offer no quick answer.
+          const event = job.data?.eventId && !job.fixedText ? s.get('events', job.data.eventId) : null;
           // A series push keeps its summary; the event is only its first occurrence.
           const title = event && !job.series ? (job.remindOpen ? `Rückmeldung fehlt: ${event.title}` : job.announce ? `${job.announce === 'new' ? 'Neuer Termin' : 'Termin geändert'}: ${event.title}` : job.change ? `Termin aktualisiert: ${event.title}` : event.title) : job.title;
           const body = event && !job.series ? eventNotificationBody(event) : job.body;
           const canRespond = event && !job.series && !event.locked && !event.slotPoolId && Date.parse(event.endsAt ?? event.startsAt) > Date.now();
-          const target = job.data?.eventId ? ['events', job.data.eventId] : job.data?.messageId ? ['messages', job.data.messageId] : job.data?.productionId ? ['productions', job.data.productionId] : job.data?.accountUid ? ['accounts', job.data.accountUid] : job.data?.slotPoolId ? ['slots', job.data.slotPoolId] : null;
+          const target = job.data?.eventId ? ['events', job.data.eventId] : job.data?.messageId ? ['messages', job.data.messageId] : job.data?.pollId ? ['polls', job.data.pollId] : job.data?.productionId ? ['productions', job.data.productionId] : job.data?.accountUid ? ['accounts', job.data.accountUid] : job.data?.slotPoolId ? ['slots', job.data.slotPoolId] : null;
           const link = appOrigin ? new URL('/', appOrigin) : null;
           if (link && target) link.searchParams.set('target', `theaterapp://app/${target[0]}/${encodeURIComponent(target[1])}`);
           const result = await messaging.sendEachForMulticast({ tokens: chunk.map(d => d.token), ...(custom ? { data: { ...job.data, title, body, notificationId: job.id, recipientUid: chunk[0].uid, ...(canRespond ? { attendanceActions: 'true' } : {}) } } : { notification: { title, body }, data: job.data ?? {} }), ...(link?.protocol === 'https:' ? { webpush: { fcmOptions: { link: link.href } } } : {}), android: { priority: 'high', ...(custom ? {} : { notification: { channelId: 'theater_updates' } }) }, apns: { payload: { aps: { sound: 'default' } } } });

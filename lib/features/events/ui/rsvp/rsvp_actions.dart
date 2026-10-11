@@ -35,7 +35,7 @@ Future<void> declineEvent(
           ),
           const SizedBox(height: 12),
           const Text(
-            'Ein kurzer Grund hilft bei der Probenplanung. Die Angabe ist freiwillig.',
+            'Ein kurzer Grund hilft bei der Probenplanung. Die Angabe ist freiwillig und nur für die Theaterleitung sichtbar.',
           ),
           const SizedBox(height: 18),
           TextField(

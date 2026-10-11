@@ -25,6 +25,9 @@ class TheaterEvent {
     this.productionIds = const [],
     this.slotPoolId,
     this.seriesId,
+    this.addressedToMe = true,
+    this.lastRemindedAt,
+    this.remindCount = 0,
   });
   final String id,
       title,
@@ -61,7 +64,17 @@ class TheaterEvent {
   /// still edited on its own.
   final String? seriesId;
   bool get inSeries => seriesId != null;
-  bool get needsResponse => response == 'open' && !locked && !fromSlotPool;
+
+  /// Whether the signed-in person is invited. Always true for members; admins
+  /// also receive events of other groups and other people's slot events.
+  final bool addressedToMe;
+
+  /// When an admin last reminded the open invitees, and how often (admins on
+  /// servers with `nudges` only).
+  final DateTime? lastRemindedAt;
+  final int remindCount;
+  bool get needsResponse =>
+      response == 'open' && !locked && !fromSlotPool && addressedToMe;
   bool acceptsResponsesAt(DateTime now) =>
       !locked &&
       !fromSlotPool &&
@@ -101,9 +114,13 @@ class TheaterEvent {
         ? null
         : textValue(json['slotPoolId']),
     seriesId: json['seriesId'] == null ? null : textValue(json['seriesId']),
+    addressedToMe: json['addressedToMe'] != false,
+    lastRemindedAt: dateValue(json['lastRemindedAt'])?.toLocal(),
+    remindCount: intValue(json['remindCount']),
   );
   TheaterEvent copyWith({
     String? response,
+    bool? addressedToMe,
     String? declineReason,
     DateTime? expectedArrivalAt,
     bool clearExpectedArrival = false,
@@ -133,6 +150,9 @@ class TheaterEvent {
     productionIds: productionIds,
     slotPoolId: slotPoolId,
     seriesId: seriesId,
+    addressedToMe: addressedToMe ?? this.addressedToMe,
+    lastRemindedAt: lastRemindedAt,
+    remindCount: remindCount,
   );
   JsonMap toJson() => {
     'id': id,
@@ -158,5 +178,9 @@ class TheaterEvent {
     'sceneIds': sceneIds,
     if (slotPoolId != null) 'slotPoolId': slotPoolId,
     if (seriesId != null) 'seriesId': seriesId,
+    if (!addressedToMe) 'addressedToMe': false,
+    if (lastRemindedAt != null)
+      'lastRemindedAt': lastRemindedAt!.toUtc().toIso8601String(),
+    if (remindCount != 0) 'remindCount': remindCount,
   };
 }

@@ -1,12 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
+import 'package:theater_app/data/api_client.dart';
 import 'package:theater_app/features/absences/absences.dart';
 
-import 'app_controller_test.dart' show TestServer, signIn, fixedNow;
+import 'app_controller_test.dart'
+    show TestServer, signIn, fixedNow, jsonResponse;
 
 /// An event at a local wall-clock time, so dates hold in any time zone.
 JsonMap event(String id, DateTime start, {JsonMap extra = const {}}) => {
@@ -82,13 +86,16 @@ void main() {
     );
   });
 
-  test('a rejected absence reports no outcome instead of queued', () async {
+  test('a rejected absence throws and stays for review', () async {
     final server = TestServer();
     final controller = server.controller();
     addTearDown(controller.dispose);
     await signIn(controller);
     server.actionStatus = 409;
-    expect(await controller.addAbsence(fixedNow, fixedNow, 'Urlaub'), isNull);
+    await expectLater(
+      controller.addAbsence(fixedNow, fixedNow, 'Urlaub'),
+      throwsA(isA<ApiException>()),
+    );
     expect(controller.failedCount, 1);
   });
 
@@ -241,6 +248,100 @@ void main() {
     );
     expect(find.textContaining('vorgemerkt'), findsNothing);
     await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('the declined count comes from the server when it tells', (
+    tester,
+  ) async {
+    final server = TestServer();
+    seedEvents(server);
+    server.override = (request) {
+      if (!request.url.path.contains('/actions')) return null;
+      return Future.value(
+        jsonResponse({
+          'ok': true,
+          'id': 'abs-1',
+          'declinedEventIds': ['b', 'a', 'later'],
+        }),
+      );
+    };
+    final controller = server.controller();
+    await signIn(controller);
+    await report(tester, controller);
+    await tester.tap(save());
+    await tester.pumpAndSettle();
+    // The preview said 2; the server's Berlin dates decide.
+    expect(
+      find.text('Abwesenheit gespeichert · 3 Termine abgesagt'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Termine ansehen'));
+    await tester.pumpAndSettle();
+    expect(find.text('Abgesagte Termine'), findsOneWidget);
+    expect(find.text('later'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('removing an absence offers to reopen events with the flag', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(600, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final server = TestServer();
+    server.data['capabilities'] = {
+      'features': ['absenceOutcome'],
+    };
+    server.data['absences'] = [
+      {'id': 'x1', 'from': '2026-09-14', 'to': '2026-09-20', 'reason': 'Kur'},
+    ];
+    final bodies = <JsonMap>[];
+    server.override = (request) {
+      if (!request.url.path.contains('/actions')) return null;
+      bodies.add(jsonMap(jsonDecode(request.body)));
+      return Future.value(
+        jsonResponse({
+          'ok': true,
+          'reopenedEventIds': ['a'],
+        }),
+      );
+    };
+    final controller = server.controller();
+    await signIn(controller);
+    await tester.pumpWidget(screen(AbsencesScreen(controller: controller)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Abwesenheit löschen'));
+    await tester.pumpAndSettle();
+    expect(find.text('Abgesagte Termine wieder öffnen'), findsOneWidget);
+    expect(find.textContaining('Bereits gespeicherte Absagen'), findsNothing);
+    await tester.tap(find.widgetWithText(FilledButton, 'Entfernen'));
+    await tester.pumpAndSettle();
+    expect(bodies.last, {
+      'action': 'absence.delete',
+      'id': 'x1',
+      'reopen': true,
+    });
+    expect(
+      find.text('Abwesenheit entfernt · 1 Termin wieder geöffnet.'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('without the flag the reopen option stays hidden', (
+    tester,
+  ) async {
+    final server = TestServer();
+    server.data['absences'] = [
+      {'id': 'x1', 'from': '2026-09-14', 'to': '2026-09-20', 'reason': 'Kur'},
+    ];
+    final controller = server.controller();
+    await signIn(controller);
+    // Even a direct wish is not sent to a server that does not know it.
+    await controller.deleteAbsence('x1', reopen: true);
+    expect(server.actionBodies.last, {'action': 'absence.delete', 'id': 'x1'});
     controller.dispose();
   });
 }

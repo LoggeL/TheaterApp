@@ -244,4 +244,24 @@ void main() {
     semantics.dispose();
     await finish(tester, controller);
   });
+
+  testWidgets('admins see that they are not invited instead of the RSVP', (
+    tester,
+  ) async {
+    final server = TestServer()
+      ..data['events'] = [
+        _event(
+          'technik',
+          extra: {
+            'roleIds': ['role-3'],
+            'addressedToMe': false,
+          },
+        ),
+      ];
+    final controller = await open(tester, server, 'technik');
+    expect(find.text('Du bist nicht eingeladen'), findsOneWidget);
+    expect(find.text('Nicht eingeladen'), findsOneWidget);
+    expect(find.byType(RsvpPanel), findsNothing);
+    await finish(tester, controller);
+  });
 }

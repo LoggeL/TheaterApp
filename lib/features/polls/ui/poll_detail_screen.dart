@@ -9,6 +9,7 @@ import '../../../shared/audience/audience_pickers.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/layout/content_width.dart';
 import '../../../shared/navigation.dart';
+import '../../../shared/nudges.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../domain/poll_selectors.dart';
 import 'poll_editor_screen.dart';
@@ -49,24 +50,60 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
     }
   }
 
-  /// Ends voting now, or opens it again without a deadline.
+  /// Ends voting now, or opens it again: without a deadline or, on servers
+  /// with `pollDelete`, with a new one.
   Future<void> _setClosed(Poll poll, bool closed) async {
-    final confirmed = closed
-        ? await confirmDestructive(
-            context,
-            title: 'Abstimmung beenden?',
-            message:
-                'Danach kann niemand mehr abstimmen. Du kannst sie später wieder öffnen.',
-            confirmLabel: 'Beenden',
-          )
-        : await confirmAction(
-            context,
-            title: 'Abstimmung wieder öffnen?',
-            message:
-                'Die Frist wird entfernt. Alle können wieder abstimmen, bis du sie beendest.',
-            confirmLabel: 'Wieder öffnen',
-          );
-    if (!confirmed || !mounted) return;
+    DateTime? closesAt;
+    if (closed) {
+      final confirmed = await confirmDestructive(
+        context,
+        title: 'Abstimmung beenden?',
+        message:
+            'Danach kann niemand mehr abstimmen. Du kannst sie später wieder öffnen.',
+        confirmLabel: 'Beenden',
+      );
+      if (!confirmed) return;
+    } else if (widget.controller.supports('pollDelete')) {
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Abstimmung wieder öffnen?'),
+          content: const Text(
+            'Alle können wieder abstimmen. Ohne Frist läuft sie, bis du sie beendest.',
+          ),
+          actions: [
+            TextButton(
+              autofocus: true,
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Abbrechen'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'open'),
+              child: const Text('Ohne Frist'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, 'deadline'),
+              child: const Text('Neue Frist wählen'),
+            ),
+          ],
+        ),
+      );
+      if (choice == null || !mounted) return;
+      if (choice == 'deadline') {
+        closesAt = await _pickDeadline();
+        if (closesAt == null) return;
+      }
+    } else {
+      final confirmed = await confirmAction(
+        context,
+        title: 'Abstimmung wieder öffnen?',
+        message:
+            'Die Frist wird entfernt. Alle können wieder abstimmen, bis du sie beendest.',
+        confirmLabel: 'Wieder öffnen',
+      );
+      if (!confirmed) return;
+    }
+    if (!mounted) return;
     setState(() => _busy = true);
     try {
       final outcome = await widget.controller.performAction({
@@ -74,6 +111,7 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
         'id': poll.id,
         'version': poll.version,
         'closed': closed,
+        if (closesAt != null) 'closesAt': closesAt.toUtc().toIso8601String(),
       });
       if (mounted) {
         showDone(
@@ -92,6 +130,144 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// A new deadline in the future, or null when the admin cancels.
+  Future<DateTime?> _pickDeadline() async {
+    final now = widget.controller.now;
+    final initial = now.add(const Duration(days: 7));
+    final date = await showDatePicker(
+      context: context,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: now.add(const Duration(days: 730)),
+      initialDate: initial,
+      helpText: 'Neue Frist',
+    );
+    if (date == null || !mounted) return null;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 20, minute: 0),
+    );
+    if (time == null || !mounted) return null;
+    final picked = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time.hour,
+      time.minute,
+    );
+    if (!picked.isAfter(widget.controller.now)) {
+      showProblem(context, 'Die neue Frist muss in der Zukunft liegen.');
+      return null;
+    }
+    return picked;
+  }
+
+  Future<void> _delete(Poll poll) async {
+    final confirmed = await confirmDestructive(
+      context,
+      title: 'Abstimmung löschen?',
+      message:
+          'Die Abstimmung und alle Stimmen werden für alle entfernt. Das lässt sich nicht rückgängig machen.',
+      confirmLabel: 'Löschen',
+    );
+    if (!confirmed || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final outcome = await widget.controller.performAction({
+        'action': 'poll.delete',
+        'id': poll.id,
+        'version': poll.version,
+      });
+      if (!mounted) return;
+      showDone(
+        context,
+        outcomeText(
+          outcome,
+          done: 'Abstimmung gelöscht',
+          queued: 'Löschen vorgemerkt – wird bei Verbindung gesendet',
+        ),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Pushes a reminder to everyone who may vote but has not yet.
+  Future<void> _remind(Poll poll, int open) async {
+    final confirmed = await confirmAction(
+      context,
+      title: 'Offene erinnern?',
+      message:
+          '${open == 1 ? 'Eine Person bekommt' : '$open Personen bekommen'} '
+          'eine Push-Erinnerung an diese Abstimmung.',
+      confirmLabel: 'Erinnerung senden',
+    );
+    if (!confirmed || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final result = await widget.controller.performActionWithResult({
+        'action': 'poll.remindOpen',
+        'id': poll.id,
+      });
+      if (!mounted) return;
+      final count = intValue(result.data?['recipients'], open);
+      final who = count == 1 ? '1 Person' : '$count Personen';
+      showDone(
+        context,
+        outcomeText(
+          result.outcome,
+          done: 'Erinnerung an $who gesendet.',
+          queued:
+              'Erinnerung an $who vorgemerkt – wird bei Verbindung gesendet.',
+        ),
+      );
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// "12 von 30 haben abgestimmt" and, while voting runs, the reminder.
+  List<Widget> _participation(AppController c, Poll poll, bool closed) {
+    final eligible = poll.eligibleCount!,
+        voted = poll.eligibleVotes ?? poll.totalVotes;
+    final open = eligible - voted;
+    final last = poll.lastRemindedAt;
+    final theme = Theme.of(context);
+    final coolingDown = c.supports('nudges') && remindCoolingDown(last, c.now);
+    return [
+      const SizedBox(height: 4),
+      Text(
+        '$voted von $eligible ${voted == 1 ? 'hat' : 'haben'} abgestimmt',
+        style: theme.textTheme.bodySmall,
+      ),
+      if (c.supports('pollRemind') &&
+          c.pushConfigured &&
+          !closed &&
+          open > 0) ...[
+        const SizedBox(height: 8),
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: FilledButton.tonalIcon(
+            onPressed: _busy || coolingDown ? null : () => _remind(poll, open),
+            icon: const Icon(Icons.notifications_active_outlined),
+            label: const Text('Offene erinnern'),
+          ),
+        ),
+      ],
+      if (last != null) ...[
+        const SizedBox(height: 4),
+        Text(
+          lastRemindedLabel(last, poll.remindCount, c.now),
+          style: theme.textTheme.bodySmall,
+        ),
+      ],
+    ];
   }
 
   @override
@@ -116,26 +292,37 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                 ),
                 icon: const Icon(Icons.edit_outlined),
               ),
-              PopupMenuButton<bool>(
+              PopupMenuButton<String>(
                 tooltip: 'Weitere Aktionen',
                 enabled: !_busy,
-                onSelected: (value) => _setClosed(poll, value),
+                onSelected: (value) => switch (value) {
+                  'delete' => _delete(poll),
+                  _ => _setClosed(poll, value == 'close'),
+                },
                 itemBuilder: (context) => [
                   closed
                       ? const PopupMenuItem(
-                          value: false,
+                          value: 'reopen',
                           child: ListTile(
                             leading: Icon(Icons.lock_open_outlined),
                             title: Text('Wieder öffnen'),
                           ),
                         )
                       : const PopupMenuItem(
-                          value: true,
+                          value: 'close',
                           child: ListTile(
                             leading: Icon(Icons.stop_circle_outlined),
                             title: Text('Beenden'),
                           ),
                         ),
+                  if (c.supports('pollDelete'))
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: ListTile(
+                        leading: Icon(Icons.delete_outline),
+                        title: Text('Löschen'),
+                      ),
+                    ),
                 ],
               ),
             ],
@@ -191,8 +378,9 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                         ? 'Abgeschlossen · ${poll.voteCountLabel}'
                         : '${poll.voteCountLabel}${poll.closesAt == null ? '' : ' · Bis ${DateFormat('d. MMMM · HH:mm', 'de').format(poll.closesAt!.toLocal())}'}',
                   ),
+                  if (admin && poll.eligibleCount != null)
+                    ..._participation(c, poll, closed),
                   if (canVote) ...[
-                    const SizedBox(height: 4),
                     Text(
                       'Du kannst deine Stimme bis zum Ende ändern.',
                       style: theme.textTheme.bodySmall,

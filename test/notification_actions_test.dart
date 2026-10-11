@@ -48,6 +48,18 @@ void main() {
     },
   );
 
+  test('poll pushes and links open the poll', () {
+    final fromData = AppTarget.fromData({'pollId': 'p1'})!;
+    expect((fromData.kind, fromData.id), ('polls', 'p1'));
+    final fromUri = AppTarget.fromUri(Uri.parse('theaterapp://app/polls/p1'))!;
+    expect((fromUri.kind, fromUri.id), ('polls', 'p1'));
+    expect(AppTarget.fromData({'pollId': ''}), isNull);
+    final web = AppTarget.fromWebUri(
+      Uri.parse('https://theater.example/?target=theaterapp://app/polls/p2'),
+    )!;
+    expect(web.id, 'p2');
+  });
+
   for (final status in ['yes', 'no']) {
     test(
       'quick $status persists on server and reconciles in the app',

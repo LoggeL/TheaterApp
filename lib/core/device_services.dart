@@ -60,6 +60,7 @@ class AppTarget {
             'messages',
             'accounts',
             'slots',
+            'polls',
           }.contains(path[0]) ||
           path[1].isEmpty ||
           path[1].length > 200) {
@@ -108,6 +109,10 @@ class AppTarget {
     final account = data['accountUid'];
     if (account is String && account.isNotEmpty && account.length <= 200) {
       return AppTarget('accounts', account);
+    }
+    final poll = data['pollId'];
+    if (poll is String && poll.isNotEmpty && poll.length <= 200) {
+      return AppTarget('polls', poll);
     }
     return null;
   }

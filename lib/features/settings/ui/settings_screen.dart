@@ -70,6 +70,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     animation: controller,
     builder: (context, _) {
       final theme = Theme.of(context);
+      final user = controller.user;
+      final lateDeclines =
+          controller.supports('lateDeclines') &&
+          (user?.isAdmin == true ||
+              user?.directorProductionIds.isNotEmpty == true);
       final emailOn =
           controller.emailConfigured &&
           (controller.reminders['emailEnabled'] ?? false);
@@ -126,6 +131,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                       ),
                     ),
+                  if (lateDeclines) ...[
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.event_busy_outlined),
+                      title: const Text('Kurzfristige Absagen melden'),
+                      subtitle: const Text(
+                        'Push, wenn jemand weniger als 24 Stunden vor Beginn absagt',
+                      ),
+                      value: controller.reminders['lateDeclines'] ?? true,
+                      onChanged: (value) => runAction(
+                        context,
+                        () => controller.saveReminders({
+                          ...controller.reminders,
+                          'lateDeclines': value,
+                        }),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

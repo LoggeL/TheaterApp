@@ -3,9 +3,11 @@ import '../../../core/models.dart';
 
 /// Whether the signed-in member belongs to the audience of [poll].
 ///
-/// Members only receive polls meant for them. Admins receive every poll, so
-/// for them the roles, invited people and production ensembles decide.
+/// Members only receive polls meant for them. Admins receive every poll; the
+/// server marks the ones meant for them (`addressedToMe`). Older servers do
+/// not, so there the roles, invited people and production ensembles decide.
 bool pollAddressesUser(AppController controller, Poll poll) {
+  if (poll.addressedToMe != null) return poll.addressedToMe!;
   final user = controller.user;
   if (user?.isAdmin != true || !poll.hasAudience) return true;
   final personId = user!.personId;

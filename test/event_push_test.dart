@@ -6,7 +6,7 @@ import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/events/events.dart';
 
-import 'app_controller_test.dart' show TestServer, signIn;
+import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
 
 void main() {
   setUpAll(() => initializeDateFormatting('de'));
@@ -85,6 +85,35 @@ void main() {
       findsWidgets,
     );
     await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('the confirmation says when the server sent no push', (
+    tester,
+  ) async {
+    final (server, controller) = await open(tester);
+    server.override = (request) => request.url.path.contains('/actions')
+        ? Future.value(
+            jsonResponse({
+              'ok': true,
+              'id': 'e1',
+              'pushQueued': false,
+              'pushSkipped': 'far_future',
+            }),
+          )
+        : null;
+    await tester.enterText(find.widgetWithText(TextField, 'Titel'), 'Fotos');
+    final save = find.text('Termin speichern');
+    await scrollTo(tester, save);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Termin gespeichert – kein Push, der Termin liegt mehr als 14 Tage entfernt.',
+      ),
+      findsOneWidget,
+    );
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });

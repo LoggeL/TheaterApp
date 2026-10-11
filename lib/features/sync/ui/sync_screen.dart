@@ -141,7 +141,8 @@ class SyncScreen extends StatelessWidget {
                     trailing: PopupMenuButton<String>(
                       tooltip: 'Änderung bearbeiten',
                       itemBuilder: (_) => [
-                        if (entry.failed)
+                        // Retrying cannot help after e.g. a passed deadline.
+                        if (entry.failed && entry.retryable)
                           const PopupMenuItem(
                             value: 'retry',
                             child: Text('Erneut versuchen'),
