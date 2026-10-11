@@ -14,6 +14,7 @@ import '../../rehearsal/ui/responses_screen.dart';
 import '../../rehearsal/ui/scene_planner_screen.dart';
 import '../../scripts/ui/script_reader_screen.dart';
 import '../../slots/ui/slot_event_notice.dart';
+import '../admin/event_editor_screen.dart';
 import '../data/ics_export.dart';
 import '../domain/event_dates.dart';
 import '../domain/event_format.dart';
@@ -38,7 +39,7 @@ class EventDetailScreen extends StatelessWidget {
           controller: controller,
           selectedIndex: AppSection.schedule.index,
           child: Scaffold(
-            appBar: AppBar(),
+            appBar: AppBar(title: const Text('Termin')),
             body: const EmptyState(
               icon: Icons.event_busy,
               title: 'Termin nicht verfügbar',
@@ -56,8 +57,25 @@ class EventDetailScreen extends StatelessWidget {
           appBar: AppBar(
             title: const Text('Termin'),
             actions: [
+              if (controller.user?.isAdmin == true)
+                IconButton(
+                  tooltip: event.fromSlotPool
+                      ? 'Im Terminfinder öffnen'
+                      : 'Termin bearbeiten',
+                  onPressed: () async {
+                    final route = Navigator.of(context);
+                    final result = await editEvent(context, controller, event);
+                    // A deleted event leaves nothing to show here.
+                    if (result == EventEditorResult.deleted) route.pop();
+                  },
+                  icon: Icon(
+                    event.fromSlotPool
+                        ? Icons.edit_calendar_outlined
+                        : Icons.edit_outlined,
+                  ),
+                ),
               IconButton(
-                tooltip: 'Kalenderdatei teilen',
+                tooltip: 'In Kalender übernehmen',
                 onPressed: event.startsAt == null
                     ? null
                     : () =>
@@ -84,17 +102,33 @@ class EventDetailContent extends StatelessWidget {
   final AppController controller;
   final TheaterEvent event;
   final bool embedded;
+
+  /// Who is invited; shown for every event, also for ensembles only.
+  String get _audience {
+    final label = controller.audienceLabel(
+      event.roleIds,
+      event.personIds,
+      event.productionIds,
+    );
+    return 'Für ${label == 'Alle' ? 'alle' : label}';
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final side = constraints.maxWidth > 840
           ? (constraints.maxWidth - 840) / 2 + 24
           : 24.0;
+      final now = controller.now;
+      final marker = eventMarker(event, now);
+      final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+      final admin = controller.user?.isAdmin == true;
+      final gap = SizedBox(height: embedded ? 10 : 17);
       return ListView(
         primary: false,
         padding: EdgeInsets.fromLTRB(side, 16, side, 36),
         children: [
-          const Eyebrow('Kolpingtheater Ramsen'),
+          Eyebrow(eventDate(event)),
           const SizedBox(height: 12),
           Text(
             event.title,
@@ -103,40 +137,22 @@ class EventDetailContent extends StatelessWidget {
                 : Theme.of(context).textTheme.headlineLarge,
           ),
           const SizedBox(height: 12),
-          Builder(
-            builder: (context) {
-              final now = DateTime.now();
-              final marker = eventMarker(event, now);
-              return Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  EventKindPill(event.kind),
-                  if (marker != null) EventMarker(marker),
-                  if (event.inSeries)
-                    Tooltip(
-                      message: 'Serientermin',
-                      child: StatePill(
-                        'Serie',
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        icon: Icons.repeat,
-                      ),
-                    ),
-                  if (eventIsPast(event, now))
-                    StatePill(
-                      'Vorbei',
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      icon: Icons.history,
-                    ),
-                ],
-              );
-            },
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              EventKindPill(event.kind),
+              if (marker != null) EventMarker(marker),
+              if (event.inSeries)
+                Tooltip(
+                  message: 'Serientermin',
+                  child: StatePill('Serie', color: muted, icon: Icons.repeat),
+                ),
+              if (eventIsPast(event, now))
+                StatePill('Vorbei', color: muted, icon: Icons.history),
+            ],
           ),
-          if (event.description.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            SelectableText(event.description),
-          ],
           SizedBox(height: embedded ? 16 : 24),
           Card(
             child: Padding(
@@ -144,23 +160,17 @@ class EventDetailContent extends StatelessWidget {
               child: Column(
                 children: [
                   _DetailMeta(Icons.calendar_today_outlined, eventDate(event)),
-                  SizedBox(height: embedded ? 10 : 17),
+                  gap,
                   _DetailMeta(Icons.schedule, eventTime(event)),
-                  SizedBox(height: embedded ? 10 : 17),
+                  gap,
                   _DetailMeta(
                     Icons.location_on_outlined,
                     event.place.isEmpty
                         ? 'Ort wird noch bekannt gegeben'
                         : event.place,
                   ),
-                  if (event.roleIds.isNotEmpty ||
-                      event.personIds.isNotEmpty) ...[
-                    SizedBox(height: embedded ? 10 : 17),
-                    _DetailMeta(
-                      Icons.group_outlined,
-                      'Für ${controller.audienceLabel(event.roleIds, event.personIds, event.productionIds)}',
-                    ),
-                  ],
+                  gap,
+                  _DetailMeta(Icons.group_outlined, _audience),
                 ],
               ),
             ),
@@ -180,14 +190,10 @@ class EventDetailContent extends StatelessWidget {
               padding: const EdgeInsets.only(top: 10),
               child: Text('Dein Absagegrund: ${event.declineReason}'),
             ),
-          if (controller.pendingCount > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text(
-                '${controller.pendingCount} Änderung(en) warten auf Übertragung.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
+          if (event.description.isNotEmpty) ...[
+            const SectionTitle('Beschreibung'),
+            SelectableText(event.description),
+          ],
           if (event.productionId != null) ...[
             const SectionTitle('Für diese Probe'),
             Card(
@@ -212,8 +218,23 @@ class EventDetailContent extends StatelessWidget {
               ),
             ),
           ],
-          if (controller.user?.isAdmin == true) ...[
+          if (admin) ...[
             const SectionTitle('Probenleitung'),
+            // The route offers editing in its app bar; inline it heads here.
+            if (embedded) ...[
+              FilledButton.tonalIcon(
+                onPressed: () => editEvent(context, controller, event),
+                icon: Icon(
+                  event.fromSlotPool
+                      ? Icons.edit_calendar_outlined
+                      : Icons.edit_outlined,
+                ),
+                label: Text(
+                  event.fromSlotPool ? 'Im Terminfinder öffnen' : 'Bearbeiten',
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             OutlinedButton.icon(
               onPressed: () => openPage(
                 context,
@@ -241,14 +262,17 @@ class EventDetailContent extends StatelessWidget {
               label: const Text('Szenen planen'),
             ),
           ],
-          SizedBox(height: embedded ? 16 : 24),
-          OutlinedButton.icon(
-            onPressed: event.startsAt == null
-                ? null
-                : () => runAction(context, () => exportEvent(context, event)),
-            icon: const Icon(Icons.calendar_month_outlined),
-            label: const Text('Für den Kalender exportieren'),
-          ),
+          // The route has the export in its app bar.
+          if (embedded) ...[
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: event.startsAt == null
+                  ? null
+                  : () => runAction(context, () => exportEvent(context, event)),
+              icon: const Icon(Icons.calendar_month_outlined),
+              label: const Text('In Kalender übernehmen'),
+            ),
+          ],
         ],
       );
     },

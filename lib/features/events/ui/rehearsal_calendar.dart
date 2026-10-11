@@ -5,40 +5,88 @@ import '../../../core/models.dart';
 import '../domain/event_dates.dart';
 import 'event_style.dart';
 
-class RehearsalCalendar extends StatelessWidget {
+class RehearsalCalendar extends StatefulWidget {
   const RehearsalCalendar({
     super.key,
     required this.selected,
     required this.onSelected,
     required this.events,
+    this.displayedMonth,
+    this.onMonthChanged,
+    this.today,
   });
   final DateTime selected;
   final ValueChanged<DateTime> onSelected;
   final List<TheaterEvent> events;
+
+  /// The month on screen. Without it the calendar pages on its own and
+  /// follows [selected] whenever that moves to another month.
+  final DateTime? displayedMonth;
+
+  /// Called when the member pages to another month. Paging never changes
+  /// the selected day.
+  final ValueChanged<DateTime>? onMonthChanged;
+
+  /// The current day, normally `controller.now`; defaults to the device time.
+  final DateTime? today;
+  @override
+  State<RehearsalCalendar> createState() => _RehearsalCalendarState();
+}
+
+class _RehearsalCalendarState extends State<RehearsalCalendar> {
+  late DateTime _month = _monthOf(widget.displayedMonth ?? widget.selected);
+
+  static DateTime _monthOf(DateTime day) => DateTime(day.year, day.month);
+
+  @override
+  void didUpdateWidget(RehearsalCalendar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.displayedMonth != null) {
+      _month = _monthOf(widget.displayedMonth!);
+    } else if (_monthOf(widget.selected) != _monthOf(oldWidget.selected)) {
+      _month = _monthOf(widget.selected);
+    }
+  }
+
+  void _show(DateTime month) {
+    month = _monthOf(month);
+    if (month == _month) return;
+    setState(() => _month = month);
+    widget.onMonthChanged?.call(month);
+  }
+
+  void _page(int delta) => _show(DateTime(_month.year, _month.month + delta));
+
+  /// Selecting a day also brings its month on screen.
+  void _select(DateTime day) {
+    _show(day);
+    widget.onSelected(day);
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final selected = widget.selected, events = widget.events;
+    final now = widget.today ?? DateTime.now();
     return Column(
       children: [
         Row(
           children: [
             IconButton(
               tooltip: 'Vorheriger Monat',
-              onPressed: () =>
-                  onSelected(DateTime(selected.year, selected.month - 1)),
+              onPressed: () => _page(-1),
               icon: const Icon(Icons.chevron_left),
             ),
             Expanded(
               child: Text(
-                DateFormat.yMMMM('de').format(selected),
+                DateFormat.yMMMM('de').format(_month),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
             ),
             IconButton(
               tooltip: 'Nächster Monat',
-              onPressed: () =>
-                  onSelected(DateTime(selected.year, selected.month + 1)),
+              onPressed: () => _page(1),
               icon: const Icon(Icons.chevron_right),
             ),
           ],
@@ -73,14 +121,13 @@ class RehearsalCalendar extends StatelessWidget {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               children: [
-                for (final day in calendarDays(selected))
+                for (final day in calendarDays(_month))
                   Builder(
                     builder: (context) {
                       final dayEvents = events
                           .where((e) => eventOnDay(e, day))
                           .toList();
                       final count = dayEvents.length;
-                      final now = DateTime.now();
                       final chosen = DateUtils.isSameDay(day, selected),
                           today = DateUtils.isSameDay(day, now),
                           past = DateTime(
@@ -119,7 +166,7 @@ class RehearsalCalendar extends StatelessWidget {
 
                       final foreground = chosen
                           ? scheme.onPrimary
-                          : day.month != selected.month
+                          : day.month != _month.month
                           ? scheme.onSurfaceVariant.withValues(alpha: .55)
                           : past
                           ? scheme.onSurfaceVariant
@@ -128,11 +175,12 @@ class RehearsalCalendar extends StatelessWidget {
                         button: true,
                         selected: chosen,
                         label:
-                            '${DateFormat.yMMMMEEEEd('de').format(day)}, $count Termine',
+                            '${DateFormat.yMMMMEEEEd('de').format(day)}, '
+                            '${count == 1 ? '1 Termin' : '$count Termine'}',
                         excludeSemantics: true,
                         child: InkWell(
                           borderRadius: BorderRadius.circular(14),
-                          onTap: () => onSelected(day),
+                          onTap: () => _select(day),
                           child: Container(
                             margin: const EdgeInsets.all(2),
                             decoration: BoxDecoration(
@@ -252,7 +300,7 @@ class RehearsalCalendar extends StatelessWidget {
           children: [
             const _ResponseLegend(),
             TextButton(
-              onPressed: () => onSelected(DateTime.now()),
+              onPressed: () => _select(now),
               child: const Text('Heute'),
             ),
           ],

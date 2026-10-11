@@ -4,14 +4,15 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/features/events/events.dart';
 
-import 'app_controller_test.dart' show TestServer, signIn;
+import 'app_controller_test.dart' show TestServer, fixedNow, signIn;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() => initializeDateFormatting('de'));
 
   TestServer server() {
-    final now = DateTime.now();
+    // The schedule follows the controller clock.
+    final now = fixedNow;
     String at(Duration offset) => now.add(offset).toUtc().toIso8601String();
     final result = TestServer();
     result.data['events'] = [

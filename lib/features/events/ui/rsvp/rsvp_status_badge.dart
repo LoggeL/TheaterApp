@@ -16,6 +16,7 @@ class RsvpStatusBadge extends StatelessWidget {
     this.locked = false,
     this.onDark = false,
     this.emphasizeOpen = false,
+    this.showLabel = false,
   });
 
   final String status;
@@ -25,11 +26,22 @@ class RsvpStatusBadge extends StatelessWidget {
   /// Draws an open, still answerable response in the accent colour.
   final bool emphasizeOpen;
 
+  /// Spells out an open response next to the icon: 'Offen' while it can
+  /// still be given, 'Geschlossen' once responses are closed.
+  final bool showLabel;
+
   @override
   Widget build(BuildContext context) {
     final arrival = status == 'late' && expectedArrivalAt != null
         ? DateFormat.Hm('de').format(expectedArrivalAt!.toLocal())
         : null;
+    final short =
+        arrival ??
+        (showLabel && status == 'open'
+            ? locked
+                  ? 'Geschlossen'
+                  : 'Offen'
+            : null);
     final label = [
       status == 'open' ? 'Rückmeldung offen' : statusText(status),
       if (status == 'late') arrival ?? 'Uhrzeit offen',
@@ -69,10 +81,10 @@ class RsvpStatusBadge extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(icon, size: 16, color: color),
-              if (arrival != null) ...[
+              if (short != null) ...[
                 const SizedBox(width: 5),
                 Text(
-                  arrival,
+                  short,
                   style: TextStyle(
                     color: color,
                     fontSize: 12,
@@ -80,7 +92,7 @@ class RsvpStatusBadge extends StatelessWidget {
                   ),
                 ),
               ],
-              if (locked) ...[
+              if (locked && short != 'Geschlossen') ...[
                 const SizedBox(width: 4),
                 Icon(Icons.lock_outline, size: 12, color: color),
               ],
