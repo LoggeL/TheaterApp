@@ -59,7 +59,7 @@ void main() {
       tester.getTopLeft(secondary).dx,
       greaterThan(tester.getTopLeft(primary).dx),
     );
-    await tester.tap(find.text('Zum Plan'));
+    await tester.tap(find.text('Alle Termine'));
     expect(plans, 1);
     await tester.tap(
       find.descendant(
@@ -121,6 +121,12 @@ void main() {
       expect(find.byKey(const ValueKey('today-primary-column')), findsNothing);
       expect(find.text('Keine anstehenden Termine'), findsOneWidget);
       expect(find.text('Kein aktuelles Stück'), findsOneWidget);
+      // Nothing to preview and nothing waiting: no empty sections.
+      expect(find.text('Weitere Termine'), findsNothing);
+      expect(
+        find.text('Alles erledigt – keine offenen Rückmeldungen.'),
+        findsOneWidget,
+      );
       await pump(1360, 1);
       expect(
         find.byKey(const ValueKey('today-primary-column')),
