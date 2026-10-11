@@ -9,14 +9,16 @@ class ProductionCard extends StatelessWidget {
     required this.production,
     required this.number,
     required this.cached,
-    required this.role,
+    required this.roles,
     required this.onTap,
     this.highlightLatest = true,
   });
   final Production production;
   final int number;
   final bool cached;
-  final String? role;
+
+  /// Names of the member's roles in this production; may be empty.
+  final List<String> roles;
   final VoidCallback onTap;
   final bool highlightLatest;
   bool get latest => highlightLatest && number == 1;
@@ -78,12 +80,14 @@ class ProductionCard extends StatelessWidget {
                   ),
                 ],
                 if (!latest) const Spacer(),
-                Text(
-                  number.toString().padLeft(2, '0'),
-                  style: const TextStyle(
-                    fontSize: 40,
-                    fontWeight: FontWeight.w300,
-                    color: Colors.white30,
+                ExcludeSemantics(
+                  child: Text(
+                    number.toString().padLeft(2, '0'),
+                    style: const TextStyle(
+                      fontSize: 40,
+                      fontWeight: FontWeight.w300,
+                      color: Colors.white30,
+                    ),
                   ),
                 ),
               ],
@@ -116,12 +120,11 @@ class ProductionCard extends StatelessWidget {
                         : '${production.sceneCount} Szenen',
                     style: const TextStyle(color: Colors.white70),
                   ),
-                Text(
-                  role?.isNotEmpty == true
-                      ? 'Deine Rolle: $role'
-                      : 'Rolle im Drehbuch auswählen',
-                  style: const TextStyle(color: Colors.white70),
-                ),
+                Text(switch (roles.length) {
+                  0 => 'Rolle im Drehbuch auswählen',
+                  1 => 'Deine Rolle: ${roles.single}',
+                  _ => 'Deine Rollen: ${roles.join(', ')}',
+                }, style: const TextStyle(color: Colors.white70)),
               ],
             ),
             const SizedBox(height: 22),

@@ -2,21 +2,39 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../app/shell/app_navigation.dart';
 import '../../../app/shell/app_section.dart';
+import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
+import '../../../shared/feedback.dart';
+import '../../../shared/layout/breakpoints.dart';
 import '../../../shared/navigation.dart';
+import '../../../shared/widgets/empty_state.dart';
 import '../../casting/ui/casting_screen.dart';
+import '../data/comments_repository.dart';
+import '../data/reader_preferences.dart';
+import '../data/script_pdf_exporter.dart';
+import '../domain/cue_category.dart';
+import '../domain/reader_entries.dart';
+import '../domain/reader_mode.dart';
 import '../domain/script_filter.dart';
+import '../domain/script_roles.dart';
+import '../state/live_focus_controller.dart';
 import 'annotations/cue_comments_screen.dart';
 import 'annotations/private_note_editor.dart';
+import 'widgets/cue_card.dart';
+import 'widgets/reader_sheet_frame.dart';
 import 'widgets/reader_style.dart';
+import 'widgets/scene_heading.dart';
+
+part 'reader/reader_annotations.dart';
+part 'reader/reader_desktop.dart';
+part 'reader/reader_live.dart';
+part 'reader/reader_sheets.dart';
+part 'reader/reader_toolbars.dart';
 
 class ScriptReaderScreen extends StatefulWidget {
   const ScriptReaderScreen({
@@ -34,6 +52,14 @@ class ScriptReaderScreen extends StatefulWidget {
   State<ScriptReaderScreen> createState() => _ScriptReaderScreenState();
 }
 
+/// The view filters that automatic jumps may widen, kept for undo.
+typedef _ViewFilters = ({
+  ReaderMode mode,
+  Set<String> categories,
+  bool showDirections,
+  bool showTechnical,
+});
+
 class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     with WidgetsBindingObserver {
   final _itemScroll = ItemScrollController();
@@ -42,16 +68,10 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   final _searchFocus = FocusNode();
   Timer? _saveTimer;
   Timer? _searchTimer;
-  Timer? _focusTimer;
-  FocusState? _liveFocus;
-  String? _liveError;
-  bool _following = false;
-  bool _directing = false;
-  bool _focusRequest = false;
-  bool _foreground = true;
-  int _lastFocusSequence = -1;
+  late final LiveFocusController _live;
+  late final CommentsRepository _comments;
   ScriptDocument? _document;
-  List<_ReaderEntry> _entries = [];
+  List<ReaderEntry> _entries = [];
   Map<String, int> _cueIndices = {};
   List<ScriptCue> _searchResults = [];
   Set<String> _bookmarks = {};
@@ -66,12 +86,14 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
       cue.kind == 'dialogue' &&
       _roles.any((r) => r.toUpperCase() == cue.role.trim().toUpperCase());
   bool get _hasRoles => _roles.isNotEmpty;
-  String _mode = 'read';
+  ReaderMode _mode = ReaderMode.read;
   String? _activeCueId;
   String? _firstVisibleCueId;
   String? _loadError;
   String _sceneLabel = '';
   String? _visibleSceneId;
+  String? _pinnedSceneId, _pinnedAtCueId;
+  bool _autoScrolling = false;
   double _fontScale = 1;
   int _contextLines = 2;
   int _searchResultIndex = 0;
@@ -80,9 +102,9 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   bool _loading = true;
   bool _searching = false;
   bool _printing = false;
+  bool _hintDismissed = false;
 
-  String get _prefix => 'reader.${widget.productionId}';
-  bool get _stage => _mode == 'stage';
+  bool get _stage => _mode == ReaderMode.stage;
   String get _title {
     for (final production in widget.controller.productions) {
       if (production.id == widget.productionId) return production.title;
@@ -90,61 +112,49 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     return 'Drehbuch';
   }
 
+  /// Lets the part files rebuild; `setState` is protected.
+  void _update(VoidCallback change) => setState(change);
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    final preferences = widget.controller.preferences;
-    _role = preferences['$_prefix.role'] as String? ?? '';
-    _roles = jsonList(
-      preferences['$_prefix.roles'],
-    ).map((v) => v.toString()).toSet();
-    if (_roles.isEmpty && _role.isNotEmpty) _roles.add(_role);
-    _assignedRoles = preferences.containsKey('$_prefix.assignedRoles')
-        ? preferences['$_prefix.assignedRoles'] == true
-        : _roles.isEmpty;
-    _notes = jsonMap(preferences['$_prefix.notes']);
-    _categories = preferences.containsKey('$_prefix.categories')
-        ? jsonList(
-            preferences['$_prefix.categories'],
-          ).map((v) => v.toString()).toSet()
-        : {'direction'};
-    _categoryContext = jsonMap(
-      preferences['$_prefix.categoryContext'],
-    ).map((k, v) => MapEntry(k, intValue(v)));
-    _mode =
-        preferences['$_prefix.mode'] as String? ??
-        (preferences['$_prefix.actorMode'] == true ? 'actor' : 'read');
-    if (!const {
-      'read',
-      'actor',
-      'practice',
-      'stage',
-      'technical',
-      'cues',
-    }.contains(_mode)) {
-      _mode = 'read';
-    }
-    _fontScale = ((preferences['$_prefix.fontScale'] as num?)?.toDouble() ?? 1)
-        .clamp(0.85, 1.6);
-    _contextLines =
-        ((preferences['$_prefix.contextLines'] as num?)?.toInt() ?? 2).clamp(
-          0,
-          6,
-        );
-    _showDirections = preferences['$_prefix.showDirections'] != false;
-    _showTechnical = preferences['$_prefix.showTechnical'] == true;
-    _bookmarks = (preferences['$_prefix.bookmarks'] as List? ?? [])
-        .whereType<String>()
-        .toSet();
-    _activeCueId =
-        widget.initialCueId ?? preferences['$_prefix.lastCueId'] as String?;
+    final saved = ReaderPreferences.read(
+      widget.controller.preferences,
+      widget.productionId,
+    );
+    _role = saved.role;
+    _roles = saved.roles;
+    _assignedRoles = saved.assignedRoles;
+    _notes = saved.notes;
+    _categories = saved.categories;
+    _categoryContext = saved.categoryContext;
+    _mode = saved.mode;
+    _fontScale = saved.fontScale;
+    _contextLines = saved.contextLines;
+    _showDirections = saved.showDirections;
+    _showTechnical = saved.showTechnical;
+    _bookmarks = saved.bookmarks;
+    _activeCueId = widget.initialCueId ?? saved.lastCueId;
+    _live = LiveFocusController(
+      controller: widget.controller,
+      productionId: widget.productionId,
+      revision: () => _document?.revision,
+      onFollow: _followFocus,
+      onPublishFailed: _notice,
+    )..addListener(_rebuild);
+    _comments = CommentsRepository(
+      controller: widget.controller,
+      productionId: widget.productionId,
+    )..addListener(_rebuild);
     _positions.itemPositions.addListener(_onPositionsChanged);
     _document = widget.controller.scripts[widget.productionId];
     _selectAssignedRoles();
     _rebuildEntries();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _load();
+      if (!mounted) return;
+      _load();
+      _comments.ensureLoaded();
     });
   }
 
@@ -152,7 +162,8 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   void dispose() {
     _saveTimer?.cancel();
     _searchTimer?.cancel();
-    _focusTimer?.cancel();
+    _live.dispose();
+    _comments.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _positions.itemPositions.removeListener(_onPositionsChanged);
     _searchController.dispose();
@@ -160,204 +171,28 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     super.dispose();
   }
 
+  void _rebuild() {
+    if (mounted) setState(() {});
+  }
+
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    _foreground = state == AppLifecycleState.resumed;
-    if (_foreground && (_following || _directing)) {
-      _startFocusPolling();
-    } else {
-      _focusTimer?.cancel();
-    }
-  }
+  void didChangeAppLifecycleState(AppLifecycleState state) =>
+      _live.setForeground(state == AppLifecycleState.resumed);
 
-  void _startFocusPolling() {
-    _focusTimer?.cancel();
-    if (!_foreground || (!_following && !_directing)) return;
-    _refreshFocus();
-    _focusTimer = Timer.periodic(
-      const Duration(seconds: 3),
-      (_) => _refreshFocus(),
-    );
-  }
-
-  Future<void> _refreshFocus() async {
-    if (_focusRequest || !_foreground || !mounted) return;
-    _focusRequest = true;
-    try {
-      final focus = await widget.controller.getFocus(widget.productionId);
-      if (!mounted || !_foreground) return;
-      if (focus.productionId != widget.productionId ||
-          focus.sequence < _lastFocusSequence) {
-        return;
-      }
-      final changed = focus.sequence > _lastFocusSequence;
-      _lastFocusSequence = focus.sequence;
-      if (focus.cueId != null && focus.revision != _document?.revision) {
-        setState(() {
-          _liveFocus = focus;
-          _liveError =
-              'Andere Drehbuchfassung. Bitte aktualisieren, um dem Fokus zu folgen.';
-        });
-        return;
-      }
-      setState(() {
-        _liveFocus = focus;
-        _liveError = null;
-        if (!focus.canDirect) _directing = false;
-      });
-      if (changed && _following && focus.cueId != null) {
-        await _jumpToCue(focus.cueId!);
-      }
-      if (changed && _following && focus.cueId == null) {
-        setState(() => _activeCueId = null);
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(
-          () => _liveError =
-              'Fokus zurzeit nicht erreichbar. Dein Drehbuch bleibt lesbar.',
-        );
-      }
-    } finally {
-      _focusRequest = false;
+  Future<void> _followFocus(String? cueId) async {
+    if (cueId != null) {
+      await _jumpToCue(cueId);
+    } else if (mounted) {
+      setState(() => _activeCueId = null);
     }
-  }
-
-  Future<void> _publishFocus(ScriptCue cue) async {
-    if (_focusRequest) {
-      _notice(
-        'Der letzte Fokus wird noch übertragen. Bitte gleich noch einmal tippen.',
-      );
-      return;
-    }
-    _focusRequest = true;
-    try {
-      final focus = await widget.controller.publishFocus(
-        widget.productionId,
-        revision: _document!.revision,
-        cueId: cue.id,
-      );
-      if (!mounted) return;
-      setState(() {
-        _liveFocus = focus;
-        _liveError = null;
-        _lastFocusSequence = focus.sequence;
-      });
-    } catch (_) {
-      if (mounted) {
-        setState(
-          () => _liveError =
-              'Der Fokus wurde nicht geteilt. Bitte erneut versuchen.',
-        );
-        _notice(_liveError!);
-      }
-    } finally {
-      _focusRequest = false;
-    }
-  }
-
-  Future<void> _showLive() async {
-    await _refreshFocus();
-    if (!mounted) return;
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, updateSheet) => _SheetFrame(
-          title: 'Ein gemeinsamer Fokus',
-          subtitle: widget.controller.isDemo
-              ? 'Die Demo zeigt den Fokus auf diesem Gerät. Für mehrere Geräte verbinde dich mit eurem Server.'
-              : _liveFocus?.source == 'skript'
-              ? 'Mit dem Skript-Browser verbunden. Folge der gemeinsamen Textstelle.'
-              : 'Folge derselben Textstelle auf Handy, Tablet und in der Web-App.',
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (_liveError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Text(
-                      _liveError!,
-                      style: const TextStyle(color: readerAccent),
-                    ),
-                  ),
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Der Regie folgen'),
-                  subtitle: const Text(
-                    'Automatisch zur gemeinsamen Textstelle springen',
-                  ),
-                  value: _following,
-                  onChanged: _liveFocus == null
-                      ? null
-                      : (value) {
-                          setState(() {
-                            _following = value;
-                            if (value) {
-                              _directing = false;
-                              _lastFocusSequence = -1;
-                            }
-                          });
-                          updateSheet(() {});
-                          _startFocusPolling();
-                        },
-                ),
-                if (_liveFocus?.canDirect == true)
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Regie übernehmen'),
-                    subtitle: const Text(
-                      'Angetippte Textstellen mit allen folgenden Geräten teilen',
-                    ),
-                    value: _directing,
-                    onChanged: (value) {
-                      setState(() {
-                        _directing = value;
-                        if (value) _following = false;
-                      });
-                      updateSheet(() {});
-                      _startFocusPolling();
-                    },
-                  ),
-                if (_liveFocus?.canDirect == true && _liveFocus?.cueId != null)
-                  TextButton.icon(
-                    onPressed: () async {
-                      try {
-                        await widget.controller.clearFocus(widget.productionId);
-                        if (!mounted) return;
-                        await _refreshFocus();
-                        if (context.mounted) updateSheet(() {});
-                      } catch (_) {
-                        if (mounted) {
-                          _notice('Der Fokus konnte nicht aufgehoben werden.');
-                        }
-                      }
-                    },
-                    icon: const Icon(Icons.location_disabled),
-                    label: const Text('Gemeinsamen Fokus aufheben'),
-                  ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Zurück zum Stück'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   Future<void> _preference(String key, Object? value) async {
     try {
-      await widget.controller.setPreference('$_prefix.$key', value);
+      await widget.controller.setPreference(
+        ReaderPreferences.key(widget.productionId, key),
+        value,
+      );
     } catch (_) {
       if (mounted) _notice('Die Einstellung konnte nicht gespeichert werden.');
     }
@@ -409,38 +244,20 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     final cues = visibleScriptCues(
       doc,
       roles: _roles,
-      mode: _mode == 'cues' ? 'technical' : _mode,
-      technicalFullText: _mode == 'technical',
+      mode: _mode == ReaderMode.cues ? 'technical' : _mode.code,
+      technicalFullText: _mode == ReaderMode.technical,
       categories: _categories,
       categoryContext: _categoryContext,
       contextLines: _contextLines,
       showDirections: _showDirections,
-      showTechnical: _showTechnical || _mode == 'technical' || _mode == 'cues',
+      showTechnical: _showTechnical || _mode.technicalFocus,
     );
-    final scenes = {for (final scene in doc.scenes) scene.id: scene};
-    final entries = <_ReaderEntry>[];
-    final cueIndices = <String, int>{};
-    String? previousScene;
-    for (final cue in cues) {
-      if (cue.sceneId != previousScene) {
-        entries.add(
-          _ReaderEntry.scene(
-            scenes[cue.sceneId] ??
-                ScriptScene(
-                  id: cue.sceneId,
-                  title: 'Szene ${cue.sceneId}',
-                  ordinal: 0,
-                  roles: const [],
-                ),
-          ),
-        );
-        previousScene = cue.sceneId;
-      }
-      cueIndices[cue.id] = entries.length;
-      entries.add(_ReaderEntry.cue(cue));
-    }
+    final entries = readerEntries(doc, cues);
     _entries = entries;
-    _cueIndices = cueIndices;
+    _cueIndices = {
+      for (var i = 0; i < entries.length; i++)
+        if (entries[i].cue != null) entries[i].cue!.id: i,
+    };
   }
 
   void _onPositionsChanged() {
@@ -452,54 +269,100 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
             )
             .toList()
           ..sort((a, b) => a.index.compareTo(b.index));
-    for (final position in positions) {
-      if (position.index >= _entries.length) continue;
-      final cue = _entries[position.index].cue;
-      if (cue == null) continue;
-      if (_firstVisibleCueId == cue.id) return;
-      _firstVisibleCueId = cue.id;
-      final scenes = _document?.scenes ?? <ScriptScene>[];
-      var label = 'Szene ${cue.sceneId}';
-      for (final scene in scenes) {
-        if (scene.id == cue.sceneId) {
-          label = scene.title;
-          break;
-        }
-      }
-      if ((_sceneLabel != label || _visibleSceneId != cue.sceneId) && mounted) {
-        setState(() {
-          _sceneLabel = label;
-          _visibleSceneId = cue.sceneId;
-        });
-      }
-      _saveTimer?.cancel();
-      _saveTimer = Timer(
-        const Duration(milliseconds: 650),
-        () => _preference('lastCueId', cue.id),
-      );
-      return;
+    final visible = [
+      for (final position in positions)
+        if (position.index < _entries.length) _entries[position.index],
+    ];
+    final cue = visible.map((entry) => entry.cue).nonNulls.firstOrNull;
+    if (cue == null || _firstVisibleCueId == cue.id) return;
+    _firstVisibleCueId = cue.id;
+    // After a jump the target scene stays highlighted, even when the list
+    // cannot scroll it to the top, until the member scrolls on.
+    if (_pinnedSceneId != null && !_autoScrolling && cue.id != _pinnedAtCueId) {
+      _pinnedSceneId = null;
     }
+    final sceneId =
+        _pinnedSceneId != null &&
+            visible.any(
+              (entry) =>
+                  (entry.cue?.sceneId ?? entry.scene?.id) == _pinnedSceneId,
+            )
+        ? _pinnedSceneId!
+        : cue.sceneId;
+    final label = sceneTitle(_document!, sceneId);
+    if ((_sceneLabel != label || _visibleSceneId != sceneId) && mounted) {
+      setState(() {
+        _sceneLabel = label;
+        _visibleSceneId = sceneId;
+      });
+    }
+    _saveTimer?.cancel();
+    _saveTimer = Timer(
+      const Duration(milliseconds: 650),
+      () => _preference('lastCueId', cue.id),
+    );
+  }
+
+  _ViewFilters _viewFilters() => (
+    mode: _mode,
+    categories: Set.of(_categories),
+    showDirections: _showDirections,
+    showTechnical: _showTechnical,
+  );
+
+  Future<void> _persistView() async {
+    await _preference('mode', _mode.code);
+    await _preference('categories', _categories.toList());
+    await _preference('showDirections', _showDirections);
+    await _preference('showTechnical', _showTechnical);
+  }
+
+  /// Tells the member that a jump widened the view, with an undo.
+  void _announceReveal(_ViewFilters before) {
+    if (!mounted) return;
+    final message = before.mode != _mode
+        ? 'Ansicht auf „${_mode.label}“ umgestellt, damit die Textstelle sichtbar ist'
+        : 'Weitere Hinweise eingeblendet, damit die Textstelle sichtbar ist';
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    showDone(
+      context,
+      message,
+      actionLabel: 'Rückgängig',
+      onAction: () => _restoreView(before),
+    );
+  }
+
+  Future<void> _restoreView(_ViewFilters view) async {
+    if (!mounted) return;
+    setState(() {
+      _mode = view.mode;
+      _categories = Set.of(view.categories);
+      _showDirections = view.showDirections;
+      _showTechnical = view.showTechnical;
+      _revealed.clear();
+      _rebuildEntries();
+    });
+    await _persistView();
   }
 
   Future<void> _jumpToCue(String cueId, {bool animate = true}) async {
     if (!mounted) return;
     if (!_cueIndices.containsKey(cueId)) {
       final cue = _document?.cues.where((cue) => cue.id == cueId).firstOrNull;
-      if (cue == null || cue.kind == 'scene' || cue.kind == 'role') {
+      if (cue == null || !isReadableCue(cue)) {
         _notice('Diese Textstelle ist in dieser Fassung nicht vorhanden.');
         return;
       }
+      final before = _viewFilters();
       setState(() {
-        _mode = 'read';
+        _mode = ReaderMode.read;
         if (cue.kind == 'direction') _showDirections = true;
-        if (isTechnicalCue(cue)) _showTechnical = true;
+        if (cue.isTechnical) _showTechnical = true;
         if (cue.kind != 'dialogue') _categories.add(cueCategory(cue));
         _rebuildEntries();
       });
-      await _preference('mode', 'read');
-      await _preference('categories', _categories.toList());
-      await _preference('showDirections', _showDirections);
-      await _preference('showTechnical', _showTechnical);
+      await _persistView();
+      _announceReveal(before);
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
     }
@@ -508,56 +371,76 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
       _notice('Diese Textstelle ist in dieser Fassung nicht vorhanden.');
       return;
     }
+    final sceneId = _document!.cues
+        .firstWhere((cue) => cue.id == cueId)
+        .sceneId;
     setState(() {
       _activeCueId = cueId;
-      _visibleSceneId = _document!.cues
-          .firstWhere((cue) => cue.id == cueId)
-          .sceneId;
+      _visibleSceneId = sceneId;
     });
-    if (_itemScroll.isAttached) {
+    await _scrollTo(index, alignment: 0.08, animate: animate);
+    _preference('lastCueId', cueId);
+  }
+
+  /// Scrolls to a scene. The reading mode changes only when the scene has
+  /// nothing to show in the current one.
+  Future<void> _jumpToScene(String sceneId, {bool animate = true}) async {
+    int sceneIndex() =>
+        _entries.indexWhere((entry) => entry.scene?.id == sceneId);
+    var index = sceneIndex();
+    if (index < 0 && _mode != ReaderMode.read) {
+      final before = _viewFilters();
+      setState(() {
+        _mode = ReaderMode.read;
+        _revealed.clear();
+        _rebuildEntries();
+      });
+      await _preference('mode', _mode.code);
+      _announceReveal(before);
+      await WidgetsBinding.instance.endOfFrame;
+      index = sceneIndex();
+    }
+    if (!mounted || index < 0) return;
+    setState(() {
+      _visibleSceneId = sceneId;
+      _sceneLabel = sceneTitle(_document!, sceneId);
+    });
+    await _scrollTo(index, alignment: 0.02, animate: animate);
+  }
+
+  /// Scrolls to [index] and keeps the scene of that entry highlighted.
+  Future<void> _scrollTo(
+    int index, {
+    required double alignment,
+    bool animate = true,
+  }) async {
+    if (!mounted || !_itemScroll.isAttached) return;
+    final entry = _entries[index];
+    _pinnedSceneId = entry.cue?.sceneId ?? entry.scene?.id;
+    _autoScrolling = true;
+    try {
       if (animate && !MediaQuery.disableAnimationsOf(context)) {
         await _itemScroll.scrollTo(
           index: index,
           duration: const Duration(milliseconds: 320),
           curve: Curves.easeOutCubic,
-          alignment: 0.08,
+          alignment: alignment,
         );
       } else {
-        _itemScroll.jumpTo(index: index, alignment: 0.08);
+        _itemScroll.jumpTo(index: index, alignment: alignment);
       }
+      await WidgetsBinding.instance.endOfFrame;
+    } finally {
+      _autoScrolling = false;
+      _pinnedAtCueId = _firstVisibleCueId;
     }
-    _preference('lastCueId', cueId);
   }
 
-  void _notice(String message) => ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(SnackBar(content: Text(message)));
-
-  void _search(String query) {
-    final needle = query.toLowerCase().trim();
-    setState(() {
-      _searchResults = needle.isEmpty
-          ? []
-          : (_document?.cues ?? <ScriptCue>[])
-                .where(
-                  (cue) =>
-                      cue.kind != 'scene' &&
-                      cue.kind != 'role' &&
-                      '${cue.role} ${cue.text}'.toLowerCase().contains(needle),
-                )
-                .toList();
-      _searchResultIndex = 0;
-    });
-    if (_searchResults.isNotEmpty) _jumpToCue(_searchResults.first.id);
-  }
-
-  void _nextSearchResult(int delta) {
-    if (_searchResults.isEmpty) return;
-    setState(
-      () => _searchResultIndex =
-          (_searchResultIndex + delta) % _searchResults.length,
-    );
-    _jumpToCue(_searchResults[_searchResultIndex].id);
+  void _notice(String message) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _toggleBookmark(String cueId) {
@@ -568,22 +451,58 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     _preference('bookmarks', _bookmarks.toList());
   }
 
+  void _selectAssignedRoles() {
+    if (!_assignedRoles || _document == null) return;
+    _roles = assignedRoleIds(
+      _document!.roles,
+      widget.controller.user?.personId,
+    );
+    _role = _roles.firstOrNull ?? '';
+  }
+
+  void _changeMode(ReaderMode mode) {
+    setState(() {
+      _mode = mode;
+      _revealed.clear();
+      if (mode.technicalFocus) {
+        _showTechnical = true;
+        _categories.addAll(cueCategories.keys);
+      }
+      _rebuildEntries();
+    });
+    _preference('mode', mode.code);
+    _preference('categories', _categories.toList());
+    if (mode.needsRoles && !_hasRoles) _showRoles();
+  }
+
+  bool _desktopReader(BuildContext context, double width) =>
+      width >= Breakpoints.readerDesktop &&
+      MediaQuery.textScalerOf(context).scale(16) <= 22 &&
+      _fontScale <= 1.5;
+
+  ScriptCue? get _currentCue =>
+      _document?.cues
+          .where((c) => c.id == (_activeCueId ?? _firstVisibleCueId))
+          .firstOrNull ??
+      _document?.cues.where((c) => c.kind == 'dialogue').firstOrNull;
+
+  ThemeData _readerTheme(ThemeData parent) {
+    if (!_stage) return parent;
+    const stageSurface = Color(0xFF151719);
+    final dark = StageTheme.build(Brightness.dark);
+    return dark.copyWith(
+      colorScheme: dark.colorScheme.copyWith(surface: stageSurface),
+      scaffoldBackgroundColor: stageSurface,
+      appBarTheme: dark.appBarTheme.copyWith(backgroundColor: stageSurface),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
     final desktopHeader =
-        MediaQuery.sizeOf(context).width >= 1250 &&
-        _desktopReader(context, MediaQuery.sizeOf(context).width);
-    final parentTheme = Theme.of(context);
-    final readerTheme = _stage
-        ? ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: readerAccent,
-              brightness: Brightness.dark,
-              surface: const Color(0xFF151719),
-            ),
-            useMaterial3: true,
-          )
-        : parentTheme;
+        width >= Breakpoints.extendedRail && _desktopReader(context, width);
+    final readerTheme = _readerTheme(Theme.of(context));
     return Theme(
       data: readerTheme,
       child: Builder(
@@ -591,566 +510,183 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
           controller: widget.controller,
           selectedIndex: AppSection.scripts.index,
           enabled: !_stage,
-          child: Scaffold(
-            backgroundColor: _stage
-                ? const Color(0xFF151719)
-                : readerTheme.scaffoldBackgroundColor,
-            appBar: AppBar(
-              titleSpacing: 0,
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: desktopHeader ? 20 : 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (_sceneLabel.isNotEmpty)
-                    Text(
-                      _sceneLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: readerTheme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                ],
-              ),
-              actions: [
-                if (desktopHeader && _document != null) ...[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.offline_pin_outlined,
-                          size: 18,
-                          color: readerTheme.colorScheme.primary,
+          child: CallbackShortcuts(
+            bindings: {
+              const SingleActivator(
+                LogicalKeyboardKey.keyF,
+                control: true,
+              ): () =>
+                  _setSearching(true),
+              const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () =>
+                  _setSearching(true),
+              const SingleActivator(LogicalKeyboardKey.escape): () {
+                if (_searching) _setSearching(false);
+              },
+            },
+            child: Focus(
+              autofocus: true,
+              child: Scaffold(
+                backgroundColor: readerTheme.scaffoldBackgroundColor,
+                appBar: _buildAppBar(context, readerTheme, desktopHeader),
+                body: Column(
+                  children: [
+                    if (_searching) _buildSearch(context),
+                    if (_document != null) _buildToolbar(context),
+                    if (_live.active) _buildLiveBanner(context),
+                    if (_document != null &&
+                        !_hintDismissed &&
+                        widget.controller.preferences[ReaderPreferences
+                                .hintCueActionsKey] !=
+                            true &&
+                        !_desktopReader(context, width))
+                      _buildCueHint(context),
+                    if (_document?.stale == true)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 6,
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Offline verfügbar',
-                          style: readerTheme.textTheme.labelMedium,
+                        child: Text(
+                          'Gespeicherte Fassung · Aktualisierung zurzeit nicht möglich',
+                          style: Theme.of(context).textTheme.labelSmall,
                         ),
-                      ],
-                    ),
-                  ),
-                  TextButton.icon(
-                    key: const ValueKey('reader-desktop-pdf'),
-                    onPressed: _printing ? null : _exportPdf,
-                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 20),
-                    label: Text(_printing ? 'PDF wird erstellt …' : 'PDF'),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                IconButton(
-                  tooltip: 'Im Drehbuch suchen',
-                  onPressed: () {
-                    setState(() => _searching = !_searching);
-                    if (_searching) {
-                      _searchFocus.requestFocus();
-                    } else {
-                      _searchController.clear();
-                      _search('');
-                    }
-                  },
-                  icon: Icon(
-                    _searching
-                        ? Icons.search_off_rounded
-                        : Icons.search_rounded,
-                  ),
-                ),
-                PopupMenuButton<String>(
-                  tooltip: 'Weitere Aktionen',
-                  onSelected: (value) {
-                    switch (value) {
-                      case 'settings':
-                        _showSettings();
-                      case 'notes':
-                        _showNotes();
-                      case 'bookmarks':
-                        _showBookmarks();
-                      case 'export':
-                        _exportPdf();
-                      case 'refresh':
-                        _load();
-                      case 'focus':
-                        _showLive();
-                      case 'casting':
-                        openPage(
-                          context,
-                          CastingScreen(
-                            controller: widget.controller,
-                            productionId: widget.productionId,
-                          ),
-                        );
-                    }
-                  },
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(
-                      value: 'settings',
-                      child: Text('Leseeinstellungen'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'notes',
-                      child: Text('Private Notizen'),
-                    ),
-                    PopupMenuItem(
-                      value: 'focus',
-                      enabled: _document != null,
-                      child: const Text('Gemeinsamer Fokus'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'bookmarks',
-                      child: Text('Lesezeichen'),
-                    ),
-                    PopupMenuItem(
-                      value: 'export',
-                      enabled: _document != null && !_printing,
-                      child: Text(
-                        _printing ? 'PDF wird erstellt …' : 'Drucken / PDF',
                       ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'refresh',
-                      child: Text('Fassung aktualisieren'),
-                    ),
-                    if (widget.controller.user?.isAdmin == true)
-                      const PopupMenuItem(
-                        value: 'casting',
-                        child: Text('Besetzung & Team'),
-                      ),
+                    if (_loading && _document != null)
+                      const LinearProgressIndicator(minHeight: 2),
+                    Expanded(child: _buildAdaptiveContent(context)),
                   ],
                 ),
-              ],
+                bottomNavigationBar: _document == null
+                    ? null
+                    : _buildBottomBar(context),
+              ),
             ),
-            body: Column(
-              children: [
-                if (_searching) _buildSearch(context),
-                if (_document != null) _buildToolbar(context),
-                if (_following || _directing)
-                  Material(
-                    color: readerAccent.withValues(alpha: 0.12),
-                    child: ListTile(
-                      dense: true,
-                      visualDensity: VisualDensity.compact,
-                      leading: Icon(
-                        _directing ? Icons.cell_tower : Icons.sync,
-                        color: readerAccent,
-                        size: 19,
-                      ),
-                      title: Text(
-                        _liveError ??
-                            (widget.controller.isDemo
-                                ? 'Demo-Fokus · nur dieses Gerät'
-                                : _directing
-                                ? 'Du führst · Text antippen, um den Fokus zu teilen'
-                                : _liveFocus?.cueId == null
-                                ? 'Warte auf den gemeinsamen Fokus'
-                                : 'Du folgst dem gemeinsamen Fokus'),
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      trailing: IconButton(
-                        tooltip: 'Fokus beenden',
-                        icon: const Icon(Icons.close, size: 19),
-                        onPressed: () {
-                          setState(() {
-                            _following = false;
-                            _directing = false;
-                          });
-                          _focusTimer?.cancel();
-                        },
-                      ),
-                    ),
-                  ),
-                if (_document?.stale == true)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 6,
-                    ),
-                    child: Text(
-                      'Gespeicherte Fassung · Aktualisierung zurzeit nicht möglich',
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ),
-                  ),
-                if (_loading && _document != null)
-                  const LinearProgressIndicator(minHeight: 2),
-                Expanded(child: _buildAdaptiveContent(context)),
-              ],
-            ),
-            bottomNavigationBar: _document == null
-                ? null
-                : _buildBottomBar(context),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildSearch(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
-    child: Row(
+  PreferredSizeWidget _buildAppBar(
+    BuildContext context,
+    ThemeData readerTheme,
+    bool desktopHeader,
+  ) => AppBar(
+    titleSpacing: 0,
+    title: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: TextField(
-            controller: _searchController,
-            focusNode: _searchFocus,
-            onChanged: (query) {
-              _searchTimer?.cancel();
-              _searchTimer = Timer(
-                const Duration(milliseconds: 180),
-                () => _search(query),
-              );
-            },
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _searchFocus.unfocus(),
-            decoration: InputDecoration(
-              hintText: 'Text oder Rolle suchen',
-              prefixIcon: const Icon(Icons.search),
-              suffixText: _searchController.text.isEmpty
-                  ? null
-                  : _searchResults.isEmpty
-                  ? '0 Treffer'
-                  : '${_searchResultIndex + 1}/${_searchResults.length}',
-              isDense: true,
-            ),
+        Text(
+          _title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: desktopHeader ? 20 : 16,
+            fontWeight: FontWeight.w700,
           ),
         ),
-        IconButton(
-          tooltip: 'Vorheriger Treffer',
-          onPressed: _searchResults.isEmpty
-              ? null
-              : () => _nextSearchResult(-1),
-          icon: const Icon(Icons.keyboard_arrow_up),
-        ),
-        IconButton(
-          tooltip: 'Nächster Treffer',
-          onPressed: _searchResults.isEmpty ? null : () => _nextSearchResult(1),
-          icon: const Icon(Icons.keyboard_arrow_down),
-        ),
+        if (_sceneLabel.isNotEmpty)
+          Text(
+            _sceneLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              color: readerTheme.colorScheme.onSurfaceVariant,
+            ),
+          ),
       ],
     ),
-  );
-
-  void _selectAssignedRoles() {
-    if (!_assignedRoles || _document == null) return;
-    _roles = _document!.roles
-        .where(
-          (r) =>
-              r.personId != null &&
-              r.personId == widget.controller.user?.personId,
-        )
-        .map((r) => r.id)
-        .toSet();
-    _role = _roles.firstOrNull ?? '';
-  }
-
-  static const _modes = {
-    'read': 'Lesen',
-    'practice': 'Lernen',
-    'actor': 'Meine Texte',
-    'technical': 'Technik',
-    'cues': 'Nur Cues',
-    'stage': 'Bühne',
-  };
-
-  void _changeMode(String mode) {
-    setState(() {
-      _mode = mode;
-      _revealed.clear();
-      if (mode == 'technical' || mode == 'cues') {
-        _showTechnical = true;
-        _categories.addAll({
-          'direction',
-          'technical',
-          'lighting',
-          'audio',
-          'props',
-          'microphone',
-          'autoMicrophone',
-        });
-      }
-      _rebuildEntries();
-    });
-    _preference('mode', mode);
-    _preference('categories', _categories.toList());
-    if ((mode == 'practice' || mode == 'actor') && !_hasRoles) _showRoles();
-  }
-
-  bool _desktopReader(BuildContext context, double width) =>
-      width >= 1000 &&
-      MediaQuery.textScalerOf(context).scale(16) <= 22 &&
-      _fontScale <= 1.5;
-
-  Widget _buildToolbar(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      if (_desktopReader(context, constraints.maxWidth)) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+    actions: [
+      if (desktopHeader && _document != null) ...[
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final mode in _modes.entries)
-                      ChoiceChip(
-                        key: ValueKey('reader-mode-${mode.key}'),
-                        label: Text(mode.value),
-                        selected: _mode == mode.key,
-                        onSelected: (_) => _changeMode(mode.key),
-                      ),
-                  ],
-                ),
+              Icon(
+                Icons.offline_pin_outlined,
+                size: 18,
+                color: readerTheme.colorScheme.primary,
               ),
-              const SizedBox(width: 16),
-              TextButton.icon(
-                onPressed: _showRoles,
-                icon: const Icon(Icons.person_outline, size: 18),
-                label: Text(
-                  _roles.isEmpty ? 'Meine Rollen' : '${_roles.length} Rollen',
-                ),
+              const SizedBox(width: 8),
+              Text(
+                'Offline verfügbar',
+                style: readerTheme.textTheme.labelMedium,
               ),
             ],
           ),
-        );
-      }
-      return _buildMobileToolbar(context);
-    },
-  );
-
-  Widget _buildMobileToolbar(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-    child: Row(
-      children: [
+        ),
         TextButton.icon(
-          onPressed: _showScenes,
-          icon: const Icon(Icons.list_rounded, size: 18),
-          label: const Text('Szenen'),
+          key: const ValueKey('reader-desktop-pdf'),
+          onPressed: _printing ? null : _exportPdf,
+          icon: const Icon(Icons.picture_as_pdf_outlined, size: 20),
+          label: Text(_printing ? 'PDF wird erstellt …' : 'PDF'),
         ),
-        const Spacer(),
-        Flexible(
-          child: TextButton(
-            onPressed: _showRoles,
-            child: Text(
-              _roles.isEmpty
-                  ? 'Meine Rollen'
-                  : _roles.length == 1
-                  ? _roles.first
-                  : '${_roles.length} Rollen',
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ),
-        PopupMenuButton<String>(
-          tooltip: 'Lesemodus',
-          initialValue: _mode,
-          onSelected: _changeMode,
-          itemBuilder: (_) => [
-            for (final mode in _modes.entries)
-              CheckedPopupMenuItem(
-                value: mode.key,
-                checked: _mode == mode.key,
-                child: Text(mode.value),
-              ),
-          ],
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(_modes[_mode] ?? 'Lesen'),
-                const SizedBox(width: 4),
-                const Icon(Icons.expand_more, size: 18),
-              ],
-            ),
-          ),
-        ),
+        const SizedBox(width: 8),
       ],
-    ),
-  );
-
-  Widget _sideCard(BuildContext context, String title, List<Widget> children) =>
-      Card(
-        margin: const EdgeInsets.only(bottom: 16),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(title, style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 12),
-              ...children,
-            ],
-          ),
+      IconButton(
+        tooltip: 'Im Drehbuch suchen',
+        onPressed: () => _setSearching(!_searching),
+        icon: Icon(
+          _searching ? Icons.search_off_rounded : Icons.search_rounded,
         ),
-      );
-
-  Widget _buildAdaptiveContent(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      if (!_desktopReader(context, constraints.maxWidth) || _document == null) {
-        return Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 800),
-            child: _buildContent(context),
-          ),
-        );
-      }
-      final focus = _document!.cues
-          .where((c) => c.id == _liveFocus?.cueId)
-          .firstOrNull;
-      final sceneNotes = _notes.entries.where(
-        (entry) =>
-            textValue(jsonMap(entry.value)['sceneId']) == _visibleSceneId,
-      );
-      return Row(
-        key: const ValueKey('reader-desktop-workspace'),
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: 220,
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    'Szenen',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
+      ),
+      PopupMenuButton<String>(
+        tooltip: 'Weitere Aktionen',
+        onSelected: (value) {
+          switch (value) {
+            case 'settings':
+              _showSettings();
+            case 'notes':
+              _showNotes();
+            case 'bookmarks':
+              _showBookmarks();
+            case 'export':
+              _exportPdf();
+            case 'refresh':
+              _refreshScript();
+            case 'focus':
+              _showLive();
+            case 'casting':
+              openPage(
+                context,
+                CastingScreen(
+                  controller: widget.controller,
+                  productionId: widget.productionId,
                 ),
-                for (final scene in _document!.scenes)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: ListTile(
-                      key: ValueKey('reader-scene-${scene.id}'),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      title: Text(scene.title),
-                      selected: _visibleSceneId == scene.id,
-                      selectedColor: readerAccent,
-                      selectedTileColor: readerAccent.withValues(alpha: 0.1),
-                      onTap: () {
-                        final cue = _document!.cues
-                            .where(
-                              (c) =>
-                                  c.sceneId == scene.id &&
-                                  c.kind != 'scene' &&
-                                  c.kind != 'role',
-                            )
-                            .firstOrNull;
-                        if (cue != null) _jumpToCue(cue.id);
-                      },
-                    ),
-                  ),
-              ],
-            ),
+              );
+          }
+        },
+        itemBuilder: (_) => [
+          const PopupMenuItem(
+            value: 'settings',
+            child: Text('Leseeinstellungen'),
           ),
-          const VerticalDivider(width: 1),
-          Expanded(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 760),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 18, 12, 0),
-                  child: _buildContent(context),
-                ),
-              ),
-            ),
+          const PopupMenuItem(value: 'notes', child: Text('Private Notizen')),
+          PopupMenuItem(
+            value: 'focus',
+            enabled: _document != null,
+            child: const Text('Gemeinsamer Fokus'),
           ),
-          const VerticalDivider(width: 1),
-          SizedBox(
-            width: 290,
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _sideCard(context, 'Regie & Besetzung', [
-                  for (final role in _document!.roles)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      title: Text(role.name),
-                      subtitle: Text(
-                        role.actor.isEmpty ? 'Noch nicht besetzt' : role.actor,
-                      ),
-                      trailing: _roles.contains(role.id)
-                          ? const Tooltip(
-                              message: 'Eigene Rolle',
-                              child: Icon(Icons.person, size: 18),
-                            )
-                          : null,
-                    ),
-                  TextButton(
-                    onPressed: _showRoles,
-                    child: const Text('Meine Rollen wählen'),
-                  ),
-                ]),
-                _sideCard(context, 'Private Notizen', [
-                  if (sceneNotes.isEmpty)
-                    const Text(
-                      'Noch keine Notizen zu dieser Szene. Eine Textstelle lange drücken, um eine Notiz hinzuzufügen.',
-                    ),
-                  for (final entry in sceneNotes)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        textValue(jsonMap(entry.value)['text']),
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      onTap: () => _jumpToCue(entry.key),
-                    ),
-                  TextButton(
-                    onPressed: _showNotes,
-                    child: const Text('Alle Notizen öffnen'),
-                  ),
-                ]),
-                _sideCard(context, 'Gemeinsamer Fokus', [
-                  Text(
-                    focus == null
-                        ? 'Keine aktuelle Textstelle geteilt.'
-                        : 'Szene ${focus.sceneId} · ${focus.role}',
-                  ),
-                  if (focus != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      focus.text,
-                      maxLines: 6,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    TextButton(
-                      onPressed: () => _jumpToCue(focus.id),
-                      child: const Text('Zur Textstelle'),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: _showLive,
-                    icon: const Icon(Icons.cell_tower, size: 18),
-                    label: Text(
-                      _directing
-                          ? 'Du führst'
-                          : _following
-                          ? 'Du folgst'
-                          : 'Sitzung öffnen',
-                    ),
-                  ),
-                ]),
-              ],
-            ),
+          const PopupMenuItem(value: 'bookmarks', child: Text('Lesezeichen')),
+          PopupMenuItem(
+            value: 'export',
+            enabled: _document != null && !_printing,
+            child: Text(_printing ? 'PDF wird erstellt …' : 'Drucken / PDF'),
           ),
+          const PopupMenuItem(
+            value: 'refresh',
+            child: Text('Fassung aktualisieren'),
+          ),
+          if (widget.controller.user?.isAdmin == true)
+            const PopupMenuItem(
+              value: 'casting',
+              child: Text('Besetzung & Team'),
+            ),
         ],
-      );
-    },
+      ),
+    ],
   );
 
   Widget _buildContent(BuildContext context) {
@@ -1167,31 +703,40 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
       );
     }
     if (_document == null) {
-      return ReaderEmpty(
-        icon: Icons.cloud_off_rounded,
-        title: 'Noch kein Drehbuch auf dem Gerät.',
-        message:
-            _loadError ??
-            'Öffne dieses Stück einmal mit Internetverbindung, um es offline zu lesen.',
-        action: FilledButton.icon(
-          onPressed: _load,
-          icon: const Icon(Icons.refresh),
-          label: const Text('Erneut versuchen'),
+      return Center(
+        child: SingleChildScrollView(
+          child: EmptyState(
+            icon: Icons.cloud_off_rounded,
+            title: 'Noch kein Drehbuch auf dem Gerät.',
+            message:
+                _loadError ??
+                'Öffne dieses Stück einmal mit Internetverbindung, um es offline zu lesen.',
+            action: FilledButton.icon(
+              onPressed: _load,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Erneut versuchen'),
+            ),
+          ),
         ),
       );
     }
     if (_entries.isEmpty) {
-      return ReaderEmpty(
-        icon: Icons.filter_alt_off_outlined,
-        title: 'Hier ist es gerade still.',
-        message:
-            'Für diese Auswahl sind keine Textstellen vorhanden. Passe deine Rolle oder die Leseeinstellungen an.',
-        action: OutlinedButton(
-          onPressed: _showSettings,
-          child: const Text('Einstellungen öffnen'),
+      return Center(
+        child: SingleChildScrollView(
+          child: EmptyState(
+            icon: Icons.filter_alt_off_outlined,
+            title: 'Hier ist es gerade still.',
+            message:
+                'Für diese Auswahl sind keine Textstellen vorhanden. Passe deine Rolle oder die Leseeinstellungen an.',
+            action: OutlinedButton(
+              onPressed: _showSettings,
+              child: const Text('Einstellungen öffnen'),
+            ),
+          ),
         ),
       );
     }
+    final desktop = _desktopReader(context, MediaQuery.sizeOf(context).width);
     return ScrollablePositionedList.builder(
       itemScrollController: _itemScroll,
       itemPositionsListener: _positions,
@@ -1201,1112 +746,44 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
       itemBuilder: (context, index) {
         final entry = _entries[index];
         if (entry.scene != null) {
-          return _SceneHeading(
+          return SceneHeading(
             key: ValueKey('scene-${entry.scene!.id}'),
             scene: entry.scene!,
-            roles: _document!.roles,
-            dark: _stage,
           );
         }
         final cue = entry.cue!;
-        return _CueCard(
+        return CueCard(
           key: ValueKey(cue.id),
           cue: cue,
           own: _own(cue),
           hidden:
-              _mode == 'practice' && _own(cue) && !_revealed.contains(cue.id),
+              _mode == ReaderMode.practice &&
+              _own(cue) &&
+              !_revealed.contains(cue.id),
           hasNote: _notes.containsKey(cue.id),
-          active: (_following || _directing) && cue.id == _liveFocus?.cueId,
+          commentCount: _comments.countFor(cue.id),
+          active: cue.id == _live.activeCueId,
           bookmarked: _bookmarks.contains(cue.id),
           fontScale: _fontScale * (_stage ? 1.2 : 1),
           dark: _stage,
           query: _searchController.text.trim(),
+          showActionsButton: desktop,
           onTap: () {
             setState(() {
               _activeCueId = cue.id;
-              if (_mode == 'practice' && _own(cue)) {
+              if (_mode == ReaderMode.practice && _own(cue)) {
                 if (!_revealed.add(cue.id)) _revealed.remove(cue.id);
               }
             });
             _preference('lastCueId', cue.id);
-            if (_directing) _publishFocus(cue);
+            if (_live.directing) _live.publish(cue.id);
           },
           onBookmark: () => _toggleBookmark(cue.id),
-          onLongPress: () => _showCueActions(cue),
+          onActions: () => _showCueActions(cue),
+          onNote: () => _editNote(cue),
+          onComments: () => _showComments(cue),
         );
       },
     );
   }
-
-  void _jumpOwn(int direction) {
-    final cues = _entries
-        .where((e) => e.cue != null && _own(e.cue!))
-        .map((e) => e.cue!)
-        .toList();
-    if (cues.isEmpty) {
-      _showRoles();
-      return;
-    }
-    final current = _cueIndices[_firstVisibleCueId] ?? 0;
-    final options = cues
-        .where(
-          (c) => direction > 0
-              ? (_cueIndices[c.id] ?? 0) > current
-              : (_cueIndices[c.id] ?? 0) < current,
-        )
-        .toList();
-    final cue = options.isEmpty
-        ? (direction > 0 ? cues.first : cues.last)
-        : (direction > 0 ? options.first : options.last);
-    _jumpToCue(cue.id);
-  }
-
-  ScriptCue? get _currentCue =>
-      _document?.cues
-          .where((c) => c.id == (_activeCueId ?? _firstVisibleCueId))
-          .firstOrNull ??
-      _document?.cues.where((c) => c.kind == 'dialogue').firstOrNull;
-
-  Widget _buildBottomBar(BuildContext context) => SafeArea(
-    top: false,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        border: Border(
-          top: BorderSide(
-            color: Theme.of(context).dividerColor.withValues(alpha: .15),
-          ),
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          IconButton(
-            tooltip: 'Voriger eigener Einsatz',
-            onPressed: () => _jumpOwn(-1),
-            icon: const Icon(Icons.keyboard_arrow_up),
-          ),
-          IconButton(
-            tooltip: 'Nächster eigener Einsatz',
-            onPressed: () => _jumpOwn(1),
-            icon: const Icon(Icons.keyboard_arrow_down),
-          ),
-          Tooltip(
-            message: widget.controller.isOffline
-                ? 'Offline lesbar'
-                : 'Auf diesem Gerät gespeichert',
-            child: Icon(
-              widget.controller.isOffline
-                  ? Icons.cloud_off_outlined
-                  : Icons.offline_pin_outlined,
-              size: 18,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          IconButton(
-            tooltip: 'Private Notizen',
-            onPressed: _showNotes,
-            icon: const Icon(Icons.edit_note),
-          ),
-          IconButton(
-            tooltip: 'Kommentare zur Textstelle',
-            onPressed: _currentCue == null
-                ? null
-                : () => _showComments(_currentCue!),
-            icon: const Icon(Icons.chat_bubble_outline, size: 21),
-          ),
-          IconButton(
-            tooltip: 'Lesezeichen öffnen',
-            onPressed: _showBookmarks,
-            icon: Icon(
-              _bookmarks.isEmpty ? Icons.bookmark_border : Icons.bookmark,
-              size: 22,
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-
-  Future<void> _showRoles() async {
-    final doc = _document;
-    if (doc == null) return;
-    final chosen = Set<String>.from(_roles);
-    var assigned = _assignedRoles;
-    final result = await showModalBottomSheet<Set<String>>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (sheet) => StatefulBuilder(
-        builder: (sheet, update) => _SheetFrame(
-          title: 'Rollen auswählen',
-          subtitle: '',
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.person_outline),
-                title: const Text('Meine Rollen'),
-                onTap: () => update(() {
-                  assigned = true;
-                  chosen.clear();
-                  chosen.addAll(
-                    doc.roles
-                        .where(
-                          (r) =>
-                              r.personId != null &&
-                              r.personId == widget.controller.user?.personId,
-                        )
-                        .map((r) => r.id),
-                  );
-                }),
-              ),
-              ListTile(
-                leading: const Icon(Icons.groups_outlined),
-                title: const Text('Alle Rollen ohne Hervorhebung'),
-                onTap: () => update(() {
-                  assigned = false;
-                  chosen.clear();
-                }),
-              ),
-              for (final role in doc.roles)
-                CheckboxListTile(
-                  value: chosen.any(
-                    (r) =>
-                        r.toUpperCase() == role.id.toUpperCase() ||
-                        r.toUpperCase() == role.name.toUpperCase(),
-                  ),
-                  title: Text(role.name),
-                  subtitle: role.actor.isEmpty ? null : Text(role.actor),
-                  onChanged: (value) => update(() {
-                    assigned = false;
-                    chosen.removeWhere(
-                      (r) =>
-                          r.toUpperCase() == role.id.toUpperCase() ||
-                          r.toUpperCase() == role.name.toUpperCase(),
-                    );
-                    if (value == true) chosen.add(role.id);
-                  }),
-                ),
-              Padding(
-                padding: const EdgeInsets.all(24),
-                child: FilledButton(
-                  onPressed: () => Navigator.pop(sheet, chosen),
-                  child: const Text('Übernehmen'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (result == null || !mounted) return;
-    setState(() {
-      _roles = result;
-      _role = result.firstOrNull ?? '';
-      _assignedRoles = assigned;
-      _revealed.clear();
-      if (!_hasRoles && (_mode == 'actor' || _mode == 'practice')) {
-        _mode = 'read';
-      }
-      _rebuildEntries();
-    });
-    _preference('roles', result.toList());
-    _preference('role', _role);
-    _preference('assignedRoles', assigned);
-    _preference('mode', _mode);
-  }
-
-  Future<void> _jumpToScene(String sceneId, {bool animate = true}) async {
-    var index = _entries.indexWhere((entry) => entry.scene?.id == sceneId);
-    if (index < 0) {
-      setState(() {
-        _mode = 'read';
-        _rebuildEntries();
-      });
-      await _preference('mode', 'read');
-      await Future<void>.delayed(Duration.zero);
-      index = _entries.indexWhere((entry) => entry.scene?.id == sceneId);
-    }
-    if (!mounted || index < 0 || !_itemScroll.isAttached) return;
-    if (animate && !MediaQuery.disableAnimationsOf(context)) {
-      await _itemScroll.scrollTo(
-        index: index,
-        duration: const Duration(milliseconds: 320),
-        alignment: 0.02,
-      );
-    } else {
-      _itemScroll.jumpTo(index: index, alignment: 0.02);
-    }
-  }
-
-  void _showScenes() {
-    final doc = _document;
-    if (doc == null) return;
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (context) => _SheetFrame(
-        title: 'Szenen',
-        subtitle: doc.scenes.length == 1
-            ? '1 Szene'
-            : '${doc.scenes.length} Szenen',
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: doc.scenes.length,
-          itemBuilder: (context, index) {
-            final scene = doc.scenes[index];
-            ScriptCue? first;
-            var ownCount = 0;
-            for (final cue in doc.cues) {
-              if (cue.sceneId != scene.id ||
-                  cue.kind == 'scene' ||
-                  cue.kind == 'role') {
-                continue;
-              }
-              first ??= cue;
-              if (_own(cue)) {
-                ownCount++;
-              }
-            }
-            final firstCue = first;
-            return ListTile(
-              selected: ownCount > 0,
-              selectedTileColor: readerAccent.withValues(alpha: 0.08),
-              selectedColor: readerAccent,
-              leading: CircleAvatar(
-                backgroundColor: readerAccent.withValues(
-                  alpha: ownCount > 0 ? 0.25 : 0.06,
-                ),
-                foregroundColor: readerAccent,
-                child: Text('${index + 1}'),
-              ),
-              title: Text(scene.title),
-              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
-              onTap: firstCue == null
-                  ? null
-                  : () {
-                      Navigator.pop(context);
-                      _jumpToScene(scene.id);
-                    },
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  void _showBookmarks() {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (sheet) => StatefulBuilder(
-        builder: (sheet, update) => _SheetFrame(
-          title: 'Deine Lesezeichen',
-          subtitle: '',
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              if (_bookmarks.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('Noch keine Lesezeichen.'),
-                ),
-              for (final id in _bookmarks)
-                Builder(
-                  builder: (context) {
-                    final cue = _document?.cues
-                        .where((cue) => cue.id == id)
-                        .firstOrNull;
-                    return ListTile(
-                      leading: const Icon(Icons.bookmark_outline),
-                      title: Text(
-                        cue == null
-                            ? 'Nicht mehr zugeordnet'
-                            : cue.role.isEmpty
-                            ? 'Textstelle'
-                            : cue.role,
-                      ),
-                      subtitle: Text(
-                        cue?.text ?? 'Die Textstelle fehlt in dieser Fassung.',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: IconButton(
-                        tooltip: 'Lesezeichen entfernen',
-                        icon: const Icon(Icons.close),
-                        onPressed: () {
-                          _toggleBookmark(id);
-                          update(() {});
-                        },
-                      ),
-                      onTap: cue == null
-                          ? null
-                          : () {
-                              Navigator.pop(sheet);
-                              _jumpToCue(id);
-                            },
-                    );
-                  },
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showSettings() {
-    const names = {
-      'direction': 'Regieanweisungen',
-      'technical': 'Technik',
-      'lighting': 'Licht',
-      'audio': 'Ton',
-      'props': 'Requisiten',
-      'microphone': 'Mikrofonhinweise',
-      'autoMicrophone': 'Automatische Mikrofonhinweise',
-    };
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (sheet) => StatefulBuilder(
-        builder: (sheet, update) => _SheetFrame(
-          title: 'Leseeinstellungen',
-          subtitle: '',
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Schriftgröße · ${(_fontScale * 100).round()} %',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  Slider(
-                    value: _fontScale,
-                    min: .85,
-                    max: 1.6,
-                    divisions: 15,
-                    onChanged: (v) {
-                      setState(() => _fontScale = v);
-                      update(() {});
-                    },
-                    onChangeEnd: (v) => _preference('fontScale', v),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Kontext um eigene Texte · $_contextLines Zeilen',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  Slider(
-                    value: _contextLines.toDouble(),
-                    min: 0,
-                    max: 6,
-                    divisions: 6,
-                    onChanged: (v) {
-                      setState(() {
-                        _contextLines = v.round();
-                        _rebuildEntries();
-                      });
-                      update(() {});
-                    },
-                    onChangeEnd: (v) => _preference('contextLines', v.round()),
-                  ),
-                  const SizedBox(height: 20),
-                  for (final category in names.entries)
-                    Column(
-                      children: [
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(category.value),
-                          value: _categories.contains(category.key),
-                          onChanged: (enabled) {
-                            setState(() {
-                              if (enabled) {
-                                _categories.add(category.key);
-                              } else {
-                                _categories.remove(category.key);
-                              }
-                              _showDirections = _categories.contains(
-                                'direction',
-                              );
-                              _showTechnical = _categories.any(
-                                (c) => c != 'direction',
-                              );
-                              _rebuildEntries();
-                            });
-                            update(() {});
-                            _preference('categories', _categories.toList());
-                            _preference('showTechnical', _showTechnical);
-                            _preference('showDirections', _showDirections);
-                          },
-                        ),
-                        if (_mode == 'cues' &&
-                            _categories.contains(category.key))
-                          Row(
-                            children: [
-                              const Expanded(child: Text('Kontextzeilen')),
-                              DropdownButton<int>(
-                                value: _categoryContext[category.key] ?? 0,
-                                items: [
-                                  for (var i = 0; i <= 6; i++)
-                                    DropdownMenuItem(
-                                      value: i,
-                                      child: Text('$i'),
-                                    ),
-                                ],
-                                onChanged: (v) {
-                                  setState(() {
-                                    _categoryContext[category.key] = v!;
-                                    _rebuildEntries();
-                                  });
-                                  update(() {});
-                                  _preference(
-                                    'categoryContext',
-                                    _categoryContext,
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                      ],
-                    ),
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: () => Navigator.pop(sheet),
-                      child: const Text('Fertig'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _editNote(ScriptCue cue) async {
-    final result = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => PrivateNoteEditor(
-        initialText: textValue(jsonMap(_notes[cue.id])['text']),
-      ),
-    );
-    if (result == null || !mounted) return;
-    setState(() {
-      if (result.isEmpty) {
-        _notes.remove(cue.id);
-      } else {
-        _notes[cue.id] = {
-          'text': result,
-          'revision': _document!.revision,
-          'sceneId': cue.sceneId,
-          'role': cue.role,
-        };
-      }
-    });
-    await _preference('notes', _notes);
-  }
-
-  void _showComments(ScriptCue cue) => openPage(
-    context,
-    CueCommentsScreen(
-      controller: widget.controller,
-      document: _document!,
-      cue: cue,
-    ),
-  );
-
-  void _showNotes() {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (sheet) => _SheetFrame(
-        title: 'Private Notizen',
-        subtitle: 'Nur auf diesem Gerät gespeichert',
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            if (_currentCue != null)
-              ListTile(
-                leading: const Icon(Icons.add),
-                title: const Text('Notiz an aktueller Textstelle'),
-                onTap: () {
-                  Navigator.pop(sheet);
-                  _editNote(_currentCue!);
-                },
-              ),
-            for (final entry in _notes.entries)
-              Builder(
-                builder: (context) {
-                  final cue = _document?.cues
-                      .where((c) => c.id == entry.key)
-                      .firstOrNull;
-                  final note = jsonMap(entry.value);
-                  return ListTile(
-                    leading: Icon(
-                      cue == null ? Icons.link_off : Icons.edit_note,
-                    ),
-                    title: Text(
-                      textValue(note['text']),
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      cue == null
-                          ? 'Nicht zugeordnet: andere Fassung'
-                          : 'Szene ${cue.sceneId}${note['revision'] != _document!.revision ? ' · Aus älterer Fassung' : ''}',
-                    ),
-                    onTap: cue == null
-                        ? null
-                        : () {
-                            Navigator.pop(sheet);
-                            _jumpToCue(cue.id);
-                            _editNote(cue);
-                          },
-                    trailing: cue != null
-                        ? null
-                        : IconButton(
-                            tooltip: 'Verwaiste Notiz löschen',
-                            icon: const Icon(Icons.delete_outline),
-                            onPressed: () {
-                              setState(() => _notes.remove(entry.key));
-                              _preference('notes', _notes);
-                              Navigator.pop(sheet);
-                            },
-                          ),
-                  );
-                },
-              ),
-            if (_notes.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Text('Noch keine Notizen.'),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showCueActions(ScriptCue cue) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.edit_note),
-              title: const Text('Private Notiz'),
-              onTap: () {
-                Navigator.pop(context);
-                _editNote(cue);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.chat_bubble_outline),
-              title: const Text('Kommentare'),
-              onTap: () {
-                Navigator.pop(context);
-                _showComments(cue);
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                _bookmarks.contains(cue.id)
-                    ? Icons.bookmark_remove_outlined
-                    : Icons.bookmark_add_outlined,
-              ),
-              title: Text(
-                _bookmarks.contains(cue.id)
-                    ? 'Lesezeichen entfernen'
-                    : 'Lesezeichen setzen',
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _toggleBookmark(cue.id);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.copy_rounded),
-              title: const Text('Text kopieren'),
-              onTap: () {
-                Clipboard.setData(
-                  ClipboardData(
-                    text:
-                        '${cue.role.isEmpty ? '' : '${cue.role}: '} ${cue.text}'
-                            .trim(),
-                  ),
-                );
-                Navigator.pop(context);
-                _notice('Text kopiert.');
-              },
-            ),
-            const SizedBox(height: 12),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _exportPdf() async {
-    if (_document == null || _printing) return;
-    final full = await showModalBottomSheet<bool>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheet) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.description_outlined),
-              title: const Text('Ganzes Drehbuch'),
-              onTap: () => Navigator.pop(sheet, true),
-            ),
-            ListTile(
-              leading: const Icon(Icons.filter_alt_outlined),
-              title: const Text('Aktuelle Auswahl'),
-              subtitle: const Text('Mit deinen Rollen- und Kategoriefiltern'),
-              onTap: () => Navigator.pop(sheet, false),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (full == null || !mounted) return;
-    setState(() => _printing = true);
-    try {
-      final font = pw.Font.ttf(
-        await rootBundle.load('assets/fonts/DejaVuSans.ttf'),
-      );
-      final boldFont = pw.Font.ttf(
-        await rootBundle.load('assets/fonts/DejaVuSans-Bold.ttf'),
-      );
-      final pdf = pw.Document(
-        title: _title,
-        author: 'Kolpingtheater Ramsen',
-        theme: pw.ThemeData.withFont(
-          base: font,
-          bold: boldFont,
-          italic: font,
-          boldItalic: boldFont,
-        ),
-      );
-      final entries = <_ReaderEntry>[];
-      if (full) {
-        String? previousScene;
-        for (final cue in _document!.cues) {
-          if (cue.kind == 'scene' || cue.kind == 'role') continue;
-          if (previousScene != cue.sceneId) {
-            final scene = _document!.scenes
-                .where((scene) => scene.id == cue.sceneId)
-                .firstOrNull;
-            if (scene != null) entries.add(_ReaderEntry.scene(scene));
-            previousScene = cue.sceneId;
-          }
-          entries.add(_ReaderEntry.cue(cue));
-        }
-      } else {
-        entries.addAll(_entries);
-      }
-      pdf.addPage(
-        pw.MultiPage(
-          maxPages: 500,
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(40),
-          header: (context) => pw.Padding(
-            padding: const pw.EdgeInsets.only(bottom: 14),
-            child: pw.Text(
-              _title,
-              style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
-            ),
-          ),
-          footer: (context) => pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(
-                _roles.isEmpty ? 'Alle Rollen' : 'Rollen: ${_roles.join(', ')}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              pw.Text(
-                '${context.pageNumber} / ${context.pagesCount}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-            ],
-          ),
-          build: (context) => [
-            for (final entry in entries)
-              if (entry.scene != null)
-                pw.Padding(
-                  padding: const pw.EdgeInsets.only(top: 20, bottom: 10),
-                  child: pw.Text(
-                    entry.scene!.title,
-                    style: pw.TextStyle(
-                      fontSize: 16,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                )
-              else ...[
-                pw.Padding(
-                  padding: const pw.EdgeInsets.only(top: 10, bottom: 3),
-                  child: pw.Text(
-                    entry.cue!.role.isEmpty
-                        ? _category(entry.cue!.kind).label
-                        : entry.cue!.role,
-                    style: pw.TextStyle(
-                      fontSize: 9,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                ),
-                pw.Text(
-                  entry.cue!.text,
-                  style: pw.TextStyle(
-                    fontSize: 11,
-                    lineSpacing: 3,
-                    fontStyle: entry.cue!.kind == 'direction'
-                        ? pw.FontStyle.italic
-                        : pw.FontStyle.normal,
-                    fontWeight: _own(entry.cue!)
-                        ? pw.FontWeight.bold
-                        : pw.FontWeight.normal,
-                  ),
-                ),
-              ],
-          ],
-        ),
-      );
-      await Printing.layoutPdf(
-        onLayout: (_) => pdf.save(),
-        name: '${_title.replaceAll(RegExp(r'[^a-zA-Z0-9äöüÄÖÜß_-]'), '_')}.pdf',
-      );
-    } catch (_) {
-      if (mounted) {
-        _notice(
-          'Das PDF konnte nicht erstellt werden. Bitte versuche es erneut.',
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _printing = false);
-    }
-  }
-}
-
-class _ReaderEntry {
-  const _ReaderEntry.scene(this.scene) : cue = null;
-  const _ReaderEntry.cue(this.cue) : scene = null;
-  final ScriptScene? scene;
-  final ScriptCue? cue;
-}
-
-class _SceneHeading extends StatelessWidget {
-  const _SceneHeading({
-    super.key,
-    required this.scene,
-    required this.roles,
-    required this.dark,
-  });
-  final ScriptScene scene;
-  final List<ScriptRole> roles;
-  final bool dark;
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 28, 16, 28),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'SZENE ${scene.id}',
-          style: TextStyle(
-            fontSize: 11,
-            letterSpacing: 1.5,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          scene.title,
-          style: Theme.of(
-            context,
-          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-        ),
-      ],
-    ),
-  );
-}
-
-class _CueCard extends StatelessWidget {
-  const _CueCard({
-    super.key,
-    required this.cue,
-    required this.own,
-    required this.active,
-    required this.bookmarked,
-    required this.fontScale,
-    required this.dark,
-    required this.query,
-    required this.onTap,
-    required this.onBookmark,
-    required this.onLongPress,
-    this.hidden = false,
-    this.hasNote = false,
-  });
-  final ScriptCue cue;
-  final bool own, active, bookmarked, dark, hidden, hasNote;
-  final double fontScale;
-  final String query;
-  final VoidCallback onTap, onBookmark, onLongPress;
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context),
-        direction = cue.kind == 'direction',
-        technical = isTechnicalCue(cue),
-        category = _category(cue.kind);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border(
-                left: BorderSide(
-                  color: own
-                      ? readerAccent
-                      : active
-                      ? theme.colorScheme.secondary
-                      : Colors.transparent,
-                  width: own ? 3 : 2,
-                ),
-              ),
-              color: active
-                  ? theme.colorScheme.secondary.withValues(alpha: .08)
-                  : Colors.transparent,
-            ),
-            padding: const EdgeInsets.fromLTRB(16, 7, 12, 9),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (!direction || bookmarked || hasNote)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: direction
-                            ? const SizedBox.shrink()
-                            : Text(
-                                technical
-                                    ? category.label.toUpperCase()
-                                    : cue.role,
-                                style: TextStyle(
-                                  fontSize: 12 * fontScale,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1,
-                                  color: own
-                                      ? readerAccent
-                                      : technical
-                                      ? category.color
-                                      : theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                      ),
-                      if (cue.isAutoMic)
-                        Text('AUTO', style: theme.textTheme.labelSmall),
-                      if (bookmarked)
-                        IconButton(
-                          tooltip: 'Lesezeichen entfernen',
-                          onPressed: onBookmark,
-                          icon: const Icon(Icons.bookmark, size: 17),
-                          color: readerAccent,
-                        ),
-                      if (hasNote)
-                        IconButton(
-                          tooltip: 'Notiz zur Textstelle',
-                          onPressed: onLongPress,
-                          icon: const Icon(Icons.edit_note, size: 19),
-                        ),
-                    ],
-                  ),
-                if (!direction) const SizedBox(height: 7),
-                if (hidden)
-                  Semantics(
-                    label: 'Eigener Text verdeckt. Zum Aufdecken antippen.',
-                    button: true,
-                    child: ExcludeSemantics(
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 18),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.visibility_outlined,
-                              size: 18,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 10),
-                            Text(
-                              'Text aufdecken',
-                              style: TextStyle(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  )
-                else
-                  Text.rich(
-                    _highlightedText(
-                      cue.text,
-                      query,
-                      TextStyle(
-                        fontSize: (direction ? 16 : 19) * fontScale,
-                        height: 1.6,
-                        color: direction
-                            ? theme.colorScheme.onSurfaceVariant
-                            : theme.colorScheme.onSurface,
-                        fontStyle: direction
-                            ? FontStyle.italic
-                            : FontStyle.normal,
-                      ),
-                    ),
-                    semanticsLabel:
-                        '${cue.role.isNotEmpty ? '${cue.role}: ' : ''}${cue.text}',
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-TextSpan _highlightedText(String text, String query, TextStyle style) {
-  if (query.isEmpty) return TextSpan(text: text, style: style);
-  final lower = text.toLowerCase();
-  final needle = query.toLowerCase();
-  final spans = <TextSpan>[];
-  var cursor = 0;
-  while (cursor < text.length) {
-    final index = lower.indexOf(needle, cursor);
-    if (index == -1) {
-      spans.add(TextSpan(text: text.substring(cursor)));
-      break;
-    }
-    if (index > cursor) {
-      spans.add(TextSpan(text: text.substring(cursor, index)));
-    }
-    spans.add(
-      TextSpan(
-        text: text.substring(index, index + needle.length),
-        style: const TextStyle(
-          backgroundColor: Color(0xFFFFD289),
-          color: Color(0xFF342111),
-        ),
-      ),
-    );
-    cursor = index + needle.length;
-  }
-  return TextSpan(style: style, children: spans);
-}
-
-({String label, IconData icon, Color color}) _category(String kind) =>
-    switch (kind) {
-      'direction' => (
-        label: 'Regie',
-        icon: Icons.edit_note_rounded,
-        color: const Color(0xFF8D7A66),
-      ),
-      'technical' => (
-        label: 'Technik',
-        icon: Icons.tune_rounded,
-        color: const Color(0xFF648895),
-      ),
-      'lighting' => (
-        label: 'Licht',
-        icon: Icons.light_mode_outlined,
-        color: const Color(0xFFB1832D),
-      ),
-      'audio' => (
-        label: 'Ton / Einspieler',
-        icon: Icons.volume_up_outlined,
-        color: const Color(0xFF8076AF),
-      ),
-      'props' => (
-        label: 'Requisite',
-        icon: Icons.inventory_2_outlined,
-        color: const Color(0xFF62866D),
-      ),
-      'microphone' => (
-        label: 'Mikrofon',
-        icon: Icons.mic_none_rounded,
-        color: const Color(0xFF4D8792),
-      ),
-      _ => (
-        label: 'Text',
-        icon: Icons.notes_rounded,
-        color: const Color(0xFF888888),
-      ),
-    };
-
-class _SheetFrame extends StatelessWidget {
-  const _SheetFrame({
-    required this.title,
-    required this.subtitle,
-    required this.child,
-  });
-  final String title, subtitle;
-  final Widget child;
-  @override
-  Widget build(BuildContext context) => SafeArea(
-    top: false,
-    child: ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * 0.82,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-            child: Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-          ),
-          if (subtitle.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-              child: Text(
-                subtitle,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          Flexible(child: child),
-        ],
-      ),
-    ),
-  );
 }

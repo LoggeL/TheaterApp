@@ -1,4 +1,5 @@
 import '../../../core/models.dart';
+import 'cue_category.dart';
 
 /// Pure view derivation: context stays in its scene and canonical order is kept.
 /// The original document is never altered by display preferences.
@@ -57,13 +58,5 @@ List<ScriptCue> visibleScriptCues(
   ];
 }
 
-String cueCategory(ScriptCue cue) =>
-    cue.kind == 'microphone' && cue.isAutoMic ? 'autoMicrophone' : cue.kind;
-
-bool isTechnicalCue(ScriptCue cue) => const {
-  'technical',
-  'lighting',
-  'audio',
-  'props',
-  'microphone',
-}.contains(cue.kind);
+/// Technical cues: technique, light, sound, props and microphones.
+bool isTechnicalCue(ScriptCue cue) => cue.isTechnical;
