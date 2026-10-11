@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
+import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/page_header.dart';
@@ -12,6 +13,7 @@ import '../../ensemble/admin/members_admin_screen.dart';
 import '../../ensemble/admin/roles_admin_screen.dart';
 import '../../events/admin/events_admin_screen.dart';
 import '../../events/domain/event_format.dart';
+import '../../events/domain/event_selectors.dart';
 import '../../galleries/ui/gallery_list_screen.dart';
 import '../../messages/ui/message_composer_screen.dart';
 import '../../messages/ui/push_admin_screen.dart';
@@ -22,6 +24,20 @@ import '../../rehearsal/ui/attendance_screen.dart';
 import '../../rehearsal/ui/responses_screen.dart';
 import '../../rehearsal/ui/scene_planner_screen.dart';
 import '../../slots/ui/slot_pools_screen.dart';
+
+/// Event kinds whose scenes are planned in advance.
+const _scenePlanningKinds = {'rehearsal', 'dress'};
+
+/// The first of [upcoming] that is a rehearsal linked to a production, i.e.
+/// the event "Szenen planen" prepares; null when there is none.
+TheaterEvent? nextScenePlanningEvent(Iterable<TheaterEvent> upcoming) =>
+    upcoming
+        .where(
+          (e) =>
+              _scenePlanningKinds.contains(e.kind) &&
+              (e.productionId?.isNotEmpty ?? false),
+        )
+        .firstOrNull;
 
 class ManagementScreen extends StatelessWidget {
   const ManagementScreen({
@@ -36,9 +52,12 @@ class ManagementScreen extends StatelessWidget {
 
   List<Widget> _content(BuildContext ctx) {
     final theme = Theme.of(ctx);
-    final next = controller.events
-        .where((e) => e.endsAt?.isAfter(controller.now) ?? false)
-        .firstOrNull;
+    final upcoming = upcomingEvents(
+      controller,
+      controller.now,
+    ).where((e) => !e.fromSlotPool).toList();
+    final next = upcoming.firstOrNull;
+    final rehearsal = nextScenePlanningEvent(upcoming);
     final registrations = controller.openRegistrationCount;
     GroupTile tile(
       IconData icon,
@@ -119,12 +138,12 @@ class ManagementScreen extends StatelessWidget {
                 ProductionsAdminScreen(controller: controller),
                 'Stücke, Rollen im Drehbuch, Regie',
               ),
-              if (next != null)
+              if (rehearsal != null)
                 tile(
                   Icons.playlist_add_check,
                   'Szenen planen',
-                  ScenePlannerScreen(controller: controller, event: next),
-                  'Für ${next.title}',
+                  ScenePlannerScreen(controller: controller, event: rehearsal),
+                  'Für ${rehearsal.title} · ${eventDate(rehearsal)}',
                 ),
             ],
           ),
@@ -156,7 +175,7 @@ class ManagementScreen extends StatelessWidget {
             tiles: [
               tile(
                 Icons.photo_library_outlined,
-                'Galerien verwalten',
+                'Galerien',
                 GalleryListScreen(controller: controller),
                 'Alben und Freigaben',
               ),
@@ -181,7 +200,7 @@ class ManagementScreen extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 1100),
         child: RefreshIndicator(
-          onRefresh: controller.refresh,
+          onRefresh: () => refreshWithFeedback(context, controller),
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(22, 20, 22, 30),
@@ -207,9 +226,6 @@ class _NextEventCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final responded = controller.events
-        .where((e) => e.id == event.id)
-        .firstOrNull;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -240,10 +256,10 @@ class _NextEventCard extends StatelessWidget {
               _Fact(Icons.schedule, eventTime(event)),
               if (event.place.isNotEmpty)
                 _Fact(Icons.place_outlined, event.place),
-              if (responded != null && responded.attendeeCount > 0)
+              if (event.attendeeCount > 0)
                 _Fact(
                   Icons.how_to_reg_outlined,
-                  '${responded.attendeeCount} dabei',
+                  '${event.attendeeCount} dabei',
                 ),
             ],
           ),

@@ -7,7 +7,38 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/state_pill.dart';
+import '../../casting/domain/casting.dart';
 import '../../ensemble/admin/member_editor_screen.dart';
+
+/// People who may be linked to [account], best name match first: the same
+/// name, then a similar one, then everyone else alphabetically.
+List<TheaterMember> rankApprovalCandidates(
+  String accountName,
+  Iterable<TheaterMember> people,
+) {
+  final scored = [
+    for (final m in people)
+      (member: m, score: nameMatchScore(accountName, m.name)),
+  ];
+  scored.sort((a, b) {
+    final byScore = b.score.compareTo(a.score);
+    return byScore != 0
+        ? byScore
+        : normalizeName(a.member.name).compareTo(normalizeName(b.member.name));
+  });
+  return [for (final s in scored) s.member];
+}
+
+/// The only person carrying exactly [accountName], if there is one.
+TheaterMember? uniqueExactMatch(
+  String accountName,
+  Iterable<TheaterMember> people,
+) {
+  final exact = people
+      .where((m) => nameMatchScore(accountName, m.name) == 2)
+      .toList();
+  return exact.length == 1 ? exact.single : null;
+}
 
 class AccountApprovalScreen extends StatefulWidget {
   const AccountApprovalScreen({
@@ -29,10 +60,57 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
   int? _person;
   String _search = '', _role = 'member';
   bool _busy = false;
+
+  /// Set once the member list is current; the suggestion is chosen then.
+  bool _suggested = false;
   @override
   void initState() {
     super.initState();
     _person = widget.initialPersonId;
+    _suggested = _person != null;
+    // Refreshing notifies listeners, which must not happen during build.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshPeople());
+  }
+
+  String get _accountName => textValue(widget.account['name']);
+
+  Set<int> get _linked => widget.accounts
+      .where((x) => x['personId'] != null)
+      .map((x) => intValue(x['personId']))
+      .toSet();
+
+  /// Loads the current person list, then preselects a unique exact match.
+  Future<void> _refreshPeople() async {
+    try {
+      await widget.controller.refresh();
+    } catch (_) {
+      // The cached list stays usable; refresh errors show in the banner.
+    }
+    if (!mounted || _suggested) return;
+    final match = _suggestion;
+    setState(() {
+      _suggested = true;
+      _person ??= match?.id;
+    });
+  }
+
+  TheaterMember? get _suggestion => uniqueExactMatch(
+    _accountName,
+    widget.controller.members.where((m) => m.active && !_linked.contains(m.id)),
+  );
+
+  Future<void> _createPerson() async {
+    final id = await openPage<int>(
+      context,
+      MemberEditorScreen(
+        controller: widget.controller,
+        initialName: _accountName,
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      if (id != null) _person = id;
+    });
   }
 
   Future<void> _save(bool approve) async {
@@ -99,13 +177,17 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
     title: 'Konto freigeben',
     children: (context) {
       final a = widget.account;
-      final linked = widget.accounts
-          .where((x) => x['personId'] != null)
-          .map((x) => intValue(x['personId']))
-          .toSet();
-      final people = widget.controller.members.where(
-        (m) => m.active && m.name.toLowerCase().contains(_search.toLowerCase()),
+      final linked = _linked;
+      final needle = normalizeName(_search);
+      final ranked = rankApprovalCandidates(
+        _accountName,
+        widget.controller.members.where(
+          (m) => m.active && normalizeName(m.name).contains(needle),
+        ),
       );
+      final free = ranked.where((m) => !linked.contains(m.id)).toList();
+      final taken = ranked.where((m) => linked.contains(m.id)).toList();
+      final suggestion = _suggestion;
       return [
         Card(
           child: Padding(
@@ -154,39 +236,56 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
           onChanged: (s) => setState(() => _search = s),
         ),
         const SizedBox(height: 14),
-        for (final m in people)
-          Card(
-            child: ListTile(
-              enabled: !linked.contains(m.id),
-              leading: Icon(
-                _person == m.id
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_off,
-              ),
-              onTap: linked.contains(m.id)
-                  ? null
-                  : () => setState(() => _person = m.id),
-              title: Text(m.name),
-              subtitle: Text(
-                linked.contains(m.id)
-                    ? 'Bereits mit einem Konto verknüpft'
-                    : [
+        if (free.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('Keine freie Person gefunden.'),
+          ),
+        RadioGroup<int>(
+          groupValue: _person,
+          onChanged: (id) {
+            if (!_busy) setState(() => _person = id);
+          },
+          child: Column(
+            children: [
+              for (final m in free)
+                Card(
+                  child: RadioListTile<int>(
+                    value: m.id,
+                    title: Text(m.name),
+                    subtitle: Text(
+                      [
+                        if (nameMatchScore(_accountName, m.name) == 1)
+                          'Ähnlicher Name',
                         widget.controller.roleNames(m.roleIds),
                         'Mitglied Nr. ${m.id.toString().padLeft(3, '0')}',
                       ].where((s) => s.isNotEmpty).join(' · '),
-              ),
-            ),
+                    ),
+                    secondary: m.id == suggestion?.id
+                        ? const StatePill('Vorschlag', icon: Icons.auto_awesome)
+                        : null,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (taken.isNotEmpty)
+          ExpansionTile(
+            key: const ValueKey('approval-linked-people'),
+            tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: Text('Bereits verknüpft (${taken.length})'),
+            children: [
+              for (final m in taken)
+                ListTile(
+                  enabled: false,
+                  leading: const Icon(Icons.link),
+                  title: Text(m.name),
+                  subtitle: const Text('Bereits mit einem Konto verknüpft'),
+                ),
+            ],
           ),
         TextButton.icon(
-          onPressed: _busy
-              ? null
-              : () async {
-                  await openPage(
-                    context,
-                    MemberEditorScreen(controller: widget.controller),
-                  );
-                  if (mounted) setState(() {});
-                },
+          onPressed: _busy ? null : _createPerson,
           icon: const Icon(Icons.person_add_outlined),
           label: const Text('Person anlegen'),
         ),

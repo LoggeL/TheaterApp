@@ -181,7 +181,7 @@ int _distance(String a, String b) {
 
 /// Whether a name from the script plausibly means this person: initials
 /// ("Alex B."), a single first or last name, or a small typo.
-bool _similarName(String scriptName, String personName) {
+bool similarName(String scriptName, String personName) {
   final script = _tokens(scriptName), person = _tokens(personName);
   if (script.isEmpty || person.isEmpty) return false;
   final a = script.join(' '), b = person.join(' ');
@@ -198,6 +198,15 @@ bool _similarName(String scriptName, String personName) {
   }
   final allowed = a.length >= 12 ? 2 : (a.length >= 6 ? 1 : 0);
   return allowed > 0 && _distance(a, b) <= allowed;
+}
+
+/// How well [name] (e.g. from a registration) matches [personName]:
+/// 2 for the same normalized name, 1 for a [similarName], 0 otherwise.
+int nameMatchScore(String name, String personName) {
+  final a = normalizeName(name), b = normalizeName(personName);
+  if (a.isEmpty || b.isEmpty) return 0;
+  if (a == b) return 2;
+  return similarName(name, personName) || similarName(personName, name) ? 1 : 0;
 }
 
 /// Spoken lines per script role, counted from the dialogue cues.
@@ -305,7 +314,7 @@ List<CastingSuggestion> castingSuggestions(
         (actor.isEmpty
             ? null
             : suggest(
-                unique((m) => _similarName(role.actor, m.name)),
+                unique((m) => similarName(role.actor, m.name)),
                 'ähnlicher Name im Drehbuch: „${role.actor}“',
               )) ??
         (name.isEmpty || name.contains(' ')

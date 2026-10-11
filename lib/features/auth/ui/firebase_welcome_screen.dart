@@ -4,6 +4,7 @@ import '../../../app/brand.dart';
 import '../../../app/platform/pwa_install_card.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/identity.dart';
+import '../../../shared/feedback.dart';
 import '../../../shared/widgets/brand_logo.dart';
 import '../../../shared/widgets/privacy_links.dart';
 import 'sign_in_providers.dart';
@@ -21,7 +22,7 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
       _email = TextEditingController(),
       _password = TextEditingController();
   bool _register = false, _hidden = true, _busy = false;
-  String? _error, _info;
+  String? _error;
   @override
   void dispose() {
     _name.dispose();
@@ -34,7 +35,6 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
     setState(() {
       _busy = true;
       _error = null;
-      _info = null;
     });
     try {
       await operation();
@@ -59,20 +59,64 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
   }
 
   Future<void> _reset() async {
-    if (!_email.text.contains('@')) {
-      setState(() => _error = 'Bitte zuerst deine E-Mail-Adresse eintragen.');
-      return;
-    }
+    final email = await showDialog<String>(
+      context: context,
+      builder: (_) => _ResetPasswordDialog(email: _email.text.trim()),
+    );
+    if (email == null || !mounted) return;
+    _email.text = email;
     await _run(() async {
       await widget.controller.identity!.initialize();
-      await widget.controller.identity!.resetPassword(_email.text);
+      await widget.controller.identity!.resetPassword(email);
       if (mounted) {
-        setState(
-          () => _info =
-              'Falls ein Konto mit dieser Adresse existiert, erhältst du eine E-Mail zum Zurücksetzen.',
+        showDone(
+          context,
+          'Falls es ein Konto mit $email gibt, kommt gleich eine E-Mail zum '
+          'Zurücksetzen.',
         );
       }
     });
+  }
+
+  /// Error or info text in a tonal box that screen readers announce.
+  Widget _notice(String text, {bool error = false}) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Semantics(
+        liveRegion: true,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: error ? scheme.errorContainer : scheme.secondaryContainer,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                error ? Icons.error_outline : Icons.info_outline,
+                size: 20,
+                color: error
+                    ? scheme.onErrorContainer
+                    : scheme.onSecondaryContainer,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  text,
+                  style: TextStyle(
+                    color: error
+                        ? scheme.onErrorContainer
+                        : scheme.onSecondaryContainer,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _provider(String provider) => Padding(
@@ -202,6 +246,7 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                         maxLength: 120,
                         autofillHints: const [AutofillHints.name],
                         textCapitalization: TextCapitalization.words,
+                        textInputAction: TextInputAction.next,
                         decoration: const InputDecoration(
                           labelText: 'Name zur Zuordnung',
                           hintText: 'Vor- und Nachname',
@@ -219,8 +264,12 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                     TextFormField(
                       controller: _email,
                       keyboardType: TextInputType.emailAddress,
-                      autofillHints: const [AutofillHints.email],
+                      autofillHints: const [
+                        AutofillHints.username,
+                        AutofillHints.email,
+                      ],
                       autocorrect: false,
+                      textInputAction: TextInputAction.next,
                       decoration: const InputDecoration(labelText: 'E-Mail'),
                       validator: (s) => s != null && s.contains('@')
                           ? null
@@ -230,6 +279,7 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                     TextFormField(
                       controller: _password,
                       obscureText: _hidden,
+                      textInputAction: TextInputAction.done,
                       autofillHints: [
                         _register
                             ? AutofillHints.newPassword
@@ -268,20 +318,7 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                         ),
                       ),
                     if (_error != null || widget.controller.error != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Text(
-                          _error ?? widget.controller.error!,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ),
-                    if (_info != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Text(_info!),
-                      ),
+                      _notice(_error ?? widget.controller.error!, error: true),
                     const SizedBox(height: 18),
                     FilledButton(
                       onPressed: _busy ? null : _submit,
@@ -308,7 +345,6 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                           : () => setState(() {
                               _register = !_register;
                               _error = null;
-                              _info = null;
                               widget.controller.clearError();
                             }),
                       child: Text(
@@ -328,4 +364,70 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
       ),
     );
   }
+}
+
+/// Asks for the address to send the reset link to; owns its controller.
+/// Pops the trimmed address or null.
+class _ResetPasswordDialog extends StatefulWidget {
+  const _ResetPasswordDialog({required this.email});
+  final String email;
+  @override
+  State<_ResetPasswordDialog> createState() => _ResetPasswordDialogState();
+}
+
+class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
+  final _form = GlobalKey<FormState>();
+  late final _email = TextEditingController(text: widget.email);
+
+  @override
+  void dispose() {
+    _email.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_form.currentState!.validate()) {
+      Navigator.pop(context, _email.text.trim());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
+    title: const Text('Passwort zurücksetzen'),
+    content: Form(
+      key: _form,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Wir schicken dir einen Link, mit dem du ein neues Passwort '
+            'festlegen kannst.',
+          ),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: _email,
+            autofocus: widget.email.isEmpty,
+            keyboardType: TextInputType.emailAddress,
+            autofillHints: const [AutofillHints.email],
+            autocorrect: false,
+            textInputAction: TextInputAction.send,
+            decoration: const InputDecoration(labelText: 'E-Mail'),
+            validator: (s) => s != null && s.contains('@')
+                ? null
+                : 'Bitte eine gültige E-Mail-Adresse eingeben.',
+            onFieldSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Abbrechen'),
+      ),
+      FilledButton(onPressed: _submit, child: const Text('Link senden')),
+    ],
+  );
 }
