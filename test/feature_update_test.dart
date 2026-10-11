@@ -96,12 +96,24 @@ void main() {
         find.byType(NavigationRail),
         width >= 900 ? findsOneWidget : findsNothing,
       );
-      expect(find.text('Admin'), findsOneWidget);
-      await tester.tap(find.text('Admin'));
+      if (width >= 900) {
+        // The rail lists Admin as a section.
+        expect(find.text('Admin'), findsOneWidget);
+        await tester.tap(find.text('Admin'));
+      } else {
+        // Phones keep five tabs; Admin opens from the app bar.
+        expect(find.byType(NavigationDestination), findsNWidgets(5));
+        expect(find.text('Admin'), findsNothing);
+        await tester.tap(find.byTooltip('Admin'));
+      }
       await tester.pumpAndSettle();
       expect(find.text('Administration.'), findsOneWidget);
       expect(find.text('Konten & Verknüpfungen'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      if (width < 900) {
+        await tester.tap(find.byTooltip('Zurück'));
+        await tester.pumpAndSettle();
+      }
       await tester.tap(find.text('Termine'));
       await tester.pumpAndSettle();
       if (width < 1250) {

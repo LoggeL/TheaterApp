@@ -51,13 +51,13 @@ class AppController extends ChangeNotifier {
   bool get usesFirebase => _identity != null;
   bool get hasAccess => _user?.isApproved == true;
   List<JsonMap> get messages =>
-      jsonList(_baseSnapshot['messages']).map(jsonMap).toList();
+      jsonList(_view['messages']).map(jsonMap).toList();
 
   /// Slot pools ("Terminfinder"), newest first; includes queued bookings.
   List<JsonMap> get slotPools => _slotPools;
   List<JsonMap> _slotPools = const [];
   List<JsonMap> get pendingAccounts =>
-      jsonList(_baseSnapshot['pendingAccounts']).map(jsonMap).toList();
+      jsonList(_view['pendingAccounts']).map(jsonMap).toList();
 
   /// Registrations an admin can link now (confirmed identity and name given).
   int get openRegistrationCount => pendingAccounts
@@ -74,28 +74,16 @@ class AppController extends ChangeNotifier {
   JsonMap get checkinVersions => cloneJson(_checkinVersions);
   JsonMap _checkinVersions = {};
   List<JsonMap> get productionRecords =>
-      jsonList(_baseSnapshot['productions']).map((item) {
-        final record = jsonMap(item);
-        final projected = _productions
-            .where((p) => p.id == record['id'])
-            .firstOrNull;
-        return projected == null
-            ? record
-            : {
-                ...record,
-                'archived': projected.archived,
-                'version': projected.version,
-              };
-      }).toList()..sort(
+      jsonList(_view['productions']).map(jsonMap).toList()..sort(
         (left, right) => Production.compareNewestFirst(
           Production.fromJson(left),
           Production.fromJson(right),
         ),
       );
   List<JsonMap> get memberRecords =>
-      jsonList(_baseSnapshot['members']).map(jsonMap).toList();
+      jsonList(_view['members']).map(jsonMap).toList();
   List<JsonMap> get personRoles =>
-      jsonList(_baseSnapshot['personRoles']).map(jsonMap).toList();
+      jsonList(_view['personRoles']).map(jsonMap).toList();
 
   /// Readable target audience; no roles, productions or people = everyone.
   String audienceLabel(
@@ -149,6 +137,7 @@ class AppController extends ChangeNotifier {
   final DateTime Function() _clock;
   Future<void> _writeTail = Future.value();
   Future<void>? _refreshTask, _drainTask;
+  bool _refreshSilent = false, _refreshing = false;
   int _generation = 0, _busyCount = 0, _mutationVersion = 0;
   bool _initialized = false,
       _isDemo = false,
@@ -160,6 +149,9 @@ class AppController extends ChangeNotifier {
   DateTime? _lastSync, _expiresAt;
   AppUser? _user;
   JsonMap _baseSnapshot = {};
+
+  /// [_baseSnapshot] with the queued changes applied; set by `_rebuild`.
+  JsonMap _view = {};
   List<TheaterEvent> _events = [];
   List<Absence> _absences = [];
   List<Poll> _polls = [];
@@ -189,6 +181,9 @@ class AppController extends ChangeNotifier {
   bool get initialized => _initialized;
   int get sessionEpoch => _generation;
   bool get busy => _busyCount > 0;
+
+  /// True while any refresh runs, also a silent background refresh.
+  bool get isRefreshing => _refreshing;
   bool get isDemo => _isDemo;
   bool get isOffline => _isOffline;
   bool get isAuthenticated => _user != null;
@@ -274,13 +269,20 @@ class AppController extends ChangeNotifier {
       );
     }
     final generation = _generation;
-    final result = await _api.request(
-      _apiBaseUrl,
-      method,
-      path,
-      token: _token,
-      body: body,
-    );
+    final JsonMap result;
+    try {
+      result = await _api.request(
+        _apiBaseUrl,
+        method,
+        path,
+        token: _token,
+        body: body,
+      );
+    } on ApiException catch (error) {
+      // An expired session signs out here just like during a refresh.
+      if (error.isUnauthorized) await _expire(generation);
+      rethrow;
+    }
     if (!_current(generation)) {
       throw const ApiException('Das Konto hat sich geändert.', statusCode: 401);
     }

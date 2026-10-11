@@ -328,6 +328,7 @@ extension SessionController on AppController {
         _drainTask = null;
         _loadingScripts.clear();
         _busyCount = 0;
+        _refreshing = false;
       }
       await _write(() => _store.clearAccount(_account!));
       if (!_current(generation)) return;
@@ -480,6 +481,7 @@ extension SessionController on AppController {
     _expiresAt = null;
     _deviceToken = null;
     _baseSnapshot = {};
+    _view = {};
     _events = [];
     _absences = [];
     _polls = [];
@@ -493,6 +495,7 @@ extension SessionController on AppController {
     _loadingScripts.clear();
     _lastSync = null;
     _busyCount = 0;
+    _refreshing = false;
     _isDemo = false;
     _isOffline = false;
     _refreshTask = null;

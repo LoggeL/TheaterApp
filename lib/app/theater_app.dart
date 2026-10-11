@@ -30,13 +30,20 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
   final _navigator = GlobalKey<NavigatorState>();
   final _messenger = GlobalKey<ScaffoldMessengerState>();
   final _navigationTab = ValueNotifier<int>(0);
+
+  /// What the root depends on: session identity and theme. Everything else
+  /// rebuilds below it (the session gate and pages opened with `openPage`).
+  late final _rootState = ValueNotifier<Object?>(_rootKey);
   late final DeviceServices _devices;
   late final DeepLinkRouter _deepLinks;
   late final BackgroundSync _sync;
   final _updates = AppUpdateCheck();
   String? _identity;
   bool _starting = true;
-  String? _startupError;
+  Object? _startupError;
+
+  /// Completes when the startup update check has finished or does not apply.
+  Future<void> _updateCheck = Future.value();
   @override
   void initState() {
     super.initState();
@@ -53,7 +60,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
       onTarget: _deepLinks.handle,
       onForegroundMessage: (message) {
         _messenger.currentState?.showSnackBar(SnackBar(content: Text(message)));
-        widget.controller.refresh();
+        widget.controller.refresh(silent: true);
       },
     );
     _identity = _sessionIdentity;
@@ -74,7 +81,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
           _startupError = null;
         });
         _sync.start();
-        _checkForUpdate();
+        _updateCheck = _checkForUpdate();
         final target = _deepLinks.takePending();
         if (target != null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -86,8 +93,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
       if (mounted) {
         setState(() {
           _starting = false;
-          _startupError =
-              'Die lokalen App-Daten konnten nicht geöffnet werden. $e';
+          _startupError = e;
         });
       }
     }
@@ -97,7 +103,22 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
       ? null
       : '${widget.controller.apiBaseUrl}:${widget.controller.user!.id}:${widget.controller.user!.status}:${widget.controller.user!.role}:${widget.controller.isDemo}:${widget.controller.sessionEpoch}';
 
+  Object? get _rootKey {
+    final c = widget.controller;
+    return (
+      c.user?.id,
+      c.user?.status,
+      c.user?.role,
+      c.hasAccess,
+      c.user?.mustChangePassword,
+      c.isDemo,
+      c.sessionEpoch,
+      c.preferences['themeMode'],
+    );
+  }
+
   void _accountChanged() {
+    _rootState.value = _rootKey;
     final current = _sessionIdentity;
     if (current != _identity) {
       _identity = current;
@@ -125,19 +146,27 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _sync.start();
       unawaited(_sync.refresh());
-      _checkForUpdate();
+      _updateCheck = _checkForUpdate();
     } else {
       _sync.stop();
     }
   }
 
-  void _checkForUpdate() {
-    if (!widget.enableDeviceServices || !AppUpdateCheck.supported) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _navigator.currentContext != null) {
-        unawaited(_updates.run(() => _navigator.currentContext!));
+  Future<void> _checkForUpdate() {
+    if (!widget.enableDeviceServices || !AppUpdateCheck.supported) {
+      return Future.value();
+    }
+    final done = Completer<void>();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        if (mounted && _navigator.currentContext != null) {
+          await _updates.run(() => _navigator.currentContext!);
+        }
+      } finally {
+        done.complete();
       }
     });
+    return done.future;
   }
 
   @override
@@ -147,16 +176,18 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     widget.controller.removeListener(_accountChanged);
     _devices.dispose();
     _navigationTab.dispose();
+    _rootState.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: widget.controller,
-    builder: (context, _) {
+  Widget build(BuildContext context) => ValueListenableBuilder<Object?>(
+    valueListenable: _rootState,
+    builder: (context, _, _) {
       final controller = widget.controller;
       return AppNavigationScope(
         selection: _navigationTab,
+        controller: controller,
         child: MaterialApp(
           title: Brand.name,
           debugShowCheckedModeBanner: false,
@@ -179,6 +210,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
             startupError: _startupError,
             onRetry: _start,
             promptForPush: widget.enableDeviceServices,
+            beforePushPrompt: () => _updateCheck,
           ),
         ),
       );

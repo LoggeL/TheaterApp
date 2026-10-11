@@ -231,18 +231,42 @@ extension SyncController on AppController {
     _notify();
   }
 
-  Future<void> refresh() {
+  /// Sends queued changes and loads a fresh snapshot. A [silent] refresh (the
+  /// automatic background sync) leaves [busy] untouched; [isRefreshing] still
+  /// reports it.
+  Future<void> refresh({bool silent = false}) {
     if (_user == null) return Future.value();
-    if (_refreshTask != null) return _refreshTask!;
+    final running = _refreshTask;
+    if (running != null) {
+      // Someone waits for a silent refresh: show its progress from now on.
+      if (!silent && _refreshSilent) _busyUntil(running);
+      return running;
+    }
     final generation = _generation;
-    final task = _refresh(generation);
+    _refreshSilent = silent;
+    final task = _refresh(generation, silent: silent);
     _refreshTask = task;
     return task.whenComplete(() {
       if (_current(generation)) _refreshTask = null;
     });
   }
 
-  Future<void> _refresh(int generation) async {
+  void _busyUntil(Future<void> task) {
+    final generation = _generation;
+    _refreshSilent = false;
+    _busyCount++;
+    _notify();
+    unawaited(
+      task.catchError((Object _) {}).whenComplete(() {
+        if (_current(generation)) {
+          _busyCount = max(0, _busyCount - 1);
+          _notify();
+        }
+      }),
+    );
+  }
+
+  Future<void> _refresh(int generation, {bool silent = false}) async {
     if (_isDemo) {
       _error = null;
       _lastSync = _clock();
@@ -250,7 +274,8 @@ extension SyncController on AppController {
       return;
     }
     final origin = _apiBaseUrl, token = _token!;
-    _busyCount++;
+    if (!silent) _busyCount++;
+    _refreshing = true;
     _error = null;
     _notify();
     try {
@@ -295,7 +320,8 @@ extension SyncController on AppController {
       }
     } finally {
       if (_current(generation)) {
-        _busyCount = max(0, _busyCount - 1);
+        if (!silent) _busyCount = max(0, _busyCount - 1);
+        _refreshing = false;
         _notify();
       }
     }
@@ -356,5 +382,6 @@ extension SyncController on AppController {
     _checkinsByEvent = jsonMap(view['checkinsByEvent']);
     _checkinVersions = jsonMap(view['checkinVersions']);
     _capabilities = jsonMap(view['capabilities']);
+    _view = view;
   }
 }
