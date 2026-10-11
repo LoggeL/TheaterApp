@@ -62,8 +62,14 @@ class _GalleryEditorState extends State<GalleryEditor> {
     }
   }
 
+  // Listens to the controller so the production list follows a sync.
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: widget.controller,
+    builder: (context, _) => _form(context),
+  );
+
+  Widget _form(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: Text(
         widget.gallery == null ? 'Album freigeben' : 'Album bearbeiten',

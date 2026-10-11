@@ -25,31 +25,36 @@ class _MessageTargetScreenState extends State<MessageTargetScreen> {
   late final Future<void> _loading = Future.microtask(
     widget.controller.refresh,
   );
+  // Listens to the controller so a message that arrives with a later sync
+  // still replaces the placeholder.
   @override
-  Widget build(BuildContext context) => FutureBuilder<void>(
-    future: _loading,
-    builder: (context, snapshot) {
-      final matches = widget.controller.messages.where(
-        (m) => m['id'] == widget.messageId,
-      );
-      if (matches.isNotEmpty) {
-        return MessageDetailScreen(
-          controller: widget.controller,
-          message: matches.first,
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: widget.controller,
+    builder: (context, _) => FutureBuilder<void>(
+      future: _loading,
+      builder: (context, snapshot) {
+        final matches = widget.controller.messages.where(
+          (m) => m['id'] == widget.messageId,
         );
-      }
-      return Scaffold(
-        appBar: AppBar(title: const Text('Mitteilung')),
-        body: snapshot.connectionState != ConnectionState.done
-            ? const Center(child: CircularProgressIndicator())
-            : const EmptyState(
-                icon: Icons.mail_outline,
-                title: 'Mitteilung nicht verfügbar',
-                message:
-                    'Die Mitteilung wurde entfernt oder ist für dein Konto nicht freigegeben.',
-              ),
-      );
-    },
+        if (matches.isNotEmpty) {
+          return MessageDetailScreen(
+            controller: widget.controller,
+            message: matches.first,
+          );
+        }
+        return Scaffold(
+          appBar: AppBar(title: const Text('Mitteilung')),
+          body: snapshot.connectionState != ConnectionState.done
+              ? const Center(child: CircularProgressIndicator())
+              : const EmptyState(
+                  icon: Icons.mail_outline,
+                  title: 'Mitteilung nicht verfügbar',
+                  message:
+                      'Die Mitteilung wurde entfernt oder ist für dein Konto nicht freigegeben.',
+                ),
+        );
+      },
+    ),
   );
 }
 
