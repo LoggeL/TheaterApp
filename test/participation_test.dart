@@ -172,4 +172,36 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });
+
+  testWidgets('a failed overview offers to load again', (tester) async {
+    final server = TestServer();
+    var fail = true;
+    server.override = (request) => request.url.path.contains('/participation')
+        ? Future.value(
+            fail
+                ? jsonResponse({'error': 'Server nicht erreichbar'}, 503)
+                : jsonResponse({
+                    'since': '2026-03-12T12:00:00.000Z',
+                    'own': counts,
+                  }),
+          )
+        : null;
+    final controller = server.controller();
+    await signIn(controller);
+    await tester.pumpWidget(
+      MaterialApp(home: ParticipationScreen(controller: controller)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Übersicht nicht geladen'), findsOneWidget);
+    expect(find.text('Server nicht erreichbar'), findsOneWidget);
+    fail = false;
+    await tester.tap(find.text('Erneut laden'));
+    await tester.pumpAndSettle();
+    expect(find.text('Übersicht nicht geladen'), findsNothing);
+    expect(find.text('Trotz Zusage gefehlt'), findsOneWidget);
+    expect(find.byType(RefreshIndicator), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
 }

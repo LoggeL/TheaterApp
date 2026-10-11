@@ -8,10 +8,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
+import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/features/galleries/galleries.dart';
 import 'package:theater_app/features/profile/profile.dart';
 
-import 'app_controller_test.dart' show TestServer, signIn, jsonResponse;
+import 'app_controller_test.dart'
+    show TestServer, fixedNow, signIn, jsonResponse;
 
 final _png = base64Decode(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==',
@@ -299,4 +301,313 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets(
+    'the grid keeps every loaded page after closing an unchanged lightbox',
+    (tester) async {
+      tester.view.physicalSize = const Size(1100, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final server = TestServer();
+      final offsets = <int>[];
+      server.override = (request) {
+        if (request.url.path.contains('/assets/')) {
+          return Future.value(_image());
+        }
+        if (request.url.path.endsWith('/galleries/g/')) {
+          final offset = int.parse(request.url.queryParameters['offset']!);
+          offsets.add(offset);
+          return Future.value(
+            jsonResponse({
+              'gallery': {'id': 'g', 'title': 'Testalbum'},
+              'assets': offset == 0
+                  ? List.generate(60, _asset)
+                  : List.generate(10, (i) => _asset(60 + i)),
+              'nextOffset': offset == 0 ? 60 : null,
+              'total': 70,
+            }),
+          );
+        }
+        return null;
+      };
+      final controller = server.controller();
+      await signIn(controller);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: GalleryScreen(
+            controller: controller,
+            gallery: const {'id': 'g', 'title': 'Testalbum'},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -8000));
+      await tester.pumpAndSettle();
+      expect(offsets, [0, 60]);
+      await tester.tap(find.bySemanticsLabel('Aufnahme 65 öffnen'));
+      await tester.pumpAndSettle();
+      expect(find.text('65 / 70'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      // No reload from the first page: all 70 images are still in the grid.
+      expect(offsets, [0, 60]);
+      expect(find.bySemanticsLabel('Aufnahme 65 öffnen'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
+    'hiding an image keeps the lightbox open, offers undo and updates the grid',
+    (tester) async {
+      tester.view.physicalSize = const Size(1100, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final server = TestServer();
+      final visibility = <String, bool>{};
+      JsonMap local(int index) => {..._asset(index), 'id': 'local-$index'};
+      server.override = (request) {
+        final path = request.url.path;
+        if (path.contains('/assets/')) return Future.value(_image());
+        if (path.contains('/visibility') && request.method == 'PUT') {
+          final id = path.split('/media/').last.split('/').first;
+          visibility[id] = jsonMap(jsonDecode(request.body))['hidden'] == true;
+          return Future.value(jsonResponse({'ok': true}));
+        }
+        if (path.endsWith('/galleries/g/')) {
+          return Future.value(
+            jsonResponse({
+              'gallery': {'id': 'g', 'title': 'Testalbum'},
+              'assets': List.generate(3, local),
+              'nextOffset': null,
+              'total': 3,
+            }),
+          );
+        }
+        return null;
+      };
+      final controller = server.controller();
+      await signIn(controller);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: GalleryScreen(
+            controller: controller,
+            gallery: const {'id': 'g', 'title': 'Testalbum'},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Bilder hinzufügen'), findsOneWidget);
+      await tester.tap(find.bySemanticsLabel('Aufnahme 2 öffnen'));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(find.text('3 / 3'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pumpAndSettle();
+      expect(find.text('2 / 3'), findsOneWidget);
+      await tester.tap(find.byTooltip('Bild ausblenden'));
+      await tester.pumpAndSettle();
+      expect(visibility, {'1': true});
+      expect(find.byType(GalleryLightbox), findsOneWidget);
+      expect(find.text('Bild ausgeblendet'), findsOneWidget);
+      expect(find.byTooltip('Bild einblenden'), findsOneWidget);
+
+      await tester.tap(find.text('Rückgängig'));
+      await tester.pumpAndSettle();
+      expect(visibility, {'1': false});
+      expect(find.byTooltip('Bild ausblenden'), findsOneWidget);
+      await tester.tap(find.byTooltip('Bild ausblenden'));
+      await tester.pumpAndSettle();
+      expect(visibility, {'1': true});
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byType(GalleryLightbox), findsNothing);
+      expect(find.text('2 Aufnahmen'), findsWidgets);
+      expect(find.bySemanticsLabel('Aufnahme 3 öffnen'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+
+  testWidgets('ending a publication asks first and marks the album', (
+    tester,
+  ) async {
+    final server = TestServer();
+    var published = true;
+    final changes = <JsonMap>[];
+    server.override = (request) {
+      final path = request.url.path;
+      if (path.contains('/galleries/g/visibility')) {
+        final body = jsonMap(jsonDecode(request.body));
+        changes.add(body);
+        published = body['published'] == true;
+        return Future.value(jsonResponse({'ok': true}));
+      }
+      if (path.endsWith('/galleries/g/')) {
+        return Future.value(
+          jsonResponse({
+            'gallery': {
+              'id': 'g',
+              'title': 'Testalbum',
+              'published': published,
+              'version': 3,
+            },
+            'assets': [],
+            'nextOffset': null,
+            'total': 0,
+          }),
+        );
+      }
+      return null;
+    };
+    final controller = server.controller();
+    await signIn(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GalleryScreen(
+          controller: controller,
+          gallery: const {'id': 'g', 'title': 'Testalbum'},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Nur für Administration sichtbar'), findsNothing);
+    await tester.tap(find.byTooltip('Album verwalten'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Freigabe beenden'));
+    await tester.pumpAndSettle();
+    expect(find.text('Freigabe beenden?'), findsOneWidget);
+    await tester.tap(find.text('Abbrechen'));
+    await tester.pumpAndSettle();
+    expect(changes, isEmpty);
+
+    await tester.tap(find.byTooltip('Album verwalten'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Freigabe beenden'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Freigabe beenden'));
+    await tester.pumpAndSettle();
+    expect(changes.single, {'published': false, 'version': 3});
+    expect(find.textContaining('Freigabe beendet'), findsOneWidget);
+    expect(find.text('Nur für Administration sichtbar'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('the demo explains galleries instead of failing to load', (
+    tester,
+  ) async {
+    final controller = AppController(
+      localStore: MemoryLocalStore(),
+      credentialStore: MemoryCredentialStore(),
+      clock: () => fixedNow,
+    );
+    await controller.startDemo();
+    await tester.pumpWidget(
+      MaterialApp(home: GalleryListScreen(controller: controller)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Galerien nur mit Theaterkonto'), findsOneWidget);
+    expect(find.text('Erneut laden'), findsNothing);
+    expect(find.text('Album anlegen'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('saving the profile without a change closes it without a call', (
+    tester,
+  ) async {
+    final server = TestServer();
+    var profileCalls = 0;
+    server.override = (request) {
+      if (request.url.path.contains('/profile')) profileCalls++;
+      return null;
+    };
+    final controller = server.controller();
+    await signIn(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => ProfileScreen(controller: controller),
+                ),
+              ),
+              child: const Text('Öffnen'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Öffnen'));
+    await tester.pumpAndSettle();
+    expect(find.text('Name und Rollen pflegt die Theaterleitung.'), findsOne);
+    final save = find.widgetWithText(FilledButton, 'Speichern');
+    expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(find.byType(ProfileScreen), findsNothing);
+    expect(profileCalls, 0);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('leaving the profile with an unsaved removal asks first', (
+    tester,
+  ) async {
+    final server = TestServer();
+    server.data['user'] = {...server.user, 'avatarId': 'original'};
+    server.override = (request) {
+      final path = request.url.path.replaceFirst(RegExp(r'/$'), '');
+      if (path.endsWith('/snapshot')) {
+        return Future.value(
+          jsonResponse({
+            ...server.data,
+            'user': {...server.user, 'avatarId': 'original'},
+          }),
+        );
+      }
+      if (path.contains('/media/')) return Future.value(_image());
+      return null;
+    };
+    final controller = server.controller();
+    await signIn(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => ProfileScreen(controller: controller),
+                ),
+              ),
+              child: const Text('Öffnen'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Öffnen'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Entfernen'));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Änderungen verwerfen?'), findsOneWidget);
+    await tester.tap(find.text('Verwerfen'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ProfileScreen), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
 }

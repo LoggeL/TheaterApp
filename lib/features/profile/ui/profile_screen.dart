@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../data/api_client.dart';
+import '../../../shared/feedback.dart';
 import '../../../shared/layout/content_width.dart';
 import '../../../shared/widgets/member_avatar.dart';
 
@@ -65,6 +66,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _save() async {
+    // Nothing changed: leave without a round trip to the server.
+    if (!_hasDraft) {
+      Navigator.pop(context);
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    final removed = _selected == null && _avatar == null;
     setState(() {
       _busy = true;
       _error = null;
@@ -82,7 +90,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
         avatarId: _selected != null ? _uploadedAvatar : _avatar,
         version: _version,
       );
-      if (mounted) Navigator.pop(context);
+      if (!mounted) return;
+      setState(() => _hasDraft = false);
+      Navigator.pop(context);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            removed ? 'Profilbild entfernt.' : 'Profilbild gespeichert.',
+          ),
+        ),
+      );
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -90,7 +107,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _error = _conflict
               ? 'Dein Profil wurde inzwischen geändert. Lade den aktuellen '
                     'Stand, bevor du erneut speicherst. Dein Bildentwurf bleibt erhalten.'
-              : e.toString();
+              : userMessage(e);
         });
       }
     } finally {
@@ -116,14 +133,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _error = null;
       });
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = userMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) =>
+      DiscardGuard(dirty: _hasDraft && !_busy, child: _page(context));
+
+  Widget _page(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Mein Profil')),
     body: ListView(
       padding: pagePadding(context),
@@ -147,13 +167,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           spacing: 8,
           children: [
             TextButton.icon(
-              onPressed: _busy ? null : _pick,
+              onPressed: _busy || widget.controller.isDemo ? null : _pick,
               icon: const Icon(Icons.add_a_photo_outlined),
               label: const Text('Bild auswählen'),
             ),
             if (_selected != null || _avatar != null)
               TextButton(
-                onPressed: _busy
+                onPressed: _busy || widget.controller.isDemo
                     ? null
                     : () => setState(() {
                         _selected = null;
@@ -171,8 +191,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleLarge,
         ),
-        const SizedBox(height: 28),
-        const SizedBox(height: 16),
+        if (widget.controller.user?.roleIds.isNotEmpty == true)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              widget.controller.roleNames(widget.controller.user!.roleIds),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+        const SizedBox(height: 20),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.badge_outlined),
+            title: const Text('Name und Rollen pflegt die Theaterleitung.'),
+            subtitle: const Text(
+              'Wenn hier etwas nicht stimmt, sag der Theaterleitung Bescheid.',
+            ),
+            subtitleTextStyle: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        const SizedBox(height: 24),
         if (_error != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
@@ -190,10 +229,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               label: Text(_busy ? 'Wird geladen …' : 'Aktuellen Stand laden'),
             ),
           ),
+        // Never disabled without a draft: saving then simply closes the page.
         FilledButton(
-          onPressed: _busy || _conflict || widget.controller.isDemo
-              ? null
-              : _save,
+          onPressed: _busy || _conflict ? null : _save,
           child: Text(
             _busy
                 ? _conflict
