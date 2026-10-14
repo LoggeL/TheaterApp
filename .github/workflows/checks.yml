@@ -38,13 +38,13 @@ jobs:
           name: theater-web
           path: build/web
   google-play:
-    name: Publish internal Google Play release
+    name: Submit closed Google Play release
     needs: verify
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     concurrency:
-      group: google-play-internal
+      group: google-play-closed
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -115,7 +115,7 @@ jobs:
       - name: Build signed app bundle
         if: steps.current.outputs.publish == 'true'
         run: flutter build appbundle --release --dart-define-from-file=config/production.android.json --build-number=${{ steps.play.outputs.version_code }} --dart-define=APP_BUILD=${{ steps.play.outputs.version_code }}
-      - name: Publish and verify internal release
+      - name: Submit and verify closed release
         if: steps.current.outputs.publish == 'true'
         run: |
           node server/scripts/play-release.mjs publish "$RUNNER_TEMP/play-release.json" build/app/outputs/bundle/release/app-release.aab

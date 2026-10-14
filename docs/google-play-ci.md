@@ -1,6 +1,6 @@
 # Google Play aus GitHub Actions
 
-Der Workflow `.github/workflows/checks.yml` veröffentlicht nach einem erfolgreichen Prüfjob jeden Push auf `main` im internen Google-Play-Test. Pull Requests bekommen keine Release-Credentials und veröffentlichen nichts. Ein manueller Workflow-Start auf `main` veröffentlicht ebenfalls.
+Der Workflow `.github/workflows/checks.yml` reicht nach einem erfolgreichen Prüfjob jeden Push auf `main` im geschlossenen Google-Play-Test `alpha` zur Veröffentlichung ein. Das ist der feste Zielkanal für alle Android-Releases. Pull Requests bekommen keine Release-Credentials und veröffentlichen nichts. Ein manueller Workflow-Start auf `main` verwendet ebenfalls den geschlossenen Test.
 
 Die sichtbare Versionsnummer kommt aus `pubspec.yaml`. Der Android-Versionscode ist mindestens der dort eingetragene Code und immer höher als die bereits zu Google Play hochgeladenen Bundles. Auch ein erneut gestarteter Workflow erhält dadurch einen neuen Code. Play-Veröffentlichungen laufen nacheinander; ein inzwischen überholter Commit wird vor dem Build übersprungen.
 
@@ -14,11 +14,11 @@ Die Google Play Android Developer API muss im Google-Cloud-Projekt aktiviert sei
 
 ## Prüfung und Verwendung
 
-Der Release-Job lädt das AAB hoch, validiert die Änderung, veröffentlicht im Track `internal` und liest anschließend den Track in einer neuen API-Transaktion zurück. Ein grüner Release-Job belegt, dass Google den Versionscode als veröffentlicht zurückgegeben hat. Die tatsächliche Installation auf einem Gerät und die zeitverzögerte Store-Verteilung sind separate Prüfungen.
+Der Release-Job lädt das AAB hoch, validiert die Änderung und reicht den vollständigen Rollout im Track `alpha` ein. Anschließend liest er den Release-Lebenszyklus über die Play-API zurück. Ein grüner Release-Job belegt, dass Google die Version zur Prüfung angenommen hat, sie zur Veröffentlichung freigegeben hat oder sie bereits veröffentlicht ist. Der konkrete Status steht im Job-Nachweis. Eine noch nicht eingereichte oder abgelehnte Version lässt die Prüfung fehlschlagen. Die tatsächliche Installation auf einem Gerät und die zeitverzögerte Store-Verteilung sind separate Prüfungen.
 
-Testlink: https://play.google.com/apps/internaltest/4701275968106617341
+Testlink: https://play.google.com/apps/testing/de.kolpingtheater.ramsen.theaterapp
 
-Tester müssen in der ausgewählten Play-Console-Liste stehen und den Testbeitritt annehmen. Geräte mit aktivierten Play-Auto-Updates erhalten veröffentlichte Versionen nach der Verteilung durch Google. Der Workflow veröffentlicht nicht in Produktion.
+Tester müssen in der ausgewählten Liste des geschlossenen Tests stehen und den Testbeitritt annehmen. Geräte mit aktivierten Play-Auto-Updates erhalten veröffentlichte Versionen nach der Verteilung durch Google. Die Google-Prüfung erfolgt vor der Verfügbarkeit. Bei ausgeschalteter verwalteter Veröffentlichung veröffentlicht Google nach der Freigabe automatisch; bei eingeschalteter verwalteter Veröffentlichung ist die Freigabe zur Veröffentlichung in der Play Console nötig. Der Workflow veröffentlicht nicht in Produktion.
 
 Der Workflow und `server/scripts/play-release.mjs` sind vertrauenswürdiger Release-Code: Änderungen daran auf `main` können auf die Release-Secrets zugreifen. Private Schlüssel niemals committen oder in Logs ausgeben.
 

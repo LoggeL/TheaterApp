@@ -83,7 +83,7 @@ Private Server-Credentials und Android-Signierschlüssel liegen ausschließlich 
 
 Das [Betriebshandbuch](docs/operations.md) beschreibt Dokploy, Datenbank-Backups, Wiederherstellung, Firebase und weitere Anmeldeanbieter. `python3 tool/deploy.py` baut das Web-Frontend, überträgt einen geprüften Docker-Kontext und aktualisiert ausschließlich den eigenen Dokploy-Dienst. Der Probenplan und der Skriptdienst laufen separat weiter.
 
-Der [Google-Play-Workflow](docs/google-play-ci.md) baut nach erfolgreichen Prüfungen auf `main` ein signiertes Android-Bundle und veröffentlicht es im internen Testkanal. Die Einrichtung benötigt die dort beschriebenen GitHub-Secrets und Play-Console-Rechte.
+Der [Google-Play-Workflow](docs/google-play-ci.md) baut nach erfolgreichen Prüfungen auf `main` ein signiertes Android-Bundle und reicht es im geschlossenen Testkanal `alpha` zur Veröffentlichung ein. Die Einrichtung benötigt die dort beschriebenen GitHub-Secrets und Play-Console-Rechte.
 
 ## Design und Quellen
 
