@@ -25,13 +25,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _uploadedAvatar;
   bool _busy = false, _hasDraft = false, _conflict = false;
   String? _error;
+
+  /// "Über mich" and hiding the website data; only on servers that know them.
+  late final bool _details = widget.controller.supports('ensembleProfiles');
+  final _about = TextEditingController();
+  String _savedAbout = '';
+  bool _hidden = false, _savedHidden = false;
+
   @override
   void initState() {
     super.initState();
     final u = widget.controller.user!;
     _avatar = u.avatarId;
     _version = u.profileVersion;
+    _loadDetails();
+    _about.addListener(() => setState(() {}));
   }
+
+  @override
+  void dispose() {
+    _about.dispose();
+    super.dispose();
+  }
+
+  TheaterMember? get _member {
+    final personId = widget.controller.user?.personId;
+    return widget.controller.members.where((m) => m.id == personId).firstOrNull;
+  }
+
+  void _loadDetails() {
+    final member = _member;
+    _savedAbout = member?.about ?? '';
+    _savedHidden = _hidden = member?.websiteHidden ?? false;
+    _about.text = _savedAbout;
+  }
+
+  bool get _detailsDirty =>
+      _details &&
+      (_about.text.trim() != _savedAbout.trim() || _hidden != _savedHidden);
 
   Future<void> _pick() async {
     try {
@@ -67,7 +98,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _save() async {
     // Nothing changed: leave without a round trip to the server.
-    if (!_hasDraft) {
+    if (!_hasDraft && !_detailsDirty) {
       Navigator.pop(context);
       return;
     }
@@ -86,17 +117,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
         _uploadedAvatar = textValue(upload['id']);
       }
+      final details = _detailsDirty, picture = _hasDraft;
       await widget.controller.saveProfile(
         avatarId: _selected != null ? _uploadedAvatar : _avatar,
         version: _version,
+        about: _details ? _about.text.trim() : null,
+        websiteHidden: _details ? _hidden : null,
       );
       if (!mounted) return;
-      setState(() => _hasDraft = false);
+      setState(() {
+        _hasDraft = false;
+        _savedAbout = _about.text.trim();
+        _savedHidden = _hidden;
+      });
       Navigator.pop(context);
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            removed ? 'Profilbild entfernt.' : 'Profilbild gespeichert.',
+            details || !picture
+                ? 'Profil gespeichert.'
+                : removed
+                ? 'Profilbild entfernt.'
+                : 'Profilbild gespeichert.',
           ),
         ),
       );
@@ -106,7 +148,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _conflict = e is ApiException && e.statusCode == 409;
           _error = _conflict
               ? 'Dein Profil wurde inzwischen geändert. Lade den aktuellen '
-                    'Stand, bevor du erneut speicherst. Dein Bildentwurf bleibt erhalten.'
+                    'Stand, bevor du erneut speicherst. Dein ${_hasDraft ? 'Bildentwurf' : 'Entwurf'} bleibt erhalten.'
               : userMessage(e);
         });
       }
@@ -129,6 +171,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() {
         _version = user.profileVersion;
         if (!_hasDraft) _avatar = user.avatarId;
+        if (!_detailsDirty) _loadDetails();
         _conflict = false;
         _error = null;
       });
@@ -140,8 +183,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   @override
-  Widget build(BuildContext context) =>
-      DiscardGuard(dirty: _hasDraft && !_busy, child: _page(context));
+  Widget build(BuildContext context) => DiscardGuard(
+    dirty: (_hasDraft || _detailsDirty) && !_busy,
+    child: _page(context),
+  );
 
   Widget _page(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Mein Profil')),
@@ -200,6 +245,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ),
+        if (_details) ..._detailFields(context),
         const SizedBox(height: 20),
         Card(
           child: ListTile(
@@ -248,4 +294,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ],
     ),
   );
+
+  List<Widget> _detailFields(BuildContext context) => [
+    const SizedBox(height: 24),
+    TextField(
+      key: const ValueKey('profile-about'),
+      controller: _about,
+      enabled: !_busy && !widget.controller.isDemo,
+      minLines: 3,
+      maxLines: 8,
+      maxLength: aboutMaxLength,
+      textCapitalization: TextCapitalization.sentences,
+      decoration: const InputDecoration(
+        labelText: 'Über mich',
+        hintText: 'Ein paar Sätze für dein Profil im Ensemble',
+        helperText:
+            'Sehen alle freigegebenen Mitglieder. Leer lassen, '
+            'wenn du keinen Text zeigen möchtest.',
+        helperMaxLines: 3,
+        alignLabelWithHint: true,
+      ),
+    ),
+    const SizedBox(height: 8),
+    SwitchListTile(
+      key: const ValueKey('profile-website-visible'),
+      contentPadding: EdgeInsets.zero,
+      value: !_hidden,
+      onChanged: _busy || widget.controller.isDemo
+          ? null
+          : (value) => setState(() => _hidden = !value),
+      title: const Text('Angaben der Website zeigen'),
+      subtitle: const Text(
+        'Foto, Rollen und Aufgaben von kolpingtheater-ramsen.de auf deinem '
+        'Profil in der App. Die Website selbst ändert sich dadurch nicht.',
+      ),
+    ),
+  ];
 }
+
+/// Longest "Über mich" text; the server allows the same.
+const aboutMaxLength = 600;

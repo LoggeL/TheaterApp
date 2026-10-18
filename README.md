@@ -17,6 +17,7 @@ Flutter-App für das Kolpingtheater Ramsen. Web und Android verwenden denselben 
 - Teilnahmeübersicht der letzten sechs Monate: Mitglieder sehen ihre eigenen Zahlen, Admins alle aktiven Personen; keine Rangliste, Absagen zählen nicht negativ.
 - Tägliche automatische Löschung nicht mehr benötigter Daten (Fristen in `server/src/retention.mjs` und der Datenschutzerklärung) und Löschen von Anmeldekonten durch Admins.
 - Profilbilder und Galerien mit Immich-Titelbildern, eigenem Bildupload, Lightbox und Download.
+- Ensemble-Profile unter „Unser Ensemble“: Foto, „Über mich“-Text, aktuelle und bisherige Rollen sowie Aufgaben hinter den Kulissen; ergänzt um die öffentlichen Angaben der Teamseite kolpingtheater-ramsen.de (Abgleich per `server/scripts/import-website-team.mjs`, siehe [Betrieb](docs/operations.md)).
 - Fünf Reiter auf dem Telefon (Heute, Termine, Drehbücher, Mitteilungen, Mein Bereich); Admins öffnen die Verwaltung über die Schaltfläche „Admin“ in der Kopfleiste. Ab 900 px Breite eine Seitenleiste mit Admin-Eintrag, die auch auf Unterseiten sichtbar bleibt; Kalender mit Termintiteln.
 - Lokaler Cache und sichtbare Warteschlange für Rückmeldungen bei fehlender Verbindung.
 

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { AppError } from './theater.mjs';
 import { Immich } from './immich.mjs';
+import { websitePhotoVisible } from './website-team.mjs';
 sharp.cache({ memory: 16, files: 0, items: 20 });
 const fail = (status, message) => { throw new AppError(status, message); };
 const text = (v, max) => typeof v === 'string' ? v.trim().slice(0, max) : '';
@@ -77,6 +78,8 @@ export class MediaService {
     const a = this.theater.account(uid), m = this.store.get('media', id);
     if (!m || (m.hidden && a.role !== 'admin')) fail(404, 'Bild nicht gefunden.');
     if (m.kind === 'profile' && m.ownerPersonId !== a.personId && !this.store.all('members').some(p => p.avatarId === id)) fail(404, 'Bild nicht gefunden.');
+    // Website portraits are public anyway; a person can still hide theirs in the app.
+    if (m.kind === 'website' && !websitePhotoVisible(this.store, id)) fail(404, 'Bild nicht gefunden.');
     if (m.galleryId) this.gallery(m.galleryId, uid);
     return { bytes: await readFile(resolve(this.directory, `${m.id}.webp`)), mime: 'image/webp' };
   }

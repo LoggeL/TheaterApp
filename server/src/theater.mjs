@@ -30,7 +30,9 @@ export const remindCooldownMs = 10 * 60 * 1000;
 // Declines this close to the start are pushed to admins and the production's directors.
 export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'ensembleProfiles']);
+// A short self-written "Über mich" text on the ensemble profile.
+export const aboutMaxLength = 600;
 // Feedback from members to the admins as support tickets (see feedback-tickets.mjs).
 export { feedbackMaxLength, feedbackPerHour } from './feedback-tickets.mjs';
 const seriesFields = ['title', 'description', 'place', 'type', 'locked', 'roleIds', 'personIds', 'productionIds', 'productionId'];
@@ -458,7 +460,12 @@ export class Theater {
           const image = s.get('media', avatarId);
           if (!image || image.kind !== 'profile' || image.ownerPersonId !== a.personId) fail(403, 'Dieses Profilbild gehört nicht zu deinem Konto.');
         }
-        s.put('members', m.id, { ...m, avatarId, tagline: '', profileVersion: (m.profileVersion ?? 0) + 1, version: (m.version ?? 1) + 1 });
+        // Optional profile fields: older clients send neither, which keeps the stored values.
+        if (b.about !== undefined && b.about !== null && typeof b.about !== 'string') fail(400, 'Ungültiger Text.');
+        if (typeof b.about === 'string' && b.about.trim().length > aboutMaxLength) fail(400, `Bitte höchstens ${aboutMaxLength} Zeichen für „Über mich“ verwenden.`);
+        const about = b.about === undefined ? m.about ?? '' : String(b.about ?? '').replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+        const websiteHidden = b.websiteHidden === undefined ? m.websiteHidden === true : b.websiteHidden === true;
+        s.put('members', m.id, { ...m, avatarId, tagline: '', about, websiteHidden, profileVersion: (m.profileVersion ?? 0) + 1, version: (m.version ?? 1) + 1 });
         return {};
       }
       case 'member.save': {

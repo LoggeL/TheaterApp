@@ -9,12 +9,20 @@ class TheaterMember {
     this.avatarId,
     this.roleIds = const [],
     this.active = true,
+    this.about = '',
+    this.websiteHidden = false,
   });
   final int id;
   final String name, initials;
   final String? avatar, avatarId;
   final List<String> roleIds;
   final bool active;
+
+  /// Self-written "Über mich" text, visible to the ensemble.
+  final String about;
+
+  /// The person hid the imported website data (photo, roles) in the app.
+  final bool websiteHidden;
 
   /// Whether this member belongs to an audience of roles, invited people or
   /// production ensembles (one list per production); nothing chosen = everyone.
@@ -35,6 +43,8 @@ class TheaterMember {
     avatarId: json['avatarId'] as String?,
     roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
     active: json['active'] != false,
+    about: textValue(json['about']),
+    websiteHidden: json['websiteHidden'] == true,
   );
   JsonMap toJson() => {
     'id': id,
@@ -44,5 +54,7 @@ class TheaterMember {
     'avatarId': avatarId,
     'roleIds': roleIds,
     'active': active,
+    'about': about,
+    'websiteHidden': websiteHidden,
   };
 }

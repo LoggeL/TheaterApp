@@ -9,6 +9,7 @@ import '../../../shared/widgets/page_header.dart';
 import '../../accounts/ui/accounts_admin_screen.dart';
 import '../../casting/ui/person_productions.dart';
 import 'roles_admin_screen.dart';
+import 'website_profile_link.dart';
 
 /// Creates or edits a person. When a new person was saved, the route pops
 /// with their id (null while the creation still waits for a connection).
@@ -312,6 +313,11 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
             ),
           ),
         if (widget.member != null)
+          WebsiteProfileLink(
+            controller: widget.controller,
+            personId: intValue(widget.member!['id']),
+          ),
+        if (widget.member != null)
           PersonProductions(
             controller: widget.controller,
             personId: intValue(widget.member!['id']),
@@ -371,6 +377,7 @@ class _DeleteMemberDialogState extends State<_DeleteMemberDialog> {
       'Besetzungen, Regie und Mitwirkung in Stücken',
       'Einladungen, gebuchte Zeitfenster und Lesebestätigungen',
       'Kommentare im Drehbuch und namentliche Stimmen; anonyme Stimmen zählen ohne Namen weiter',
+      'Der selbst geschriebene „Über mich“-Text; das Website-Profil bleibt ohne Zuordnung bestehen',
       'Termine, Abstimmungen, Terminfinder und Mitteilungen, die nur an diese Person gingen',
     ];
     return AlertDialog(

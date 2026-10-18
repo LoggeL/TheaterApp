@@ -10,11 +10,15 @@ class MemberAvatar extends StatelessWidget {
     this.avatarId,
     required this.initials,
     this.radius = 22,
+    this.alignment = Alignment.center,
   });
   final AppController controller;
   final String? avatarId;
   final String initials;
   final double radius;
+
+  /// [Alignment.topCenter] keeps the face of a portrait photo in the circle.
+  final Alignment alignment;
   @override
   Widget build(BuildContext context) {
     final fallback = ColoredBox(
@@ -37,6 +41,7 @@ class MemberAvatar extends StatelessWidget {
             : ProtectedImage(
                 controller: controller,
                 path: '/media/$avatarId',
+                alignment: alignment,
                 decodeWidth: 256,
                 fallback: fallback,
               ),

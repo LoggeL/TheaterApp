@@ -9,12 +9,16 @@ class ProtectedImage extends StatefulWidget {
     required this.controller,
     required this.path,
     this.fit = BoxFit.cover,
+    this.alignment = Alignment.center,
     this.decodeWidth = 480,
     this.fallback,
   });
   final AppController controller;
   final String path;
   final BoxFit fit;
+
+  /// Which part stays visible when [fit] crops, e.g. the face of a portrait.
+  final Alignment alignment;
   final int decodeWidth;
   final Widget? fallback;
   @override
@@ -73,6 +77,7 @@ class _ProtectedImageState extends State<ProtectedImage> {
       return Image.memory(
         state.data!.bytes,
         fit: widget.fit,
+        alignment: widget.alignment,
         width: double.infinity,
         height: double.infinity,
         cacheWidth: widget.decodeWidth,

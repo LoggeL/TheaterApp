@@ -141,6 +141,21 @@ Das Raster lädt jeweils 60 Einträge und nur sichtbare Vorschaubilder. Die Ligh
 
 Der Probenplan wechselt zwischen Agenda und Monatskalender. Die Kalenderansicht zeigt auch vergangene Proben und alle Tage einer mehrtägigen Probe. Tippen auf einen Tag öffnet dessen Terminliste.
 
+## Ensemble-Profile und Website-Abgleich
+
+„Unser Ensemble“ öffnet zu jeder Person eine kurze Profilseite: Profilbild (sonst das Foto der Website), Aufgabenrollen, ein selbst geschriebener „Über mich“-Text (bis 600 Zeichen), die aktuelle Rolle, „Dabei seit“, alle Rollen je Stück und die Aufgaben hinter den Kulissen. Website-Rollen und Besetzungen der App werden pro Stück zu einem Eintrag zusammengeführt. Kontaktdaten, Rückmeldungen und Anwesenheiten erscheinen dort nicht. Unter „Profil bearbeiten“ schreibt jede Person ihren Text und kann die Website-Angaben in der App ausblenden; dann liefert der Server weder ihre Website-Rollen noch das Website-Foto aus.
+
+Quelle ist die öffentliche Teamseite <https://kolpingtheater-ramsen.de/team>. Die Website rendert sie aus `src/data/team.json` des öffentlichen Repositorys `Kolpingtheater-Ramsen/next-theater`; der Abgleich liest diese Datei über `raw.githubusercontent.com` und übernimmt nur Profile, die auf der Live-Teamseite verlinkt sind. Fotos kommen von `/img/team/avatar/<Name>.jpg`, werden auf 600×800 Pixel als WebP verkleinert und als Medien der Art `website` unter `/data/media` gespeichert. Platzhalterbilder der Website werden nicht übernommen.
+
+Der Abgleich läuft nicht automatisch. Nach Änderungen an der Website im Container zuerst den Probelauf, dann die Übernahme starten:
+
+```sh
+docker exec <container> node scripts/import-website-team.mjs /data/theater.sqlite
+docker exec <container> node scripts/import-website-team.mjs /data/theater.sqlite --apply
+```
+
+Der Probelauf schreibt nichts und lädt keine Fotos. Er listet zugeordnete, unsichere und nicht gefundene Profile sowie die erkannten Stücke. Zugeordnet wird nur eindeutig: gleicher Name ohne Widerspruch, ein Namenszusatz im Website-Kürzel („LinaK“ → „Lina K.“, „julian-technik“ → „Julian (Technik)“) oder ein Vorname, den die aktuelle Rolle, eine Aufgabe oder eine Besetzung in einem verknüpften Stück bestätigt. Widerspricht eine Besetzung der Website-Rolle, bleibt das Profil unverknüpft. Stücke werden über den Titel verknüpft („Sommerstück 2026 (Creepshow)“ → „Creepshow“) oder über die Besetzung, wenn mindestens drei bereits zugeordnete Personen dieselben Rollen spielen („Sommerstück 2025“ → „Anno 1146“). Unsichere Profile ordnet die Theaterleitung unter „Personen → Person bearbeiten → Website-Profil“ zu; solche Zuordnungen und ein bewusstes „Kein Website-Profil“ bleiben bei späteren Abgleichen erhalten. Unveränderte Fotos werden nicht neu gespeichert; Profile, die von der Website verschwinden, werden mit ihrem Foto entfernt. Für Tests oder ohne Netz lassen sich mit `--team team.json --team-page team.html` lokale Kopien einlesen.
+
 ## Original-Logo
 
 Quelle: https://kolpingtheater-ramsen.de/presse, Originaldatei https://kolpingtheater-ramsen.de/img/logo.png. `assets/brand/kolpingtheater-ramsen.png` bleibt unverändert (SHA-256 `c22912bb9397371f959f23fd9caf75880be49ec2e639b1b2c81508c0a9626fab`). `node tool/brand-icons.mjs` erzeugt daraus lediglich passend skalierte Plattformicons auf weißen Flächen. Anmeldung, App-Kopf, Infoansicht und Plattformicons verwenden dieses Logo.

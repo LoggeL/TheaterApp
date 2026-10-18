@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { AppError } from './theater.mjs';
+import { linkWebsiteProfile, websiteProfilesView } from './website-team.mjs';
 import { adminTicketView, closeOwnFeedback, markFeedbackRead, ownFeedback, ownTicketView, replyAsAdmin, replyAsMember } from './feedback-tickets.mjs';
 
 // Content-addressed web files from tool/version-web.mjs never change under their name.
@@ -96,6 +97,9 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (route === '/snapshot' && req.method === 'GET') return json(res, 200, theater.snapshot(identity.uid));
       if (route === '/actions' && req.method === 'POST') return json(res, 200, theater.action(identity.uid, body, req.headers['idempotency-key']));
       if (route === '/participation' && req.method === 'GET') return json(res, 200, theater.participation(identity.uid));
+      if (route === '/ensemble/website-profiles' && req.method === 'GET') return json(res, 200, websiteProfilesView(theater, identity.uid));
+      const websiteProfile = route.match(/^\/ensemble\/website-profiles\/([^/]+)$/);
+      if (websiteProfile && req.method === 'PUT') return json(res, 200, linkWebsiteProfile(theater, identity.uid, websiteProfile[1], body));
       if (route === '/feedback' && req.method === 'POST') return json(res, 200, theater.submitFeedback(identity.uid, body));
       if (route === '/admin/feedback' && req.method === 'GET') return json(res, 200, theater.feedbackList(identity.uid));
       const feedback = route.match(/^\/admin\/feedback\/([^/]+)$/);
