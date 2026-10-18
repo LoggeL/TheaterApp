@@ -38,12 +38,13 @@ test('install manifest and brand icons have a stable identity and valid platform
 
 test('public build cache changes with asset contents and remains stable when finalized twice', async t => {
   const directory = await temporary(t);
-  for (const dir of ['assets', 'canvaskit']) await mkdir(join(directory, dir));
+  for (const dir of ['assets/assets/games/stage_runner', 'canvaskit']) await mkdir(join(directory, dir), {recursive: true});
   const fixtures = {
     'index.html': '<meta name="theater-pwa-version" content="development">',
     'privacy.html': 'privacy', 'manifest.json': '{"icons":[]}',
     'main.1234.dart.js': 'main', 'pwa.1234.js': 'install',
     'assets/FontManifest.json': 'fonts', 'assets/font.ttf': 'font version one',
+    'assets/assets/games/stage_runner/music.mp3': 'tune',
     'canvaskit/canvaskit.wasm': 'renderer', 'canvaskit/skwasm.wasm': 'unused renderer',
     'firebase-web-config.js': 'client config',
     'firebase-messaging-sw.js': "importScripts('https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js')",
@@ -58,6 +59,8 @@ test('public build cache changes with asset contents and remains stable when fin
   assert(worker.includes('/canvaskit/canvaskit.wasm'));
   assert(!worker.includes('/canvaskit/skwasm.wasm'));
   assert(!worker.includes('/firebase-web-config.js'));
+  // The game's pictures and sounds load on demand only.
+  assert(!worker.includes('games/stage_runner'));
   assert(worker.includes('https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js'));
   await writeFile(join(directory, 'assets/font.ttf'), 'font version two');
   assert.notEqual((await writePwaWorker(root, entries)).version, first.version);
@@ -67,6 +70,7 @@ test('public build cache changes with asset contents and remains stable when fin
   assert(versionedWorker.includes('/'+paths.assetBase+'assets/font.ttf'));
   assert(versionedWorker.includes('/'+paths.canvasKitBaseUrl+'canvaskit.wasm'));
   assert(!versionedWorker.includes('"/assets/font.ttf"'));
+  assert(!versionedWorker.includes('games/stage_runner'));
 });
 
 test('asset URLs change with font contents while renderer URLs and prior files remain stable', async t => {
@@ -181,6 +185,8 @@ test('offline navigation restores the cached app shell including a deep link', a
 test('web server serves the manifest and worker correctly, and missing assets are real 404s', async t => {
   const directory = await temporary(t);
   for (const [name, value] of [['index.html', 'app'], ['manifest.json', '{"name":"Theater-App"}'], ['theater-service-worker.js', 'self.addEventListener("fetch",()=>{})']]) await writeFile(join(directory, name), value);
+  await mkdir(join(directory, 'assets/games'), {recursive: true});
+  for (const name of ['atlas.webp', 'music.mp3']) await writeFile(join(directory, 'assets/games', name), 'bytes');
   const server = createHttpServer({theater: {}, verifyToken: async () => ({}), webDir: directory});
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -193,6 +199,9 @@ test('web server serves the manifest and worker correctly, and missing assets ar
   assert.equal(worker.headers.get('service-worker-allowed'), '/');
   assert.match(worker.headers.get('content-type'), /javascript/);
   assert.equal(await worker.text(), '');
+  // The game's pictures and sounds come with their media types.
+  assert.equal((await fetch(base + '/assets/games/atlas.webp')).headers.get('content-type'), 'image/webp');
+  assert.equal((await fetch(base + '/assets/games/music.mp3')).headers.get('content-type'), 'audio/mpeg');
   for (const path of ['/missing.js', '/icons/missing.png', '/canvaskit/missing.wasm', '/assets/missing', '/web-assets/old/assets/missing', '/web-renderer/old/missing', '/api/unknown']) assert.equal((await fetch(base + path)).status, 404);
   assert.equal(await (await fetch(base + '/events/123')).text(), 'app');
 });

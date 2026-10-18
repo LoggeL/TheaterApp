@@ -4,6 +4,7 @@ import '../../core/app_controller.dart';
 import '../../core/device_services.dart';
 import '../../features/admin/ui/management_screen.dart';
 import '../../features/events/ui/schedule_screen.dart';
+import '../../features/games/games.dart';
 import '../../features/me/ui/my_area_screen.dart';
 import '../../features/messages/ui/communication_screen.dart';
 import '../../features/scripts/ui/productions_screen.dart';
@@ -11,7 +12,6 @@ import '../../features/today/ui/today_screen.dart';
 import '../../shared/layout/breakpoints.dart';
 import '../../shared/layout/content_width.dart';
 import '../../shared/navigation.dart';
-import '../../shared/widgets/brand_logo.dart';
 import '../brand.dart';
 import '../platform/push_prompt.dart';
 import 'app_navigation.dart';
@@ -97,7 +97,7 @@ class _AppShellState extends State<AppShell> {
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const BrandLogo(size: 32),
+            HeaderLogo(controller: c),
             const SizedBox(width: 10),
             Flexible(
               child: Text(

@@ -13,6 +13,9 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../data/leaderboard_api.dart';
 import '../domain/stage_runner.dart';
+import 'stage_runner_art.dart';
+import 'stage_runner_fx.dart';
+import 'stage_runner_sound.dart';
 
 /// Opens the stage runner.
 Future<void> openStageRunner(BuildContext context, AppController controller) =>
@@ -28,8 +31,13 @@ class StageRunnerScreen extends StatefulWidget {
     required this.controller,
     this.random,
     this.onRun,
+    this.sound,
   });
   final AppController controller;
+
+  /// Replaced in tests; by default the `audioplayers` plugin.
+  @visibleForTesting
+  final RunnerSound? sound;
 
   /// Fixed in tests for reproducible courses.
   final Random? random;
@@ -48,6 +56,14 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   Duration _lastFrame = Duration.zero;
   _Phase _phase = _Phase.intro;
   StageRunner _game = StageRunner();
+  RunnerFx _fx = RunnerFx();
+  RunnerArt? _art = RunnerArt.loaded;
+  late final RunnerSound _sound = widget.sound ?? PluginRunnerSound();
+
+  /// The closing line of the last run; its own dice, so courses stay
+  /// reproducible.
+  final _lines = Random();
+  String _line = '';
 
   /// Repaints the stage without rebuilding widgets; the HUD only rebuilds
   /// when its numbers change.
@@ -71,10 +87,17 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     super.initState();
     _ticker = createTicker(_tick);
     if (_ranked) _loadBoard();
+    if (_art == null) {
+      RunnerArt.load().then((art) {
+        if (mounted && art != null) setState(() => _art = art);
+      });
+    }
   }
 
   @override
   void dispose() {
+    _sound.stopMusic();
+    if (widget.sound == null) _sound.dispose();
     _ticker.dispose();
     _frame.dispose();
     _hud.dispose();
@@ -98,7 +121,13 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   void _play() {
     final run = ++_run;
-    _game = StageRunner(random: widget.random);
+    final game = _game = StageRunner(random: widget.random);
+    final fx = _fx = RunnerFx(best: _board?.own?.score, onSound: _sound.play);
+    game.onPickup = (kind, x, y) => fx.pickup(kind, x - game.distance, y);
+    // Called from the tap on "Vorhang auf", so browsers allow the sound.
+    _sound
+      ..prepare()
+      ..startMusic();
     widget.onRun?.call(_game);
     _hud.value = (0, 0);
     _pointers = 0;
@@ -137,18 +166,23 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _game
       ..holding = _pointers > 0 || keys.any(_holdKeys.contains)
       ..update(dt);
+    _fx.update(dt, _game);
     _frame.value++;
     final hud = (_game.score, _game.meters);
     if (hud != _hud.value) _hud.value = hud;
     // Let the curtain close before showing the result.
-    if (_game.over && _game.sinceOver >= .8) {
+    if (_game.over && _game.sinceOver >= _curtainEnd) {
       _ticker.stop();
+      _sound.stopMusic();
       _finish(_run);
     }
   }
 
   Future<void> _finish(int run) async {
-    setState(() => _phase = _Phase.finished);
+    setState(() {
+      _phase = _Phase.finished;
+      _line = curtainLine(_game.hitBy, _lines);
+    });
     final start = _start;
     if (start == null) return;
     setState(() => _saving = true);
@@ -161,6 +195,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         score: _game.score,
       );
       if (!mounted || run != _run) return;
+      // The fanfare, unless it already played when the record fell.
+      if (result.improved && !_fx.recordBroken) _sound.play(RunnerSfx.record);
       setState(() {
         _improved = result.improved;
         _board = result.leaderboard;
@@ -182,7 +218,23 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Bühnenlauf')),
+    appBar: AppBar(
+      title: const Text('Bühnenlauf'),
+      actions: [
+        ValueListenableBuilder(
+          valueListenable: _sound.enabled,
+          builder: (context, on, _) => IconButton(
+            key: const ValueKey('runner-sound'),
+            tooltip: on ? 'Ton aus' : 'Ton an',
+            isSelected: on,
+            icon: const Icon(Icons.volume_off_outlined),
+            selectedIcon: const Icon(Icons.volume_up_outlined),
+            onPressed: () => _sound.setEnabled(!on),
+          ),
+        ),
+        const SizedBox(width: 8),
+      ],
+    ),
     body: switch (_phase) {
       _Phase.playing => Focus(
         autofocus: true,
@@ -209,7 +261,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
           SizedBox(
             width: 32,
             height: 32,
-            child: CustomPaint(painter: _LegendPainter(kind)),
+            child: CustomPaint(painter: _LegendPainter(kind, _art)),
           ),
           const SizedBox(width: 12),
           Expanded(child: Text(label)),
@@ -222,8 +274,19 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         'Bühnenlauf',
         eyebrow: 'Hinter der Bühne',
         subtitle:
-            'Am Flugseil quer über die Bühne – vorbei an Kisten, Kulissen, Scheinwerfern und Sandsäcken. Es wird immer schneller, bis der Vorhang fällt.',
+            'Engel Ewald hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt. Vorbei an Kisten, Kulissen, Scheinwerfern und Sandsäcken, immer schneller, bis der Vorhang fällt.',
       ),
+      if (_art case final art?)
+        Center(
+          child: SizedBox(
+            width: 96,
+            height: 126,
+            child: CustomPaint(
+              painter: _SpritePainter(art, RunnerSprite.cheer),
+            ),
+          ),
+        ),
+      const SizedBox(height: 8),
       Card(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -269,14 +332,34 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            const Icon(
-              Icons.theater_comedy,
-              size: 48,
-              color: StageTheme.orange,
-            ),
+            if (_art case final art?)
+              SizedBox(
+                width: 120,
+                height: 74,
+                child: CustomPaint(
+                  painter: _SpritePainter(art, RunnerSprite.crash),
+                ),
+              )
+            else
+              const Icon(
+                Icons.theater_comedy,
+                size: 48,
+                color: StageTheme.orange,
+              ),
             const SizedBox(height: 12),
-            Text('Der Vorhang fällt!', style: theme.textTheme.titleLarge),
+            Text(
+              'Der Vorhang fällt!',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: StageTheme.orange,
+              ),
+            ),
             const SizedBox(height: 4),
+            Text(
+              _line,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
             Text(
               _game.score == 1 ? '1 Punkt' : '${_game.score} Punkte',
               style: theme.textTheme.headlineMedium,
@@ -472,7 +555,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                           child: CustomPaint(
                             key: const ValueKey('runner-stage'),
                             size: Size.infinite,
-                            painter: _StagePainter(() => _game, _frame),
+                            painter: _StagePainter(
+                              () => _game,
+                              () => _fx,
+                              () => _art,
+                              _frame,
+                            ),
                           ),
                         ),
                       ),
@@ -502,20 +590,44 @@ String _pickupLabel(PickupKind kind) => switch (kind) {
   PickupKind.star => 'Stern des Abends',
 };
 
+/// Seconds from the crash until the result shows: a comic fall, then the
+/// curtain closes.
+const _curtainEnd = 1.0, _curtainStart = .2;
+
 const _stageDark = Color(0xFF151A17), _wall = Color(0xFF1D2420);
-const _leg = Color(0xFF2A1E1C), _curtain = Color(0xFF9E2B25);
+const _velvet = Color(0xFF8E2420), _velvetDark = Color(0xFF5E1714);
+const _gold = Color(0xFFD9A441);
 const _floorColor = Color(0xFF3B2A1E), _plank = Color(0xFF2C1F16);
+const _floorEdge = Color(0xFF6B4A30);
 const _wood = Color(0xFFB07A45), _woodDark = Color(0xFF7D532C);
 const _canvas = Color(0xFFD9CBB0), _canvasEdge = Color(0xFF8E7D62);
 const _metal = Color(0xFF59605C), _beam = Color(0xFFFFF1C9);
 const _sack = Color(0xFF8A6A48), _rope = Color(0xFFBDB29C);
 const _roseColor = Color(0xFFE5486B), _starColor = Color(0xFFFFC94A);
+const _crowd = Color(0xFF07090A);
 
 Paint _fill(Color color) => Paint()..color = color;
 Paint _stroke(Color color, double width) => Paint()
   ..color = color
   ..strokeWidth = width
   ..style = PaintingStyle.stroke;
+
+/// Sprites are scaled down from the atlas; mipmapped sampling keeps them
+/// smooth without any blur filter.
+final _imagePaint = Paint()..filterQuality = FilterQuality.medium;
+
+void _sprite(Canvas canvas, RunnerArt art, RunnerSprite sprite, Rect dst) =>
+    canvas.drawImageRect(art.atlas, sprite.rect, dst, _imagePaint);
+
+/// [sprite] centred in [size], as large as it fits.
+Rect _fit(RunnerSprite sprite, Size size) {
+  final scale = min(size.width / sprite.width, size.height / sprite.height);
+  return Rect.fromCenter(
+    center: size.center(Offset.zero),
+    width: sprite.width * scale,
+    height: sprite.height * scale,
+  );
+}
 
 IconData _pickupIcon(PickupKind kind) => switch (kind) {
   PickupKind.rose => Icons.local_florist,
@@ -529,7 +641,7 @@ Color _pickupColor(PickupKind kind) => switch (kind) {
   PickupKind.star => _starColor,
 };
 
-/// Laid-out glyphs, reused across frames as long as the size stays the same.
+/// Laid-out text, reused across frames as long as the size stays the same.
 class _Glyphs {
   double _size = 0;
   final Map<Object, TextPainter> _cache = {};
@@ -559,6 +671,20 @@ class _Glyphs {
     );
   }
 
+  /// A popup or banner line; [shadow] is the dark copy drawn behind it.
+  TextPainter label(String text, double size, {bool shadow = false}) {
+    _reset(size);
+    return _cache[(text, shadow)] ??= _layout(
+      text,
+      TextStyle(
+        color: shadow ? const Color(0xE6000000) : const Color(0xFFFFE7A3),
+        fontSize: size,
+        fontWeight: FontWeight.w900,
+        letterSpacing: -.3,
+      ),
+    );
+  }
+
   void _reset(double size) {
     if (size == _size) return;
     for (final p in _cache.values) {
@@ -577,9 +703,23 @@ class _Glyphs {
 void _paintCentered(Canvas canvas, TextPainter p, Offset center) =>
     p.paint(canvas, center - Offset(p.width / 2, p.height / 2));
 
+class _SpritePainter extends CustomPainter {
+  _SpritePainter(this.art, this.sprite);
+  final RunnerArt art;
+  final RunnerSprite sprite;
+  @override
+  void paint(Canvas canvas, Size size) =>
+      _sprite(canvas, art, sprite, _fit(sprite, size));
+
+  @override
+  bool shouldRepaint(_SpritePainter old) =>
+      old.art != art || old.sprite != sprite;
+}
+
 class _LegendPainter extends CustomPainter {
-  _LegendPainter(this.kind);
+  _LegendPainter(this.kind, this.art);
   final PickupKind? kind;
+  final RunnerArt? art;
   final _glyphs = _Glyphs();
   @override
   void paint(Canvas canvas, Size size) {
@@ -591,8 +731,11 @@ class _LegendPainter extends CustomPainter {
       _fill(_stageDark),
     );
     final c = size.center(Offset.zero);
-    final kind = this.kind;
-    if (kind != null) {
+    final kind = this.kind, art = this.art;
+    if (kind != null && art != null) {
+      final sprite = RunnerSprite.of(kind);
+      _sprite(canvas, art, sprite, _fit(sprite, size * .8).shift(c * .2));
+    } else if (kind != null) {
       _paintCentered(canvas, _glyphs.icon(kind, size.width * .7), c);
     } else {
       // Two floor planks for "metres".
@@ -611,59 +754,183 @@ class _LegendPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_LegendPainter old) => old.kind != kind;
+  bool shouldRepaint(_LegendPainter old) => old.kind != kind || old.art != art;
 }
 
-/// Paints the run. Paints and glyphs are created once; per frame it only
-/// issues a few dozen plain rectangles, lines and cached glyphs.
+/// Paints the run. Paints, paths and text are created once; per frame it
+/// issues a few dozen rectangles, circles and sprite copies from one atlas.
+/// Without the pictures (offline on the web) it draws simple shapes.
 class _StagePainter extends CustomPainter {
-  _StagePainter(this.game, Listenable repaint) : super(repaint: repaint);
+  _StagePainter(this.game, this.fx, this.art, Listenable repaint)
+    : super(repaint: repaint);
   final StageRunner Function() game;
+  final RunnerFx Function() fx;
+  final RunnerArt? Function() art;
 
   static final _bg = _fill(_stageDark), _wallPaint = _fill(_wall);
-  static final _legPaint = _fill(_leg), _curtainPaint = _fill(_curtain);
+  static final _velvetPaint = _fill(_velvet);
+  static final _foldPaint = _fill(_velvetDark);
+  static final _goldPaint = _fill(_gold);
   static final _floorPaint = _fill(_floorColor);
   static final _plankPaint = _stroke(_plank, 2);
+  static final _edgePaint = _stroke(_floorEdge, 2);
   static final _woodPaint = _fill(_wood), _woodLine = _stroke(_woodDark, 2);
   static final _canvasPaint = _fill(_canvas);
   static final _canvasLine = _stroke(_canvasEdge, 2);
   static final _metalPaint = _fill(_metal), _sackPaint = _fill(_sack);
   static final _beamPaint = _fill(_beam.withValues(alpha: .07));
+  static final _conePaint = _fill(_beam.withValues(alpha: .045));
+  static final _poolPaint = _fill(_beam.withValues(alpha: .07));
   static final _lensPaint = _fill(_beam);
   static final _ropePaint = _stroke(_rope, 1.5);
+  static final _crowdPaint = _fill(_crowd);
+  static final _platePaint = _fill(const Color(0xDD151A17));
+  static final _plateEdge = _stroke(_gold, 2);
   static final _bodyPaint = _fill(StageTheme.onInkAccent);
   static final _headPaint = _fill(const Color(0xFFF2D3B8));
   static final _limbPaint = _stroke(const Color(0xFFF2F3ED), 3)
     ..strokeCap = StrokeCap.round;
+  static final _particlePaints = [
+    _fill(_roseColor),
+    _fill(_starColor),
+    _fill(const Color(0xFFFFF4C2)),
+    _fill(const Color(0xFFBFA88A)),
+  ];
   final _glyphs = _Glyphs();
+  final _path = Path();
 
   @override
   void paint(Canvas canvas, Size size) {
-    final g = game();
+    final g = game(), f = fx(), a = art();
     // One stage height in pixels; the course is viewWidth heights wide.
     final s = size.height, w = size.width;
-    double sx(double worldX) => (worldX - g.distance) * s;
+    final floorY = s * StageRunner.floor;
 
-    canvas.drawRect(Offset.zero & size, _bg);
-    // Back wall with wings that move at half speed (parallax).
-    canvas.drawRect(
-      Rect.fromLTRB(0, s * .1, w, s * StageRunner.floor),
-      _wallPaint,
+    canvas.drawRect((Offset.zero & size).inflate(s * .05), _bg);
+    final (dx, dy) = f.shake(g);
+    canvas.save();
+    canvas.translate(dx * s, dy * s);
+
+    _backdrop(canvas, g, a, s, w, floorY);
+    _spotlights(canvas, g, s, w, floorY);
+    _wings(canvas, g, s);
+    _floor(canvas, g, s, w, floorY);
+
+    for (final o in g.obstacles) {
+      final rect = Rect.fromLTRB(
+        (o.left - g.distance) * s,
+        o.top * s,
+        (o.right - g.distance) * s,
+        o.bottom * s,
+      );
+      if (rect.right < -s * .1 || rect.left > w + s * .1) continue;
+      if (a == null) {
+        _plainObstacle(canvas, o.kind, rect, s, floorY);
+      } else {
+        _obstacle(canvas, a, o.kind, rect, s, floorY);
+      }
+    }
+
+    _pickups(canvas, g, a, s, w);
+    if (a == null) {
+      _plainRunner(canvas, g, s);
+    } else {
+      _runner(canvas, g, f, a, s);
+    }
+    _particles(canvas, f, s);
+    _audience(canvas, g, f, s);
+    _bannerAndValance(canvas, f, s, w);
+    canvas.restore();
+
+    if (g.over) _curtain(canvas, g, s, w);
+  }
+
+  /// The painted backdrop drifts slowly; mirrored copies keep it seamless.
+  void _backdrop(
+    Canvas canvas,
+    StageRunner g,
+    RunnerArt? a,
+    double s,
+    double w,
+    double floorY,
+  ) {
+    if (a == null) {
+      canvas.drawRect(Rect.fromLTRB(0, s * .1, w, floorY), _wallPaint);
+      return;
+    }
+    final image = a.backdrop, top = s * .04, h = floorY - top;
+    final tile = h * image.width / image.height;
+    final src = Rect.fromLTWH(
+      0,
+      0,
+      image.width.toDouble(),
+      image.height.toDouble(),
     );
-    const wingSpacing = .55;
-    final offset = (g.distance * .5) % wingSpacing;
-    for (
-      var x = -offset;
-      x < StageRunner.viewWidth + wingSpacing;
-      x += wingSpacing
-    ) {
-      canvas.drawRect(
-        Rect.fromLTWH(x * s, s * .05, s * .06, s * (StageRunner.floor - .05)),
-        _legPaint,
+    for (var x = -((g.distance * .12 * s) % (2 * tile)); x < w; x += 2 * tile) {
+      canvas.drawImageRect(
+        image,
+        src,
+        Rect.fromLTWH(x, top, tile, h),
+        _imagePaint,
+      );
+      canvas
+        ..save()
+        ..translate(x + 2 * tile, top)
+        ..scale(-1, 1)
+        ..drawImageRect(image, src, Rect.fromLTWH(0, 0, tile, h), _imagePaint)
+        ..restore();
+    }
+  }
+
+  /// Two softly swaying light cones: flat translucent shapes, no blur.
+  void _spotlights(
+    Canvas canvas,
+    StageRunner g,
+    double s,
+    double w,
+    double floorY,
+  ) {
+    for (var i = 0; i < 2; i++) {
+      final x = w * (.3 + .45 * i) + sin(g.time * .5 + i * 2.1) * s * .15;
+      _path
+        ..reset()
+        ..moveTo(x - s * .02, 0)
+        ..lineTo(x + s * .02, 0)
+        ..lineTo(x + s * .22, floorY)
+        ..lineTo(x - s * .22, floorY)
+        ..close();
+      canvas.drawPath(_path, _conePaint);
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(x, floorY + s * .02),
+          width: s * .46,
+          height: s * .06,
+        ),
+        _poolPaint,
       );
     }
-    // Floor with planks moving at full speed.
-    final floorY = s * StageRunner.floor;
+  }
+
+  /// Velvet wings at half speed (parallax).
+  void _wings(Canvas canvas, StageRunner g, double s) {
+    const spacing = .55;
+    final offset = (g.distance * .5) % spacing;
+    for (var x = -offset; x < StageRunner.viewWidth + spacing; x += spacing) {
+      final left = x * s, top = s * .05, bottom = s * StageRunner.floor;
+      canvas.drawRect(
+        Rect.fromLTRB(left, top, left + s * .07, bottom),
+        _velvetPaint,
+      );
+      for (final fold in const [.012, .042]) {
+        canvas.drawRect(
+          Rect.fromLTRB(left + s * fold, top, left + s * (fold + .012), bottom),
+          _foldPaint,
+        );
+      }
+    }
+  }
+
+  void _floor(Canvas canvas, StageRunner g, double s, double w, double floorY) {
     canvas.drawRect(Rect.fromLTRB(0, floorY, w, s), _floorPaint);
     const plankSpacing = .25;
     final plankOffset = g.distance % plankSpacing;
@@ -674,102 +941,421 @@ class _StagePainter extends CustomPainter {
         _plankPaint,
       );
     }
+    canvas.drawLine(Offset(0, floorY), Offset(w, floorY), _edgePaint);
+  }
 
-    for (final o in g.obstacles) {
-      final rect = Rect.fromLTRB(
-        sx(o.left),
-        o.top * s,
-        sx(o.right),
-        o.bottom * s,
-      );
-      if (rect.right < 0 || rect.left > w) continue;
-      switch (o.kind) {
-        case ObstacleKind.crate:
-          canvas.drawRect(rect, _woodPaint);
-          canvas.drawRect(rect.deflate(1), _woodLine);
-          canvas.drawLine(rect.topLeft, rect.bottomRight, _woodLine);
-          canvas.drawLine(rect.topRight, rect.bottomLeft, _woodLine);
-        case ObstacleKind.flat:
-          canvas.drawRect(rect, _canvasPaint);
-          canvas.drawRect(rect.deflate(1), _canvasLine);
-          final strut = rect.left + rect.width * .5;
-          canvas.drawLine(
-            Offset(strut, rect.top + 4),
-            Offset(strut, rect.bottom),
-            _canvasLine,
+  void _obstacle(
+    Canvas canvas,
+    RunnerArt a,
+    ObstacleKind kind,
+    Rect rect,
+    double s,
+    double floorY,
+  ) {
+    switch (kind) {
+      case ObstacleKind.crate:
+        // A tall pile is two crates, so none gets stretched much.
+        if (rect.height > rect.width * 1.35) {
+          final half = rect.height / 2;
+          _sprite(
+            canvas,
+            a,
+            RunnerSprite.crate,
+            rect.topLeft & Size(rect.width, half),
           );
-        case ObstacleKind.border:
-          canvas.drawRect(rect, _curtainPaint);
-          canvas.drawLine(rect.bottomLeft, rect.bottomRight, _canvasLine);
-        case ObstacleKind.lamp:
-          final cx = rect.center.dx;
-          final body = Rect.fromLTRB(
-            rect.left,
-            rect.bottom - s * .1,
-            rect.right,
-            rect.bottom,
+          _sprite(
+            canvas,
+            a,
+            RunnerSprite.crate,
+            Rect.fromLTWH(rect.left, rect.top + half, rect.width, half),
           );
-          canvas.drawLine(Offset(cx, 0), Offset(cx, body.top), _ropePaint);
-          canvas.drawRect(body, _metalPaint);
-          canvas.drawRect(
-            Rect.fromLTRB(
-              body.left + 3,
-              body.bottom - 5,
-              body.right - 3,
-              body.bottom,
-            ),
-            _lensPaint,
-          );
-          // A faint beam; a flat rectangle, no blur.
-          canvas.drawRect(
-            Rect.fromLTRB(body.left, body.bottom, body.right, floorY),
-            _beamPaint,
-          );
-        case ObstacleKind.sandbag:
-          final cx = rect.center.dx;
-          canvas.drawLine(Offset(cx, 0), Offset(cx, rect.top), _ropePaint);
-          canvas.drawRRect(
-            RRect.fromRectAndRadius(rect, Radius.circular(rect.width * .3)),
-            _sackPaint,
-          );
-          _paintCentered(canvas, _glyphs.kg(rect.width), rect.center);
-      }
-    }
-
-    final glyph = s * .075;
-    for (final p in g.pickups) {
-      if (p.taken) continue;
-      final x = sx(p.x);
-      if (x < -glyph || x > w + glyph) continue;
-      _paintCentered(canvas, _glyphs.icon(p.kind, glyph), Offset(x, p.y * s));
-    }
-
-    _paintRunner(canvas, g, s);
-
-    // Top border of the stage portal.
-    canvas.drawRect(
-      Rect.fromLTRB(0, 0, w, s * StageRunner.ceiling * .7),
-      _curtainPaint,
-    );
-
-    if (g.over) {
-      // The curtain closes from both sides.
-      final t = Curves.easeIn.transform(
-        (g.sinceOver / .8).clamp(0, 1).toDouble(),
-      );
-      canvas.drawRect(Rect.fromLTRB(0, 0, w * .5 * t, s), _curtainPaint);
-      canvas.drawRect(Rect.fromLTRB(w - w * .5 * t, 0, w, s), _curtainPaint);
+        } else {
+          _sprite(canvas, a, RunnerSprite.crate, rect);
+        }
+      case ObstacleKind.flat:
+        _flat(canvas, a, rect);
+      case ObstacleKind.border:
+        _velvetPiece(canvas, rect, s);
+      case ObstacleKind.lamp:
+        final sprite = RunnerSprite.lamp;
+        final width = rect.width * 1.05;
+        final height = width * sprite.height / sprite.width;
+        final body = Rect.fromLTWH(
+          rect.center.dx - width / 2,
+          rect.bottom - height,
+          width,
+          height,
+        );
+        canvas.drawLine(
+          Offset(rect.center.dx, 0),
+          Offset(rect.center.dx, body.top),
+          _ropePaint,
+        );
+        // The beam from the lens down to the floor.
+        final lens = Offset(body.center.dx, body.bottom - height * .06);
+        _path
+          ..reset()
+          ..moveTo(lens.dx - width * .3, lens.dy)
+          ..lineTo(lens.dx + width * .3, lens.dy)
+          ..lineTo(lens.dx + width * .9, floorY)
+          ..lineTo(lens.dx - width * .9, floorY)
+          ..close();
+        canvas.drawPath(_path, _beamPaint);
+        _sprite(canvas, a, sprite, body);
+      case ObstacleKind.sandbag:
+        final sprite = RunnerSprite.sandbag;
+        final width = rect.width * 1.25;
+        final height = width * sprite.height / sprite.width;
+        final bag = Rect.fromLTWH(
+          rect.center.dx - width / 2,
+          rect.bottom - height,
+          width,
+          height,
+        );
+        canvas.drawLine(
+          Offset(rect.center.dx, 0),
+          Offset(rect.center.dx, bag.top + height * .1),
+          _ropePaint,
+        );
+        _sprite(canvas, a, sprite, bag);
     }
   }
 
-  void _paintRunner(Canvas canvas, StageRunner g, double s) {
+  /// A painted flat in three slices: frame top and feet keep their shape,
+  /// only the canvas in between stretches.
+  void _flat(Canvas canvas, RunnerArt a, Rect rect) {
+    final sprite = RunnerSprite.flat, src = sprite.rect;
+    final width = rect.width * 1.35, scale = width / sprite.width;
+    final left = rect.center.dx - width / 2;
+    const topCap = 36.0, footCap = 64.0;
+    final top = topCap * scale, foot = footCap * scale;
+    if (rect.height <= top + foot) {
+      _sprite(
+        canvas,
+        a,
+        sprite,
+        Rect.fromLTWH(left, rect.top, width, rect.height),
+      );
+      return;
+    }
+    void slice(
+      double srcTop,
+      double srcBottom,
+      double dstTop,
+      double dstBottom,
+    ) => canvas.drawImageRect(
+      a.atlas,
+      Rect.fromLTRB(src.left, src.top + srcTop, src.right, src.top + srcBottom),
+      Rect.fromLTRB(left, dstTop, left + width, dstBottom),
+      _imagePaint,
+    );
+    slice(0, topCap, rect.top, rect.top + top);
+    slice(topCap, sprite.height - footCap, rect.top + top, rect.bottom - foot);
+    slice(
+      sprite.height - footCap,
+      sprite.height,
+      rect.bottom - foot,
+      rect.bottom,
+    );
+  }
+
+  /// A border (short curtain) hanging from the fly loft, with gold fringe.
+  void _velvetPiece(Canvas canvas, Rect rect, double s) {
+    canvas.drawRect(rect, _velvetPaint);
+    final fold = rect.width / 5;
+    for (var i = 1; i < 5; i += 2) {
+      canvas.drawRect(
+        Rect.fromLTWH(rect.left + fold * i, rect.top, fold * .7, rect.height),
+        _foldPaint,
+      );
+    }
+    canvas.drawRect(
+      Rect.fromLTWH(rect.left, rect.bottom - s * .014, rect.width, s * .014),
+      _goldPaint,
+    );
+    for (var i = 0; i < 4; i++) {
+      canvas.drawCircle(
+        Offset(rect.left + rect.width * (i + .5) / 4, rect.bottom + s * .006),
+        s * .006,
+        _goldPaint,
+      );
+    }
+  }
+
+  void _pickups(
+    Canvas canvas,
+    StageRunner g,
+    RunnerArt? a,
+    double s,
+    double w,
+  ) {
+    final glyph = s * .075, height = s * .085;
+    for (final p in g.pickups) {
+      if (p.taken) continue;
+      final x = (p.x - g.distance) * s;
+      if (x < -glyph || x > w + glyph) continue;
+      // A gentle bob; the hitbox stays where it is.
+      final y = p.y * s + sin(g.time * 4 + p.x * 7) * s * .008;
+      if (a == null) {
+        _paintCentered(canvas, _glyphs.icon(p.kind, glyph), Offset(x, y));
+        continue;
+      }
+      final sprite = RunnerSprite.of(p.kind);
+      final scale = height / max(sprite.width, sprite.height);
+      _sprite(
+        canvas,
+        a,
+        sprite,
+        Rect.fromCenter(
+          center: Offset(x, y),
+          width: sprite.width * scale,
+          height: sprite.height * scale,
+        ),
+      );
+    }
+  }
+
+  /// Engel Ewald: runs on the floor, flies with arms forward, dangles when
+  /// sinking, cheers at a pickup and crashes comically.
+  void _runner(
+    Canvas canvas,
+    StageRunner g,
+    RunnerFx f,
+    RunnerArt a,
+    double s,
+  ) {
+    final onFloor =
+        g.y >= StageRunner.floor - StageRunner.runnerHeight / 2 - .001;
+    final RunnerSprite sprite;
+    var feet = g.y + StageRunner.runnerHeight / 2 + .006;
+    var angle = 0.0, wireTop = 0.0;
+    if (g.over) {
+      sprite = RunnerSprite.crash;
+      // Drops to the floor with a little bounce; the wire snaps upwards.
+      final t = (g.sinceOver / .35).clamp(0, 1).toDouble();
+      final bounce = (1 - t) * sin(t * pi) * .06;
+      feet =
+          feet +
+          (StageRunner.floor + .01 - feet) * Curves.easeIn.transform(t) -
+          bounce;
+      angle = (1 - t) * .5;
+      wireTop =
+          (g.y - StageRunner.runnerHeight / 2) * Curves.easeOut.transform(t);
+    } else if (f.cheer > 0) {
+      sprite = RunnerSprite.cheer;
+    } else if (onFloor) {
+      sprite = (g.distance * 9).floor().isEven
+          ? RunnerSprite.runA
+          : RunnerSprite.runB;
+    } else {
+      sprite = g.vy < -.05 ? RunnerSprite.fly : RunnerSprite.dangle;
+      angle = (g.vy * .12).clamp(-.2, .2).toDouble();
+    }
+    // Same scale for all poses: the tallest frame is .155 stage heights.
+    final scale = .155 * s / 200;
+    final width = sprite.width * scale, height = sprite.height * scale;
+    final cx = StageRunner.runnerX * s, bottom = feet * s;
+    final dst = Rect.fromLTWH(cx - width / 2, bottom - height, width, height);
+    final harness = Offset(cx - width * .08, dst.top + height * .3);
+    if (!g.over) {
+      canvas.drawLine(Offset(harness.dx, 0), harness, _ropePaint);
+    } else if (wireTop > 0) {
+      canvas.drawLine(
+        Offset(cx, 0),
+        Offset(
+          cx,
+          (g.y - StageRunner.runnerHeight / 2) * s - wireTop * s + s * .02,
+        ),
+        _ropePaint,
+      );
+    }
+    if (angle == 0) {
+      _sprite(canvas, a, sprite, dst);
+      return;
+    }
+    final pivot = dst.center;
+    canvas
+      ..save()
+      ..translate(pivot.dx, pivot.dy)
+      ..rotate(angle)
+      ..translate(-pivot.dx, -pivot.dy);
+    _sprite(canvas, a, sprite, dst);
+    canvas.restore();
+  }
+
+  void _particles(Canvas canvas, RunnerFx f, double s) {
+    for (var i = 0; i < RunnerFx.maxParticles; i++) {
+      final life = f.life[i];
+      if (life <= 0) continue;
+      canvas.drawCircle(
+        Offset(f.px[i] * s, f.py[i] * s),
+        f.size[i] * s * min(1, life * 3),
+        _particlePaints[f.tint[i]],
+      );
+    }
+    final size = s * .045;
+    for (final p in f.popups) {
+      if (!p.alive) continue;
+      final at = Offset(p.x * s, (p.y - p.age * .12) * s);
+      _paintCentered(
+        canvas,
+        _glyphs.label(p.text, size, shadow: true),
+        at + Offset(s * .003, s * .003),
+      );
+      _paintCentered(canvas, _glyphs.label(p.text, size), at);
+    }
+  }
+
+  /// Heads in the front row, faster than the stage (parallax); they bounce
+  /// while a banner celebrates.
+  void _audience(Canvas canvas, StageRunner g, RunnerFx f, double s) {
+    const spacing = .11;
+    final travel = g.distance * 1.25;
+    final first = (travel / spacing).floor();
+    final cheering = f.showsBanner && !g.over;
+    for (
+      var i = first - 1;
+      i * spacing - travel < StageRunner.viewWidth + spacing;
+      i++
+    ) {
+      final h = (i * 7919) % 13;
+      final r = s * (.034 + (h % 3) * .004);
+      final x = (i * spacing - travel) * s + (h % 5) * s * .004;
+      final hop = cheering ? -(sin(g.time * 9 + i) * .5 + .5) * s * .014 : 0.0;
+      final y = s * (.985 - (h % 4) * .006) + hop;
+      canvas.drawCircle(Offset(x, y - r * .6), r, _crowdPaint);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(
+            center: Offset(x, y + r * 1.2),
+            width: r * 3.2,
+            height: r * 2.2,
+          ),
+          Radius.circular(r),
+        ),
+        _crowdPaint,
+      );
+    }
+  }
+
+  /// The banner pops in below the valance and slides up behind it.
+  void _bannerAndValance(Canvas canvas, RunnerFx f, double s, double w) {
+    final text = f.banner;
+    if (text != null && f.showsBanner) {
+      final t = f.bannerAge;
+      final pop = t < .18 ? Curves.easeOutBack.transform(t / .18) : 1.0;
+      final leave = max(0.0, t - (RunnerFx.bannerLife - .3)) / .3;
+      final label = _glyphs.label(text, s * .055);
+      final center = Offset(w / 2, s * (.2 - leave * .2));
+      final plate = Rect.fromCenter(
+        center: center,
+        width: label.width + s * .08,
+        height: label.height + s * .03,
+      );
+      canvas
+        ..save()
+        ..translate(center.dx, center.dy)
+        ..scale(pop)
+        ..translate(-center.dx, -center.dy);
+      final rrect = RRect.fromRectAndRadius(plate, Radius.circular(s * .03));
+      canvas
+        ..drawRRect(rrect, _platePaint)
+        ..drawRRect(rrect, _plateEdge);
+      _paintCentered(canvas, label, center);
+      canvas.restore();
+    }
+    // Valance of the stage portal with a scalloped edge.
+    final bottom = s * StageRunner.ceiling * .7, r = s * .03;
+    canvas.drawRect(Rect.fromLTRB(0, 0, w, bottom), _velvetPaint);
+    for (var x = r; x < w + r; x += r * 2) {
+      canvas.drawCircle(Offset(x, bottom), r, _velvetPaint);
+    }
+    canvas.drawRect(
+      Rect.fromLTRB(0, bottom - s * .01, w, bottom - s * .004),
+      _goldPaint,
+    );
+  }
+
+  /// The curtain closes from both sides after the crash.
+  void _curtain(Canvas canvas, StageRunner g, double s, double w) {
+    final t = Curves.easeIn.transform(
+      ((g.sinceOver - _curtainStart) / (_curtainEnd - _curtainStart - .05))
+          .clamp(0, 1)
+          .toDouble(),
+    );
+    if (t == 0) return;
+    final half = w * .5 * t, fold = s * .06;
+    for (final left in [true, false]) {
+      final rect = left
+          ? Rect.fromLTRB(0, 0, half, s)
+          : Rect.fromLTRB(w - half, 0, w, s);
+      canvas.drawRect(rect, _velvetPaint);
+      for (var x = rect.left + fold * .5; x < rect.right; x += fold) {
+        canvas.drawRect(Rect.fromLTWH(x, 0, fold * .35, s), _foldPaint);
+      }
+      final edge = left ? rect.right - s * .012 : rect.left;
+      canvas.drawRect(Rect.fromLTWH(edge, 0, s * .012, s), _goldPaint);
+    }
+  }
+
+  void _plainObstacle(
+    Canvas canvas,
+    ObstacleKind kind,
+    Rect rect,
+    double s,
+    double floorY,
+  ) {
+    switch (kind) {
+      case ObstacleKind.crate:
+        canvas.drawRect(rect, _woodPaint);
+        canvas.drawRect(rect.deflate(1), _woodLine);
+        canvas.drawLine(rect.topLeft, rect.bottomRight, _woodLine);
+        canvas.drawLine(rect.topRight, rect.bottomLeft, _woodLine);
+      case ObstacleKind.flat:
+        canvas.drawRect(rect, _canvasPaint);
+        canvas.drawRect(rect.deflate(1), _canvasLine);
+      case ObstacleKind.border:
+        _velvetPiece(canvas, rect, s);
+      case ObstacleKind.lamp:
+        final cx = rect.center.dx;
+        final body = Rect.fromLTRB(
+          rect.left,
+          rect.bottom - s * .1,
+          rect.right,
+          rect.bottom,
+        );
+        canvas.drawLine(Offset(cx, 0), Offset(cx, body.top), _ropePaint);
+        canvas.drawRect(body, _metalPaint);
+        canvas.drawRect(
+          Rect.fromLTRB(
+            body.left + 3,
+            body.bottom - 5,
+            body.right - 3,
+            body.bottom,
+          ),
+          _lensPaint,
+        );
+        canvas.drawRect(
+          Rect.fromLTRB(body.left, body.bottom, body.right, floorY),
+          _beamPaint,
+        );
+      case ObstacleKind.sandbag:
+        final cx = rect.center.dx;
+        canvas.drawLine(Offset(cx, 0), Offset(cx, rect.top), _ropePaint);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect, Radius.circular(rect.width * .3)),
+          _sackPaint,
+        );
+        _paintCentered(canvas, _glyphs.kg(rect.width), rect.center);
+    }
+  }
+
+  void _plainRunner(Canvas canvas, StageRunner g, double s) {
     final cx = StageRunner.runnerX * s, cy = g.y * s;
     final h = StageRunner.runnerHeight * s, bw = StageRunner.runnerWidth * s;
-    // The flying wire up into the fly loft.
     canvas.drawLine(Offset(cx, 0), Offset(cx, cy - h * .5), _ropePaint);
     final onFloor =
         g.y >= StageRunner.floor - StageRunner.runnerHeight / 2 - .001;
-    // Legs swing while running, dangle while flying.
     final swing = onFloor && !g.over
         ? sin(g.distance * 40) * bw * .5
         : bw * .15;

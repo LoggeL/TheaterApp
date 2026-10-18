@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/app_controller.dart';
 import '../../features/events/domain/event_selectors.dart';
+import '../../features/games/games.dart';
 import '../../features/messages/domain/message_selectors.dart';
 import '../../features/polls/domain/poll_selectors.dart';
 import '../../features/slots/domain/slot_pool.dart';
 import '../../shared/feedback.dart';
 import '../../shared/layout/breakpoints.dart';
-import '../../shared/widgets/brand_logo.dart';
 import '../brand.dart';
 
 /// Keeps section selection available to routes opened above the app shell.
@@ -181,7 +181,7 @@ class AppNavigationRail extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const BrandLogo(size: 32),
+                  HeaderLogo(controller: controller),
                   const SizedBox(width: 10),
                   Text(
                     Brand.name,

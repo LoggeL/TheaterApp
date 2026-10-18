@@ -34,7 +34,7 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
             return resolve(root, 'index.html');
           };
           try { if (!(await stat(file)).isFile()) file = fallback(); } catch (error) { if (error instanceof AppError) throw error; file = fallback(); }
-          const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png', '.svg': 'image/svg+xml', '.ttf': 'font/ttf', '.woff2': 'font/woff2' };
+          const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png', '.webp': 'image/webp', '.mp3': 'audio/mpeg', '.svg': 'image/svg+xml', '.ttf': 'font/ttf', '.woff2': 'font/woff2' };
           const content = await readFile(file);
           const manifest = /\/manifest(?:\.[a-f0-9]{16})?\.json$/.test(file);
           if (path === '/theater-service-worker.js') res.setHeader('Service-Worker-Allowed', '/');

@@ -1,7 +1,7 @@
 name: theater_app
 description: Die native Mitglieder-App des Kolpingtheaters Ramsen.
 publish_to: none
-version: 0.8.0+18
+version: 0.8.1+19
 environment:
   sdk: '>=3.12.0 <4.0.0'
   flutter: '>=3.44.0'
@@ -32,6 +32,7 @@ dependencies:
   file_saver: ^0.4.0
   flutter_local_notifications: ^21.0.0
   in_app_update: ^5.0.0
+  audioplayers: ^6.8.1
 dev_dependencies:
   integration_test:
     sdk: flutter
@@ -79,3 +80,5 @@ flutter:
     - assets/fonts/DejaVuSans-Bold.ttf
     - assets/fonts/LICENSE-DejaVu.txt
     - assets/fonts/roboto/LICENSE.txt
+    # Only loaded when the game opens; kept out of the web app's offline cache.
+    - assets/games/stage_runner/

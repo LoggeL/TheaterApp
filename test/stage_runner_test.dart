@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,11 +16,46 @@ import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/features/changelog/changelog.dart';
 import 'package:theater_app/features/games/domain/stage_runner.dart';
 import 'package:theater_app/features/games/games.dart';
+import 'package:theater_app/features/games/ui/stage_runner_fx.dart';
+import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
 import 'package:theater_app/features/me/me.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:theater_app/app/shell/app_shell.dart';
+import 'package:theater_app/shared/navigation.dart';
 import 'package:theater_app/shared/widgets/brand_logo.dart';
 
 import 'app_controller_test.dart'
     show TestServer, fixedNow, jsonResponse, signIn;
+import 'shell_navigation_test.dart' show finish, pumpDemo, setWidth;
+
+/// Records what the game would play.
+class _FakeSound implements RunnerSound {
+  final played = <RunnerSfx>[];
+  final _enabled = ValueNotifier(true);
+  bool music = false, prepared = false;
+
+  @override
+  ValueListenable<bool> get enabled => _enabled;
+  @override
+  void setEnabled(bool on) {
+    _enabled.value = on;
+    if (!on) music = false;
+  }
+
+  @override
+  void prepare() => prepared = true;
+  @override
+  void play(RunnerSfx sfx) {
+    if (_enabled.value) played.add(sfx);
+  }
+
+  @override
+  void startMusic() => music = _enabled.value;
+  @override
+  void stopMusic() => music = false;
+  @override
+  void dispose() => _enabled.dispose();
+}
 
 String _path(http.Request request) =>
     request.url.path.replaceFirst(RegExp(r'/$'), '');
@@ -229,7 +265,6 @@ void main() {
         await tester.tap(logo());
         await tester.pump(const Duration(milliseconds: 50));
       }
-      await tester.pumpAndSettle();
       expect(find.byType(StageRunnerScreen), findsNothing);
       expect(find.byType(AboutDialog), findsOneWidget);
       await tester.tap(logo());
@@ -308,21 +343,27 @@ void main() {
       addTearDown(controller.dispose);
       await signIn(controller);
       late StageRunner game;
+      final sound = _FakeSound();
       await _pump(
         tester,
         StageRunnerScreen(
           controller: controller,
           random: Random(3),
           onRun: (g) => game = g,
+          sound: sound,
         ),
       );
       expect(find.text('Kim Beispiel'), findsOneWidget);
       expect(find.text('Du stehst noch nicht auf der Liste.'), findsOneWidget);
 
+      expect(sound.prepared, isFalse);
       await tester.tap(find.text('Vorhang auf'));
       await tester.pump();
       expect(find.byKey(const ValueKey('runner-stage')), findsOneWidget);
       expect(find.text('0 m'), findsOneWidget);
+      // Sound starts with the tap on "Vorhang auf", as browsers require.
+      expect(sound.prepared, isTrue);
+      expect(sound.music, isTrue);
       // Holding anywhere on the screen lifts the runner.
       final floor = game.y;
       final gesture = await tester.startGesture(
@@ -341,6 +382,15 @@ void main() {
       expect(find.text('Der Vorhang fällt!'), findsOneWidget);
       expect(find.text('Neuer persönlicher Bestwert!'), findsOneWidget);
       expect(find.text('Testmitglied'), findsOneWidget);
+      expect(sound.played, containsAllInOrder([RunnerSfx.whoosh]));
+      expect(
+        sound.played.where(
+          (s) => s == RunnerSfx.crash || s == RunnerSfx.curtain,
+        ),
+        [RunnerSfx.crash, RunnerSfx.curtain],
+      );
+      expect(sound.played.last, RunnerSfx.record);
+      expect(sound.music, isFalse);
       expect(find.text('Du stehst noch nicht auf der Liste.'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
@@ -349,7 +399,11 @@ void main() {
       late StageRunner game;
       await _pump(
         tester,
-        StageRunnerScreen(controller: await _demo(), onRun: (g) => game = g),
+        StageRunnerScreen(
+          controller: await _demo(),
+          onRun: (g) => game = g,
+          sound: _FakeSound(),
+        ),
       );
       await tester.tap(find.text('Vorhang auf'));
       await tester.pump();
@@ -391,7 +445,11 @@ void main() {
       await signIn(controller);
       await _pump(
         tester,
-        StageRunnerScreen(controller: controller, random: Random(3)),
+        StageRunnerScreen(
+          controller: controller,
+          random: Random(3),
+          sound: _FakeSound(),
+        ),
       );
       await tester.tap(find.text('Vorhang auf'));
       await _runUntilOver(tester);
@@ -406,7 +464,10 @@ void main() {
     testWidgets('the demo plays without a leaderboard, again and again', (
       tester,
     ) async {
-      await _pump(tester, StageRunnerScreen(controller: await _demo()));
+      await _pump(
+        tester,
+        StageRunnerScreen(controller: await _demo(), sound: _FakeSound()),
+      );
       expect(find.text('In der Demo gibt es keine Bestenliste.'), findsOne);
       await tester.tap(find.text('Vorhang auf'));
       await _runUntilOver(tester);
@@ -424,7 +485,10 @@ void main() {
       final controller = TestServer().controller();
       addTearDown(controller.dispose);
       await signIn(controller);
-      await _pump(tester, StageRunnerScreen(controller: controller));
+      await _pump(
+        tester,
+        StageRunnerScreen(controller: controller, sound: _FakeSound()),
+      );
       expect(
         find.text(
           'Die Bestenliste ist auf diesem Server noch nicht verfügbar.',
@@ -432,6 +496,271 @@ void main() {
         findsOneWidget,
       );
       await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('header logo', () {
+    Finder logo() => find.descendant(
+      of: find.byType(AppBar),
+      matching: find.byType(BrandLogo),
+    );
+    Matrix4 hop(WidgetTester tester) => tester
+        .widget<Transform>(
+          find
+              .descendant(
+                of: find.byType(SecretTap),
+                matching: find.byType(Transform),
+              )
+              .first,
+        )
+        .transform;
+
+    Future<void> taps(WidgetTester tester, int count, Duration pause) async {
+      for (var i = 0; i < count; i++) {
+        await tester.tap(logo());
+        await tester.pump();
+        await tester.pump(pause);
+      }
+    }
+
+    // A pushed route is offstage in its first frame.
+    final game = find.byType(StageRunnerScreen, skipOffstage: false);
+
+    testWidgets('five quick taps open the game after a short sparkle', (
+      tester,
+    ) async {
+      setWidth(tester, 400);
+      final c = await pumpDemo(tester);
+      await taps(tester, 4, const Duration(milliseconds: 120));
+      expect(find.byType(StageRunnerScreen), findsNothing);
+      await tester.tap(logo());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
+      // The closing effect plays first, but not for long.
+      expect(game, findsNothing);
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump();
+      expect(game, findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(find.text('Vorhang auf'), findsOneWidget);
+      await finish(tester, c);
+    });
+
+    testWidgets('single and slow taps keep the logo as it was', (tester) async {
+      setWidth(tester, 400);
+      final c = await pumpDemo(tester);
+      await tester.tap(logo());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 60));
+      // Each tap hops ...
+      expect(hop(tester), isNot(Matrix4.identity()));
+      await tester.pumpAndSettle();
+      // ... and the logo comes back to rest.
+      expect(hop(tester), Matrix4.identity());
+      expect(find.byType(StageRunnerScreen), findsNothing);
+      // A pause longer than the window starts the count again.
+      await taps(tester, 5, const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.byType(StageRunnerScreen), findsNothing);
+      expect(hop(tester), Matrix4.identity());
+      await finish(tester, c);
+    });
+
+    testWidgets('the animation does not hold up the navigation', (
+      tester,
+    ) async {
+      setWidth(tester, 400);
+      final c = await pumpDemo(tester);
+      await tester.tap(logo());
+      await tester.pump(const Duration(milliseconds: 30));
+      await tester.tap(find.text('Termine').last);
+      await tester.pumpAndSettle();
+      final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+      expect(bar.selectedIndex, 1);
+      expect(find.byType(StageRunnerScreen), findsNothing);
+      await finish(tester, c);
+    });
+
+    testWidgets('with reduced motion the logo stays still and still opens', (
+      tester,
+    ) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      setWidth(tester, 400);
+      final c = await pumpDemo(tester);
+      await tester.tap(logo());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(hop(tester), Matrix4.identity());
+      await taps(tester, 3, const Duration(milliseconds: 60));
+      await tester.tap(logo());
+      await tester.pump();
+      // No closing effect: the game opens at once.
+      expect(game, findsOneWidget);
+      await tester.pumpAndSettle();
+      await finish(tester, c);
+    });
+
+    testWidgets('the header logo is not announced as a button', (tester) async {
+      setWidth(tester, 400);
+      final c = await pumpDemo(tester);
+      final semantics = tester.ensureSemantics();
+      expect(
+        tester.getSemantics(
+          find.descendant(
+            of: find.byType(AppBar),
+            matching: find.bySemanticsLabel('Kolpingtheater Ramsen'),
+          ),
+        ),
+        isNot(matchesSemantics(isButton: true, hasTapAction: true)),
+      );
+      semantics.dispose();
+      await finish(tester, c);
+    });
+
+    testWidgets('on wide screens the rail logo of a page opens it, too', (
+      tester,
+    ) async {
+      setWidth(tester, 1200);
+      final c = await pumpDemo(tester);
+      openPage<void>(
+        tester.element(find.byType(AppShell)),
+        const Scaffold(body: Text('Eine Seite')),
+      );
+      await tester.pumpAndSettle();
+      final rail = find.descendant(
+        of: find.byType(NavigationRail),
+        matching: find.byType(BrandLogo),
+      );
+      expect(rail, findsOneWidget);
+      for (var i = 0; i < 5; i++) {
+        await tester.tap(rail);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 60));
+      }
+      await tester.pumpAndSettle();
+      expect(find.byType(StageRunnerScreen), findsOneWidget);
+      await finish(tester, c);
+    });
+  });
+
+  group('sound', () {
+    testWidgets('the switch mutes the run and is remembered', (tester) async {
+      final sound = _FakeSound();
+      await _pump(
+        tester,
+        StageRunnerScreen(controller: await _demo(), sound: sound),
+      );
+      await tester.tap(find.text('Vorhang auf'));
+      await tester.pump();
+      expect(sound.music, isTrue);
+      expect(find.byTooltip('Ton aus'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('runner-sound')));
+      await tester.pump();
+      expect(sound.enabled.value, isFalse);
+      expect(sound.music, isFalse);
+      expect(find.byTooltip('Ton an'), findsOneWidget);
+      await _runUntilOver(tester);
+      expect(sound.played, isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    test('the device remembers a muted game', () async {
+      SharedPreferences.setMockInitialValues({});
+      final first = PluginRunnerSound();
+      await pumpEventQueue();
+      expect(first.enabled.value, isTrue);
+      first.setEnabled(false);
+      await pumpEventQueue();
+      first.dispose();
+      final next = PluginRunnerSound();
+      await pumpEventQueue();
+      expect(next.enabled.value, isFalse);
+      next.dispose();
+    });
+  });
+
+  group('effects', () {
+    test('pickups sparkle and sound by kind; the score stays the same', () {
+      final played = <RunnerSfx>[];
+      final game = StageRunner(random: Random(5))..invincible = true;
+      final fx = RunnerFx(random: Random(1), onSound: played.add);
+      var taken = 0;
+      game.onPickup = (kind, x, y) {
+        taken += kind.points;
+        fx.pickup(kind, x - game.distance, y);
+      };
+      for (var i = 0; i < 60 * 30; i++) {
+        _greedyStep(game);
+        fx.update(1 / 60, game);
+      }
+      expect(taken, game.pickupPoints);
+      expect(game.score, game.meters + game.pickupPoints);
+      expect(played, contains(RunnerSfx.rose));
+      expect(played, contains(RunnerSfx.bravo));
+      expect(fx.combo, greaterThan(0));
+    });
+
+    test('milestones at 100, 500 and 1000 m, then every thousand', () {
+      expect(
+        [for (var i = 0; i < 5; i++) RunnerFx.milestoneAt(i)],
+        [100, 500, 1000, 2000, 3000],
+      );
+      expect(RunnerFx.milestoneText(1000), '1000 m – Zugabe!');
+      final game = StageRunner(random: Random(2))..invincible = true;
+      final fx = RunnerFx();
+      while (game.meters < 100) {
+        game.update(1 / 60);
+        fx.update(1 / 60, game);
+      }
+      expect(fx.banner, '100 m – Applaus!');
+      expect(fx.showsBanner, isTrue);
+    });
+
+    test('a broken record gets a fanfare once', () {
+      final played = <RunnerSfx>[];
+      final game = StageRunner(random: Random(2))..invincible = true;
+      final fx = RunnerFx(best: 20, onSound: played.add);
+      for (var i = 0; i < 60 * 10; i++) {
+        game.update(1 / 60);
+        fx.update(1 / 60, game);
+      }
+      expect(fx.recordBroken, isTrue);
+      expect(played.where((s) => s == RunnerSfx.record), hasLength(1));
+    });
+
+    test('the crash shakes briefly, then the curtain sounds', () {
+      final played = <RunnerSfx>[];
+      final game = StageRunner(random: Random(4));
+      final fx = RunnerFx(onSound: played.add);
+      while (!game.over) {
+        game.update(1 / 60);
+        fx.update(1 / 60, game);
+      }
+      expect(game.hitBy, isNotNull);
+      game.update(1 / 60);
+      fx.update(1 / 60, game);
+      expect(fx.shake(game), isNot((0.0, 0.0)));
+      for (var i = 0; i < 60; i++) {
+        game.update(1 / 60);
+        fx.update(1 / 60, game);
+      }
+      expect(fx.shake(game), (0.0, 0.0));
+      expect(played.where((s) => s == RunnerSfx.crash), hasLength(1));
+      expect(played.where((s) => s == RunnerSfx.curtain), hasLength(1));
+    });
+
+    test('the curtain line changes and sometimes names the obstacle', () {
+      final random = Random(9);
+      final lines = {
+        for (var i = 0; i < 80; i++) curtainLine(ObstacleKind.sandbag, random),
+      };
+      expect(lines.length, greaterThan(5));
+      expect(lines, contains('Der Sandsack hatte Vorfahrt.'));
+      expect(lines, contains('Text vergessen!'));
     });
   });
 }

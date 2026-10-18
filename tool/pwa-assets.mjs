@@ -9,8 +9,11 @@ export async function writePwaWorker(root, entrypoints, assetPaths = {assetBase:
   const {main, wasm, wasmRuntime, ...shell} = entrypoints;
   const paths = new Set(['index.html', 'privacy.html', 'manifest.json', ...Object.values(shell), ...manifest.icons.map(icon => icon.src)]);
   const directory = assetPaths.assetBase + 'assets/';
+  // The hidden game loads its pictures and sounds on demand; they need no offline copy.
+  const onDemand = directory + 'assets/games/';
   for (const file of await readdir(new URL(directory, root), {recursive: true, withFileTypes: true})) {
-    if (file.isFile()) paths.add(relative(fileURLToPath(root), join(file.parentPath, file.name)).split(sep).join('/'));
+    const path = relative(fileURLToPath(root), join(file.parentPath, file.name)).split(sep).join('/');
+    if (file.isFile() && !path.startsWith(onDemand)) paths.add(path);
   }
   // The variants flutter.js picks from. skwasm_heavy (no Wasm-capable browser needs it) and wimp stay out.
   const engine = assetPaths.canvasKitBaseUrl;

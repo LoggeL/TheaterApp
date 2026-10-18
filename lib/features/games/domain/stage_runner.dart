@@ -102,6 +102,13 @@ class StageRunner {
   @visibleForTesting
   bool invincible = false;
 
+  /// What ended the run, for the closing line.
+  ObstacleKind? hitBy;
+
+  /// Told about every pickup as it is taken, for sound and sparkle; it does
+  /// not change the score.
+  void Function(PickupKind kind, double x, double y)? onPickup;
+
   final List<Obstacle> obstacles = [];
   final List<Pickup> pickups = [];
   final List<Obstacle> _spareObstacles = [];
@@ -173,6 +180,7 @@ class StageRunner {
             o.top < y + hh &&
             o.bottom > y - hh) {
           over = true;
+          hitBy = o.kind;
           vy = 0;
           break;
         }
@@ -183,6 +191,7 @@ class StageRunner {
         p.taken = true;
         pickupPoints += p.kind.points;
         collected++;
+        onPickup?.call(p.kind, p.x, p.y);
       }
     }
     _recycle();
