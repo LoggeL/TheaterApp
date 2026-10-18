@@ -114,6 +114,9 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (ownTicket && !ownTicket[2] && req.method === 'PUT') return json(res, 200, closeOwnFeedback(theater, identity.uid, ownTicket[1], body));
       if (ownTicket?.[2] === '/messages' && req.method === 'POST') return json(res, 200, replyAsMember(theater, identity.uid, ownTicket[1], body));
       if (ownTicket?.[2] === '/read' && req.method === 'PUT') return json(res, 200, markFeedbackRead(theater, identity.uid, ownTicket[1]));
+      if (route === '/games/runner/leaderboard' && req.method === 'GET') return json(res, 200, theater.runnerLeaderboard(identity.uid));
+      if (route === '/games/runner/rounds' && req.method === 'POST') return json(res, 200, theater.runnerStart(identity.uid));
+      if (route === '/games/runner/scores' && req.method === 'POST') return json(res, 200, theater.runnerScore(identity.uid, body));
       if (route === '/admin/accounts' && req.method === 'GET') return json(res, 200, theater.adminData(identity.uid));
       if (route === '/admin/email' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.emailEnabled, jobs: theater.store.all('emailJobs').slice(-50).map(({ acceptedRecipientIds, failedRecipientIds, ...job }) => job) }); }
       if (route === '/admin/push' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.pushEnabled, devices: theater.store.all('devices').map(({ token, ...d }) => d), jobs: theater.store.all('pushJobs').slice(-50).map(({ acceptedDeviceIds, ...j }) => j) }); }

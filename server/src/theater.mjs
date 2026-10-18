@@ -30,11 +30,24 @@ export const remindCooldownMs = 10 * 60 * 1000;
 // Declines this close to the start are pushed to admins and the production's directors.
 export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'ensembleProfiles']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles']);
 // A short self-written "Über mich" text on the ensemble profile.
 export const aboutMaxLength = 600;
 // Feedback from members to the admins as support tickets (see feedback-tickets.mjs).
 export { feedbackMaxLength, feedbackPerHour } from './feedback-tickets.mjs';
+// "Bühnenlauf", an endless runner: one best score per person, shared with all members.
+// The run gets faster until failing is unavoidable. Points are metres plus pickups; the client
+// places at most `pickupPointsPerMeter` per metre. A score needs a run the server started and may
+// not exceed what the measured run time allows (see `runnerMaxScore`).
+export const stageRunner = Object.freeze({ startSpeed: 0.55, acceleration: 0.01, maxSpeed: 2.4, metersPerUnit: 10, pickupPointsPerMeter: 6, tolerance: 1.15, slackSeconds: 5, slackPoints: 60, roundTtlMs: 30 * 60000, roundsPerHour: 60, leaderboardSize: 10 });
+/** Metres a run can cover in `seconds`: the speed (stage heights per second) grows linearly up to its maximum. */
+export const runnerMaxMeters = seconds => {
+  const { startSpeed: v0, acceleration: a, maxSpeed: v1, metersPerUnit } = stageRunner, t = Math.max(0, seconds), tc = (v1 - v0) / a;
+  const units = t <= tc ? v0 * t + a * t * t / 2 : v0 * tc + a * tc * tc / 2 + v1 * (t - tc);
+  return units * metersPerUnit;
+};
+/** Highest plausible score for a run the server measured as `ms` long. */
+export const runnerMaxScore = ms => Math.ceil(runnerMaxMeters(ms / 1000 + stageRunner.slackSeconds) * (1 + stageRunner.pickupPointsPerMeter) * stageRunner.tolerance + stageRunner.slackPoints);
 const seriesFields = ['title', 'description', 'place', 'type', 'locked', 'roleIds', 'personIds', 'productionIds', 'productionId'];
 // Legacy records may lack fields; compare them as event.save would store them.
 const sameValue = (field, x, y) => {
@@ -299,6 +312,46 @@ export class Theater {
   submitFeedback(uid, b) { return submitFeedback(this, uid, b); }
   feedbackList(uid) { return feedbackList(this, uid); }
   feedbackStatus(uid, feedbackId, b) { return setFeedbackStatus(this, uid, feedbackId, b); }
+  /** Starts a run of the stage runner for the caller; at most `roundsPerHour` per person. */
+  runnerStart(uid) {
+    return this.store.transaction(() => {
+      const a = this.account(uid), at = this.clock(), since = +at - 3600000;
+      const previous = this.store.get('runnerRounds', a.personId);
+      const starts = list(previous?.starts).filter(x => Date.parse(x) > since);
+      if (starts.length >= stageRunner.roundsPerHour) fail(429, 'Gerade wurde sehr oft gespielt. Bitte später noch einmal versuchen.', 'rate_limited');
+      const round = { personId: a.personId, roundId: id(), startedAt: at.toISOString(), starts: [...starts, at.toISOString()] };
+      this.store.put('runnerRounds', a.personId, round);
+      return { roundId: round.roundId, startedAt: round.startedAt };
+    });
+  }
+  /** Ends the caller's open run with its score and keeps the person's best score. */
+  runnerScore(uid, b) {
+    return this.store.transaction(() => {
+      const a = this.account(uid), at = +this.clock();
+      if (!Number.isInteger(b.score) || b.score < 0) fail(400, 'Ungültiger Punktestand.', 'implausible');
+      const round = this.store.get('runnerRounds', a.personId);
+      if (typeof b.roundId !== 'string' || !round?.roundId || round.roundId !== b.roundId) fail(409, 'Dieser Lauf ist nicht bekannt.', 'round_unknown');
+      const elapsed = at - Date.parse(round.startedAt);
+      if (elapsed > stageRunner.roundTtlMs) fail(409, 'Der Lauf ist abgelaufen.', 'round_expired');
+      if (b.score > runnerMaxScore(elapsed)) fail(400, 'So viele Punkte sind in dieser Zeit nicht möglich.', 'implausible');
+      // Each run counts once; the start history stays for the hourly limit.
+      this.store.put('runnerRounds', a.personId, { ...round, roundId: null });
+      const old = this.store.get('runnerScores', a.personId), improved = b.score > (old?.best ?? 0);
+      const when = new Date(at).toISOString();
+      this.store.put('runnerScores', a.personId, { personId: a.personId, best: improved ? b.score : old?.best ?? 0, bestAt: improved ? when : old?.bestAt ?? null, rounds: (old?.rounds ?? 0) + 1, lastPlayedAt: when });
+      return { score: b.score, improved, leaderboard: this.runnerBoard(a) };
+    });
+  }
+  runnerLeaderboard(uid) { return this.runnerBoard(this.account(uid)); }
+  /** Top list of active people with a score above zero; equal scores share a rank, the earlier best comes first. */
+  runnerBoard(a) {
+    const members = new Map(this.store.all('members').filter(m => m.active === true).map(m => [m.id, m]));
+    const ranked = this.store.all('runnerScores').filter(x => x.best > 0 && members.has(x.personId))
+      .sort((x, y) => y.best - x.best || String(x.bestAt).localeCompare(String(y.bestAt)) || x.personId - y.personId)
+      .map((x, i, all) => ({ rank: all.findIndex(o => o.best === x.best) + 1, personId: x.personId, name: members.get(x.personId).name, score: x.best, achievedAt: x.bestAt }));
+    const own = ranked.find(x => x.personId === a.personId) ?? null;
+    return { players: ranked.length, top: ranked.slice(0, stageRunner.leaderboardSize), own };
+  }
   /** Deletes a login and its link; the person and their theater data stay. `deleteIdentity` removes the Firebase user. */
   async deleteAccount(uid, targetUid, version, deleteIdentity = null) {
     const check = () => {
@@ -1064,6 +1117,7 @@ export class Theater {
     // Feedback is personal data of its author and goes with the person (deleting only the login keeps it).
     // Their answers in other people's tickets stay, without their name.
     forgetFeedbackPerson(s, personId);
+    s.delete('runnerScores', personId); s.delete('runnerRounds', personId);
     // Reminder keys are `${eventId}:${startsAt}:${personId}:${kind}`; startsAt contains colons itself.
     for (const { id: key } of s.db.prepare("SELECT id FROM entities WHERE kind = 'reminderSent'").all()) if (key.split(':').at(-2) === String(personId)) s.delete('reminderSent', key);
     s.delete('reminders', personId);

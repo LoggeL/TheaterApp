@@ -22,6 +22,7 @@ import '../../changelog/changelog.dart';
 import '../../ensemble/ui/members_screen.dart';
 import '../../feedback/feedback.dart';
 import '../../galleries/ui/gallery_list_screen.dart';
+import '../../games/games.dart';
 import '../../participation/ui/participation_screen.dart';
 import '../../profile/ui/profile_screen.dart';
 import '../../settings/ui/settings_screen.dart';
@@ -118,7 +119,16 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
     context: context,
     applicationName: Brand.name,
     applicationVersion: appVersionLabel,
-    applicationIcon: const BrandLogo(size: 41),
+    // Seven quick taps on the logo open a small game for the ensemble.
+    applicationIcon: Builder(
+      builder: (dialog) => SecretTap(
+        onUnlocked: () {
+          Navigator.pop(dialog);
+          openStageRunner(context, controller);
+        },
+        child: const BrandLogo(size: 41),
+      ),
+    ),
     children: [
       const Text(
         'Termine, Rückmeldungen, Drehbücher und Mitteilungen des Ensembles an einem Ort. Bei Fragen zur App hilft dir die Theaterleitung weiter.',
