@@ -38,7 +38,8 @@ test('scheduled reminder is persisted once and respects cancellation and prefere
   store.put('events', 'e', { id: 'e', title: 'Probe', startsAt: '2026-09-13T09:00:00Z' });
   store.put('reminders', a.personId, { dayBefore: false }); scheduleReminders(theater, now); assert.equal(store.all('pushJobs').length, 0);
   store.put('reminders', a.personId, { dayBefore: true }); store.put('responses', `e:${a.personId}`, { status: 'no' }); scheduleReminders(theater, now); assert.equal(store.all('pushJobs').length, 0);
-  store.delete('responses', `e:${a.personId}`); scheduleReminders(theater, now); scheduleReminders(theater, now); assert.equal(store.all('pushJobs').length, 1);
+  store.delete('responses', `e:${a.personId}`); scheduleReminders(theater, now); assert.equal(store.all('pushJobs').length, 0);
+  store.put('responses', `e:${a.personId}`, { status: 'yes' }); scheduleReminders(theater, now); scheduleReminders(theater, now); assert.equal(store.all('pushJobs').length, 1);
 });
 
 test('web push opens the exact message with an encoded target', async t => {
@@ -55,6 +56,7 @@ test('one-day reminder defaults off, two-hour reminder defaults on, opt-in survi
   const now = new Date('2026-09-14T12:00:00Z');
   store.put('events', 'e', { id: 'e', title: 'Abbau', startsAt: '2026-09-15T11:00:00Z', place: 'Kolpingheim' });
   assert.deepEqual(theater.snapshot('admin').reminders, { dayBefore: false, twoHours: true, changes: true, emailEnabled: false, customMinutes: null, lateDeclines: true });
+  store.put('responses', `e:${a.personId}`, { status: 'yes' });
   scheduleReminders(theater, now);
   assert.equal(store.all('pushJobs').length, 0);
   store.put('events', 'e', { ...store.get('events', 'e'), startsAt: '2026-09-14T13:30:00Z' });
@@ -78,7 +80,7 @@ test('upgraded Android receives an account-bound action payload, old Android and
   theater.device('admin', 'new-android-device-token', 'android', false, true);
   const future = new Date(Date.now() + 3600000).toISOString();
   store.put('events', 'e', { id: 'e', title: 'Abbau', startsAt: future, endsAt: future, place: 'Saal' });
-  theater.enqueuePush({ title: 'Abbau', body: 'Old generic body', data: { eventId: 'e' } });
+  theater.enqueuePush({ title: 'Abbau', body: 'Old generic body', data: { eventId: 'e' }, newEvent: true, announce: 'new' });
   const calls = [];
   await deliverPush(theater, { sendEachForMulticast: async p => {
     calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) };
@@ -99,9 +101,165 @@ test('upgraded Android receives an account-bound action payload, old Android and
   assert.equal(store.all('pushJobs')[0].accepted, 3);
 });
 
-test('locked and expired events have no response actions', async t => {
-  const { store, theater } = setup(t);
+for (const [status, summary] of [['yes', 'Du hast zugesagt.'], ['late', 'Du kommst später.']]) {
+  test(`event reminders show the current ${status} response without quick answers on every platform`, async t => {
+    const { store, theater, a } = setup(t);
+    theater.device('admin', 'new-android-device-token', 'android', false, true);
+    theater.device('admin', 'ios-device-token-for-reminder', 'ios');
+    const future = new Date(Date.now() + 3600000).toISOString();
+    store.put('events', 'e', { id: 'e', title: 'Abbau', startsAt: future, endsAt: future, place: 'Saal' });
+    store.put('responses', `e:${a.personId}`, { status: 'yes' });
+    scheduleReminders(theater);
+    assert.equal(store.all('pushJobs').length, 1);
+    // A changed answer arrives after the reminder was queued, before it is sent.
+    store.put('responses', `e:${a.personId}`, { status });
+    const calls = [];
+    await deliverPush(theater, { sendEachForMulticast: async p => {
+      calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) };
+    } }, 'https://theater.example');
+    const android = calls.find(p => p.tokens.includes('new-android-device-token'));
+    assert.equal(android.data.attendanceActions, undefined);
+    assert.equal(android.data.recipientUid, 'admin');
+    assert.equal(android.data.eventId, 'e');
+    assert.ok(android.data.body.endsWith(`Uhr · Saal\n${summary}`));
+    const legacy = calls.find(p => p.tokens.includes('token-a'));
+    assert.deepEqual(legacy.tokens, ['token-a', 'token-b', 'ios-device-token-for-reminder']);
+    assert.equal(legacy.notification.body, android.data.body);
+    assert.equal(new URL(legacy.webpush.fcmOptions.link).searchParams.get('target'), 'theaterapp://app/events/e');
+    assert.equal(store.all('pushJobs')[0].accepted, 4);
+  });
+}
+
+for (const status of [null, 'no']) {
+  test(`open and declined invitations (${status ?? 'open'}) do not schedule or receive ordinary reminder pushes`, async t => {
+    const { store, theater, a } = setup(t);
+    const future = new Date(Date.now() + 3600000).toISOString();
+    store.put('events', 'e', { id: 'e', title: 'Probe', startsAt: future, endsAt: future });
+    if (status) store.put('responses', `e:${a.personId}`, { status });
+    scheduleReminders(theater);
+    assert.equal(store.all('pushJobs').length, 0);
+    assert.equal(store.all('reminderSent').length, 0);
+    // Previously queued reminders also obey the current attendance restriction.
+    theater.enqueuePush({ title: 'Probe', body: 'Probe', data: { eventId: 'e' } });
+    await deliverPush(theater, { sendEachForMulticast: async () => assert.fail('No reminder for an open or declined invitation') });
+    assert.equal(store.all('pushJobs')[0].status, 'no_devices');
+  });
+
+  test(`a queued accepted reminder is skipped after the response becomes ${status ?? 'open'}`, async t => {
+    const { store, theater, a } = setup(t);
+    const future = new Date(Date.now() + 3600000).toISOString();
+    store.put('events', 'e', { id: 'e', title: 'Probe', startsAt: future, endsAt: future });
+    store.put('responses', `e:${a.personId}`, { status: 'yes' });
+    scheduleReminders(theater);
+    assert.equal(store.all('pushJobs').length, 1);
+    if (status) store.put('responses', `e:${a.personId}`, { status });
+    else store.delete('responses', `e:${a.personId}`);
+    await deliverPush(theater, { sendEachForMulticast: async () => assert.fail('The acceptance was withdrawn before sending') });
+    assert.equal(store.all('pushJobs')[0].status, 'no_devices');
+  });
+}
+
+test('a decline suppresses reminders at retry and between device batches', async t => {
+  const { store, theater, a } = setup(t);
   store.put('devices', 'a', { ...store.get('devices', 'a'), notificationActions: true });
+  const future = new Date(Date.now() + 3600000).toISOString();
+  store.put('events', 'e', { id: 'e', title: 'Probe', startsAt: future, endsAt: future });
+  store.put('responses', `e:${a.personId}`, { status: 'late' });
+  scheduleReminders(theater);
+  let sends = 0;
+  await deliverPush(theater, { sendEachForMulticast: async p => {
+    sends++;
+    assert.deepEqual(p.tokens, ['token-a']);
+    store.put('responses', `e:${a.personId}`, { status: 'no' });
+    return { responses: [{ success: false, error: { code: 'messaging/internal-error' } }] };
+  } });
+  assert.equal(sends, 1, 'the other device batch is skipped after the decline');
+  const job = store.all('pushJobs')[0];
+  assert.equal(job.status, 'pending');
+  store.put('pushJobs', job.id, { ...job, nextAttemptAt: new Date(0).toISOString() });
+  await deliverPush(theater, { sendEachForMulticast: async () => assert.fail('Declined reminders must not be retried') });
+  assert.equal(store.all('pushJobs')[0].status, 'no_devices');
+});
+
+test('declined invitees do not receive event changes or already queued announcements', async t => {
+  const { store, theater, a } = setup(t);
+  const future = new Date(Date.now() + 3600000).toISOString();
+  store.put('events', 'e', { id: 'e', title: 'Probe', startsAt: future, endsAt: future });
+  store.put('responses', `e:${a.personId}`, { status: 'no' });
+  for (const kind of [{ change: true }, { change: true, announce: 'changed' }, { newEvent: true, announce: 'new' }]) {
+    theater.enqueuePush({ title: 'Probe', body: 'Probe', data: { eventId: 'e' }, ...kind });
+  }
+  await deliverPush(theater, { sendEachForMulticast: async () => assert.fail('Declined invitees must stay quiet') });
+  assert.ok(store.all('pushJobs').every(j => j.status === 'no_devices'));
+});
+
+test('new event announcements keep responses separate and offer quick answers only to open invitees', async t => {
+  const { store, theater, a } = setup(t);
+  theater.device('admin', 'admin-android-device-with-actions', 'android', false, true);
+  const personId = theater.action('admin', { action: 'member.save', name: 'Sam' }, 'create-sam').id;
+  theater.session({ uid: 'sam', name: 'Sam', email: 'sam@example.invalid', email_verified: true });
+  theater.action('admin', { action: 'account.approve', uid: 'sam', personId, version: 1, role: 'member' }, 'approve-sam');
+  theater.device('sam', 'sam-android-device-with-actions', 'android', false, true);
+  theater.device('sam', 'sam-web-device-for-notifications', 'web');
+  theater.device('sam', 'sam-legacy-android-device-token', 'android');
+  for (const job of store.all('pushJobs')) store.delete('pushJobs', job.id);
+  const future = new Date(Date.now() + 3600000).toISOString();
+  store.put('events', 'e', { id: 'e', title: 'Probe', startsAt: future, endsAt: future });
+  store.put('responses', `e:${a.personId}`, { status: 'yes' });
+  theater.enqueuePush({ title: 'Probe', body: 'Probe', data: { eventId: 'e' }, newEvent: true, announce: 'new' });
+  const calls = [];
+  await deliverPush(theater, { sendEachForMulticast: async p => {
+    calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) };
+  } });
+  const adminAndroid = calls.find(p => p.tokens.includes('admin-android-device-with-actions'));
+  const samAndroid = calls.find(p => p.tokens.includes('sam-android-device-with-actions'));
+  const adminLegacy = calls.find(p => p.tokens.includes('token-b'));
+  const samLegacy = calls.find(p => p.tokens.includes('sam-web-device-for-notifications'));
+  assert.equal(adminAndroid.data.attendanceActions, undefined);
+  assert.ok(adminAndroid.data.body.endsWith('\nDu hast zugesagt.'));
+  assert.equal(samAndroid.data.attendanceActions, 'true');
+  assert.equal(samAndroid.data.recipientUid, 'sam');
+  assert.ok(samAndroid.data.body.endsWith('Uhr'));
+  assert.equal(adminLegacy.notification.body, adminAndroid.data.body);
+  assert.equal(samLegacy.notification.body, samAndroid.data.body);
+  assert.deepEqual(adminLegacy.tokens, ['token-a', 'token-b']);
+  assert.deepEqual(samLegacy.tokens, ['sam-web-device-for-notifications', 'sam-legacy-android-device-token']);
+});
+
+test('a push retry reads a newly saved response and does not resend accepted devices', async t => {
+  const { store, theater, a } = setup(t);
+  store.put('devices', 'a', { ...store.get('devices', 'a'), notificationActions: true });
+  theater.device('admin', 'second-android-device-for-retry', 'android', false, true);
+  const future = new Date(Date.now() + 3600000).toISOString();
+  store.put('events', 'e', { id: 'e', title: 'Probe', startsAt: future, endsAt: future });
+  theater.enqueuePush({ title: 'Probe', body: 'Probe', data: { eventId: 'e' }, newEvent: true, announce: 'new' });
+  const calls = [];
+  let retry = false;
+  const messaging = { sendEachForMulticast: async p => {
+    calls.push(p);
+    return { responses: p.tokens.map(token => token === 'second-android-device-for-retry' && !retry
+      ? { success: false, error: { code: 'messaging/internal-error' } } : { success: true }) };
+  } };
+  await deliverPush(theater, messaging);
+  assert.equal(calls[0].data.attendanceActions, 'true');
+  const job = store.all('pushJobs')[0];
+  assert.equal(job.status, 'pending');
+  store.put('responses', `e:${a.personId}`, { status: 'yes' });
+  store.put('pushJobs', job.id, { ...job, nextAttemptAt: new Date(0).toISOString() });
+  retry = true;
+  await deliverPush(theater, messaging);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[2].tokens, ['second-android-device-for-retry']);
+  assert.equal(calls[2].data.attendanceActions, undefined);
+  assert.ok(calls[2].data.body.endsWith('\nDu hast zugesagt.'));
+  assert.equal(store.all('pushJobs')[0].status, 'accepted_by_provider');
+  assert.equal(store.all('pushJobs')[0].accepted, 3);
+});
+
+test('locked and expired events have no response actions', async t => {
+  const { store, theater, a } = setup(t);
+  store.put('devices', 'a', { ...store.get('devices', 'a'), notificationActions: true });
+  store.put('responses', `e:${a.personId}`, { status: 'yes' });
   for (const locked of [false, true]) {
     store.put('events', 'e', { id: 'e', title: 'Probe', startsAt: '2020-01-01T12:00:00Z', locked });
     theater.enqueuePush({ title: 'Probe', body: 'Probe', data: { eventId: 'e' } });
@@ -144,6 +302,7 @@ test('new registrations notify admins once, only when ready to link', async t =>
 test('role audiences limit reminders and pushes to invited members', async t => {
   const { store, theater, a } = setup(t); const now = new Date('2026-09-14T12:00:00Z');
   store.put('events', 'e', { id: 'e', title: 'Lichtprobe', startsAt: '2026-09-14T13:30:00Z', roleIds: ['role-light'] });
+  store.put('responses', `e:${a.personId}`, { status: 'yes' });
   scheduleReminders(theater, now); assert.equal(store.all('pushJobs').length, 0);
   theater.enqueuePush({ title: 'Termin aktualisiert', body: 'Licht', roleIds: ['role-light'] });
   await deliverPush(theater, { sendEachForMulticast: async () => assert.fail('admin is not invited') });
@@ -208,10 +367,12 @@ test('short-notice declines notify admins and directors without the reason or qu
   assert.ok(store.get('reminderSent', `${soon}:2026-09-12T15:00:00.000Z:${sam}:lateDecline`));
 
   theater.device('admin', 'admin-android-token-with-actions', 'android', false, true);
+  store.put('responses', `${soon}:${admin}`, { status: 'yes' });
   const calls = [];
   await deliverPush(theater, { sendEachForMulticast: async p => { calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) }; } });
   const android = calls.find(p => p.tokens.includes('admin-android-token-with-actions'));
   assert.equal(android.data.title, 'Kurzfristige Absage: Probe');
+  assert.equal(android.data.body, job.body);
   assert.equal(android.data.attendanceActions, undefined);
   assert.equal(android.data.eventId, soon);
 

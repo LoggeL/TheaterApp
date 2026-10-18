@@ -31,6 +31,7 @@ test('events invite roles and single people together', t => {
   assert.equal(sees('kim'), false, 'neither role nor name');
   assert.throws(() => action({ action: 'attendance', eventId: id, status: 'yes' }, 'kim'), { status: 404 });
   action({ action: 'attendance', eventId: id, status: 'yes' }, 'sam');
+  action({ action: 'attendance', eventId: id, status: 'late' }, 'tech');
   scheduleReminders(app, now);
   assert.deepEqual(store.all('pushJobs').filter(j => j.data?.eventId === id).map(j => j.recipientPersonIds[0]).sort(), [sam, tech].sort());
 });
@@ -94,9 +95,9 @@ test('saving an event can push the invited people once', async t => {
   assert.equal(calls[0].notification.title, 'Neuer Termin: Lichtprobe');
   assert.equal(calls[0].data.eventId, created.id);
 
-  // Changes only reach people who already answered: Sam declined, Toni never answered.
+  // Changes only reach people who plan to attend: Sam accepted, Toni never answered.
   // Sam opted out of automatic change notifications; the explicit push still reaches him.
-  action({ action: 'attendance', eventId: created.id, status: 'no', reason: '' }, 'sam');
+  action({ action: 'attendance', eventId: created.id, status: 'yes' }, 'sam');
   action({ action: 'settings.reminders', value: { changes: false } }, 'sam');
   for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
   action(event({ id: created.id, version: 1, title: 'Lichtprobe neu', push: true }));
@@ -122,10 +123,13 @@ test('a production ensemble is an audience that follows casting and crew', t => 
   assert.deepEqual(['sam', 'tech', 'kim'].map(sees), [true, false, false]);
   assert.deepEqual(app.snapshot('admin').productions.find(p => p.id === 'winter').ensemble, [sam]);
   assert.throws(() => action(event({ productionIds: ['unknown'] })), { status: 400 });
+  action({ action: 'attendance', eventId: id, status: 'yes' }, 'sam');
 
   // Crew joins by hand, casting changes apply immediately.
   action({ action: 'production.save', id: 'winter', version: 1, title: 'Winterstück', casting: { B: kim }, memberIds: [tech] });
   assert.deepEqual(['sam', 'tech', 'kim'].map(sees), [false, true, true]);
+  action({ action: 'attendance', eventId: id, status: 'yes' }, 'tech');
+  action({ action: 'attendance', eventId: id, status: 'late' }, 'kim');
   scheduleReminders(app, now);
   assert.deepEqual(store.all('pushJobs').filter(j => j.data?.eventId === id).map(j => j.recipientPersonIds[0]).sort(), [tech, kim].sort());
 

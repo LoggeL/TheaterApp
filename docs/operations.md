@@ -3,7 +3,8 @@
 ## Laufende Instanz
 
 - Web-App: https://app.kolpingtheater-ramsen.de
-- Bisherige App- und API-Adresse für installierte Clients: https://theater-app.logge.top
+- Bisherige Web-Adresse, mit dauerhafter Weiterleitung: https://theater-app.logge.top
+- Bisherige API für installierte Clients: https://theater-app.logge.top/api/
 - Privater Quellcode: https://github.com/LoggeL/TheaterApp
 - Dokploy: Projekt `kolping-ramsen`, Umgebung `production`, eigener Dienst `Theater-App`.
 - Firebase-Projekt `theater-app-6fa5d`, derzeit Spark. Auth: E-Mail/Passwort und Google. FCM V1 und Web-VAPID sind eingerichtet.
@@ -56,6 +57,8 @@ Die Datenbank wird mit WAL betrieben. Datenverzeichnis und Schlüssel sind nur f
 Die Web-Domain nutzt den bestehenden, lokal verwalteten Cloudflare-Tunnel `local-server` auf HomeBox. Der DNS-CNAME `app` zeigt mit aktiviertem Proxy auf `0bbb6ff3-724e-4d75-b4c5-42769c3aa5c6.cfargotunnel.com`. In `/etc/cloudflared/config.yml` zeigt die genaue Hostname-Route auf `http://localhost:80`; Dokploy ordnet diesen Host dem Dienst `theater`, Port 8787, zu. Öffentlich erfolgt der Zugriff per HTTPS, der Tunnel verschlüsselt die Verbindung bis HomeBox, und der HTTP-Schritt bleibt auf dem lokalen Rechner. Für diese Route ist deshalb in Dokploy kein zusätzliches Origin-TLS konfiguriert.
 
 `config/dokploy.json` enthält die Hauptdomain, die weiterhin bedienten zusätzlichen Hosts und die Hosts mit lokalem HTTP-Origin. Das Deployment übernimmt alle Hosts in `ALLOWED_ORIGINS` und verwendet die Hauptdomain als `APP_ORIGIN` für Push-Links. Firebase Authentication muss beide öffentlichen App-Domains in `authorizedDomains` führen. `server/scripts/firebase-configure.mjs` ergänzt diese Domains aus derselben Konfiguration. Die Android- und iOS-Konfigurationen behalten die bisherige API-Adresse; der nächste Webbuild verwendet die neue Domain.
+
+In der Cloudflare-Zone `logge.top` ist die Single-Redirect-Regel "Theater-App: neue Web-Domain, API beibehalten" aktiv (ID `4d30fc4c7a0949659974a335fefbb77a`). Sie leitet HTTP- und HTTPS-Web-Aufrufe mit Status 301 auf die neue Domain um und erhält Pfad und Query-Parameter. Der Filter lautet `(http.host eq "theater-app.logge.top" and not starts_with(http.request.uri.path, "/api/") and http.request.uri.path ne "/api")`, das dynamische Ziel `concat("https://app.kolpingtheater-ramsen.de", http.request.uri.path)`, mit "Preserve query string" aktiviert. Die Ausnahme für `/api` und `/api/` ist für installierte Clients erforderlich, deren API-Client keine Redirects verfolgt. Der vorhandene proxied Wildcard-DNS-Eintrag `*.logge.top` bedient weiterhin den Tunnel. Zum Zurücksetzen nur diese Redirect-Regel deaktivieren; DNS, Tunnel und die zusätzliche Dokploy-Domain bleiben bestehen.
 
 ## Backup und Wiederherstellung
 

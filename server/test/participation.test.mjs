@@ -112,12 +112,14 @@ test('a personal reminder lead time is validated and sent once instead of an equ
   action({ action: 'settings.reminders', value: { twoHours: true, customMinutes: 120 } }, 'sam');
   assert.equal(app.snapshot('sam').reminders.customMinutes, 120);
   event('soon', new Date(+now + 90 * 60000).toISOString());
+  action({ action: 'attendance', eventId: 'soon', status: 'yes' }, 'sam');
   scheduleReminders(app, now); scheduleReminders(app, now);
-  const jobs = () => store.all('pushJobs').filter(j => j.recipientPersonIds?.includes(memberId));
+  const jobs = () => store.all('pushJobs').filter(j => j.data?.eventId && j.recipientPersonIds?.includes(memberId));
   assert.equal(jobs().length, 1);
   assert.ok(store.all('reminderSent').length >= 1);
   action({ action: 'settings.reminders', value: { twoHours: false, customMinutes: 3 * 24 * 60 } }, 'sam');
   event('later', new Date(+now + 2 * 24 * 3600000).toISOString());
+  action({ action: 'attendance', eventId: 'later', status: 'late' }, 'sam');
   scheduleReminders(app, now);
   assert.equal(jobs().length, 2, 'a long lead time reaches beyond the one-day window');
 });

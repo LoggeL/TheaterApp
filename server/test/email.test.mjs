@@ -41,6 +41,23 @@ test('event emails default off, work without push and preserve opt-in from old c
   assert.equal(sent.length, 1); assert.equal(store.all('emailJobs').filter(x => x.status === 'accepted_by_provider').length, 1);
 });
 
+test('an open email reminder does not consume a later accepted push or duplicate the email', async t => {
+  const { store, theater, account, email, sent } = setup(t);
+  theater.pushEnabled = true;
+  store.put('reminders', account.personId, { emailEnabled: true, twoHours: true });
+  scheduleReminders(theater); scheduleReminders(theater);
+  assert.equal(store.all('pushJobs').length, 0);
+  assert.equal(store.all('emailJobs').length, 1);
+  await deliverEmail(theater, email, 'https://app.example.com');
+  assert.equal(sent.length, 1);
+  store.put('responses', `e:${account.personId}`, { status: 'yes' });
+  scheduleReminders(theater); scheduleReminders(theater);
+  assert.equal(store.all('pushJobs').length, 1);
+  assert.equal(store.all('emailJobs').length, 1);
+  await deliverEmail(theater, email, 'https://app.example.com');
+  assert.equal(sent.length, 1);
+});
+
 test('email recipients require opt-in, approved account, verified email and current invitation', async t => {
   const { store, theater, account, email, sent } = setup(t);
   store.put('reminders', account.personId, { emailEnabled: true, changes: true });
