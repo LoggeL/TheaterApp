@@ -1,5 +1,5 @@
 /// Version name from pubspec.yaml; a test keeps both in sync.
-const appVersion = '0.8.1';
+const appVersion = '0.8.2';
 
 /// Store build number, passed by the Android release build
 /// (`--dart-define=APP_BUILD=…`); empty for web and local builds.
