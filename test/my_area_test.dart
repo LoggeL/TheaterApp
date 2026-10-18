@@ -107,6 +107,7 @@ void main() {
       'Passwort ändern',
       'Synchronisierung',
       'Datenschutz',
+      'Changelog',
       'Über die App',
       'Abmelden',
     ]) {

@@ -302,6 +302,12 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                       onTap: _privacy,
                     ),
                     GroupTile(
+                      icon: Icons.history,
+                      title: 'Changelog',
+                      subtitle: 'Alle Versionen und was neu ist',
+                      onTap: () => openChangelog(context),
+                    ),
+                    GroupTile(
                       icon: Icons.info_outline,
                       title: 'Über die App',
                       subtitle: '$appVersionLabel · Lizenzen',
