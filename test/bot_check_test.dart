@@ -222,6 +222,16 @@ void main() {
     );
     expect(find.text(_question), findsOneWidget);
     expect(find.bySemanticsLabel(_question), findsOneWidget);
+    // The picture is shown and stays out of the screen reader's way.
+    final art = tester.widget<Image>(
+      find.byKey(const ValueKey('bot-check-art')),
+    );
+    expect((art.image as AssetImage).assetName, BotCheckScreen.art);
+    expect(art.excludeFromSemantics, isTrue);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('bot-check-art'))).height,
+      180,
+    );
     final field = find.byKey(const ValueKey('bot-check-answer'));
     expect(tester.widget<TextField>(field).autofocus, isTrue);
 
@@ -254,6 +264,61 @@ void main() {
     expect(find.byType(FirebaseWelcomeScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  for (final (name, size, keyboard) in [
+    ('landscape', const Size(740, 360), 0.0),
+    ('an open keyboard', const Size(390, 800), 330.0),
+  ]) {
+    testWidgets('the picture gives way to the question on $name', (
+      tester,
+    ) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final c = await _controller(_Server());
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StageTheme.build(Brightness.dark),
+          home: MediaQuery(
+            data: MediaQueryData(
+              size: size,
+              viewInsets: EdgeInsets.only(bottom: keyboard),
+              disableAnimations: true,
+            ),
+            child: BotCheckScreen(controller: c),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const ValueKey('bot-check-art')), findsNothing);
+      // Question and answer field are visible above the keyboard.
+      final field = find.byKey(const ValueKey('bot-check-answer'));
+      for (final target in [find.text(_question), field]) {
+        expect(target.hitTestable(), findsOneWidget);
+        expect(
+          tester.getRect(target).bottom,
+          lessThanOrEqualTo(size.height - keyboard),
+        );
+      }
+      await tester.enterText(field, 'Mannheim');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Das passt leider nicht'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
+  test('the picture shrinks before it gives way', () {
+    expect(BotCheckScreen.artHeight(1200), 180);
+    expect(BotCheckScreen.artHeight(700), closeTo(132, 0.01));
+    expect(BotCheckScreen.artHeight(620), closeTo(84, 0.01));
+    expect(BotCheckScreen.artHeight(600), 0);
+    expect(BotCheckScreen.artHeight(360), 0);
   });
 
   testWidgets('the screen stays readable on a narrow phone with large text', (

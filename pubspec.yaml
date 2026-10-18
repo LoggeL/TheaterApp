@@ -75,6 +75,8 @@ flutter:
           weight: 900
           style: italic
   assets:
+    # The bot check is the first screen; its small picture is precached.
+    - assets/auth/no_bots.webp
     - assets/brand/kolpingtheater-ramsen.png
     - assets/fonts/DejaVuSans.ttf
     - assets/fonts/DejaVuSans-Bold.ttf

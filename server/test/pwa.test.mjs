@@ -38,12 +38,13 @@ test('install manifest and brand icons have a stable identity and valid platform
 
 test('public build cache changes with asset contents and remains stable when finalized twice', async t => {
   const directory = await temporary(t);
-  for (const dir of ['assets/assets/games/stage_runner', 'canvaskit']) await mkdir(join(directory, dir), {recursive: true});
+  for (const dir of ['assets/assets/auth', 'assets/assets/games/stage_runner', 'canvaskit']) await mkdir(join(directory, dir), {recursive: true});
   const fixtures = {
     'index.html': '<meta name="theater-pwa-version" content="development">',
     'privacy.html': 'privacy', 'manifest.json': '{"icons":[]}',
     'main.1234.dart.js': 'main', 'pwa.1234.js': 'install',
     'assets/FontManifest.json': 'fonts', 'assets/font.ttf': 'font version one',
+    'assets/assets/auth/no_bots.webp': 'picture',
     'assets/assets/games/stage_runner/music.mp3': 'tune',
     'canvaskit/canvaskit.wasm': 'renderer', 'canvaskit/skwasm.wasm': 'unused renderer',
     'firebase-web-config.js': 'client config',
@@ -56,6 +57,8 @@ test('public build cache changes with asset contents and remains stable when fin
   assert.deepEqual(await writePwaWorker(root, entries), first);
   const worker = await readFile(join(directory, first.worker), 'utf8');
   assert(worker.includes('/assets/font.ttf'));
+  // The first screen's picture is small and works offline.
+  assert(worker.includes('/assets/assets/auth/no_bots.webp'));
   assert(worker.includes('/canvaskit/canvaskit.wasm'));
   assert(!worker.includes('/canvaskit/skwasm.wasm'));
   assert(!worker.includes('/firebase-web-config.js'));

@@ -18,6 +18,17 @@ class BotCheckScreen extends StatefulWidget {
   /// Wrong answers before the screen asks for a short break.
   static const freeAttempts = 3;
 
+  /// A robot pulled off the stage with the hook; decoration only.
+  static const art = 'assets/auth/no_bots.webp';
+
+  /// The picture's height for the room left above the keyboard. It shrinks
+  /// first and gives way below a readable size, so the question and the
+  /// answer field stay visible (keyboard open, landscape).
+  static double artHeight(double room) {
+    final height = ((room - 480) * 0.6).clamp(0.0, 180.0);
+    return height < 80 ? 0 : height;
+  }
+
   @override
   State<BotCheckScreen> createState() => _BotCheckScreenState();
 }
@@ -227,6 +238,11 @@ class _BotCheckScreenState extends State<BotCheckScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final room =
+        MediaQuery.sizeOf(context).height -
+        MediaQuery.viewInsetsOf(context).bottom -
+        MediaQuery.paddingOf(context).vertical;
+    final artHeight = BotCheckScreen.artHeight(room);
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -250,7 +266,12 @@ class _BotCheckScreenState extends State<BotCheckScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 38),
+                if (artHeight > 0) ...[
+                  const SizedBox(height: 26),
+                  _NoBotsArt(height: artHeight, shakes: _wrong),
+                  const SizedBox(height: 22),
+                ] else
+                  const SizedBox(height: 24),
                 Semantics(
                   header: true,
                   child: Text(
@@ -269,6 +290,80 @@ class _BotCheckScreenState extends State<BotCheckScreen> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The picture above the question. It fades in once loaded and shakes its
+/// head after each wrong answer, unless animations are turned off.
+class _NoBotsArt extends StatefulWidget {
+  const _NoBotsArt({required this.height, required this.shakes});
+  final double height;
+
+  /// Grows with each wrong answer.
+  final int shakes;
+
+  @override
+  State<_NoBotsArt> createState() => _NoBotsArtState();
+}
+
+class _NoBotsArtState extends State<_NoBotsArt>
+    with SingleTickerProviderStateMixin {
+  late final _shake = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 520),
+  );
+
+  @override
+  void didUpdateWidget(covariant _NoBotsArt old) {
+    super.didUpdateWidget(old);
+    if (widget.shakes > old.shakes &&
+        !MediaQuery.disableAnimationsOf(context)) {
+      _shake.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _shake.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final still = MediaQuery.disableAnimationsOf(context);
+    return AnimatedBuilder(
+      animation: _shake,
+      builder: (context, child) {
+        final t = _shake.value;
+        return Transform.translate(
+          offset: Offset(sin(t * pi * 6) * 8 * (1 - t), 0),
+          child: child,
+        );
+      },
+      child: SizedBox(
+        height: widget.height,
+        child: Image.asset(
+          BotCheckScreen.art,
+          key: const ValueKey('bot-check-art'),
+          height: widget.height,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.medium,
+          // The text above the question says what matters.
+          excludeFromSemantics: true,
+          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          frameBuilder: (context, child, frame, synchronous) => synchronous
+              ? child
+              : AnimatedOpacity(
+                  opacity: frame == null ? 0 : 1,
+                  duration: still
+                      ? Duration.zero
+                      : const Duration(milliseconds: 450),
+                  curve: Curves.easeOut,
+                  child: child,
+                ),
         ),
       ),
     );
