@@ -6,6 +6,17 @@ class BotCheckQuestion {
   final String question, hint;
 }
 
+/// What the invisible bot trap of a form saw: whether its honeypot field,
+/// which people never see, was filled, and how long the form was shown before
+/// it was sent. The server only judges it; people are never locked out.
+class BotTrapReport {
+  const BotTrapReport({required this.filled, required this.elapsed});
+  final bool filled;
+  final Duration elapsed;
+
+  JsonMap toJson() => {'filled': filled, 'elapsedMs': elapsed.inMilliseconds};
+}
+
 /// A simple knowledge question before the first sign-in or registration on a
 /// device ("Botschutz"). Only the server knows and checks the answers. A
 /// correct answer returns a short-lived proof that a new account presents
@@ -58,15 +69,16 @@ extension BotCheckController on AppController {
     }
   }
 
-  /// Sends [answer] to the server. Throws an [ApiException] with code
-  /// `bot_check_wrong` for a wrong answer and `rate_limited` after too many.
-  Future<void> answerBotCheck(String answer) async {
+  /// Sends [answer] and the screen's bot [trap] to the server. Throws an
+  /// [ApiException] with code `bot_check_wrong` for a wrong answer and
+  /// `rate_limited` after too many.
+  Future<void> answerBotCheck(String answer, {BotTrapReport? trap}) async {
     final given = answer.trim();
     final r = await _api.request(
       _apiBaseUrl,
       'POST',
       '/bot-check',
-      body: {'answer': given},
+      body: {'answer': given, 'botTrap': ?trap?.toJson()},
     );
     _botProof = textValue(r['proof']);
     _botProofExpiresAt = dateValue(r['expiresAt']);

@@ -53,6 +53,15 @@ TheaterMember? uniqueExactMatch(
 bool _withoutBotCheck(JsonMap a) =>
     const ['missing', 'invalid'].contains(a['botCheck']);
 
+/// Registrations caught by the invisible bot trap of the sign-in forms.
+bool _caughtByBotTrap(JsonMap a) => a['botCheck'] == 'trap';
+
+/// What the bot trap noticed, for the approval notice.
+String _botTrapNotice(JsonMap a) =>
+    '${a['botTrap'] == 'fast' ? 'Diese Registrierung wurde ungewöhnlich schnell abgeschickt.' : 'Bei dieser Registrierung wurde ein für Menschen unsichtbares Feld ausgefüllt.'} '
+    'Das spricht für ein automatisiertes Programm, deshalb kam keine '
+    'Push-Nachricht. Bitte prüfe die Anfrage besonders sorgfältig.';
+
 class AccountApprovalScreen extends StatefulWidget {
   const AccountApprovalScreen({
     super.key,
@@ -255,6 +264,12 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
                         color: Color(0xFFA25B06),
                         icon: Icons.shield_outlined,
                       ),
+                    if (_caughtByBotTrap(a))
+                      const StatePill(
+                        'Verdacht: Bot-Falle',
+                        color: Color(0xFFA25B06),
+                        icon: Icons.smart_toy_outlined,
+                      ),
                   ],
                 ),
               ],
@@ -341,6 +356,11 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
               'keine Push-Nachricht. Bitte prüfe die Anfrage besonders '
               'sorgfältig.',
             ),
+          ),
+        if (_caughtByBotTrap(a))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Text(_botTrapNotice(a)),
           ),
         if (a['nameProvided'] == false)
           Padding(

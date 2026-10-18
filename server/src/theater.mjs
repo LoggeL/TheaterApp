@@ -121,9 +121,10 @@ export class Theater {
   }
   /**
    * Creates or refreshes the caller's account. `botCheck` is the evaluated proof of the
-   * knowledge question (see bot-check.mjs): `{ status: 'passed', id }`, `missing` or
-   * `invalid`; undefined for trusted internal callers. New accounts without a valid proof
-   * (e.g. older apps) still register but are marked and not announced to admins by push.
+   * knowledge question (see bot-check.mjs): `{ status: 'passed', id }`, `missing`,
+   * `invalid` or `{ status: 'trap', reason }` for a caught bot trap; undefined for trusted
+   * internal callers. New accounts without a valid proof (e.g. older apps) or caught by the
+   * trap still register but are marked and not announced to admins by push.
    */
   session(identity, registrationName, botCheck) {
     return this.store.transaction(() => {
@@ -144,9 +145,10 @@ export class Theater {
       const name = suppliedName ?? (a?.nameProvided ? a.name : identityName || a?.name || text(identity.email).split('@')[0] || 'Neues Konto');
       const version = a ? a.version + (suppliedName !== undefined && (a.name !== name || !a.nameProvided) ? 1 : 0) : 1;
       const fields = { name, nameProvided, version, email: text(identity.email), emailVerified: identity.email_verified === true, identityReady, provider, lastSeenAt: now() };
-      const checked = botCheck ? { botCheck: botCheck.status, botCheckAt: now(), ...(botCheck.id ? { botCheckId: botCheck.id } : {}) } : {};
-      // A waiting account without proof can still catch up, e.g. after an app update.
-      const catchUp = a?.status === 'pending' && ['missing', 'invalid'].includes(a.botCheck) && botCheck?.status === 'passed';
+      const checked = botCheck ? { botCheck: botCheck.status, botCheckAt: now(), ...(botCheck.id ? { botCheckId: botCheck.id } : {}), ...(botCheck.reason ? { botTrap: botCheck.reason } : {}) } : {};
+      // A waiting account without proof can still catch up, e.g. after an app update; a
+      // caught bot trap is recorded too. Neither undoes a caught trap.
+      const catchUp = a?.status === 'pending' && ['missing', 'invalid'].includes(a.botCheck) && ['passed', 'trap'].includes(botCheck?.status);
       a = a ? { ...a, ...fields, ...(catchUp ? checked : {}) } : { uid: identity.uid, personId: null, status: 'pending', role: 'member', createdAt: now(), version: 1, ...fields, ...checked };
       if (!this.store.get('settings', 'bootstrap') && this.bootstrapEmail && a.email.toLowerCase() === this.bootstrapEmail && a.emailVerified && this.store.accounts().every(x => x.role !== 'admin')) {
         const personId = this.nextPersonId();
@@ -159,7 +161,7 @@ export class Theater {
       // Provider accounts (e.g. Google) are linkable without a self-supplied name; a later
       // supplied name does not announce the account again.
       // Accounts from before the bot check have no `botCheck` and are announced as before.
-      if (a.status === 'pending' && a.identityReady && !a.adminNotifiedAt && !['missing', 'invalid'].includes(a.botCheck)) {
+      if (a.status === 'pending' && a.identityReady && !a.adminNotifiedAt && !['missing', 'invalid', 'trap'].includes(a.botCheck)) {
         a = { ...a, adminNotifiedAt: now() };
         this.enqueuePush({ title: 'Neue Registrierung', body: `${a.name} wartet auf Zuordnung.`, data: { accountUid: a.uid }, adminsOnly: true });
       }

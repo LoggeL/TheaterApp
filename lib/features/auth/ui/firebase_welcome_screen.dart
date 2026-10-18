@@ -7,6 +7,7 @@ import '../../../core/identity.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/widgets/brand_logo.dart';
 import '../../../shared/widgets/privacy_links.dart';
+import 'bot_trap.dart';
 import 'sign_in_providers.dart';
 
 class FirebaseWelcomeScreen extends StatefulWidget {
@@ -21,10 +22,13 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
   final _name = TextEditingController(),
       _email = TextEditingController(),
       _password = TextEditingController();
+  // Times the form from its first showing, also across the mode switch.
+  late final _trap = BotTrap(() => widget.controller.now);
   bool _register = false, _hidden = true, _busy = false;
   String? _error;
   @override
   void dispose() {
+    _trap.dispose();
     _name.dispose();
     _email.dispose();
     _password.dispose();
@@ -47,13 +51,20 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
 
   Future<void> _submit() async {
     if (!_form.currentState!.validate()) return;
+    final trap = _trap.report();
     await _run(
       () => _register
-          ? widget.controller.register(_name.text, _email.text, _password.text)
+          ? widget.controller.register(
+              _name.text,
+              _email.text,
+              _password.text,
+              trap: trap,
+            )
           : widget.controller.login(
               email: _email.text,
               password: _password.text,
               baseUrl: widget.controller.apiBaseUrl,
+              trap: trap,
             ),
     );
   }
@@ -309,6 +320,7 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                           ? 'Bitte mindestens 12 Zeichen verwenden.'
                           : null,
                     ),
+                    BotTrapField(_trap),
                     if (!_register)
                       Align(
                         alignment: Alignment.centerRight,

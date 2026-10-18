@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Store } from '../src/store.mjs';
 import { Theater } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
-import { BotCheck, answerMatches, botCheckLimits, clientAddress, editDistance, loadBotCheckConfig } from '../src/bot-check.mjs';
+import { BotCheck, answerMatches, botCheckLimits, clientAddress, editDistance, loadBotCheckConfig, trapSuspicion } from '../src/bot-check.mjs';
 
 const config = loadBotCheckConfig();
 
@@ -133,6 +133,88 @@ test('HTTP: the question is public, the answer stays on the server and the proof
   assert.equal((await fetch(`${base}/auth/session/`, { headers: { Authorization: 'Bearer older-app' } })).status, 200);
   assert.equal(store.account('older-app').botCheck, 'missing');
   assert.deepEqual(registrations().map(j => j.data.accountUid), ['new-user']);
+});
+
+test('the bot trap: a filled honeypot or a too fast form is suspicious, missing reports are not', () => {
+  assert.equal(trapSuspicion({ filled: true, elapsedMs: 9000 }), 'honeypot');
+  assert.equal(trapSuspicion({ filled: false, elapsedMs: 1999 }), 'fast');
+  assert.equal(trapSuspicion({ filled: false, elapsedMs: 0 }), 'fast');
+  for (const human of [{ filled: false, elapsedMs: botCheckLimits.minFillMs }, { filled: false, elapsedMs: 60000 }, { filled: false }, { elapsedMs: -5 }, { elapsedMs: '10' }, { filled: 'yes' }, [], null, undefined, 'trap'])
+    assert.equal(trapSuspicion(human), null, JSON.stringify(human));
+});
+
+test('a caught bot check gets a decoy proof that looks normal but counts as bot trap', t => {
+  let now = Date.parse('2026-10-19T10:00:00Z');
+  const { app, store, botCheck, registrations } = setup(t, { clock: () => now });
+  const human = botCheck.attempt('a', 'Ramsen', { filled: false, elapsedMs: 4200 });
+  const honeypot = botCheck.attempt('a', 'Ramsen', { filled: true, elapsedMs: 4200 });
+  const fast = botCheck.attempt('a', 'Ramsen', { filled: false, elapsedMs: 300 });
+  for (const decoy of [honeypot, fast]) {
+    assert.deepEqual(Object.keys(decoy), Object.keys(human));
+    assert.equal(decoy.proof.length, human.proof.length);
+    assert.equal(decoy.expiresAt, human.expiresAt);
+  }
+  assert.equal(botCheck.evaluate(human.proof).status, 'passed');
+  assert.deepEqual(botCheck.evaluate(honeypot.proof), { status: 'trap', reason: 'honeypot' });
+  assert.deepEqual(botCheck.evaluate(fast.proof), { status: 'trap', reason: 'fast' });
+  // A wrong answer stays wrong, the trap reveals nothing.
+  assert.throws(() => botCheck.attempt('a', 'Mannheim', { filled: true }), { status: 400, code: 'bot_check_wrong' });
+  const identity = uid => ({ uid, name: uid, email: `${uid}@example.invalid`, email_verified: true, firebase: { sign_in_provider: 'google.com' } });
+  app.session(identity('bot'), undefined, botCheck.evaluate(honeypot.proof));
+  assert.equal(store.account('bot').status, 'pending', 'the account is accepted');
+  assert.equal(store.account('bot').botCheck, 'trap');
+  assert.equal(store.account('bot').botTrap, 'honeypot');
+  assert.equal(registrations().length, 0, 'no push for a caught trap');
+  // A later valid proof does not undo it.
+  app.session(identity('bot'), undefined, botCheck.evaluate(botCheck.attempt('b', 'Ramsen').proof));
+  assert.equal(store.account('bot').botCheck, 'trap');
+  assert.equal(registrations().length, 0);
+  assert.ok(app.adminData('admin').accounts.some(a => a.uid === 'bot' && a.botCheck === 'trap' && a.botTrap === 'honeypot'), 'admins see the suspicion');
+  // Decoys expire like proofs.
+  now += botCheckLimits.proofTtlMs + 1;
+  assert.deepEqual(botCheck.evaluate(fast.proof), { status: 'invalid' });
+});
+
+test('the registration form\'s bot trap marks the new account, people are announced as before', t => {
+  const { app, store, botCheck, registrations } = setup(t);
+  const identity = uid => ({ uid, name: uid, email: `${uid}@example.invalid`, email_verified: true, firebase: { sign_in_provider: 'password' } });
+  const proof = () => botCheck.attempt('client', 'Ramsen').proof;
+  app.session(identity('person'), 'Person', botCheck.evaluate(proof(), { filled: false, elapsedMs: 15000 }));
+  assert.equal(store.account('person').botCheck, 'passed');
+  assert.equal(store.account('person').botTrap, undefined);
+  assert.equal(registrations().length, 1);
+  app.session(identity('filled'), 'Bot', botCheck.evaluate(proof(), { filled: true, elapsedMs: 15000 }));
+  assert.deepEqual([store.account('filled').botCheck, store.account('filled').botTrap], ['trap', 'honeypot']);
+  app.session(identity('quick'), 'Bot', botCheck.evaluate(undefined, { filled: false, elapsedMs: 800 }));
+  assert.deepEqual([store.account('quick').botCheck, store.account('quick').botTrap], ['trap', 'fast']);
+  assert.equal(store.account('quick').status, 'pending');
+  assert.equal(registrations().length, 1);
+  // An account first seen without proof records a caught trap of the later form request.
+  app.session(identity('early'), undefined, botCheck.evaluate(undefined));
+  app.session(identity('early'), 'Bot', botCheck.evaluate(proof(), { filled: true }));
+  assert.equal(store.account('early').botCheck, 'trap');
+  assert.equal(registrations().length, 1);
+  // Existing accounts are never re-evaluated by the trap.
+  app.session(identity('person'), undefined, botCheck.evaluate(undefined, { filled: true }));
+  assert.equal(store.account('person').botCheck, 'passed');
+});
+
+test('HTTP: the bot trap travels with the answer and the first account request', async t => {
+  const { app, store, botCheck, registrations } = setup(t);
+  const base = await serve(t, { theater: app, botCheck, verifyToken: async token => ({ uid: token, name: 'Neu', email: `${token}@example.invalid`, email_verified: true, firebase: { sign_in_provider: 'google.com' } }) });
+  const post = (path, body, token) => fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
+  const caught = await post('/bot-check/', { answer: 'Ramsen', botTrap: { filled: true, elapsedMs: 5000 } });
+  assert.equal(caught.status, 200, 'a normal answer');
+  const decoy = (await caught.json()).proof;
+  assert.equal((await post('/auth/session/', { botCheckProof: decoy }, 'bot')).status, 200);
+  assert.equal(store.account('bot').botCheck, 'trap');
+  const { proof } = await (await post('/bot-check/', { answer: 'Ramsen', botTrap: { filled: false, elapsedMs: 5000 } })).json();
+  assert.equal((await post('/auth/session/', { registrationName: 'Schnell', botCheckProof: proof, botTrap: { filled: false, elapsedMs: 120 } }, 'quick')).status, 200);
+  assert.deepEqual([store.account('quick').botCheck, store.account('quick').botTrap], ['trap', 'fast']);
+  const human = await (await post('/bot-check/', { answer: 'Ramsen', botTrap: { filled: false, elapsedMs: 5000 } })).json();
+  assert.equal((await post('/auth/session/', { registrationName: 'Mensch', botCheckProof: human.proof, botTrap: { filled: false, elapsedMs: 9000 } }, 'human')).status, 200);
+  assert.equal(store.account('human').botCheck, 'passed');
+  assert.deepEqual(registrations().map(j => j.data.accountUid), ['human']);
 });
 
 test('HTTP: attempts beyond the limit are refused', async t => {

@@ -224,6 +224,31 @@ void main() {
         'botCheck': check,
       });
       expect(find.text('Ohne Botschutz'), findsNothing);
+      expect(find.text('Verdacht: Bot-Falle'), findsNothing);
+    }
+  });
+
+  testWidgets('registrations caught by the bot trap are marked for admins', (
+    tester,
+  ) async {
+    for (final (reason, notice) in [
+      ('honeypot', 'unsichtbares Feld ausgefüllt'),
+      ('fast', 'ungewöhnlich schnell abgeschickt'),
+    ]) {
+      await _pumpApproval(tester, TestServer(), {
+        ..._account('Neu Bot'),
+        'botCheck': 'trap',
+        'botTrap': reason,
+      });
+      expect(find.text('Verdacht: Bot-Falle'), findsOneWidget);
+      expect(find.text('Ohne Botschutz'), findsNothing);
+      expect(find.textContaining(notice), findsOneWidget);
+      expect(find.textContaining('keine Push-Nachricht'), findsOneWidget);
+      // The approval itself stays as usual: people are never locked out.
+      expect(
+        find.widgetWithText(FilledButton, 'Verknüpfen & freigeben'),
+        findsOneWidget,
+      );
     }
   });
 }

@@ -100,10 +100,13 @@ extension SessionController on AppController {
     _rebuild();
   }
 
+  /// [trap] is the sign-in form's bot trap, judged if this creates the
+  /// server account.
   Future<void> login({
     required String email,
     required String password,
     required String baseUrl,
+    BotTrapReport? trap,
   }) async {
     if (_identity != null) {
       final origin = ApiClient.normalizeBaseUrl(baseUrl);
@@ -116,7 +119,7 @@ extension SessionController on AppController {
         await _write(
           () => _store.write('_device', 'settings', {'baseUrl': origin}),
         );
-        await _adoptFirebase(botCheckProof: proof);
+        await _adoptFirebase(botCheckProof: proof, botTrap: trap);
       });
       return;
     }
@@ -239,6 +242,7 @@ extension SessionController on AppController {
   Future<void> _adoptFirebase({
     String? registrationName,
     String? botCheckProof,
+    BotTrapReport? botTrap,
   }) async {
     if (!_storeReady) await _ensureStore();
     final previousAccount = _account;
@@ -252,12 +256,19 @@ extension SessionController on AppController {
     await refreshAccess(
       registrationName: registrationName,
       botCheckProof: botCheckProof,
+      botTrap: botTrap,
     );
     if (botCheckProof != null) _consumeBotProof();
     if (!_botCheckPassed) await _rememberBotCheck();
   }
 
-  Future<void> register(String name, String email, String password) async {
+  /// [trap] is the registration form's bot trap.
+  Future<void> register(
+    String name,
+    String email,
+    String password, {
+    BotTrapReport? trap,
+  }) async {
     if (_identity == null) {
       throw const ApiException('Die Registrierung benötigt Firebase Auth.');
     }
@@ -272,7 +283,11 @@ extension SessionController on AppController {
       await _identity.initialize();
       final proof = await _freshBotProof();
       await _identity.register(name, email, password);
-      await _adoptFirebase(registrationName: name.trim(), botCheckProof: proof);
+      await _adoptFirebase(
+        registrationName: name.trim(),
+        botCheckProof: proof,
+        botTrap: trap,
+      );
     });
   }
 
@@ -311,16 +326,19 @@ extension SessionController on AppController {
     await refreshAccess(registrationName: name.trim());
   }
 
-  /// [botCheckProof] proves the answered bot check when the server creates
-  /// the account; older servers ignore it.
+  /// [botCheckProof] proves the answered bot check and [botTrap] reports the
+  /// form's bot trap when the server creates the account; older servers
+  /// ignore both.
   Future<void> refreshAccess({
     bool refreshData = true,
     String? registrationName,
     String? botCheckProof,
+    BotTrapReport? botTrap,
   }) async {
     if (_identity == null || _identity.uid == null || _isDemo) return;
     var generation = _generation;
-    final post = registrationName != null || botCheckProof != null;
+    final post =
+        registrationName != null || botCheckProof != null || botTrap != null;
     final result = await _api.request(
       _apiBaseUrl,
       post ? 'POST' : 'GET',
@@ -330,6 +348,7 @@ extension SessionController on AppController {
           ? {
               'registrationName': ?registrationName,
               'botCheckProof': ?botCheckProof,
+              'botTrap': ?botTrap?.toJson(),
             }
           : null,
     );

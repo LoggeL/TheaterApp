@@ -8,6 +8,7 @@ import '../../../core/app_controller.dart';
 import '../../../data/api_client.dart';
 import '../../../shared/widgets/brand_logo.dart';
 import '../../../shared/widgets/privacy_links.dart';
+import 'bot_trap.dart';
 
 /// A short knowledge question before the first sign-in or registration on a
 /// device. The server checks the answer; a correct one leads to the sign-in.
@@ -36,6 +37,8 @@ class BotCheckScreen extends StatefulWidget {
 class _BotCheckScreenState extends State<BotCheckScreen> {
   final _answer = TextEditingController();
   final _focus = FocusNode();
+  // Restarted when the question appears; wrong answers do not restart it.
+  BotTrap? _trap;
   BotCheckQuestion? _question;
   bool _loading = true, _busy = false;
   String? _loadError, _error;
@@ -51,6 +54,7 @@ class _BotCheckScreenState extends State<BotCheckScreen> {
   @override
   void dispose() {
     _ticker?.cancel();
+    _trap?.dispose();
     _answer.dispose();
     _focus.dispose();
     super.dispose();
@@ -64,7 +68,12 @@ class _BotCheckScreenState extends State<BotCheckScreen> {
     try {
       // Null: the server does not ask; the sign-in replaces this screen.
       final question = await widget.controller.loadBotCheckQuestion();
-      if (mounted) setState(() => _question = question);
+      if (mounted) {
+        setState(() {
+          _question = question;
+          _trap ??= BotTrap(() => widget.controller.now);
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(
@@ -106,7 +115,10 @@ class _BotCheckScreenState extends State<BotCheckScreen> {
       _error = null;
     });
     try {
-      await widget.controller.answerBotCheck(_answer.text);
+      await widget.controller.answerBotCheck(
+        _answer.text,
+        trap: _trap?.report(),
+      );
       // The session gate now shows the sign-in.
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -215,6 +227,7 @@ class _BotCheckScreenState extends State<BotCheckScreen> {
         },
         onSubmitted: (_) => _submit(),
       ),
+      if (_trap case final trap?) BotTrapField(trap),
       if (_error != null) _notice(_error!),
       if (_wait > 0)
         _notice(

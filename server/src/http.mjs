@@ -12,8 +12,9 @@ import { adminTicketView, closeOwnFeedback, markFeedbackRead, ownFeedback, ownTi
 const hashedWebFile = /^\/(?:main\.[a-f0-9]{16}\.dart\.(?:js|mjs|wasm)|(?:flutter_bootstrap\.[a-f0-9]{16}|pwa\.[a-f0-9]{16})\.js|(?:icons\/)?[\w-]+\.[a-f0-9]{16}\.png|web-(?:renderer|assets)\/[a-f0-9]{16}\/.+)$/;
 
 // `botCheck` (see bot-check.mjs) answers the public knowledge question before sign-in and
-// evaluates its proof when an account is created; `clientIpHeader` names the proxy header
-// with the client address for its attempt limit (e.g. `cf-connecting-ip`).
+// evaluates its proof and the form's bot trap (`botTrap`) when an account is created;
+// `clientIpHeader` names the proxy header with the client address for its attempt limit
+// (e.g. `cf-connecting-ip`).
 export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null }) {
   const origins = new Set(allowedOrigins);
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
@@ -59,7 +60,7 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (route === '/config' && req.method === 'GET') return json(res, 200, { authProviders, pushConfigured: theater.pushEnabled, emailConfigured: theater.emailEnabled, scriptSourceConfigured: scriptService?.configured === true });
       // Public: asked before anyone signs in. The answers never leave the server.
       if (route === '/bot-check' && botCheck && req.method === 'GET') return json(res, 200, botCheck.question());
-      if (route === '/bot-check' && botCheck && req.method === 'POST') return json(res, 200, botCheck.attempt(clientAddress(req, clientIpHeader), (await readBody(req, route)).answer));
+      if (route === '/bot-check' && botCheck && req.method === 'POST') { const { answer, botTrap } = await readBody(req, route); return json(res, 200, botCheck.attempt(clientAddress(req, clientIpHeader), answer, botTrap)); }
       const token = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
       if (!token || token.length > 12000) throw new AppError(401, 'Bitte zuerst anmelden.');
       let identity;
@@ -70,7 +71,7 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       }
       if (!['/auth/session', '/auth/logout', '/devices'].includes(route)) theater.account(identity.uid);
       const body = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await readBody(req, route) : {};
-      if (route === '/auth/session' && ['GET', 'POST'].includes(req.method)) return json(res, 200, { user: theater.session(identity, req.method === 'POST' ? body.registrationName : undefined, botCheck?.evaluate(body.botCheckProof)) });
+      if (route === '/auth/session' && ['GET', 'POST'].includes(req.method)) return json(res, 200, { user: theater.session(identity, req.method === 'POST' ? body.registrationName : undefined, botCheck?.evaluate(body.botCheckProof, body.botTrap)) });
       if (route === '/auth/logout' && req.method === 'POST') {
         for (const d of theater.store.all('devices').filter(d => d.uid === identity.uid && d.token === body.deviceToken)) theater.store.delete('devices', d.id);
         return json(res, 200, { ok: true });

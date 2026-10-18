@@ -6,7 +6,10 @@ import { AppError } from './theater.mjs';
 // The client only receives the question; answers stay on the server. A correct
 // answer returns a short-lived signed proof that a new account presents once.
 // Attempts are limited per client address, which is kept only hashed in memory.
-export const botCheckLimits = Object.freeze({ attemptsPerWindow: 10, windowMs: 10 * 60000, proofTtlMs: 30 * 60000, maxTrackedClients: 5000, maxAnswerLength: 100 });
+// The forms also carry an invisible bot trap (see trapSuspicion): a honeypot field
+// and the time from showing the form to sending it.
+export const botCheckLimits = Object.freeze({ attemptsPerWindow: 10, windowMs: 10 * 60000, proofTtlMs: 30 * 60000, maxTrackedClients: 5000, maxAnswerLength: 100, minFillMs: 2000 });
+const trapReasons = ['honeypot', 'fast'];
 
 const fail = (status, message, code) => { throw new AppError(status, message, code); };
 const fold = value => value.normalize('NFKC').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
@@ -54,6 +57,19 @@ export function answerMatches(config, input) {
   });
 }
 
+/**
+ * What a form's bot trap `{ filled, elapsedMs }` reveals: `honeypot` when the field that
+ * people never see was filled, `fast` when the form was sent within `minFillMs` of being
+ * shown, else null. Missing or malformed reports (older apps, automatic renewals) are
+ * not suspicious, so people are never locked out.
+ */
+export function trapSuspicion(trap) {
+  if (!trap || typeof trap !== 'object' || Array.isArray(trap)) return null;
+  if (trap.filled === true) return 'honeypot';
+  const ms = trap.elapsedMs;
+  return Number.isFinite(ms) && ms >= 0 && ms < botCheckLimits.minFillMs ? 'fast' : null;
+}
+
 /** The client address for the attempt limit; behind Cloudflare the configured header carries it. */
 export const clientAddress = (req, header = '') => (header && String(req.headers[header.toLowerCase()] ?? '').split(',')[0].trim()) || req.socket?.remoteAddress || 'unknown';
 
@@ -66,8 +82,12 @@ export class BotCheck {
     this.secret = Buffer.from(secret, 'hex');
   }
   question() { return { question: this.config.question, hint: this.config.hint }; }
-  /** Checks one answer from `client`; at most `attemptsPerWindow` per client in `windowMs`. */
-  attempt(client, answer) {
+  /**
+   * Checks one answer from `client`; at most `attemptsPerWindow` per client in `windowMs`.
+   * A correct answer with a suspicious `trap` gets a decoy: it looks like any proof, but
+   * `evaluate` reports it as `trap`, so a bot cannot tell that it was caught.
+   */
+  attempt(client, answer, trap) {
     const at = this.clock(), since = at - botCheckLimits.windowMs;
     const key = createHash('sha256').update(this.salt).update(String(client)).digest('base64url').slice(0, 22);
     if (this.attempts.size >= botCheckLimits.maxTrackedClients) {
@@ -81,21 +101,36 @@ export class BotCheck {
     if (!answerMatches(this.config, answer)) fail(400, 'Das passt leider nicht. Schau noch einmal genau hin und versuche es erneut.', 'bot_check_wrong');
     const expiresAt = at + botCheckLimits.proofTtlMs;
     const payload = b64(JSON.stringify({ v: 1, id: randomUUID(), exp: expiresAt }));
-    return { proof: `${payload}.${this.sign(payload)}`, expiresAt: new Date(expiresAt).toISOString() };
+    return { proof: `${payload}.${this.sign(payload, trapSuspicion(trap))}`, expiresAt: new Date(expiresAt).toISOString() };
   }
-  sign(payload) { return createHmac('sha256', this.secret).update(payload).digest('base64url'); }
-  /** `{ status: 'passed', id }` for a valid unexpired proof, else `missing` or `invalid`. */
-  evaluate(proof) {
+  /** Signs a proof; a decoy for a caught bot trap uses its own key derivation. */
+  sign(payload, trapReason = null) {
+    const hmac = createHmac('sha256', this.secret);
+    if (trapReason) hmac.update(`trap:${trapReason}:`);
+    return hmac.update(payload).digest('base64url');
+  }
+  /**
+   * `{ status: 'passed', id }` for a valid unexpired proof, `{ status: 'trap', reason }`
+   * for a decoy or a suspicious bot trap of the form that creates the account, else
+   * `missing` or `invalid`.
+   */
+  evaluate(proof, trap) {
+    const result = this.#proof(proof), reason = trapSuspicion(trap);
+    return reason && result.status !== 'trap' ? { status: 'trap', reason } : result;
+  }
+  #proof(proof) {
     if (proof === undefined || proof === null || proof === '') return { status: 'missing' };
     if (typeof proof !== 'string' || proof.length > 500) return { status: 'invalid' };
     const [payload, signature, ...rest] = proof.split('.');
     if (!payload || !signature || rest.length) return { status: 'invalid' };
-    const expected = Buffer.from(this.sign(payload)), given = Buffer.from(signature);
-    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return { status: 'invalid' };
+    const given = Buffer.from(signature);
+    const matches = reason => { const expected = Buffer.from(this.sign(payload, reason)); return given.length === expected.length && timingSafeEqual(given, expected); };
+    const reason = matches(null) ? null : trapReasons.find(matches);
+    if (reason === undefined) return { status: 'invalid' };
     try {
       const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
       if (data.v !== 1 || typeof data.id !== 'string' || !Number.isFinite(data.exp) || data.exp <= this.clock()) return { status: 'invalid' };
-      return { status: 'passed', id: data.id };
+      return reason ? { status: 'trap', reason } : { status: 'passed', id: data.id };
     } catch { return { status: 'invalid' }; }
   }
 }

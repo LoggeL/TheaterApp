@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -86,6 +87,7 @@ Future<AppController> _controller(
   _Server server, {
   MemoryLocalStore? store,
   FakeIdentity? identity,
+  DateTime Function()? clock,
 }) async {
   final local = store ?? MemoryLocalStore();
   if (store == null) {
@@ -96,9 +98,40 @@ Future<AppController> _controller(
     localStore: local,
     credentialStore: MemoryCredentialStore(),
     apiClient: ApiClient(client: server.client),
+    clock: clock,
   );
   await c.init();
   return c;
+}
+
+/// The invisible honeypot of the bot trap on the current screen.
+Finder _trap() => find.byKey(const ValueKey('bot-trap'), skipOffstage: false);
+
+/// What a bot would do: type into the field people never see.
+void _fillTrap(WidgetTester tester) =>
+    tester.widget<TextField>(_trap()).controller!.text = 'https://spam.test';
+
+EditableTextState _trapEditable(WidgetTester tester) =>
+    tester.state<EditableTextState>(
+      find.descendant(
+        of: _trap(),
+        matching: find.byType(EditableText, skipOffstage: false),
+        skipOffstage: false,
+      ),
+    );
+
+/// The honeypot is invisible, unfocusable, silent for screen readers and
+/// outside autofill, so people, browsers and password managers never fill it.
+void _expectInvisibleTrap(WidgetTester tester) {
+  expect(_trap(), findsOneWidget);
+  expect(find.byKey(const ValueKey('bot-trap')), findsNothing);
+  expect(_trap().hitTestable(), findsNothing);
+  final field = tester.widget<TextField>(_trap());
+  expect(field.autofillHints, isNull);
+  final editable = _trapEditable(tester);
+  expect(editable.textInputConfiguration.autofillConfiguration.enabled, false);
+  expect(editable.widget.focusNode.canRequestFocus, isFalse);
+  expect(find.bySemanticsLabel('Webseite'), findsNothing);
 }
 
 Widget _gate(AppController c) => MaterialApp(
@@ -263,6 +296,130 @@ void main() {
     expect(find.byType(BotCheckScreen), findsNothing);
     expect(find.byType(FirebaseWelcomeScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the bot check screen reports its invisible bot trap', (
+    tester,
+  ) async {
+    var now = DateTime.utc(2026, 10, 19, 10);
+    final semantics = tester.ensureSemantics();
+    final server = _Server();
+    final c = await _controller(server, clock: () => now);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_gate(c));
+    await tester.pumpAndSettle();
+    _expectInvisibleTrap(tester);
+    final field = find.byKey(const ValueKey('bot-check-answer'));
+    // Tab never lands on the trap.
+    for (var i = 0; i < 4; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      expect(_trapEditable(tester).widget.focusNode.hasFocus, isFalse);
+    }
+    now = now.add(const Duration(milliseconds: 4200));
+    await tester.enterText(field, 'Mannheim');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    // A wrong answer does not restart the timer, people may retype quickly.
+    now = now.add(const Duration(milliseconds: 500));
+    _fillTrap(tester);
+    await tester.enterText(field, 'Ramsen');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(server.bodies('/bot-check'), [
+      {
+        'answer': 'Mannheim',
+        'botTrap': {'filled': false, 'elapsedMs': 4200},
+      },
+      {
+        'answer': 'Ramsen',
+        'botTrap': {'filled': true, 'elapsedMs': 4700},
+      },
+    ]);
+    // The answer counts as usual: the sign-in follows.
+    expect(find.byType(FirebaseWelcomeScreen), findsOneWidget);
+    semantics.dispose();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the registration form sends its bot trap with the first '
+      'account request', (tester) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var now = DateTime.utc(2026, 10, 19, 10);
+    final semantics = tester.ensureSemantics();
+    final server = _Server();
+    final c = await _controller(server, clock: () => now);
+    addTearDown(c.dispose);
+    await c.answerBotCheck('Ramsen');
+    await tester.pumpWidget(_gate(c));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Noch kein Konto? Registrieren'));
+    await tester.pumpAndSettle();
+    _expectInvisibleTrap(tester);
+    // The trap is outside the form's autofill group.
+    final group = tester.state<AutofillGroupState>(find.byType(AutofillGroup));
+    expect(group.autofillClients.length, 3);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Name zur Zuordnung'),
+      'Neue Person',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'E-Mail'),
+      'person@example.invalid',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Passwort'),
+      'A long password!',
+    );
+    now = now.add(const Duration(seconds: 9));
+    await tester.tap(find.widgetWithText(FilledButton, 'Konto erstellen'));
+    await tester.pumpAndSettle();
+    expect(server.bodies('/auth/session'), [
+      {
+        'registrationName': 'Neue Person',
+        'botCheckProof': 'proof-1',
+        'botTrap': {'filled': false, 'elapsedMs': 9000},
+      },
+    ]);
+    semantics.dispose();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a filled trap on the sign-in form still signs in', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final now = DateTime.utc(2026, 10, 19, 10);
+    final server = _Server(supportsBotCheck: false);
+    final c = await _controller(server, clock: () => now);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_gate(c));
+    await tester.pumpAndSettle();
+    expect(find.byType(FirebaseWelcomeScreen), findsOneWidget);
+    _fillTrap(tester);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'E-Mail'),
+      'person@example.invalid',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Passwort'),
+      'A long password!',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Anmelden'));
+    await tester.pumpAndSettle();
+    expect(server.bodies('/auth/session'), [
+      {
+        'botTrap': {'filled': true, 'elapsedMs': 0},
+      },
+    ]);
+    expect(c.user, isNotNull);
     await tester.pumpWidget(const SizedBox());
   });
 
