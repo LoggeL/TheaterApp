@@ -729,8 +729,21 @@ export class Theater {
             default: fail(400, 'Unbekannte Besetzungsänderung.');
           }
         }
+        // A person added by hand with `notify` and new to the ensemble may get one push, and only
+        // when upcoming events now apply to them. Role casting, removals and undos stay silent.
+        const newcomers = [...new Set(changes.filter(c => c.kind === 'member' && c.on !== false && c.notify === true).map(c => Number(c.personId)))].filter(x => !productionEnsemble(p).includes(x));
+        const upcoming = personId => s.all('events').filter(e => !e.slotPoolId && Date.parse(e.endsAt) > +this.clock() && inAudience(s.get('members', personId), e, s));
+        const before = new Map(newcomers.map(x => [x, new Set(upcoming(x).map(e => e.id))]));
         s.put('productions', p.id, { ...p, casting, directorMemberIds: [...directors], memberIds: [...memberIds], memberFunctions: teamFunctions(functions, [...memberIds]), version: (p.version ?? 1) + 1 });
-        return { ensemble: productionEnsemble(s.get('productions', p.id)) };
+        const newEvents = {};
+        for (const personId of newcomers) {
+          const fresh = upcoming(personId).filter(e => !before.get(personId).has(e.id)).sort((x, y) => x.startsAt.localeCompare(y.startsAt));
+          if (!fresh.length) continue;
+          newEvents[personId] = fresh.length;
+          // Opens the first of them; fixed text, no quick answer and no email copy.
+          this.enqueuePush({ title: `Ensemble: ${p.title}`, body: `Du gehörst jetzt dazu. ${fresh.length === 1 ? '1 kommender Termin gilt' : `${fresh.length} kommende Termine gelten`} jetzt auch für dich, ab ${eventNotificationBody(fresh[0])}.`, data: { eventId: fresh[0].id }, recipientPersonIds: [personId], fixedText: true, email: false });
+        }
+        return { ensemble: productionEnsemble(s.get('productions', p.id)), newEvents, notified: this.pushEnabled ? Object.keys(newEvents).map(Number) : [] };
       }
       case 'production.scopeEvents': {
         // Limits the production's not yet ended events without an audience to its ensemble.

@@ -20,6 +20,7 @@ import '../../messages/ui/message_composer_screen.dart';
 import '../../messages/ui/push_admin_screen.dart';
 import '../../participation/ui/participation_screen.dart';
 import '../../polls/ui/polls_screen.dart';
+import '../../productions/admin/ensembles_admin_screen.dart';
 import '../../productions/admin/productions_admin_screen.dart';
 import '../../rehearsal/ui/attendance_screen.dart';
 import '../../rehearsal/ui/responses_screen.dart';
@@ -109,6 +110,12 @@ class ManagementScreen extends StatelessWidget {
                 'Rollen verwalten',
                 RolesAdminScreen(controller: controller),
                 'Eigene Rollen und Mehrfachzuordnung',
+              ),
+              tile(
+                Icons.diversity_3_outlined,
+                'Ensembles & Verteiler',
+                EnsemblesAdminScreen(controller: controller),
+                'Wer zu welchem Stück gehört und warum',
               ),
               tile(
                 Icons.event_available_outlined,

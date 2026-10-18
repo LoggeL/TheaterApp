@@ -52,7 +52,11 @@ class _CastingScreenState extends State<CastingScreen> {
         textValue(record['revision']).isNotEmpty &&
         jsonList(record['roles']).isNotEmpty &&
         !_controller.scripts.containsKey(widget.productionId)) {
-      _controller.loadScript(widget.productionId);
+      // After the first frame: loading notifies the controller, and the page
+      // that opened this one may still be building in reaction to it.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _controller.loadScript(widget.productionId);
+      });
     }
   }
 

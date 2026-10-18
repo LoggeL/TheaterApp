@@ -8,6 +8,7 @@ import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../casting/domain/casting.dart';
 import '../../casting/ui/casting_screen.dart';
+import 'ensembles_admin_screen.dart';
 
 /// Creates or edits a production. After creating one, the route pops with
 /// the new production's id (null while it still waits for a connection), so
@@ -62,6 +63,18 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
     );
     final after = intValue(_current?['version'] ?? _version);
     // Only casting changes made meanwhile are adopted; other edits still conflict.
+    if (mounted && before == _version) setState(() => _version = after);
+  }
+
+  /// Same record as the casting; a changed version is adopted like there.
+  Future<void> _openEnsemble() async {
+    final id = textValue(widget.production?['id']);
+    final before = intValue(_current?['version'] ?? _version);
+    await openPage(
+      context,
+      EnsemblesAdminScreen(controller: widget.controller, productionId: id),
+    );
+    final after = intValue(_current?['version'] ?? _version);
     if (mounted && before == _version) setState(() => _version = after);
   }
 
@@ -332,6 +345,26 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
             );
           },
         ),
+      if (widget.production != null) ...[
+        const SizedBox(height: 10),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: ListTile(
+            key: const ValueKey('production-editor-ensemble'),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 6,
+            ),
+            leading: const Icon(Icons.diversity_3_outlined),
+            title: const Text('Ensemble & Verteiler'),
+            subtitle: const Text(
+              'Wer zum Stück gehört und warum; weitere Mitwirkende pflegen',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _busy ? null : _openEnsemble,
+          ),
+        ),
+      ],
       if (_canScopeEvents) ...[
         const SectionTitle('Termine'),
         Card(
