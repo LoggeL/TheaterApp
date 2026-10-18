@@ -8,6 +8,7 @@ import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/member_avatar.dart';
+import '../../../shared/widgets/one_line_segmented_button.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/state_pill.dart';
 import '../../../shared/widgets/visible_listenable_builder.dart';
@@ -162,7 +163,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                   if (all.isNotEmpty) ...[
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: SegmentedButton<bool>(
+                      child: OneLineSegmentedButton<bool>(
                         segments: [
                           const ButtonSegment(
                             value: false,

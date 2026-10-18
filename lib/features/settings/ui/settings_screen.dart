@@ -5,6 +5,7 @@ import '../../../core/app_controller.dart';
 import '../../../core/device_services.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/layout/content_width.dart';
+import '../../../shared/widgets/one_line_segmented_button.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../domain/reminder_lead_times.dart';
 
@@ -253,7 +254,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
-                      child: SegmentedButton<String>(
+                      child: OneLineSegmentedButton<String>(
                         key: const ValueKey('theme-mode'),
                         showSelectedIcon: false,
                         segments: const [

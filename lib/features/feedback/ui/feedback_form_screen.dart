@@ -4,6 +4,7 @@ import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/layout/content_width.dart';
+import '../../../shared/widgets/one_line_segmented_button.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../data/feedback_api.dart';
 import '../domain/feedback_entry.dart';
@@ -139,7 +140,7 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
       const SectionTitle('Worum geht es?'),
       SizedBox(
         width: double.infinity,
-        child: SegmentedButton<String>(
+        child: OneLineSegmentedButton<String>(
           key: const ValueKey('feedback-category'),
           showSelectedIcon: false,
           segments: [

@@ -10,6 +10,7 @@ import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/one_line_segmented_button.dart';
 import '../../../shared/widgets/state_pill.dart';
 import '../../scripts/ui/script_reader_screen.dart';
 import '../domain/scene_planning.dart';
@@ -260,7 +261,7 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
               },
       ),
       const SizedBox(height: 24),
-      SegmentedButton<bool>(
+      OneLineSegmentedButton<bool>(
         segments: const [
           ButtonSegment(value: true, label: Text('Nach Anwesenheit')),
           ButtonSegment(value: false, label: Text('Nach Rückmeldungen')),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/app_controller.dart';
 import '../../../shared/navigation.dart';
+import '../../../shared/widgets/one_line_segmented_button.dart';
 import '../../../shared/widgets/visible_listenable_builder.dart';
 import '../../polls/domain/poll_selectors.dart';
 import '../../polls/ui/poll_editor_screen.dart';
@@ -107,7 +108,7 @@ class _CommunicationScreenState extends State<CommunicationScreen> {
       final unread = unreadMessageCount(c), open = pollsToVote(c).length;
       final switcher = Align(
         alignment: Alignment.centerLeft,
-        child: SegmentedButton<bool>(
+        child: OneLineSegmentedButton<bool>(
           segments: [
             ButtonSegment(
               value: false,

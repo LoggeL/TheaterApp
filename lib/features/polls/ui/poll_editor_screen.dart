@@ -9,6 +9,7 @@ import '../../../core/models.dart';
 import '../../../shared/audience/audience_pickers.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/widgets/admin_page.dart';
+import '../../../shared/widgets/one_line_segmented_button.dart';
 import '../../../shared/widgets/page_header.dart';
 
 class PollEditorScreen extends StatefulWidget {
@@ -186,7 +187,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SectionTitle('Abstimmungsart'),
-              SegmentedButton<bool>(
+              OneLineSegmentedButton<bool>(
                 segments: const [
                   ButtonSegment(
                     value: true,
