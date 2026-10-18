@@ -28,7 +28,10 @@ export const remindCooldownMs = 10 * 60 * 1000;
 // Declines this close to the start are pushed to admins and the production's directors.
 export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'productionScopeEvents']);
+// Feedback from members to the admins: limits per message and per account and hour.
+export const feedbackMaxLength = 4000, feedbackPerHour = 10;
+const feedbackCategories = ['idea', 'bug', 'other'], feedbackStatuses = ['new', 'done'];
 const seriesFields = ['title', 'description', 'place', 'type', 'locked', 'roleIds', 'personIds', 'productionIds', 'productionId'];
 // Legacy records may lack fields; compare them as event.save would store them.
 const sameValue = (field, x, y) => {
@@ -122,7 +125,9 @@ export class Theater {
         this.store.audit('bootstrap', 'account.approve', a.uid);
       }
       // Tell admins once per account, as soon as the registration can actually be linked.
-      if (a.status === 'pending' && a.identityReady && a.nameProvided && !a.adminNotifiedAt) {
+      // Provider accounts (e.g. Google) are linkable without a self-supplied name; a later
+      // supplied name does not announce the account again.
+      if (a.status === 'pending' && a.identityReady && !a.adminNotifiedAt) {
         a = { ...a, adminNotifiedAt: now() };
         this.enqueuePush({ title: 'Neue Registrierung', body: `${a.name} wartet auf Zuordnung.`, data: { accountUid: a.uid }, adminsOnly: true });
       }
@@ -283,6 +288,45 @@ export class Theater {
     const invitedIds = this.audienceIds(e), answered = new Set(responses.filter(r => ['yes', 'late', 'no'].includes(r.status)).map(r => r.personId)), absent = new Set(absences.map(x => x.personId));
     return { responses, checkins: this.store.all('checkins').filter(r => r.eventId === eventId), absences, invitedIds, openIds: invitedIds.filter(x => !answered.has(x)), absentIds: invitedIds.filter(x => absent.has(x)), ...this.reminded(this.nudges(), 'event', eventId) };
   }
+  /** Stores member feedback for the admins and notifies them; at most `feedbackPerHour` per account. */
+  submitFeedback(uid, b) {
+    return this.store.transaction(() => {
+      const s = this.store, a = this.account(uid), message = typeof b.message === 'string' ? b.message.trim() : '';
+      if (!message) fail(400, 'Bitte eine Nachricht eingeben.');
+      if (message.length > feedbackMaxLength) fail(400, `Die Nachricht darf höchstens ${feedbackMaxLength} Zeichen lang sein.`);
+      const category = b.category ?? 'other', platform = b.platform ?? null;
+      if (!feedbackCategories.includes(category)) fail(400, 'Ungültige Kategorie.');
+      if (platform !== null && !['android', 'ios', 'web'].includes(platform)) fail(400, 'Ungültige Plattform.');
+      if (b.appVersion != null && (typeof b.appVersion !== 'string' || b.appVersion.trim().length > 40)) fail(400, 'Ungültige App-Version.');
+      const at = this.clock(), since = new Date(+at - 3600000).toISOString();
+      if (s.all('feedback').filter(f => f.authorUid === uid && f.createdAt > since).length >= feedbackPerHour) fail(429, 'Du hast in der letzten Stunde schon viel Feedback geschickt. Bitte versuche es später noch einmal.', 'rate_limited');
+      const name = s.get('members', a.personId)?.name ?? a.name, createdAt = at.toISOString(), feedbackId = id();
+      s.put('feedback', feedbackId, { id: feedbackId, message, category, status: 'new', createdAt, updatedAt: createdAt, version: 1, appVersion: text(b.appVersion, 40) || null, platform, authorUid: uid, authorPersonId: a.personId, authorName: name });
+      const short = message.replace(/\s+/g, ' ');
+      // No deep-link target exists for feedback (see deliverPush); the app just opens.
+      this.enqueuePush({ title: 'Neues Feedback', body: `${name}: ${short.length > 120 ? `${short.slice(0, 119).trimEnd()}…` : short}`, data: { feedback: '1' }, adminsOnly: true });
+      s.audit(uid, 'feedback.create', feedbackId);
+      return { ok: true, id: feedbackId };
+    });
+  }
+  // The current name of a still existing person wins over the name saved with the feedback.
+  feedbackView(f) {
+    const { authorUid, authorPersonId, authorName, ...rest } = f;
+    return { ...rest, author: { uid: authorUid, personId: authorPersonId, name: (authorPersonId != null && this.store.get('members', authorPersonId)?.name) || authorName } };
+  }
+  feedbackList(uid) { this.account(uid, true); return { feedback: this.store.all('feedback').sort((x, y) => y.createdAt.localeCompare(x.createdAt)).map(f => this.feedbackView(f)) }; }
+  feedbackStatus(uid, feedbackId, b) {
+    return this.store.transaction(() => {
+      this.account(uid, true);
+      if (!feedbackStatuses.includes(b.status)) fail(400, 'Ungültiger Status.');
+      const f = this.store.get('feedback', feedbackId);
+      if (!f) fail(404, 'Feedback nicht gefunden.');
+      if (f.version !== b.version) fail(409, 'Das Feedback wurde inzwischen geändert. Bitte neu laden.', 'version_conflict');
+      const next = this.store.put('feedback', f.id, { ...f, status: b.status, version: f.version + 1, updatedAt: this.clock().toISOString() });
+      this.store.audit(uid, 'feedback.status', f.id);
+      return { feedback: this.feedbackView(next) };
+    });
+  }
   /** Deletes a login and its link; the person and their theater data stay. `deleteIdentity` removes the Firebase user. */
   async deleteAccount(uid, targetUid, version, deleteIdentity = null) {
     const check = () => {
@@ -300,6 +344,8 @@ export class Theater {
   forgetAccount(targetUid, actor) {
     for (const d of this.store.all('devices').filter(d => d.uid === targetUid)) this.store.delete('devices', d.id);
     this.store.db.prepare('DELETE FROM requests WHERE uid = ?').run(targetUid);
+    // Feedback stays with the person; only the deleted login is removed from it.
+    for (const f of this.store.all('feedback').filter(f => f.authorUid === targetUid)) this.store.put('feedback', f.id, { ...f, authorUid: null });
     this.store.deleteAccount(targetUid);
     this.store.audit(actor, 'account.delete', targetUid);
   }
@@ -340,7 +386,8 @@ export class Theater {
       if (previous) { if (previous.hash !== hash) fail(409, 'Dieser Änderungsschlüssel wurde bereits für andere Daten benutzt.', 'request_reused'); return JSON.parse(previous.result); }
       const result = { ok: true, ...this.apply(a, body) };
       this.store.db.prepare('INSERT INTO requests VALUES(?,?,?,?,?)').run(uid, requestId, hash, JSON.stringify(result), now());
-      this.store.audit(uid, text(body.action), body.eventId ?? body.uid ?? body.id ?? result.id ?? '');
+      // A dry run only counts; it changes nothing worth an audit entry.
+      if (result.dryRun !== true) this.store.audit(uid, text(body.action), body.eventId ?? body.uid ?? body.id ?? result.id ?? body.productionId ?? '');
       return result;
     });
   }
@@ -408,11 +455,14 @@ export class Theater {
         admin(); const target = s.account(required(b.uid, 'Konto')); const member = s.get('members', Number(b.personId));
         if (!target || target.status !== 'pending' || target.version !== b.version) fail(409, 'Die Kontoanfrage hat sich geändert. Bitte neu laden.', 'version_conflict');
         if (!target.identityReady) fail(409, 'Die E-Mail-Adresse muss zuerst bestätigt werden.');
-        if (target.nameProvided === false) fail(409, 'Das Konto muss zuerst einen Namen zur Zuordnung angeben.');
+        // Admins may link accounts whose name only comes from the sign-in provider; nameProvided
+        // stays as is so the origin of the name remains visible and a reopened request asks again.
         if (!member?.active) fail(400, 'Bitte eine aktive Person auswählen.');
         if (s.accounts().some(x => x.personId === member.id && x.uid !== target.uid)) fail(409, 'Diese Person ist bereits mit einem Konto verknüpft.');
         if (!['member', 'admin'].includes(b.role)) fail(400, 'Ungültige Berechtigung.');
-        s.saveAccount({ ...target, personId: member.id, status: 'approved', role: b.role, approvedBy: a.uid, approvedAt: now(), version: target.version + 1 }); return {};
+        s.saveAccount({ ...target, personId: member.id, status: 'approved', role: b.role, approvedBy: a.uid, approvedAt: now(), version: target.version + 1 });
+        // Reaches devices registered while the account was still waiting.
+        this.enqueuePush({ title: 'Zugang freigegeben', body: 'Dein Theaterzugang ist jetzt freigeschaltet.', data: {}, recipientPersonIds: [member.id] }); return {};
       }
       case 'account.status': {
         admin(); const target = s.account(b.uid);
@@ -705,6 +755,18 @@ export class Theater {
         s.put('productions', p.id, { ...p, casting, directorMemberIds: [...directors], memberIds: [...memberIds], memberFunctions: teamFunctions(functions, [...memberIds]), version: (p.version ?? 1) + 1 });
         return { ensemble: productionEnsemble(s.get('productions', p.id)) };
       }
+      case 'production.scopeEvents': {
+        // Limits the production's not yet ended events without an audience to its ensemble.
+        // Silent on purpose: no push or email; whoever is not (yet) in the ensemble just no longer sees them.
+        // Events with an audience of their own and Terminfinder events stay as they are.
+        admin(); const p = s.get('productions', text(b.productionId));
+        if (!p) fail(404, 'Produktion nicht gefunden.');
+        const at = +this.clock(), forAll = e => !list(e.roleIds).length && !list(e.personIds).length && !list(e.productionIds).length;
+        const events = s.all('events').filter(e => e.productionId === p.id && !e.slotPoolId && forAll(e) && (b.includePast === true || Date.parse(e.endsAt) > at)).sort((x, y) => x.startsAt.localeCompare(y.startsAt));
+        // storeEvent adds absence declines as usual; times stay, so arrivals are untouched.
+        if (b.dryRun !== true) for (const e of events) this.storeEvent({ ...e, productionIds: [p.id], version: (e.version ?? 1) + 1 });
+        return { updated: events.length, eventIds: events.map(e => e.id), ensembleSize: productionEnsemble(p).length, ...(b.dryRun === true ? { dryRun: true } : {}) };
+      }
       case 'message.send': {
         // A targeted message reaches everyone with one of the roles, in one of the ensembles, plus the people chosen by name.
         admin(); const { target, recipients } = this.messageTarget(b);
@@ -890,7 +952,8 @@ export class Theater {
     return { ...this.store.put('focus', productionId, { productionId, revision: doc.revision, sequence: current.sequence + 1, cueId: body.cueId ?? null, cueOrdinal: cue?.ordinal ?? null, sceneId: cue?.sceneId ?? null, updatedBy: uid, director: { id: uid, name: this.profile(a).displayName }, updatedAt: now() }), canDirect };
   }
   device(uid, token, platform, remove = false, notificationActions = false) {
-    this.account(uid); if (typeof token !== 'string' || token.length < 20 || token.length > 4096) fail(400, 'Ungültiges Gerätetoken.');
+    if (this.store.account(uid)?.status !== 'pending') this.account(uid);
+    if (typeof token !== 'string' || token.length < 20 || token.length > 4096) fail(400, 'Ungültiges Gerätetoken.');
     const key = createHash('sha256').update(token).digest('hex');
     if (remove) { if (this.store.get('devices', key)?.uid === uid) this.store.delete('devices', key); }
     else { if (!['android', 'ios', 'web'].includes(platform)) fail(400, 'Ungültige Plattform.'); this.store.put('devices', key, { id: key, uid, token, platform, notificationActions: platform === 'android' && notificationActions === true, updatedAt: now() }); }
@@ -954,7 +1017,7 @@ export class Theater {
   /**
    * Deletes a person with their personal data and every reference to them.
    * Anything addressed to them alone goes, too: emptied audiences would otherwise mean "everyone".
-   * Anonymous poll votes stay without a person; named votes, comments and receipts are removed.
+   * Anonymous poll votes stay without a person; named votes, comments, receipts and their feedback are removed.
    * Queued push/email jobs keep their recipient lists; delivery only reaches existing accounts.
    */
   forgetMember(personId) {
@@ -1006,6 +1069,8 @@ export class Theater {
     for (const r of s.all('receipts').filter(r => r.personId === personId)) s.delete('receipts', `${r.messageId}:${personId}`);
     for (const x of s.all('absences').filter(x => x.personId === personId)) s.delete('absences', x.id);
     for (const c of s.all('comments').filter(c => c.authorId === personId)) s.delete('comments', c.id);
+    // Feedback is personal data of its author and goes with the person (deleting only the login keeps it).
+    for (const f of s.all('feedback').filter(f => f.authorPersonId === personId)) s.delete('feedback', f.id);
     // Reminder keys are `${eventId}:${startsAt}:${personId}:${kind}`; startsAt contains colons itself.
     for (const { id: key } of s.db.prepare("SELECT id FROM entities WHERE kind = 'reminderSent'").all()) if (key.split(':').at(-2) === String(personId)) s.delete('reminderSent', key);
     s.delete('reminders', personId);

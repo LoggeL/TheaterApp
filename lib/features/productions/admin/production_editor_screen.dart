@@ -186,6 +186,87 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
     }
   }
 
+  /// Limiting the events without an audience needs a server that can do
+  /// it; archived productions have no upcoming events to limit.
+  bool get _canScopeEvents =>
+      widget.production != null &&
+      (_current ?? widget.production)!['archived'] != true &&
+      widget.controller.supports('productionScopeEvents');
+
+  /// Asks the server how many events would change, confirms with the admin
+  /// and then limits them silently (no push, no email) to the ensemble.
+  Future<void> _scopeEvents() async {
+    final id = textValue(widget.production?['id']);
+    final title = textValue((_current ?? widget.production)?['title']);
+    final controller = widget.controller;
+    if (controller.isOffline) {
+      showProblem(context, 'Dafür wird eine Verbindung zum Server benötigt.');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final preview = await controller.performActionWithResult({
+        'action': 'production.scopeEvents',
+        'productionId': id,
+        'dryRun': true,
+      });
+      final data = preview.data;
+      if (preview.outcome == ActionOutcome.queued || data == null) {
+        throw 'Die Termine konnten gerade nicht geprüft werden. Bitte mit '
+            'Verbindung erneut versuchen.';
+      }
+      if (!mounted) return;
+      final count = intValue(data['updated']);
+      final people = intValue(data['ensembleSize']);
+      if (count == 0) {
+        showDone(
+          context,
+          'Alle Termine dieses Stücks haben bereits eine Zielgruppe.',
+        );
+        return;
+      }
+      final events = count == 1
+          ? '1 Termin ohne Zielgruppe gilt'
+          : '$count Termine ohne Zielgruppe gelten';
+      final confirmed = await confirmAction(
+        context,
+        title: 'Termine nur fürs Ensemble?',
+        message:
+            '$events künftig nur für das Ensemble von „$title“ (aktuell '
+            '${people == 1 ? '1 Person' : '$people Personen'}). Wer nicht '
+            'dazugehört, sieht diese Termine nicht mehr. Es werden keine '
+            'Benachrichtigungen verschickt.'
+            '${people == 0 ? '\n\nAchtung: Das Ensemble ist noch leer. Bis die '
+                      'Besetzung eingetragen ist, sieht niemand ohne '
+                      'Admin-Rechte diese Termine.' : ''}',
+        confirmLabel: 'Nur fürs Ensemble',
+        scrollable: true,
+        destructive: people == 0,
+      );
+      if (!confirmed || !mounted) return;
+      final result = await controller.performActionWithResult({
+        'action': 'production.scopeEvents',
+        'productionId': id,
+      });
+      if (!mounted) return;
+      final updated = intValue(result.data?['updated'], count);
+      showDone(
+        context,
+        outcomeText(
+          result.outcome,
+          done: updated == 1
+              ? '1 Termin angepasst.'
+              : '$updated Termine angepasst.',
+          queued: 'Änderung vorgemerkt – wird bei Verbindung gesendet.',
+        ),
+      );
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) =>
       DiscardGuard(dirty: _dirty, child: _page(context));
@@ -251,6 +332,27 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
             );
           },
         ),
+      if (_canScopeEvents) ...[
+        const SectionTitle('Termine'),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: ListTile(
+            key: const ValueKey('production-editor-scope-events'),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 6,
+            ),
+            leading: const Icon(Icons.group_work_outlined),
+            title: const Text('Termine nur fürs Ensemble'),
+            subtitle: const Text(
+              'Kommende Termine dieses Stücks ohne Zielgruppe gelten danach '
+              'nur noch für das Ensemble. Ohne Benachrichtigung.',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _busy ? null : _scopeEvents,
+          ),
+        ),
+      ],
       const SizedBox(height: 24),
       FilledButton(
         onPressed: _busy || _titleMissing ? null : _save,

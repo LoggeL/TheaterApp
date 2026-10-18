@@ -557,6 +557,35 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
           ),
           const SizedBox(height: 8),
           Text('Eingeladen: $audience', style: theme.textTheme.bodySmall),
+          // A play's event for everyone is often meant for its ensemble only.
+          if (_roleIds.isEmpty &&
+              _personIds.isEmpty &&
+              _productionIds.isEmpty &&
+              widget.controller.activeProductions.any(
+                (p) => p.id == _production,
+              ))
+            Padding(
+              key: const ValueKey('event-audience-everyone-hint'),
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 18,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Dieser Termin gilt für alle Mitglieder. Nur fürs '
+                      'Ensemble? Dann Ensemble des Stücks wählen.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           const SizedBox(height: 24),
           TextField(
             controller: _description,

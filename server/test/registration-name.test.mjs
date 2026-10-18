@@ -6,7 +6,7 @@ import { createHttpServer } from '../src/http.mjs';
 
 function setup(t) {
   const store = new Store(); t.after(() => store.close());
-  const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid' });
+  const app = new Theater(store, { pushEnabled: true, bootstrapEmail: 'admin@example.invalid' });
   app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
   let sequence = 0;
   const action = body => app.action('admin', body, `name-test-${++sequence}`);
@@ -16,16 +16,44 @@ function setup(t) {
   return { app, store, identity, personId, approve };
 }
 
-test('new provider accounts must supply a name before linking', t => {
-  const { app, identity, approve } = setup(t);
+test('provider accounts can be linked without a supplied name and announce themselves once', t => {
+  const { app, store, identity, approve } = setup(t);
+  const announcements = () => store.all('pushJobs').filter(j => j.title === 'Neue Registrierung' && j.data.accountUid === identity.uid);
   assert.equal(app.session(identity).needsRegistrationName, true);
-  assert.throws(() => approve(1), { status: 409 });
+  app.session(identity);
+  assert.equal(announcements().length, 1);
+  assert.equal(announcements()[0].body, 'Google Alias wartet auf Zuordnung.');
+  assert.ok(store.account(identity.uid).adminNotifiedAt);
   assert.throws(() => app.snapshot(identity.uid), { status: 403 });
-  assert.equal(app.session(identity, '  Sam Beispiel  ').displayName, 'Sam Beispiel');
+  approve(1);
+  assert.equal(store.account(identity.uid).nameProvided, false, 'approval keeps the name origin');
   assert.equal(app.session(identity).needsRegistrationName, false);
-  approve(2);
   assert.equal(app.snapshot(identity.uid).user.displayName, 'Sam im Ensemble');
   assert.equal(app.snapshot('admin').pendingAccounts.length, 0);
+  assert.equal(announcements().length, 1);
+});
+
+test('a name supplied after the announcement does not notify admins again', t => {
+  const { app, store, identity, approve } = setup(t);
+  const announcements = () => store.all('pushJobs').filter(j => j.title === 'Neue Registrierung' && j.data.accountUid === identity.uid);
+  app.session(identity);
+  assert.equal(app.session(identity, '  Sam Beispiel  ').displayName, 'Sam Beispiel');
+  assert.equal(app.session(identity).needsRegistrationName, false);
+  assert.equal(announcements().length, 1);
+  assert.throws(() => approve(1), { status: 409 });
+  approve(2);
+  assert.equal(app.snapshot(identity.uid).user.displayName, 'Sam im Ensemble');
+});
+
+test('waiting provider accounts missed by earlier versions are announced on their next session', t => {
+  const { app, store, identity } = setup(t);
+  app.session(identity);
+  const { adminNotifiedAt, ...legacy } = store.account(identity.uid);
+  assert.ok(adminNotifiedAt);
+  for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
+  store.saveAccount(legacy);
+  app.session(identity); app.session(identity);
+  assert.equal(store.all('pushJobs').filter(j => j.title === 'Neue Registrierung').length, 1);
 });
 
 test('association names survive stale and changed provider claims; admins see the supplied name', t => {

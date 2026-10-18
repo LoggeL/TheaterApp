@@ -48,14 +48,15 @@ void main() {
         : null;
     final controller = server.controller();
     await signIn(controller);
-    expect(controller.openRegistrationCount, 1);
+    // Registrations without a self-supplied name are linkable too.
+    expect(controller.openRegistrationCount, 2);
     await tester.pumpWidget(
       MaterialApp(
         theme: StageTheme.build(Brightness.light),
         home: ManagementScreen(controller: controller),
       ),
     );
-    await tester.tap(find.text('1 neue Registrierung wartet auf Zuordnung'));
+    await tester.tap(find.text('2 neue Registrierungen warten auf Zuordnung'));
     await tester.pumpAndSettle();
     expect(find.byType(AccountsAdminScreen), findsOneWidget);
     expect(find.text('1 Konto'), findsOneWidget);

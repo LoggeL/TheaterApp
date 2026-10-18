@@ -3,14 +3,22 @@ import 'package:flutter/material.dart';
 import '../../../app/brand.dart';
 import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
+import '../../../core/device_services.dart';
 import '../../../core/identity.dart';
 import '../../../shared/widgets/privacy_links.dart';
 import '../../../shared/widgets/state_pill.dart';
 import '../domain/app_user.dart';
 
 class ApprovalPendingScreen extends StatefulWidget {
-  const ApprovalPendingScreen({super.key, required this.controller});
+  const ApprovalPendingScreen({
+    super.key,
+    required this.controller,
+    this.devices,
+  });
   final AppController controller;
+
+  /// Lets a waiting account turn on push, so the approval reaches it.
+  final DeviceServices? devices;
   @override
   State<ApprovalPendingScreen> createState() => _ApprovalPendingScreenState();
 }
@@ -64,6 +72,68 @@ class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _enablePush() => _run(() async {
+    final message = await widget.devices!.enablePush();
+    if (!mounted) return;
+    setState(() {
+      if (widget.controller.preferences['pushEnabled'] != true) {
+        _info = message;
+      }
+    });
+  });
+
+  /// Offered until push is on; afterwards it confirms that the approval will
+  /// arrive as a notification.
+  Widget _pushNotice(BuildContext context) {
+    final on = widget.controller.preferences['pushEnabled'] == true;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  on
+                      ? Icons.notifications_active_outlined
+                      : Icons.notifications_none,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    on
+                        ? 'Benachrichtigungen sind an'
+                        : 'Bei Freigabe benachrichtigen',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              on
+                  ? 'Du bekommst eine Nachricht, sobald dein Zugang '
+                        'freigegeben ist, und danach Erinnerungen zu deinen '
+                        'Terminen.'
+                  : 'Aktiviere Benachrichtigungen schon jetzt. Dann erfährst '
+                        'du sofort, wenn dein Zugang freigegeben ist, und '
+                        'bekommst danach Erinnerungen zu deinen Terminen.',
+            ),
+            if (!on) ...[
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _enablePush,
+                icon: const Icon(Icons.notifications_outlined),
+                label: const Text('Benachrichtigungen aktivieren'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   /// Checks the e-mail confirmation and approval again and says when.
@@ -288,6 +358,13 @@ class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
                     ),
                   ),
                 ),
+                if (widget.devices != null &&
+                    Brand.pushEnabled &&
+                    !c.isDemo &&
+                    user.status == 'pending') ...[
+                  const SizedBox(height: 12),
+                  _pushNotice(context),
+                ],
                 const SizedBox(height: 20),
                 if (_error != null)
                   Padding(

@@ -296,8 +296,14 @@ class DeviceServices {
     _firebaseReady = true;
   }
 
+  /// Approved accounts and accounts still waiting for approval may register a
+  /// device; the server only delivers once the account is linked and approved.
+  bool get _canRegister =>
+      !controller.isDemo &&
+      (controller.hasAccess || controller.user?.status == 'pending');
+
   Future<String> enablePush() async {
-    if (controller.isDemo || !controller.hasAccess) {
+    if (!_canRegister) {
       return 'Push benötigt ein angemeldetes Theaterkonto.';
     }
     final session = controller.sessionEpoch;
@@ -396,8 +402,7 @@ class DeviceServices {
     final session = controller.sessionEpoch;
     if (!Brand.pushEnabled ||
         controller.preferences['pushEnabled'] != true ||
-        controller.isDemo ||
-        !controller.hasAccess) {
+        !_canRegister) {
       return;
     }
     try {

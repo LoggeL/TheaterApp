@@ -49,7 +49,7 @@ class SessionGate extends StatelessWidget {
                 ? FirebaseWelcomeScreen(controller: controller)
                 : WelcomeScreen(controller: controller)
           : !controller.hasAccess
-          ? ApprovalPendingScreen(controller: controller)
+          ? ApprovalPendingScreen(controller: controller, devices: devices)
           : controller.user!.mustChangePassword
           ? PasswordScreen(controller: controller, requiredChange: true)
           : AppShell(

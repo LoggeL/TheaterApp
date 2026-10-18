@@ -98,6 +98,18 @@ void main() {
       find.descendant(of: first, matching: find.text('Sam Vorhang')),
       findsOneWidget,
     );
+    // The subtitle shows hint and roles only, never the member number, and
+    // is left out instead of rendering an empty line.
+    expect(find.textContaining('Mitglied Nr.'), findsNothing);
+    for (final tile in tester.widgetList<RadioListTile<int>>(
+      find.byType(RadioListTile<int>),
+    )) {
+      final subtitle = (tile.subtitle as Text?)?.data;
+      if (subtitle == null) continue;
+      expect(subtitle.trim(), isNotEmpty);
+      expect(subtitle, isNot(startsWith('·')));
+      expect(subtitle, isNot(endsWith('·')));
+    }
     expect(find.text('Bereits verknüpft (1)'), findsOneWidget);
     expect(find.text('Alex Bühnenfreund'), findsNothing);
     await tester.tap(find.text('Bereits verknüpft (1)'));
@@ -144,5 +156,56 @@ void main() {
     expect(_selected(tester), 42);
     expect(find.text('Person gespeichert.'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('accounts without a supplied name can be linked after review', (
+    tester,
+  ) async {
+    final server = TestServer();
+    await _pumpApproval(tester, server, {
+      ..._account('Sam Vorhang'),
+      'nameProvided': false,
+      'provider': 'google.com',
+    });
+    expect(find.text('Name laut Google-Konto'), findsOneWidget);
+    expect(find.text('Name zur Zuordnung des Kontos'), findsNothing);
+    expect(
+      find.text(
+        'Der Name stammt vom Google-Konto und wurde nicht selbst angegeben. '
+        'Bitte prüfe die Zuordnung anhand der E-Mail-Adresse.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Diese Person muss noch einen Namen zur Zuordnung angeben.'),
+      findsNothing,
+    );
+    final button = find.widgetWithText(FilledButton, 'Verknüpfen & freigeben');
+    expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(server.actionBodies.last, {
+      'action': 'account.approve',
+      'uid': 'new',
+      'version': 1,
+      'personId': 5,
+      'role': 'member',
+    });
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a self-supplied name keeps the usual caption', (tester) async {
+    await _pumpApproval(tester, TestServer(), _account('Nora Neu'));
+    expect(find.text('Name zur Zuordnung des Kontos'), findsOneWidget);
+    expect(find.textContaining('nicht selbst angegeben'), findsNothing);
+  });
+
+  test('the name source follows the sign-in provider', () {
+    expect(accountNameSource('google.com'), 'Google-Konto');
+    expect(accountNameSource('apple.com'), 'Apple-Konto');
+    expect(accountNameSource('password'), 'Anmeldekonto');
+    expect(accountNameSource(null), 'Anmeldekonto');
+    expect(accountNameSource('example.org'), 'Anmeldekonto');
   });
 }

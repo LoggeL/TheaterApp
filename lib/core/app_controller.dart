@@ -59,14 +59,10 @@ class AppController extends ChangeNotifier {
   List<JsonMap> get pendingAccounts =>
       jsonList(_view['pendingAccounts']).map(jsonMap).toList();
 
-  /// Registrations an admin can link now (confirmed identity and name given).
+  /// Registrations an admin can link now (confirmed identity). A missing
+  /// self-supplied name does not block linking; the provider name is shown.
   int get openRegistrationCount => pendingAccounts
-      .where(
-        (a) =>
-            a['status'] == 'pending' &&
-            a['identityReady'] == true &&
-            a['nameProvided'] != false,
-      )
+      .where((a) => a['status'] == 'pending' && a['identityReady'] == true)
       .length;
   JsonMap get memberAttendanceByEvent =>
       jsonMap(_baseSnapshot['memberAttendanceByEvent']);

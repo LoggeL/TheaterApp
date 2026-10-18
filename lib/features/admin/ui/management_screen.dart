@@ -14,6 +14,7 @@ import '../../ensemble/admin/roles_admin_screen.dart';
 import '../../events/admin/events_admin_screen.dart';
 import '../../events/domain/event_format.dart';
 import '../../events/domain/event_selectors.dart';
+import '../../feedback/feedback.dart';
 import '../../galleries/ui/gallery_list_screen.dart';
 import '../../messages/ui/message_composer_screen.dart';
 import '../../messages/ui/push_admin_screen.dart';
@@ -168,6 +169,13 @@ class ManagementScreen extends StatelessWidget {
                 PushAdminScreen(controller: controller),
                 'Eigene Pushes und Versandstatus',
               ),
+              if (feedbackAvailable(controller))
+                tile(
+                  Icons.feedback_outlined,
+                  'Feedback',
+                  FeedbackAdminScreen(controller: controller),
+                  'Ideen und Fehlermeldungen der Mitglieder',
+                ),
             ],
           ),
           TileGroup(

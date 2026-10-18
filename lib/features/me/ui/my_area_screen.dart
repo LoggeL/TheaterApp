@@ -19,6 +19,7 @@ import '../../absences/ui/absences_screen.dart';
 import '../../auth/ui/account_providers_screen.dart';
 import '../../auth/ui/password_screen.dart';
 import '../../ensemble/ui/members_screen.dart';
+import '../../feedback/feedback.dart';
 import '../../galleries/ui/gallery_list_screen.dart';
 import '../../participation/ui/participation_screen.dart';
 import '../../profile/ui/profile_screen.dart';
@@ -260,6 +261,16 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                         title: 'App installieren',
                         subtitle: 'Direkt über ein Symbol auf deinem Gerät',
                         onTap: _install,
+                      ),
+                    if (feedbackAvailable(controller))
+                      GroupTile(
+                        icon: Icons.feedback_outlined,
+                        title: 'Feedback geben',
+                        subtitle: 'Idee, Fehler oder Anregung zur App',
+                        onTap: () => openPage(
+                          context,
+                          FeedbackFormScreen(controller: controller),
+                        ),
                       ),
                     GroupTile(
                       icon: Icons.privacy_tip_outlined,

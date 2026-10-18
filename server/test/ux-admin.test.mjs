@@ -132,9 +132,8 @@ test('reconsider preserves identity and registration prerequisites for subsequen
   action({ action: 'account.reconsider', uid: 'unverified', version: 2 });
   const personId = action({ action: 'member.save', name: 'Neue Person' }).id;
   assert.throws(() => action({ action: 'account.approve', uid: 'unverified', personId, version: 3, role: 'member' }), { status: 409 });
-  app.session({ uid: 'unverified', email: 'unverified@example.invalid', email_verified: true });
-  assert.throws(() => action({ action: 'account.approve', uid: 'unverified', personId, version: 3, role: 'member' }), { status: 409 });
   app.session({ uid: 'unverified', email: 'unverified@example.invalid', email_verified: true }, 'Neue Person');
+  assert.throws(() => action({ action: 'account.approve', uid: 'unverified', personId, version: 3, role: 'member' }), { status: 409 });
   action({ action: 'account.approve', uid: 'unverified', personId, version: 4, role: 'member' });
   assert.equal(store.account('unverified').status, 'approved');
 });

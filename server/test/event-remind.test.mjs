@@ -19,6 +19,8 @@ function setup(t, pushEnabled = true) {
     return id;
   };
   const people = { sam: person('sam', 'Sam'), tech: person('tech', 'Toni', ['role-3']), kim: person('kim', 'Kim', ['role-3']), lou: person('lou', 'Lou') };
+  // Approval notices are not part of these scenarios.
+  for (const job of store.all('pushJobs')) store.delete('pushJobs', job.id);
   store.put('events', 'probe', { id: 'probe', title: 'Szenenprobe', startsAt: '2026-09-14T17:00:00Z', endsAt: '2026-09-14T19:00:00Z', roleIds: ['role-3'], personIds: [people.sam], productionIds: [], version: 1 });
   return { store, app, action, ...people };
 }

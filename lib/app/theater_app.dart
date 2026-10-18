@@ -60,7 +60,12 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
       onTarget: _deepLinks.handle,
       onForegroundMessage: (message) {
         _messenger.currentState?.showSnackBar(SnackBar(content: Text(message)));
-        widget.controller.refresh(silent: true);
+        // A waiting account learns about its approval by push.
+        if (widget.controller.hasAccess) {
+          widget.controller.refresh(silent: true);
+        } else {
+          unawaited(_sync.refresh());
+        }
       },
     );
     _identity = _sessionIdentity;

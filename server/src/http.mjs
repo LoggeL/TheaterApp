@@ -47,7 +47,7 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (review && identity.uid === review.uid) {
         ({ theater, scriptService, focusBridge, media } = review);
       }
-      if (!['/auth/session', '/auth/logout'].includes(route)) theater.account(identity.uid);
+      if (!['/auth/session', '/auth/logout', '/devices'].includes(route)) theater.account(identity.uid);
       let body = {};
       if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
         let length = 0; const chunks = [];
@@ -60,6 +60,8 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
         for (const d of theater.store.all('devices').filter(d => d.uid === identity.uid && d.token === body.deviceToken)) theater.store.delete('devices', d.id);
         return json(res, 200, { ok: true });
       }
+      // Waiting accounts may already register a device; pushes start with the approval.
+      if (route === '/devices' && ['POST', 'DELETE'].includes(req.method)) return json(res, 200, theater.device(identity.uid, body.token, body.platform, req.method === 'DELETE', body.notificationActions));
       theater.account(identity.uid);
       if (route === '/profile' && req.method === 'PUT') {
         theater.action(identity.uid, { ...body, action: 'profile.save' }, req.headers['idempotency-key'] || randomUUID());
@@ -88,6 +90,10 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (route === '/snapshot' && req.method === 'GET') return json(res, 200, theater.snapshot(identity.uid));
       if (route === '/actions' && req.method === 'POST') return json(res, 200, theater.action(identity.uid, body, req.headers['idempotency-key']));
       if (route === '/participation' && req.method === 'GET') return json(res, 200, theater.participation(identity.uid));
+      if (route === '/feedback' && req.method === 'POST') return json(res, 200, theater.submitFeedback(identity.uid, body));
+      if (route === '/admin/feedback' && req.method === 'GET') return json(res, 200, theater.feedbackList(identity.uid));
+      const feedback = route.match(/^\/admin\/feedback\/([^/]+)$/);
+      if (feedback && req.method === 'PUT') return json(res, 200, theater.feedbackStatus(identity.uid, feedback[1], body));
       if (route === '/admin/accounts' && req.method === 'GET') return json(res, 200, theater.adminData(identity.uid));
       if (route === '/admin/email' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.emailEnabled, jobs: theater.store.all('emailJobs').slice(-50).map(({ acceptedRecipientIds, failedRecipientIds, ...job }) => job) }); }
       if (route === '/admin/push' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.pushEnabled, devices: theater.store.all('devices').map(({ token, ...d }) => d), jobs: theater.store.all('pushJobs').slice(-50).map(({ acceptedDeviceIds, ...j }) => j) }); }
@@ -112,7 +118,6 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
         const data = req.method === 'GET' ? null : req.method === 'DELETE' ? { cueId: null, revision: theater.store.get('scripts', focus[1])?.revision } : body;
         return json(res, 200, focusBridge ? await focusBridge.focus(identity.uid, focus[1], data) : theater.focus(identity.uid, focus[1], data));
       }
-      if (route === '/devices' && ['POST', 'DELETE'].includes(req.method)) return json(res, 200, theater.device(identity.uid, body.token, body.platform, req.method === 'DELETE', body.notificationActions));
       throw new AppError(404, 'Diese Funktion ist nicht verfügbar.');
     } catch (e) {
       const status = e.status && e.status >= 400 && e.status < 600 ? e.status : 500;

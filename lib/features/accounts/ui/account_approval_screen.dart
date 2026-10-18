@@ -7,8 +7,16 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/state_pill.dart';
+import '../../auth/ui/sign_in_providers.dart';
 import '../../casting/domain/casting.dart';
 import '../../ensemble/admin/member_editor_screen.dart';
+
+/// Where an account's name comes from when the person did not supply one,
+/// e.g. "Google-Konto"; "Anmeldekonto" for unknown providers and e-mail.
+String accountNameSource(Object? provider) {
+  final name = provider == 'password' ? null : providerNames[provider];
+  return name == null ? 'Anmeldekonto' : '$name-Konto';
+}
 
 /// People who may be linked to [account], best name match first: the same
 /// name, then a similar one, then everyone else alphabetically.
@@ -172,6 +180,16 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
     }
   }
 
+  /// Hint and roles of an assignable person; null when both are empty, so
+  /// the tile has no blank second line.
+  Widget? _subtitle(TheaterMember m) {
+    final text = [
+      if (nameMatchScore(_accountName, m.name) == 1) 'Ähnlicher Name',
+      widget.controller.roleNames(m.roleIds),
+    ].where((s) => s.isNotEmpty).join(' · ');
+    return text.isEmpty ? null : Text(text);
+  }
+
   @override
   Widget build(BuildContext context) => AdminPage(
     controller: widget.controller,
@@ -201,7 +219,11 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 4),
-                const Text('Name zur Zuordnung des Kontos'),
+                Text(
+                  a['nameProvided'] == false
+                      ? 'Name laut ${accountNameSource(a['provider'])}'
+                      : 'Name zur Zuordnung des Kontos',
+                ),
                 const SizedBox(height: 8),
                 Text(textValue(a['email'])),
                 const SizedBox(height: 12),
@@ -254,14 +276,7 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
                   child: RadioListTile<int>(
                     value: m.id,
                     title: Text(m.name),
-                    subtitle: Text(
-                      [
-                        if (nameMatchScore(_accountName, m.name) == 1)
-                          'Ähnlicher Name',
-                        widget.controller.roleNames(m.roleIds),
-                        'Mitglied Nr. ${m.id.toString().padLeft(3, '0')}',
-                      ].where((s) => s.isNotEmpty).join(' · '),
-                    ),
+                    subtitle: _subtitle(m),
                     secondary: m.id == suggestion?.id
                         ? const StatePill('Vorschlag', icon: Icons.auto_awesome)
                         : null,
@@ -307,18 +322,16 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
             child: Text('Die E-Mail-Adresse muss zuerst bestätigt werden.'),
           ),
         if (a['nameProvided'] == false)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 16),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
             child: Text(
-              'Diese Person muss noch einen Namen zur Zuordnung angeben.',
+              'Der Name stammt vom ${accountNameSource(a['provider'])} und '
+              'wurde nicht selbst angegeben. Bitte prüfe die Zuordnung '
+              'anhand der E-Mail-Adresse.',
             ),
           ),
         FilledButton(
-          onPressed:
-              _busy ||
-                  _person == null ||
-                  a['identityReady'] != true ||
-                  a['nameProvided'] == false
+          onPressed: _busy || _person == null || a['identityReady'] != true
               ? null
               : () => _save(true),
           child: const Text('Verknüpfen & freigeben'),

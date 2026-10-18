@@ -288,9 +288,9 @@ test('new registrations notify admins once, only when ready to link', async t =>
   assert.equal(jobs()[0].body, 'Neu Mitglied wartet auf Zuordnung.');
   const google = { uid: 'g', name: 'Alias', email: 'g@example.invalid', email_verified: true, firebase: { sign_in_provider: 'google.com' } };
   theater.session(google);
-  assert.equal(jobs().length, 1, 'name for linking is still missing');
+  assert.equal(jobs().length, 2, 'provider accounts are linkable without a supplied name');
   theater.session(google, 'Gabi Beispiel'); theater.session(google);
-  assert.deepEqual(jobs().map(j => j.body).sort(), ['Gabi Beispiel wartet auf Zuordnung.', 'Neu Mitglied wartet auf Zuordnung.']);
+  assert.deepEqual(jobs().map(j => j.body).sort(), ['Alias wartet auf Zuordnung.', 'Neu Mitglied wartet auf Zuordnung.']);
   const calls = [];
   await deliverPush(theater, { sendEachForMulticast: async p => { calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) }; } }, 'https://theater.example');
   assert.ok(calls.length > 0);
