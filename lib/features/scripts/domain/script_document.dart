@@ -33,14 +33,30 @@ class ScriptCue {
     required this.kind,
     required this.text,
     this.role = '',
+    this._roles,
     this.microphone = '',
     this.isAutoMic = false,
     this.micCueType = '',
   });
-  final String id, sceneId, kind, role, text, microphone, micCueType;
+  final String id, sceneId, kind, text, microphone, micCueType;
+
+  /// The speaker label, e.g. 'ROMEO' or 'ROMEO & JULIA' for a shared cue.
+  final String role;
+
+  /// Every role speaking this cue; several for lines spoken together. Older
+  /// servers only send [role], which then is the single speaker.
+  List<String> get roles => _roles ?? (role.isEmpty ? const [] : [role]);
+  final List<String>? _roles;
   final int ordinal;
   final bool isAutoMic;
   String get category => kind;
+
+  /// Whether one of [roleIds] speaks this cue (case-insensitive).
+  bool spokenByAny(Iterable<String> roleIds) {
+    final wanted = {for (final id in roleIds) id.trim().toUpperCase()};
+    return roles.any((r) => wanted.contains(r.trim().toUpperCase()));
+  }
+
   bool get isTechnical => const {
     'technical',
     'lighting',
@@ -55,16 +71,26 @@ class ScriptCue {
     kind: textValue(json['category'] ?? json['kind'], 'unknown'),
     text: textValue(json['text']),
     role: textValue(json['role']),
+    roles: _speakers(json['roles']),
     microphone: textValue(json['microphone']),
     isAutoMic: json['isAutoMic'] == true,
     micCueType: textValue(json['micCueType']),
   );
+  static List<String>? _speakers(Object? value) {
+    final roles = [
+      for (final role in jsonList(value))
+        if (role.toString().trim().isNotEmpty) role.toString().trim(),
+    ];
+    return roles.isEmpty ? null : roles;
+  }
+
   JsonMap toJson() => {
     'id': id,
     'sceneId': sceneId,
     'ordinal': ordinal,
     'category': kind,
     'role': role,
+    'roles': roles,
     'text': text,
     'microphone': microphone,
     'isAutoMic': isAutoMic,
@@ -107,9 +133,9 @@ class ScriptDocument {
                     (c) =>
                         c.sceneId == scene.id &&
                         c.kind == 'dialogue' &&
-                        c.role.isNotEmpty,
+                        c.roles.isNotEmpty,
                   )
-                  .map((c) => c.role)
+                  .expand((c) => c.roles)
                   .toSet()
                   .toList(),
       );

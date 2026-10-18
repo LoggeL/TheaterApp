@@ -82,9 +82,8 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   Map<String, int> _categoryContext = {};
   JsonMap _notes = {};
   bool _assignedRoles = true;
-  bool _own(ScriptCue cue) =>
-      cue.kind == 'dialogue' &&
-      _roles.any((r) => r.toUpperCase() == cue.role.trim().toUpperCase());
+  // Shared cues ("ROMEO & JULIA") are own text for every role speaking them.
+  bool _own(ScriptCue cue) => cue.kind == 'dialogue' && cue.spokenByAny(_roles);
   bool get _hasRoles => _roles.isNotEmpty;
   ReaderMode _mode = ReaderMode.read;
   String? _activeCueId;

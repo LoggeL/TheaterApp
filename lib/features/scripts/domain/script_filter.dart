@@ -33,9 +33,8 @@ List<ScriptCue> visibleScriptCues(
 
   for (var index = 0; index < all.length; index++) {
     final cue = all[index], key = cueCategory(all[index]);
-    if (actor &&
-        cue.kind == 'dialogue' &&
-        selected.contains(cue.role.trim().toUpperCase())) {
+    // A cue spoken together counts for each of its roles.
+    if (actor && cue.kind == 'dialogue' && cue.spokenByAny(selected)) {
       includeContext(index, contextLines);
     }
     if (technicalOnly &&

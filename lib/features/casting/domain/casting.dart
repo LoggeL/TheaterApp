@@ -209,14 +209,16 @@ int nameMatchScore(String name, String personName) {
   return similarName(name, personName) || similarName(personName, name) ? 1 : 0;
 }
 
-/// Spoken lines per script role, counted from the dialogue cues.
+/// Spoken lines per script role, counted from the dialogue cues. A line
+/// spoken together counts for each of its roles.
 Map<String, int> roleLineCounts(ScriptDocument? script) {
   final counts = <String, int>{};
   if (script == null) return counts;
   for (final cue in script.cues) {
-    if (cue.kind != 'dialogue' || cue.role.isEmpty) continue;
-    final key = normalizeName(cue.role);
-    counts[key] = (counts[key] ?? 0) + 1;
+    if (cue.kind != 'dialogue') continue;
+    for (final key in {for (final role in cue.roles) normalizeName(role)}) {
+      if (key.isNotEmpty) counts[key] = (counts[key] ?? 0) + 1;
+    }
   }
   return counts;
 }

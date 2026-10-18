@@ -1,6 +1,7 @@
 import { berlinDateTime, customReminderMinutes, defaultReminders, eventNotificationBody } from './event-notification.mjs';
 import { berlinParts, fromBerlin, seriesOccurrences, seriesSummary } from './event-series.mjs';
 import { compareProductionsNewestFirst } from './production-order.mjs';
+import { migrateSharedSpeakers, sharedSpeakersMigrationId, splitSharedSpeakers } from './shared-speakers.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 
 // Machine-readable reasons next to the German message; clients branch on `code`, never on the text.
@@ -98,6 +99,8 @@ export class Theater {
       store.put('settings', 'personRolesInitialized', { at: now() });
     });
     if (!store.get('settings', 'groupsMigrated')) store.transaction(() => migrateGroupsToRoles(store));
+    // Combined roles like "ROMEO UND JULIA" become cues with several speakers.
+    if (!store.get('migrations', sharedSpeakersMigrationId)) store.transaction(() => migrateSharedSpeakers(store));
   }
   session(identity, registrationName) {
     return this.store.transaction(() => {
@@ -926,16 +929,18 @@ export class Theater {
       default: fail(400, 'Diese Aktion wird nicht unterstützt.');
     }
   }
-  importScript(uid, production, document) {
+  importScript(uid, production, source) {
     this.account(uid, true);
-    if (!production?.id || !document?.revision || !Array.isArray(document.cues) || !Array.isArray(document.scenes) || !Array.isArray(document.roles)) fail(400, 'Ungültiges Drehbuch.');
+    if (!production?.id || !source?.revision || !Array.isArray(source.cues) || !Array.isArray(source.scenes) || !Array.isArray(source.roles)) fail(400, 'Ungültiges Drehbuch.');
+    // Already done by the script adapter; repeated here for documents from other sources.
+    const { document, unresolved } = splitSharedSpeakers(source);
     return this.store.transaction(() => {
       const old = this.store.get('productions', production.id);
       this.store.put('productions', production.id, { ...production, archived: old?.archived === true, premiereAt: old?.premiereAt ?? (production.premiereAt ? date(production.premiereAt) : null), createdAt: old?.createdAt ?? now(), roles: document.roles, sceneCount: document.scenes.length, revision: document.revision, casting: Object.fromEntries(Object.entries(old?.casting ?? {}).filter(([role]) => document.roles.some(r => r.id === role))), directorMemberIds: old?.directorMemberIds ?? [], ...(old?.memberIds ? { memberIds: old.memberIds } : {}), ...(old?.memberFunctions ? { memberFunctions: old.memberFunctions } : {}), version: (old?.version ?? 0) + 1 });
       this.store.put('scripts', production.id, document);
       this.store.delete('focus', production.id);
       this.store.audit(uid, 'script.import', production.id);
-      return { ok: true, id: production.id, sceneCount: document.scenes.length, cueCount: document.cues.length };
+      return { ok: true, id: production.id, sceneCount: document.scenes.length, cueCount: document.cues.length, unresolvedSpeakers: unresolved.map(u => u.roleId) };
     });
   }
   focus(uid, productionId, body = null) {

@@ -6,6 +6,7 @@ import {
   computeScriptRevision,
   normalizeScriptRows,
 } from './script-engine/canonical.mjs';
+import { splitSharedSpeakers } from './shared-speakers.mjs';
 
 const CATEGORY = Object.freeze({
   Schauspieler: 'dialogue',
@@ -154,7 +155,8 @@ export function toScriptDocument(productionId, rows, cache = {}) {
       return collator.compare(a.id, b.id);
     })
     .map((scene, ordinal) => ({ ...scene, ordinal }));
-  return {
+  // "ROMEO UND JULIA" speaks as ROMEO and JULIA, not as a role of its own.
+  return splitSharedSpeakers({
     productionId,
     revision: computeScriptRevision(canonical),
     cues,
@@ -164,7 +166,7 @@ export function toScriptDocument(productionId, rows, cache = {}) {
       fetchedAt: cache.fetchedAt || new Date().toISOString(),
       stale: cache.stale === true,
     },
-  };
+  }).document;
 }
 
 export function createScriptService(options = {}) {
