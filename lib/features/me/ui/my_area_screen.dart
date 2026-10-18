@@ -18,6 +18,7 @@ import '../../../shared/widgets/tile_group.dart';
 import '../../absences/ui/absences_screen.dart';
 import '../../auth/ui/account_providers_screen.dart';
 import '../../auth/ui/password_screen.dart';
+import '../../changelog/changelog.dart';
 import '../../ensemble/ui/members_screen.dart';
 import '../../feedback/feedback.dart';
 import '../../galleries/ui/gallery_list_screen.dart';
@@ -118,9 +119,21 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
     applicationName: Brand.name,
     applicationVersion: appVersionLabel,
     applicationIcon: const BrandLogo(size: 41),
-    children: const [
-      Text(
+    children: [
+      const Text(
         'Termine, Rückmeldungen, Drehbücher und Mitteilungen des Ensembles an einem Ort. Bei Fragen zur App hilft dir die Theaterleitung weiter.',
+      ),
+      Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: Builder(
+          builder: (dialog) => TextButton(
+            onPressed: () {
+              Navigator.pop(dialog);
+              openChangelog(context);
+            },
+            child: const Text('Was ist neu?'),
+          ),
+        ),
       ),
     ],
   );
@@ -281,7 +294,7 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                     GroupTile(
                       icon: Icons.info_outline,
                       title: 'Über die App',
-                      subtitle: 'Version $appVersionLabel · Lizenzen',
+                      subtitle: '$appVersionLabel · Lizenzen',
                       onTap: _about,
                     ),
                   ],
@@ -292,10 +305,11 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
           const SizedBox(height: 28),
           LogoutButton(controller: controller),
           const SizedBox(height: 25),
-          const Text(
-            '${Brand.name} · $appVersionLabel\n${Brand.subtitle}',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, height: 1.6),
+          const Center(
+            child: VersionLink(
+              label: '${Brand.name} · $appVersionLabel\n${Brand.subtitle}',
+              style: TextStyle(fontSize: 12, height: 1.6),
+            ),
           ),
         ],
       ),
