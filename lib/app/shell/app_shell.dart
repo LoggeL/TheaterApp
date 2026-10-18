@@ -141,40 +141,47 @@ class _AppShellState extends State<AppShell> {
                   child: IndexedStack(
                     index: selectedTab,
                     children: [
-                      ContentWidth(
-                        maxWidth: 1360,
-                        child: TodayScreen(
-                          controller: c,
-                          onPlan: () => selectTab(AppSection.schedule.index),
-                          onScripts: () => selectTab(AppSection.scripts.index),
-                          onMessages: () {
-                            _showPolls.value = false;
-                            selectTab(AppSection.messages.index);
-                          },
-                          onPolls: () {
-                            _showPolls.value = true;
-                            selectTab(AppSection.messages.index);
-                          },
+                      for (final (index, tab) in <Widget>[
+                        ContentWidth(
+                          maxWidth: 1360,
+                          child: TodayScreen(
+                            controller: c,
+                            onPlan: () => selectTab(AppSection.schedule.index),
+                            onScripts: () =>
+                                selectTab(AppSection.scripts.index),
+                            onMessages: () {
+                              _showPolls.value = false;
+                              selectTab(AppSection.messages.index);
+                            },
+                            onPolls: () {
+                              _showPolls.value = true;
+                              selectTab(AppSection.messages.index);
+                            },
+                          ),
                         ),
-                      ),
-                      ContentWidth(
-                        maxWidth: 1360,
-                        child: ScheduleScreen(controller: c),
-                      ),
-                      ContentWidth(
-                        maxWidth: 1050,
-                        child: ProductionsScreen(controller: c),
-                      ),
-                      CommunicationScreen(controller: c, showPolls: _showPolls),
-                      ContentWidth(
-                        maxWidth: 1100,
-                        child: MyAreaScreen(
-                          controller: c,
-                          devices: widget.devices,
+                        ContentWidth(
+                          maxWidth: 1360,
+                          child: ScheduleScreen(controller: c),
                         ),
-                      ),
-                      if (admin && wide)
-                        ManagementScreen(controller: c, embedded: true),
+                        ContentWidth(
+                          maxWidth: 1050,
+                          child: ProductionsScreen(controller: c),
+                        ),
+                        CommunicationScreen(
+                          controller: c,
+                          showPolls: _showPolls,
+                        ),
+                        ContentWidth(
+                          maxWidth: 1100,
+                          child: MyAreaScreen(
+                            controller: c,
+                            devices: widget.devices,
+                          ),
+                        ),
+                        if (admin && wide)
+                          ManagementScreen(controller: c, embedded: true),
+                      ].indexed)
+                        _TabSlot(active: index == selectedTab, child: tab),
                     ],
                   ),
                 ),
@@ -191,6 +198,28 @@ class _AppShellState extends State<AppShell> {
               destinations: destinations,
             ),
     );
+  }
+}
+
+/// One section of the shell. Hidden sections keep their state but pause:
+/// their tickers stop, and the shell's rebuilds pass them by until they are
+/// shown again.
+class _TabSlot extends StatefulWidget {
+  const _TabSlot({required this.active, required this.child});
+  final bool active;
+  final Widget child;
+  @override
+  State<_TabSlot> createState() => _TabSlotState();
+}
+
+class _TabSlotState extends State<_TabSlot> {
+  late Widget _shown = widget.child;
+
+  @override
+  Widget build(BuildContext context) {
+    // The same widget instance again makes Flutter skip the whole subtree.
+    if (widget.active) _shown = widget.child;
+    return TickerMode(enabled: widget.active, child: _shown);
   }
 }
 

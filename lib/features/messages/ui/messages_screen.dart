@@ -10,6 +10,7 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/member_avatar.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/state_pill.dart';
+import '../../../shared/widgets/visible_listenable_builder.dart';
 import '../domain/message_selectors.dart';
 import 'message_composer_screen.dart';
 import 'message_detail_screen.dart';
@@ -65,8 +66,8 @@ class _MessagesScreenState extends State<MessagesScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: widget.controller,
+  Widget build(BuildContext context) => VisibleListenableBuilder(
+    listenable: widget.controller,
     builder: (context, _) {
       final c = widget.controller, admin = c.user?.isAdmin == true;
       final all = c.messages;

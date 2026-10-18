@@ -88,7 +88,7 @@ Das Manifest hat die stabile App-ID `/`, Startadresse und Geltungsbereich `/`, d
 
 Nach dem ersten vollständigen Laden lässt sich die Oberfläche offline öffnen. Die Standardschrift Roboto mit ihren Schriftschnitten und ihrer Lizenz liegt im App-Paket. Navigation fragt zuerst den Server nach der aktuellen Version. Neue Builds ersetzen den App-Cache, ohne ein offenes Formular neu zu laden. Der Push-Worker `firebase-messaging-sw.js` bleibt unter seinem separaten Firebase-Geltungsbereich. Manifest und Worker werden ohne HTTP-Cache ausgeliefert, fehlende Dateien liefern HTTP 404.
 
-Auch Schriften, Bilder und CanvasKit erhalten Verzeichnisadressen mit einem Hash ihres Inhalts. Der Flutter-Einstieg und der Offline-Cache verwenden dieselben Adressen. So können Browser und vorgeschaltete Web-Caches keine Dateien einer früheren Version in einen neuen Build mischen. Die ursprünglichen Dateipfade bleiben für noch offene ältere App-Sitzungen vorhanden.
+Auch Schriften, Bilder und CanvasKit erhalten Verzeichnisadressen mit einem Hash ihres Inhalts. Der Flutter-Einstieg und der Offline-Cache verwenden dieselben Adressen. So können Browser und vorgeschaltete Web-Caches keine Dateien einer früheren Version in einen neuen Build mischen. Der Server liefert diese gehashten Dateien (`main.<hash>.dart.js`, `flutter_bootstrap.<hash>.js`, `pwa.<hash>.js`, gehashte Icons sowie alles unter `web-renderer/<hash>/` und `web-assets/<hash>/`) mit `Cache-Control: public, max-age=31536000, immutable` aus. `index.html`, Service Worker, Manifeste und alle ungehashten `.js`/`.json`-Dateien bleiben bei `no-store`. Die ursprünglichen Dateipfade bleiben für noch offene ältere App-Sitzungen vorhanden.
 
 ## Push aktivieren
 

@@ -8,6 +8,7 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/state_pill.dart';
+import '../../../shared/widgets/visible_listenable_builder.dart';
 import '../domain/script_roles.dart';
 import 'production_card.dart';
 import 'script_reader_screen.dart';
@@ -17,8 +18,8 @@ class ProductionsScreen extends StatelessWidget {
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: controller,
+  Widget build(BuildContext context) => VisibleListenableBuilder(
+    listenable: controller,
     builder: (context, _) {
       final productions = controller.activeProductions;
       final archived = controller.archivedProductions;

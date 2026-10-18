@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/app_controller.dart';
 import '../../../shared/navigation.dart';
+import '../../../shared/widgets/visible_listenable_builder.dart';
 import '../../polls/domain/poll_selectors.dart';
 import '../../polls/ui/poll_editor_screen.dart';
 import '../../polls/ui/polls_screen.dart';
@@ -99,8 +100,8 @@ class _CommunicationScreenState extends State<CommunicationScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: widget.controller,
+  Widget build(BuildContext context) => VisibleListenableBuilder(
+    listenable: widget.controller,
     builder: (context, _) {
       final c = widget.controller;
       final unread = unreadMessageCount(c), open = pollsToVote(c).length;

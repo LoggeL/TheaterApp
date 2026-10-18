@@ -7,6 +7,7 @@ import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/page_header.dart';
+import '../../../shared/widgets/visible_listenable_builder.dart';
 import '../../absences/ui/absences_screen.dart';
 import '../../slots/domain/slot_pool.dart';
 import '../../slots/ui/slot_pools_screen.dart';
@@ -37,8 +38,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   String? _selectedEventId;
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: widget.controller,
+  Widget build(BuildContext context) => VisibleListenableBuilder(
+    listenable: widget.controller,
     builder: (context, _) => Scaffold(
       backgroundColor: Colors.transparent,
       floatingActionButton: widget.controller.user?.isAdmin == true

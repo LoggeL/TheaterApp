@@ -4,6 +4,10 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { AppError } from './theater.mjs';
 
+// Content-addressed web files from tool/version-web.mjs never change under their name.
+// Entry points (index.html, workers, manifests) and unhashed files must stay revalidated.
+const hashedWebFile = /^\/(?:(?:main\.[a-f0-9]{16}\.dart|flutter_bootstrap\.[a-f0-9]{16}|pwa\.[a-f0-9]{16})\.js|(?:icons\/)?[\w-]+\.[a-f0-9]{16}\.png|web-(?:renderer|assets)\/[a-f0-9]{16}\/.+)$/;
+
 export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null }) {
   const origins = new Set(allowedOrigins);
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
@@ -32,7 +36,8 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
           const content = await readFile(file);
           const manifest = /\/manifest(?:\.[a-f0-9]{16})?\.json$/.test(file);
           if (path === '/theater-service-worker.js') res.setHeader('Service-Worker-Allowed', '/');
-          res.writeHead(200, { 'Content-Type': manifest ? 'application/manifest+json; charset=utf-8' : types[extname(file)] ?? 'application/octet-stream', 'Content-Length': content.length, 'Cache-Control': ['.html', '.js', '.json'].includes(extname(file)) ? 'private, no-store, max-age=0, must-revalidate' : 'public, max-age=3600' }); res.end(req.method === 'HEAD' ? undefined : content); return;
+          const cache = file === requested && hashedWebFile.test(path) ? 'public, max-age=31536000, immutable' : ['.html', '.js', '.json'].includes(extname(file)) ? 'private, no-store, max-age=0, must-revalidate' : 'public, max-age=3600';
+          res.writeHead(200, { 'Content-Type': manifest ? 'application/manifest+json; charset=utf-8' : types[extname(file)] ?? 'application/octet-stream', 'Content-Length': content.length, 'Cache-Control': cache }); res.end(req.method === 'HEAD' ? undefined : content); return;
         }
         throw new AppError(404, 'Nicht gefunden.');
       }

@@ -172,6 +172,32 @@ test('web server serves the manifest and worker correctly, and missing assets ar
   assert.equal(await (await fetch(base + '/events/123')).text(), 'app');
 });
 
+test('content-addressed web files are cached for a year; entry points and unhashed files are not cached', async t => {
+  const directory = await temporary(t);
+  const h = '0123456789abcdef';
+  const files = {
+    immutable: [`main.${h}.dart.js`, `flutter_bootstrap.${h}.js`, `pwa.${h}.js`, `favicon.${h}.png`, `icons/Icon-maskable-192.${h}.png`, `web-renderer/${h}/canvaskit.wasm`, `web-renderer/${h}/canvaskit.js`, `web-assets/${h}/assets/FontManifest.json`, `web-assets/${h}/assets/fonts/Roboto.ttf`],
+    noStore: ['index.html', 'main.dart.js', 'flutter_bootstrap.js', 'flutter.js', 'pwa.js', 'manifest.json', `manifest.${h}.json`, 'theater-service-worker.js', 'firebase-messaging-sw.js', 'firebase-web-config.js', 'release-assets.json', 'version.json', 'assets/FontManifest.json', 'canvaskit/canvaskit.js', `main.${h.slice(0, 8)}.dart.js`, `other.${h}.js`],
+    hour: ['favicon.png', 'icons/Icon-192.png', 'assets/fonts/Roboto.ttf', 'canvaskit/canvaskit.wasm'],
+  };
+  for (const name of Object.values(files).flat()) {
+    await mkdir(join(directory, name, '..'), {recursive: true});
+    await writeFile(join(directory, name), name);
+  }
+  const server = createHttpServer({theater: {}, verifyToken: async () => ({}), webDir: directory});
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}/`;
+  const cacheControl = async name => { const response = await fetch(base + name); assert.equal(response.status, 200, name); await response.arrayBuffer(); return response.headers.get('cache-control'); };
+  for (const name of files.immutable) assert.equal(await cacheControl(name), 'public, max-age=31536000, immutable', name);
+  for (const name of files.noStore) assert.match(await cacheControl(name), /no-store/, name);
+  for (const name of files.hour) assert.equal(await cacheControl(name), 'public, max-age=3600', name);
+  // A missing hashed file is a 404, and the app fallback for deep links is never cached.
+  assert.equal((await fetch(base + `main.${'f'.repeat(16)}.dart.js`)).status, 404);
+  assert.equal((await fetch(base + `web-assets/${'f'.repeat(16)}/assets/missing.ttf`)).status, 404);
+  assert.match((await fetch(base + 'events/123')).headers.get('cache-control'), /no-store/);
+});
+
 test('installation prompt is consumed once and installed windows do not offer it again', async () => {
   const events = {}, listeners = {}, display = {matches: false, addEventListener: (name, handler) => { listeners[name] = handler; }};
   const window = {isSecureContext: false, matchMedia: () => display, addEventListener: (name, handler) => { events[name] = handler; }};
