@@ -70,7 +70,12 @@ JsonMap _carina() => {
   ],
 };
 
-TestServer _server({int ownPersonId = 6, bool hidden = false}) {
+TestServer _server({
+  int ownPersonId = 6,
+  bool hidden = false,
+  List<String>? mediaRequests,
+  String? websitePhotoId,
+}) {
   final server = TestServer();
   server.data['members'] = [
     {
@@ -99,9 +104,15 @@ TestServer _server({int ownPersonId = 6, bool hidden = false}) {
     if (path.endsWith('/ensemble/website-profiles')) {
       return Future.value(
         jsonResponse({
-          'profiles': [_carina()],
+          'profiles': [
+            {..._carina(), 'photoId': ?websitePhotoId},
+          ],
         }),
       );
+    }
+    if (path.contains('/media/')) {
+      mediaRequests?.add(path);
+      return Future.value(http.Response('', 404));
     }
     return null;
   };
@@ -211,6 +222,24 @@ void main() {
     expect(find.textContaining('@'), findsNothing);
     expect(find.byTooltip('Profil bearbeiten'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('website photos are never shown, also when a server sends one', (
+    tester,
+  ) async {
+    final media = <String>[];
+    await _pumpMembers(
+      tester,
+      _server(mediaRequests: media, websitePhotoId: 'web-carina'),
+    );
+    expect(find.byType(Image), findsNothing);
+    await tester.tap(find.text('Carina'));
+    await tester.pumpAndSettle();
+    expect(find.byType(MemberProfileScreen), findsOneWidget);
+    // Without an own profile picture the initials stay.
+    expect(find.byType(Image), findsNothing);
+    expect(media, isEmpty);
+    expect(find.textContaining('Foto'), findsNothing);
   });
 
   testWidgets('the own profile invites to write a text', (tester) async {

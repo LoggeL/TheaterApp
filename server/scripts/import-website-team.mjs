@@ -1,6 +1,7 @@
-// Imports the public ensemble data of kolpingtheater-ramsen.de/team (names, photos, roles per play,
-// crew jobs) into the app database and links it to people. Without --apply it is a dry run that
-// reads the database and the website but writes nothing and downloads no photos.
+// Imports the public ensemble data of kolpingtheater-ramsen.de/team (names, roles per play, crew
+// jobs, year of joining) into the app database and links it to people. Website photos are not taken
+// over; --apply removes photos that earlier imports stored. Without --apply it is a dry run that
+// reads the database and the website but writes nothing.
 //
 //   node scripts/import-website-team.mjs DATABASE [--apply] [--media DIR] [--team team.json] [--team-page team.html]
 //

@@ -45,7 +45,6 @@ class WebsiteProfile {
     this.personLink,
     this.hidden = false,
     this.since,
-    this.photoId,
     this.url,
     this.current,
     this.credits = const [],
@@ -53,7 +52,7 @@ class WebsiteProfile {
   });
   final String slug, name;
   final int? personId, since;
-  final String? personLink, photoId, url;
+  final String? personLink, url;
   final bool hidden;
   final WebsiteCredit? current;
 
@@ -68,7 +67,6 @@ class WebsiteProfile {
     personLink: _optional(json['personLink']),
     hidden: json['hidden'] == true,
     since: json['since'] == null ? null : intValue(json['since']),
-    photoId: _optional(json['photoId']),
     url: _optional(json['url']),
     current: json['current'] == null
         ? null

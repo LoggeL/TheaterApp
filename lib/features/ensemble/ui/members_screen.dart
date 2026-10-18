@@ -8,8 +8,6 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/member_avatar.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../admin/members_admin_screen.dart';
-import '../data/website_profiles.dart';
-import '../domain/website_profile.dart';
 import 'member_profile_screen.dart';
 
 class MembersScreen extends StatefulWidget {
@@ -21,18 +19,6 @@ class MembersScreen extends StatefulWidget {
 
 class _MembersScreenState extends State<MembersScreen> {
   String _query = '';
-
-  /// Website photos stand in for people without an own profile picture.
-  List<WebsiteProfile> _website = const [];
-
-  @override
-  void initState() {
-    super.initState();
-    _website = WebsiteProfiles.peek(widget.controller) ?? const [];
-    WebsiteProfiles.load(widget.controller).then((profiles) {
-      if (mounted) setState(() => _website = profiles);
-    }, onError: (Object _) {});
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -107,18 +93,15 @@ class _MembersScreenState extends State<MembersScreen> {
     );
   }
 
+  // Without an own profile picture the initials stay; website photos are not used.
   Widget _member(TheaterMember member) {
-    final photo = member.avatarId == null && !member.websiteHidden
-        ? websiteProfileOf(_website, member.id)?.photoId
-        : null;
     return ListTile(
       key: ValueKey('member-${member.id}'),
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 7),
       leading: MemberAvatar(
         controller: widget.controller,
-        avatarId: member.avatarId ?? photo,
+        avatarId: member.avatarId,
         initials: member.initials,
-        alignment: photo != null ? Alignment.topCenter : Alignment.center,
       ),
       title: Text(member.name),
       subtitle: Text(widget.controller.roleNames(member.roleIds)),

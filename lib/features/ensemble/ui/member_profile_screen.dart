@@ -9,13 +9,12 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/member_avatar.dart';
 import '../../../shared/widgets/page_header.dart';
-import '../../../shared/widgets/protected_image.dart';
 import '../../casting/ui/casting_screen.dart';
 import '../../profile/ui/profile_screen.dart';
 import '../data/website_profiles.dart';
 import '../domain/website_profile.dart';
 
-/// A short "about" page of one person: photo, roles in the ensemble, a
+/// A short "about" page of one person: own profile picture, roles in the ensemble, a
 /// self-written text and what they played, from the app and the public
 /// website. Shows no contact data, responses or attendance.
 class MemberProfileScreen extends StatefulWidget {
@@ -122,35 +121,15 @@ class _MemberProfileScreenState extends State<MemberProfileScreen> {
   ) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final photoId = website?.photoId;
-    final Widget picture;
-    if (member.avatarId == null && photoId != null) {
-      // Website portraits are 3:4; show them like on the website.
-      picture = ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: SizedBox(
-          width: 168,
-          height: 224,
-          child: ProtectedImage(
-            key: const ValueKey('profile-website-photo'),
-            controller: widget.controller,
-            path: '/media/$photoId',
-            alignment: Alignment.topCenter,
-            decodeWidth: 480,
-            fallback: _initials(context, member),
-          ),
-        ),
-      );
-    } else {
-      picture = MemberAvatar(
-        controller: widget.controller,
-        avatarId: member.avatarId,
-        initials: member.initials.isEmpty
-            ? _initialsOf(member.name)
-            : member.initials,
-        radius: 56,
-      );
-    }
+    // Only an own profile picture; website photos are not used.
+    final picture = MemberAvatar(
+      controller: widget.controller,
+      avatarId: member.avatarId,
+      initials: member.initials.isEmpty
+          ? _initialsOf(member.name)
+          : member.initials,
+      radius: 56,
+    );
     final current = website?.current;
     final count = mergeProfileCredits(
       personId: member.id,
@@ -239,18 +218,6 @@ class _MemberProfileScreenState extends State<MemberProfileScreen> {
       ],
     );
   }
-
-  Widget _initials(BuildContext context, TheaterMember member) => ColoredBox(
-    color: Theme.of(context).colorScheme.secondaryContainer,
-    child: Center(
-      child: Text(
-        member.initials.isEmpty ? _initialsOf(member.name) : member.initials,
-        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-          color: Theme.of(context).colorScheme.onSecondaryContainer,
-        ),
-      ),
-    ),
-  );
 
   List<Widget> _about(BuildContext context, TheaterMember member) {
     final text = member.about.trim();
@@ -393,7 +360,7 @@ class _MemberProfileScreenState extends State<MemberProfileScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Foto, Rollen und Aufgaben stammen von der öffentlichen Website '
+            'Rollen und Aufgaben stammen von der öffentlichen Website '
             'kolpingtheater-ramsen.de.${_own ? ' Du kannst sie unter „Profil bearbeiten“ in der App ausblenden.' : ''}',
             style: Theme.of(context).textTheme.bodySmall,
           ),

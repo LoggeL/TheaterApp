@@ -21,7 +21,7 @@ class TheaterMember {
   /// Self-written "Über mich" text, visible to the ensemble.
   final String about;
 
-  /// The person hid the imported website data (photo, roles) in the app.
+  /// The person hid the imported website data (roles, jobs) in the app.
   final bool websiteHidden;
 
   /// Whether this member belongs to an audience of roles, invited people or

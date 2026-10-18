@@ -1,9 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import sharp from 'sharp';
 import { Store } from '../src/store.mjs';
 import { Theater, aboutMaxLength } from '../src/theater.mjs';
 import { MediaService } from '../src/media.mjs';
@@ -47,11 +46,8 @@ async function setup(t) {
   app.session({ uid: 'sam', name: 'Tom', email: 'tom@example.invalid', email_verified: true });
   action({ action: 'account.approve', uid: 'sam', personId: ids.Tom, version: 1, role: 'member' });
   const media = await mkdtemp(join(tmpdir(), 'website-team-')); t.after(() => rm(media, { recursive: true, force: true }));
-  const jpeg = await sharp({ create: { width: 300, height: 400, channels: 3, background: '#a33' } }).jpeg().toBuffer();
-  const fetched = [];
-  const fetchImpl = async url => { fetched.push(url); return new Response(jpeg, { headers: { 'content-type': 'image/jpeg' } }); };
   const team = parseTeam(teamData(), { published: publishedSlugs(teamPage) });
-  return { store, app, action, ids, media, fetchImpl, fetched, team };
+  return { store, app, action, ids, media, team };
 }
 
 test('website team data becomes one public profile per person', () => {
@@ -63,10 +59,9 @@ test('website team data becomes one public profile per person', () => {
   assert.deepEqual(tom.current, { play: 'grusel', role: 'Graf Dracula' });
   assert.deepEqual(tom.jobs, [{ job: 'Website', description: 'Gestaltung und Pflege des digitalen Auftritts' }]);
   assert.equal(tom.since, 2025, 'cast members count from their first role, like the website');
-  assert.equal(tom.photo, '/img/team/avatar/Tom.jpg');
+  assert.equal(tom.photo, undefined, 'website photos are not taken over');
   const alex = team.profiles.find(p => p.slug === 'Alex');
   assert.equal(alex.since, 2019);
-  assert.equal(alex.photo, null, 'placeholder avatars are no photos');
   assert.equal(team.profiles.find(p => p.slug === 'LinaK').name, 'Lina');
   assert.equal(team.profiles.find(p => p.slug === 'Uli').current, null);
   assert.throws(() => parseTeam({ plays: [] }), /Format/);
@@ -107,16 +102,17 @@ test('a contradicting cast keeps a same-name match unlinked', async t => {
   assert.match(contradicted.candidates[0].contra[0], /spielt in Gruselnacht „FIONA“ statt „Graf Dracula“/);
 });
 
-test('applying stores profiles and photos once, keeps manual links and removes departed people', async t => {
-  const { store, app, ids, media, fetchImpl, fetched, team } = await setup(t);
-  const first = await applyImport(store, team, planImport(store, team), { mediaDirectory: media, fetchImpl });
-  assert.deepEqual(first, { photos: 6, newPhotos: 6, photoErrors: [], removedPhotos: 0 });
-  assert.ok(fetched.every(url => url.startsWith('https://kolpingtheater-ramsen.de/img/team/avatar/')));
+test('applying stores profiles without photos, keeps manual links and removes departed people', async t => {
+  const { store, app, ids, media, team } = await setup(t);
+  const first = await applyImport(store, team, planImport(store, team), { mediaDirectory: media });
+  assert.deepEqual(first, { removedPhotos: 0 });
   const tom = store.get('websiteProfiles', 'Tom');
   assert.equal(tom.personId, ids.Tom);
   assert.equal(tom.personLink, 'auto');
-  assert.deepEqual(store.get('media', tom.photoId).kind, 'website');
-  assert.equal((await readdir(media)).length, 6);
+  assert.equal(tom.photoId, undefined);
+  assert.equal(tom.photo, undefined);
+  assert.deepEqual(await readdir(media), [], 'no photo is downloaded or stored');
+  assert.equal(store.all('media').length, 0);
   assert.equal(store.get('websiteProfiles', 'Kim').personId, null, 'uncertain matches stay unlinked');
   assert.equal(store.get('websitePlays', 'grusel').productionId, 'p-2026');
 
@@ -132,18 +128,42 @@ test('applying stores profiles and photos once, keeps manual links and removes d
   assert.deepEqual(plan.removed.sort(), ['Uli', 'Zoe']);
   assert.equal(plan.people.get('Robin').status, 'manual');
   assert.equal(plan.people.get('Lina').status, 'manualNone', 'an explicit "nobody" is not linked again');
-  const second = await applyImport(store, next, plan, { mediaDirectory: media, fetchImpl });
-  assert.deepEqual(second, { photos: 5, newPhotos: 0, photoErrors: [], removedPhotos: 1 });
+  const second = await applyImport(store, next, plan, { mediaDirectory: media });
+  assert.deepEqual(second, { removedPhotos: 0 });
   assert.equal(store.get('websiteProfiles', 'Uli'), null);
   assert.equal(store.get('websiteProfiles', 'Robin').personId, ids['Robin Sonnenschein']);
   assert.equal(store.get('websiteProfiles', 'Lina').personId, null);
-  assert.equal((await readdir(media)).length, 5);
-  assert.equal(store.all('media').filter(m => m.kind === 'website').length, 5);
+  assert.deepEqual(await readdir(media), []);
+});
+
+test('photos stored by an earlier import are removed; own profile pictures stay', async t => {
+  const { store, app, ids, media, team } = await setup(t);
+  // As stored by the first import in production: a linked profile photo and an orphaned one.
+  const put = async (id, kind, extra = {}) => { store.put('media', id, { id, kind, ownerPersonId: null, galleryId: null, caption: '', width: 600, height: 800, createdAt: '2026-10-18T18:46:00.000Z', ...extra }); await writeFile(join(media, `${id}.webp`), 'x'); };
+  await put('web-tom', 'website'); await put('web-orphan', 'website'); await put('own-uli', 'profile', { ownerPersonId: ids.Uli });
+  store.put('members', ids.Uli, { ...store.get('members', ids.Uli), avatarId: 'own-uli' });
+  store.put('websiteProfiles', 'Tom', { slug: 'Tom', name: 'Tom', kinds: ['crew'], credits: [], current: null, jobs: [], since: 2017, photo: '/img/team/avatar/Tom.jpg', photoId: 'web-tom', photoHash: 'h', personId: ids.Tom, personLink: 'auto', matchReason: '', version: 1 });
+  const mediaService = new MediaService(app, { directory: media });
+  // Even before the cleanup the server no longer serves website photos, also not to older apps.
+  await assert.rejects(mediaService.image('sam', 'web-tom'), { status: 404 });
+  assert.ok((await mediaService.image('sam', 'own-uli')).bytes.length > 0);
+  const plan = planImport(store, team);
+  assert.equal(describePlan(store, team, plan).photosToRemove, 2);
+  assert.deepEqual(await applyImport(store, team, plan, { mediaDirectory: media }), { removedPhotos: 2 });
+  assert.deepEqual((await readdir(media)).sort(), ['own-uli.webp']);
+  assert.deepEqual(store.all('media').map(m => m.id), ['own-uli']);
+  assert.equal(store.get('members', ids.Uli).avatarId, 'own-uli');
+  const tom = store.get('websiteProfiles', 'Tom');
+  assert.equal(tom.photoId, undefined);
+  assert.equal(tom.photoHash, undefined);
+  assert.equal(tom.personId, ids.Tom);
+  assert.equal(describePlan(store, team, planImport(store, team)).photosToRemove, 0);
+  assert.ok(websiteProfilesView(app, 'sam').profiles.every(p => !('photoId' in p)));
 });
 
 test('members see linked profiles without private data and may hide theirs', async t => {
-  const { store, app, action, ids, media, fetchImpl, team } = await setup(t);
-  await applyImport(store, team, planImport(store, team), { mediaDirectory: media, fetchImpl });
+  const { store, app, action, ids, media, team } = await setup(t);
+  await applyImport(store, team, planImport(store, team), { mediaDirectory: media });
   const view = websiteProfilesView(app, 'sam');
   assert.deepEqual(view.profiles.map(p => p.slug).sort(), ['Alex', 'Lina', 'LinaK', 'Tom', 'Uli']);
   const tom = view.profiles.find(p => p.slug === 'Tom');
@@ -157,13 +177,11 @@ test('members see linked profiles without private data and may hide theirs', asy
   for (const secret of ['example.invalid', 'attendance', 'photoHash', 'matchReason']) assert.ok(!serialized.includes(secret), secret);
   assert.ok(websiteProfilesView(app, 'admin').profiles.some(p => p.slug === 'Kim' && p.personId === null), 'admins also see unlinked profiles');
 
-  const mediaService = new MediaService(app, { directory: media });
-  assert.ok((await mediaService.image('sam', tom.photoId)).bytes.length > 0);
+  assert.ok(!('photoId' in tom), 'no website photo');
   const profileVersion = store.get('members', ids.Tom).profileVersion ?? 0;
   action({ action: 'profile.save', profileVersion, avatarId: null, websiteHidden: true }, 'sam');
   assert.ok(!websiteProfilesView(app, 'sam').profiles.some(p => p.slug === 'Tom'));
   assert.deepEqual(websiteProfilesView(app, 'admin').profiles.find(p => p.slug === 'Tom'), { slug: 'Tom', name: 'Tom', personId: ids.Tom, personLink: 'auto', hidden: true });
-  await assert.rejects(mediaService.image('sam', tom.photoId), { status: 404 });
 });
 
 test('people write their own about text; older clients keep it', async t => {
@@ -181,8 +199,8 @@ test('people write their own about text; older clients keep it', async t => {
 });
 
 test('website profiles are served to approved members; linking needs an admin', async t => {
-  const { store, app, ids, media, fetchImpl, team } = await setup(t);
-  await applyImport(store, team, planImport(store, team), { mediaDirectory: media, fetchImpl });
+  const { store, app, ids, media, team } = await setup(t);
+  await applyImport(store, team, planImport(store, team), { mediaDirectory: media });
   const server = createHttpServer({ theater: app, verifyToken: async token => ({ uid: token }) });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));

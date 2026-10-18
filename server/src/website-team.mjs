@@ -1,15 +1,14 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, writeFile, unlink } from 'node:fs/promises';
+import { unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { AppError } from './theater.mjs';
 
 // Public ensemble data of kolpingtheater-ramsen.de/team. The website renders its team pages from
 // `src/data/team.json` of the public repository Kolpingtheater-Ramsen/next-theater; the live team
-// page decides which profiles are actually published.
+// page decides which profiles are actually published. Website photos are not taken over: people
+// without an own profile picture keep the placeholder with their initials.
 export const websiteTeam = Object.freeze({
   siteUrl: 'https://kolpingtheater-ramsen.de',
   dataUrl: 'https://raw.githubusercontent.com/Kolpingtheater-Ramsen/next-theater/main/src/data/team.json',
-  maxPhotoBytes: 8 * 1024 * 1024,
 });
 
 const fail = (status, message, code) => { throw new AppError(status, message, code); };
@@ -81,7 +80,6 @@ export function parseTeam(data, { published = null } = {}) {
       current: current ? { play: plays.at(-1).slug, role: current } : null,
       jobs: [...new Set(p.jobs)].map(job => ({ job, description: jobDescriptions[job] ?? `Beitrag als ${job} im Team` })),
       since: p.kinds.includes('cast') ? castSince : (p.crewSince ?? castSince),
-      photo: p.placeholder ? null : `/img/team/avatar/${encodeURIComponent(p.id)}.jpg`,
     });
   }
   return { plays, profiles, skipped };
@@ -231,74 +229,40 @@ export function describePlan(store, team, plan) {
     unmatched: [...by('none'), ...by('manualNone')].map(e => ({ website: e.slug, reason: e.reason })),
     productions: team.plays.map(p => ({ play: `${p.title} (${p.year ?? '?'})`, production: plan.playLinks.get(p.slug)?.productionId ? store.get('productions', plan.playLinks.get(p.slug).productionId)?.title : null, link: plan.playLinks.get(p.slug)?.link ?? null })).filter(x => x.production),
     productionGuesses: plan.productionGuesses, removed: plan.removed,
-    photos: team.profiles.filter(p => p.photo).length,
+    // Photos stored by earlier imports; the next --apply removes them.
+    photosToRemove: storedPhotoIds(store).length,
   };
 }
 
-/** Downloads and normalises a website portrait (3:4) to WebP; returns null on failures. */
-async function loadPhoto(url, fetchImpl) {
-  const response = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(20000) });
-  if (!response.ok || !/^image\//.test(response.headers.get('content-type') ?? '')) return null;
-  const input = Buffer.from(await response.arrayBuffer());
-  if (!input.length || input.length > websiteTeam.maxPhotoBytes) return null;
-  const { default: sharp } = await import('sharp');
-  const result = await sharp(input, { limitInputPixels: 40_000_000, animated: false }).rotate()
-    .resize({ width: 600, height: 800, fit: 'cover', position: 'top', withoutEnlargement: true }).webp({ quality: 82 }).toBuffer({ resolveWithObject: true });
-  return { hash: createHash('sha256').update(input).digest('hex'), data: result.data, width: result.info.width, height: result.info.height };
-}
+/** Media ids of website photos stored by earlier imports (profiles and orphaned records). */
+const storedPhotoIds = store => [...new Set([...store.all('websiteProfiles').map(p => p.photoId).filter(Boolean), ...store.all('media').filter(m => m.kind === 'website').map(m => m.id)])];
 
 /**
- * Stores the planned import. Keeps manual links, never links uncertain people, keeps
- * unchanged photos and removes profiles (and their photos) that left the website.
+ * Stores the planned import. Keeps manual links, never links uncertain people and removes
+ * profiles that left the website. Takes over no photos and removes photos earlier imports stored.
  */
-export async function applyImport(store, team, plan, { mediaDirectory, fetchImpl = fetch, siteUrl = websiteTeam.siteUrl, now = new Date() } = {}) {
-  if (!mediaDirectory) throw Error('MEDIA_DIR fehlt: Website-Fotos werden im Medienordner gespeichert.');
-  const at = now.toISOString(), photos = new Map(), photoErrors = [], obsolete = [];
-  for (const p of team.profiles) {
-    if (!p.photo) continue;
-    try { const photo = await loadPhoto(new URL(p.photo, siteUrl).href, fetchImpl); if (photo) photos.set(p.slug, photo); else photoErrors.push(p.slug); }
-    catch { photoErrors.push(p.slug); }
-  }
-  await mkdir(resolve(mediaDirectory), { recursive: true });
-  const written = [];
-  for (const p of team.profiles) {
-    const photo = photos.get(p.slug), old = store.get('websiteProfiles', p.slug);
-    if (!photo || (old?.photoHash === photo.hash && old.photoId && store.get('media', old.photoId))) continue;
-    const id = randomUUID();
-    await writeFile(resolve(mediaDirectory, `${id}.webp`), photo.data, { flag: 'wx', mode: 0o600 });
-    written.push(id); photo.id = id;
-  }
-  try {
-    store.transaction(() => {
-      for (const play of team.plays) {
-        const link = plan.playLinks.get(play.slug), old = store.get('websitePlays', play.slug);
-        const { index: _index, ...fields } = play;
-        store.put('websitePlays', play.slug, { ...fields, productionId: link?.productionId ?? null, productionLink: link?.link ?? null, version: (old?.version ?? 0) + 1, importedAt: at });
-      }
-      for (const old of store.all('websitePlays')) if (!team.plays.some(p => p.slug === old.slug)) store.delete('websitePlays', old.slug);
-      for (const p of team.profiles) {
-        const old = store.get('websiteProfiles', p.slug), match = plan.people.get(p.slug), photo = photos.get(p.slug);
-        let photoId = old?.photoId ?? null, photoHash = old?.photoHash ?? null;
-        if (!p.photo) { if (photoId) obsolete.push(photoId); photoId = null; photoHash = null; }
-        else if (photo?.id) {
-          if (photoId) obsolete.push(photoId);
-          photoId = photo.id; photoHash = photo.hash;
-          store.put('media', photo.id, { id: photo.id, kind: 'website', ownerPersonId: null, galleryId: null, caption: '', width: photo.width, height: photo.height, source: new URL(p.photo, siteUrl).href, createdAt: at });
-        }
-        const manual = match?.status === 'manual' || match?.status === 'manualNone';
-        store.put('websiteProfiles', p.slug, { ...p, photoId, photoHash, personId: match?.personId ?? null, personLink: manual ? 'manual' : match?.personId != null ? 'auto' : null, matchReason: match?.reason ?? '', version: (old?.version ?? 0) + 1, importedAt: at });
-      }
-      for (const slug of plan.removed) { const old = store.get('websiteProfiles', slug); if (old?.photoId) obsolete.push(old.photoId); store.delete('websiteProfiles', slug); }
-      for (const id of obsolete) store.delete('media', id);
-      store.put('settings', 'websiteTeamImport', { at, profiles: team.profiles.length, plays: team.plays.length });
-      store.audit('website-import', 'website.import', `${team.profiles.length} profiles`);
-    });
-  } catch (e) {
-    for (const id of written) await unlink(resolve(mediaDirectory, `${id}.webp`)).catch(() => {});
-    throw e;
-  }
+export async function applyImport(store, team, plan, { mediaDirectory, now = new Date() } = {}) {
+  const at = now.toISOString(), obsolete = storedPhotoIds(store);
+  if (obsolete.length && !mediaDirectory) throw Error('MEDIA_DIR fehlt: Website-Fotos früherer Abgleiche liegen im Medienordner.');
+  store.transaction(() => {
+    for (const play of team.plays) {
+      const link = plan.playLinks.get(play.slug), old = store.get('websitePlays', play.slug);
+      const { index: _index, ...fields } = play;
+      store.put('websitePlays', play.slug, { ...fields, productionId: link?.productionId ?? null, productionLink: link?.link ?? null, version: (old?.version ?? 0) + 1, importedAt: at });
+    }
+    for (const old of store.all('websitePlays')) if (!team.plays.some(p => p.slug === old.slug)) store.delete('websitePlays', old.slug);
+    for (const p of team.profiles) {
+      const old = store.get('websiteProfiles', p.slug), match = plan.people.get(p.slug);
+      const manual = match?.status === 'manual' || match?.status === 'manualNone';
+      store.put('websiteProfiles', p.slug, { ...p, personId: match?.personId ?? null, personLink: manual ? 'manual' : match?.personId != null ? 'auto' : null, matchReason: match?.reason ?? '', version: (old?.version ?? 0) + 1, importedAt: at });
+    }
+    for (const slug of plan.removed) store.delete('websiteProfiles', slug);
+    for (const id of obsolete) store.delete('media', id);
+    store.put('settings', 'websiteTeamImport', { at, profiles: team.profiles.length, plays: team.plays.length });
+    store.audit('website-import', 'website.import', `${team.profiles.length} profiles`);
+  });
   for (const id of obsolete) await unlink(resolve(mediaDirectory, `${id}.webp`)).catch(e => { if (e.code !== 'ENOENT') throw e; });
-  return { photos: photos.size, newPhotos: written.length, photoErrors, removedPhotos: obsolete.length };
+  return { removedPhotos: obsolete.length };
 }
 
 /** Fetches the website's team data and the live team page (which profiles are published). */
@@ -312,12 +276,6 @@ export async function fetchTeam({ dataUrl = websiteTeam.dataUrl, siteUrl = websi
 
 /** Whether a member chose to hide the website data in the app. */
 const hiddenFor = (store, personId) => personId != null && store.get('members', personId)?.websiteHidden === true;
-
-/** Whether a website photo may be shown: it belongs to a profile whose person did not hide it. */
-export function websitePhotoVisible(store, mediaId) {
-  const profile = store.all('websiteProfiles').find(p => p.photoId === mediaId);
-  return !!profile && !hiddenFor(store, profile.personId);
-}
 
 /**
  * Website profiles for the app. Members get the profiles linked to active people who did not
@@ -334,7 +292,7 @@ export function websiteProfilesView(theater, uid) {
     if (!admin && (personId == null || hidden || members.get(personId).active === false)) continue;
     const base = { slug: p.slug, name: p.name, personId, ...(admin ? { personLink: p.personLink ?? null } : {}) };
     if (hidden) { profiles.push({ ...base, hidden: true }); continue; }
-    profiles.push({ ...base, kinds: p.kinds, since: p.since ?? null, photoId: p.photoId ?? null, url: `${websiteTeam.siteUrl}/team/${encodeURIComponent(p.slug)}`,
+    profiles.push({ ...base, kinds: p.kinds, since: p.since ?? null, url: `${websiteTeam.siteUrl}/team/${encodeURIComponent(p.slug)}`,
       current: p.current ? credit(p.current) : null, credits: list(p.credits).map(credit).filter(Boolean).reverse(), jobs: list(p.jobs) });
   }
   return { importedAt: s.get('settings', 'websiteTeamImport')?.at ?? null, source: `${websiteTeam.siteUrl}/team`, profiles: profiles.sort((x, y) => x.name.localeCompare(y.name, 'de') || x.slug.localeCompare(y.slug)) };

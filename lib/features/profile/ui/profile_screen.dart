@@ -325,7 +325,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           : (value) => setState(() => _hidden = !value),
       title: const Text('Angaben der Website zeigen'),
       subtitle: const Text(
-        'Foto, Rollen und Aufgaben von kolpingtheater-ramsen.de auf deinem '
+        'Rollen und Aufgaben von kolpingtheater-ramsen.de auf deinem '
         'Profil in der App. Die Website selbst ändert sich dadurch nicht.',
       ),
     ),
