@@ -27,6 +27,26 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.8.0',
+    date: '18. Oktober 2026',
+    items: [
+      'Sprechen mehrere Rollen eine Textstelle gemeinsam, steht sie im '
+          'Drehbuch jetzt bei jeder dieser Rollen – auch beim Lernen.',
+      'Unter „Unser Ensemble“ hat jede Person ein eigenes Profil mit Foto, '
+          'Rollen und Aufgaben hinter den Kulissen. Unter „Profil bearbeiten“ '
+          'schreibst du ein paar Sätze über dich.',
+      'Die Theaterleitung kann dir auf dein Feedback antworten. Unter „Mein '
+          'Feedback“ liest du die Antworten und schreibst zurück.',
+      'Alle Neuerungen findest du jetzt auch unter „Mein Bereich → App → '
+          'Changelog“.',
+      'Im Browser startet und läuft die App auf vielen Geräten flüssiger.',
+      'Auswahlknöpfe brechen ihre Beschriftung nicht mehr mitten im Wort um.',
+      'Für die Theaterleitung: unter „Ensembles & Verteiler“ festlegen, wer zu '
+          'welchem Stück gehört – neu Hinzugefügte bekommen eine '
+          'Benachrichtigung – und Feedback direkt beantworten.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.7.1',
     date: '18. Oktober 2026',
     items: [
