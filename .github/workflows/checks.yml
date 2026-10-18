@@ -117,12 +117,16 @@ jobs:
         run: flutter build appbundle --release --dart-define-from-file=config/production.android.json --build-number=${{ steps.play.outputs.version_code }} --dart-define=APP_BUILD=${{ steps.play.outputs.version_code }}
       - name: Submit and verify closed release
         if: steps.current.outputs.publish == 'true'
+        # Waits up to 15 minutes until Google reports the release as in review or published.
+        # The release record is kept in the artifact also when the check fails.
         run: |
           node server/scripts/play-release.mjs publish "$RUNNER_TEMP/play-release.json" build/app/outputs/bundle/release/app-release.aab
-          node server/scripts/play-release.mjs verify "$RUNNER_TEMP/play-release.json"
+          status=0
+          node server/scripts/play-release.mjs verify "$RUNNER_TEMP/play-release.json" || status=$?
           cp "$RUNNER_TEMP/play-release.json" build/app/outputs/bundle/release/play-release.json
+          exit "$status"
       - uses: actions/upload-artifact@v4
-        if: steps.current.outputs.publish == 'true'
+        if: ${{ !cancelled() && steps.current.outputs.publish == 'true' }}
         with:
           name: theater-google-play
           path: build/app/outputs/bundle/release/

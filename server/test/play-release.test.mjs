@@ -60,51 +60,107 @@ test('publish sends the bundle only to alpha and reports submission instead of a
   assert.equal(requests[1][2].track, 'alpha');
   assert.deepEqual(requests[1][2].releases[0].versionCodes, ['15']);
   assert.equal(requests[2][0], `${base}/edits/test-edit:validate`);
-  assert.equal(requests[3][0], `${base}/edits/test-edit:commit`);
+  // Sent for review explicitly, never parked as "changes not sent for review".
+  assert.equal(requests[3][0], `${base}/edits/test-edit:commit?changesNotSentForReview=false`);
   assert.match(setup.messages[0], /^Submitted closed testing release/);
   assert.equal(JSON.parse(await readFile(setup.statePath, 'utf8')).bundleSha256, 'test-sha256');
 });
 
-for (const [suffix, description] of [
-  ['IN_REVIEW', 'In Google review; not yet available'],
-  ['APPROVED_NOT_PUBLISHED', 'Approved; waiting for publication'],
-  ['PUBLISHED', 'Published and available'],
+// A fake clock: sleeping advances it, so polling tests run instantly.
+function clock() {
+  let at = Date.parse('2026-10-18T16:20:00Z');
+  const sleeps = [];
+  return { now: () => at, sleep: async ms => { sleeps.push(ms); at += ms; }, sleeps };
+}
+const releaseWith = (lifecycle, versionCode = 15) => ({ track: 'alpha', releaseName: `0.7.0 (${versionCode})`, activeArtifacts: [{ versionCode }], releaseLifecycleState: lifecycle });
+
+for (const [suffix, status, description] of [
+  ['IN_REVIEW', 'in_review', 'In Google review; not yet available'],
+  ['APPROVED_NOT_PUBLISHED', 'approved_not_published', 'Approved; waiting for publication'],
+  ['PUBLISHED', 'available', 'Published and available'],
 ]) {
   test(`verify reads the release lifecycle without an edit and reports ${suffix}`, async t => {
     const setup = await fixture(t);
     const lifecycle = `RELEASE_LIFECYCLE_STATE_${suffix}`;
+    const time = clock();
     let requests = 0;
-    await runRelease({ ...setup, mode: 'verify', request: async (url, method = 'GET') => {
+    await runRelease({ ...setup, ...time, mode: 'verify', request: async (url, method = 'GET') => {
       requests++;
       assert.equal(url, `${base}/tracks/alpha/releases`);
       assert.equal(method, 'GET');
-      return { releases: [{ track: 'alpha', releaseName: '0.7.0 (15)', activeArtifacts: [{ versionCode: 15 }], releaseLifecycleState: lifecycle }] };
+      return { releases: [releaseWith(lifecycle)] };
     } });
     assert.equal(requests, 1);
+    assert.deepEqual(time.sleeps, []);
     const summary = await readFile(setup.env.GITHUB_STEP_SUMMARY, 'utf8');
     assert.ok(summary.includes(lifecycle));
+    assert.ok(summary.includes(`(${status})`));
     assert.ok(summary.includes(description));
     assert.ok(summary.includes(`https://play.google.com/apps/testing/${packageName}`));
-    assert.equal(JSON.parse(await readFile(setup.statePath, 'utf8')).releaseLifecycleState, lifecycle);
+    const verified = JSON.parse(await readFile(setup.statePath, 'utf8'));
+    assert.equal(verified.releaseLifecycleState, lifecycle);
+    assert.equal(verified.reviewStatus, status);
+    assert.match(setup.messages.at(-1), new RegExp(`^Verified closed testing release 0.7.0 \\(15\\): ${lifecycle} \\(${status}\\)`));
   });
 }
 
-for (const suffix of ['NOT_SENT_FOR_REVIEW', 'NOT_APPROVED', 'DRAFT', 'UNSPECIFIED']) {
-  test(`verify rejects ${suffix} instead of reporting successful delivery`, async t => {
+test('verify waits while Google still reports the fresh release as not sent for review', async t => {
+  // As in run 39143454245: right after the commit the release is missing or not yet sent.
+  const setup = await fixture(t);
+  const time = clock();
+  const answers = [
+    { releases: [releaseWith('RELEASE_LIFECYCLE_STATE_PUBLISHED', 14)] },
+    { releases: [releaseWith('RELEASE_LIFECYCLE_STATE_NOT_SENT_FOR_REVIEW')] },
+    { releases: [releaseWith('RELEASE_LIFECYCLE_STATE_DRAFT')] },
+    { releases: [releaseWith('RELEASE_LIFECYCLE_STATE_IN_REVIEW')] },
+  ];
+  await runRelease({ ...setup, ...time, env: { ...setup.env, PLAY_VERIFY_INTERVAL_MS: '30000' }, mode: 'verify', request: async () => answers.shift() });
+  assert.equal(answers.length, 0);
+  assert.deepEqual(time.sleeps, [30000, 30000, 30000]);
+  const verified = JSON.parse(await readFile(setup.statePath, 'utf8'));
+  assert.equal(verified.reviewStatus, 'in_review');
+  assert.equal(verified.checks, 4);
+  assert.match(setup.messages[1], /Check 2 after 30 s: 0.7.0 \(15\): RELEASE_LIFECYCLE_STATE_NOT_SENT_FOR_REVIEW/);
+});
+
+for (const suffix of ['NOT_SENT_FOR_REVIEW', 'DRAFT', 'UNSPECIFIED']) {
+  test(`verify reports ${suffix} as not submitted once the wait is over`, async t => {
     const setup = await fixture(t);
     const lifecycle = `RELEASE_LIFECYCLE_STATE_${suffix}`;
-    await assert.rejects(runRelease({ ...setup, mode: 'verify', request: async () => ({
-      releases: [{ track: 'alpha', releaseName: '0.7.0 (15)', activeArtifacts: [{ versionCode: 15 }], releaseLifecycleState: lifecycle }],
-    }) }), new RegExp(lifecycle));
-    await assert.rejects(readFile(setup.env.GITHUB_STEP_SUMMARY), { code: 'ENOENT' });
+    const time = clock();
+    let requests = 0;
+    await assert.rejects(runRelease({ ...setup, ...time, env: { ...setup.env, PLAY_VERIFY_TIMEOUT_MS: '120000', PLAY_VERIFY_INTERVAL_MS: '30000' }, mode: 'verify', request: async () => {
+      requests++;
+      return { releases: [releaseWith(lifecycle)] };
+    } }), new RegExp(`${lifecycle} \\(not_submitted\\)`));
+    // Checks at 0, 30, 60, 90 and 120 s, never beyond the timeout.
+    assert.equal(requests, 5);
+    assert.ok(time.sleeps.reduce((a, b) => a + b, 0) <= 120000);
+    const summary = await readFile(setup.env.GITHUB_STEP_SUMMARY, 'utf8');
+    assert.ok(summary.includes(`${lifecycle} (not_submitted)`));
+    assert.ok(!summary.includes('available'));
+    assert.equal(JSON.parse(await readFile(setup.statePath, 'utf8')).reviewStatus, 'not_submitted');
+  });
+}
+
+for (const [suffix, status] of [['NOT_APPROVED', 'rejected'], ['SOMETHING_NEW', 'unknown']]) {
+  test(`verify fails at once for ${suffix} instead of reporting successful delivery`, async t => {
+    const setup = await fixture(t);
+    const lifecycle = `RELEASE_LIFECYCLE_STATE_${suffix}`;
+    const time = clock();
+    await assert.rejects(runRelease({ ...setup, ...time, mode: 'verify', request: async () => ({ releases: [releaseWith(lifecycle)] }) }), new RegExp(`${lifecycle} \\(${status}\\)`));
+    assert.deepEqual(time.sleeps, []);
+    assert.equal(JSON.parse(await readFile(setup.statePath, 'utf8')).reviewStatus, status);
   });
 }
 
 test('verify rejects a different version even if it is published', async t => {
   const setup = await fixture(t);
-  await assert.rejects(runRelease({ ...setup, mode: 'verify', request: async () => ({
+  const time = clock();
+  await assert.rejects(runRelease({ ...setup, ...time, env: { ...setup.env, PLAY_VERIFY_TIMEOUT_MS: '60000' }, mode: 'verify', request: async () => ({
     releases: [{ track: 'alpha', releaseName: 'old', activeArtifacts: [{ versionCode: 10 }], releaseLifecycleState: 'RELEASE_LIFECYCLE_STATE_PUBLISHED' }],
   }) }), /Submitted version not found/);
+  assert.equal(JSON.parse(await readFile(setup.statePath, 'utf8')).reviewStatus, 'not_submitted');
 });
 
 test('old, mismatched or foreign release states are rejected before any API request', async t => {

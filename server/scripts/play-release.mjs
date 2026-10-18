@@ -7,13 +7,21 @@ const packageName = 'de.kolpingtheater.ramsen.theaterapp';
 const trackName = 'alpha';
 const base = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}`;
 const testUrl = `https://play.google.com/apps/testing/${packageName}`;
-const lifecycleDescriptions = {
-  RELEASE_LIFECYCLE_STATE_IN_REVIEW: 'In Google review; not yet available to closed testers.',
-  RELEASE_LIFECYCLE_STATE_APPROVED_NOT_PUBLISHED: 'Approved; waiting for publication in Play Console.',
-  RELEASE_LIFECYCLE_STATE_PUBLISHED: 'Published and available on the closed testing track.',
+// Outcome of a submitted release, by `releaseLifecycleState` of tracks.releases.list.
+const outcomes = {
+  RELEASE_LIFECYCLE_STATE_IN_REVIEW: { status: 'in_review', ok: true, description: 'In Google review; not yet available to closed testers.' },
+  RELEASE_LIFECYCLE_STATE_APPROVED_NOT_PUBLISHED: { status: 'approved_not_published', ok: true, description: 'Approved; waiting for publication in Play Console (managed publishing).' },
+  RELEASE_LIFECYCLE_STATE_PUBLISHED: { status: 'available', ok: true, description: 'Published and available on the closed testing track.' },
+  RELEASE_LIFECYCLE_STATE_NOT_APPROVED: { status: 'rejected', ok: false, description: 'Rejected by Google review; see Play Console.' },
 };
+const notSubmitted = { status: 'not_submitted', ok: false, description: 'Not sent for review; Google has not accepted the release for review.' };
+// Right after edits.commit, Google still reports the release as not sent for review (or not at
+// all) while it hands it to the review; run 39143454245 read NOT_SENT_FOR_REVIEW 0.4 s after the
+// commit, the same release was published later. So these states are only final after a while.
+const pendingStates = new Set([undefined, 'RELEASE_LIFECYCLE_STATE_UNSPECIFIED', 'RELEASE_LIFECYCLE_STATE_DRAFT', 'RELEASE_LIFECYCLE_STATE_NOT_SENT_FOR_REVIEW']);
+const sleepFor = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-export async function runRelease({ mode, statePath, bundlePath, request, env = process.env, log = console.log }) {
+export async function runRelease({ mode, statePath, bundlePath, request, env = process.env, log = console.log, sleep = sleepFor, now = Date.now }) {
   if (!['prepare', 'publish', 'verify'].includes(mode) || !statePath) {
     throw new Error('Usage: node play-release.mjs prepare|publish|verify STATE [BUNDLE]');
   }
@@ -55,22 +63,38 @@ export async function runRelease({ mode, statePath, bundlePath, request, env = p
       };
       await request(`${base}/edits/${state.editId}/tracks/${trackName}`, 'PUT', { track: trackName, releases: [release] });
       await request(`${base}/edits/${state.editId}:validate`, 'POST');
-      await request(`${base}/edits/${state.editId}:commit`, 'POST');
+      // Sent for review explicitly. Should Google refuse that (e.g. after a rejection), the commit
+      // fails instead of silently leaving the release unsubmitted.
+      await request(`${base}/edits/${state.editId}:commit?changesNotSentForReview=false`, 'POST');
       state.bundleSha256 = bundle.sha256;
       await writeFile(statePath, JSON.stringify(state, null, 2) + '\n');
       log(`Submitted closed testing release ${release.name}; review and availability are checked separately`);
     } else {
-      const { releases = [] } = await request(`${base}/tracks/${trackName}/releases`);
-      const release = releases.find(r => r.track === trackName && r.activeArtifacts?.some(a => Number(a.versionCode) === state.versionCode));
-      if (!release) throw new Error('Submitted version not found in the closed testing track');
-      const lifecycle = release.releaseLifecycleState;
-      const description = lifecycleDescriptions[lifecycle];
-      if (!description) throw new Error(`Closed testing release ${release.releaseName} is not submitted or available: ${lifecycle}`);
-      state.releaseLifecycleState = lifecycle;
+      // Poll until Google reports review, approval or publication; give up after the timeout.
+      const timeoutMs = Number(env.PLAY_VERIFY_TIMEOUT_MS ?? 15 * 60 * 1000);
+      const intervalMs = Number(env.PLAY_VERIFY_INTERVAL_MS ?? 20 * 1000);
+      const started = now();
+      let release, lifecycle, outcome, attempts = 0;
+      for (;;) {
+        attempts++;
+        const { releases = [] } = await request(`${base}/tracks/${trackName}/releases`);
+        release = releases.find(r => r.track === trackName && r.activeArtifacts?.some(a => Number(a.versionCode) === state.versionCode));
+        lifecycle = release?.releaseLifecycleState;
+        const seconds = Math.round((now() - started) / 1000);
+        log(`Check ${attempts} after ${seconds} s: ${release ? `${release.releaseName}: ${lifecycle}` : `version ${state.versionCode} not yet in the closed testing track`}`);
+        outcome = pendingStates.has(lifecycle) ? null : outcomes[lifecycle] ?? { status: 'unknown', ok: false, description: 'Unknown release state.' };
+        if (outcome || now() - started + intervalMs > timeoutMs) break;
+        await sleep(intervalMs);
+      }
+      outcome ??= notSubmitted;
+      const name = release?.releaseName ?? `${state.versionName} (${state.versionCode})`;
+      Object.assign(state, { releaseLifecycleState: lifecycle ?? null, reviewStatus: outcome.status, checkedAt: new Date(now()).toISOString(), checks: attempts });
       await writeFile(statePath, JSON.stringify(state, null, 2) + '\n');
-      log(`Verified closed testing release ${release.releaseName}: ${lifecycle}. ${description}`);
       if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY,
-        `### Google Play closed test\n\nVersion ${release.releaseName}, commit ${state.commit}, track ${trackName}.\n\nStatus: ${lifecycle}. ${description}\n\n[Join the closed test](${testUrl})\n`);
+        `### Google Play closed test\n\nVersion ${name}, commit ${state.commit}, track ${trackName}.\n\nStatus: ${lifecycle ?? 'not found'} (${outcome.status}). ${outcome.description}\n\n[Join the closed test](${testUrl})\n`);
+      if (!release) throw new Error(`Submitted version not found in the closed testing track after ${attempts} checks`);
+      if (!outcome.ok) throw new Error(`Closed testing release ${name} is not in review or available: ${lifecycle} (${outcome.status}). ${outcome.description}`);
+      log(`Verified closed testing release ${name}: ${lifecycle} (${outcome.status}). ${outcome.description}`);
     }
   }
 }
