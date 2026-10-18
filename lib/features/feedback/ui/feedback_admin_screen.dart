@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
 
-import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
-import '../../../data/api_client.dart';
 import '../../../shared/feedback.dart';
+import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/empty_state.dart';
-import '../../../shared/widgets/state_pill.dart';
 import '../../messages/ui/messages_screen.dart' show messageTime;
 import '../data/feedback_api.dart';
-import '../domain/feedback_entry.dart';
+import '../domain/feedback_ticket.dart';
 import 'feedback_category_icon.dart';
+import 'feedback_pills.dart';
+import 'feedback_ticket_screen.dart';
 
-/// The members' feedback for the admins, newest first, to be marked as done.
+/// All members' feedback tickets for the admins, filtered by status and
+/// kind; new and unanswered ones are marked.
 class FeedbackAdminScreen extends StatefulWidget {
   const FeedbackAdminScreen({super.key, required this.controller});
   final AppController controller;
@@ -22,11 +23,11 @@ class FeedbackAdminScreen extends StatefulWidget {
 
 class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
   // The last loaded list stays visible while a reload runs.
-  List<FeedbackEntry>? _entries;
+  List<FeedbackTicket>? _entries;
   Object? _loadError;
   bool _loading = true;
-  String _filter = 'new';
-  final _updating = <String>{};
+  FeedbackStatus? _status = FeedbackStatus.open;
+  String? _category;
 
   @override
   void initState() {
@@ -57,53 +58,32 @@ class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
     }
   }
 
-  Future<void> _setDone(FeedbackEntry entry, bool done) async {
-    if (!mounted) return;
-    setState(() => _updating.add(entry.id));
-    try {
-      final updated = await setFeedbackDone(
-        widget.controller,
-        entry,
-        done: done,
-      );
-      if (!mounted) return;
-      setState(() {
-        _entries = [
-          for (final e in _entries ?? const <FeedbackEntry>[])
-            e.id == updated.id ? updated : e,
-        ];
-      });
-      showDone(
-        context,
-        done ? 'Als erledigt markiert.' : 'Wieder als offen markiert.',
-        actionLabel: 'Rückgängig',
-        onAction: () => _setDone(updated, !done),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      if (e is ApiException &&
-          (e.statusCode == 409 || e.code == 'version_conflict')) {
-        showProblem(
-          context,
-          'Dieses Feedback wurde inzwischen geändert. Die Liste wurde neu geladen.',
-        );
-        await _load();
-      } else {
-        showProblem(context, e);
-      }
-    } finally {
-      if (mounted) setState(() => _updating.remove(entry.id));
-    }
+  Future<void> _open(FeedbackTicket ticket) async {
+    await openPage<void>(
+      context,
+      FeedbackTicketScreen(
+        controller: widget.controller,
+        ticketId: ticket.id,
+        admin: true,
+        initial: ticket,
+      ),
+    );
+    if (mounted) await _load();
   }
 
   @override
   Widget build(BuildContext context) {
     final entries = _entries;
-    final open = entries?.where((e) => !e.done).length ?? 0;
-    final done = (entries?.length ?? 0) - open;
+    final ofKind = [
+      for (final e in entries ?? const <FeedbackTicket>[])
+        if (_category == null || e.category == _category) e,
+    ];
+    int count(FeedbackStatus status) =>
+        ofKind.where((e) => e.status == status).length;
+    final fresh = ofKind.where((e) => e.isNew).length;
     final shown = [
-      for (final e in entries ?? const <FeedbackEntry>[])
-        if (_filter == 'all' || e.done == (_filter == 'done')) e,
+      for (final e in ofKind)
+        if (_status == null || e.status == _status) e,
     ];
     return AdminPage(
       controller: widget.controller,
@@ -134,19 +114,55 @@ class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
             child: Center(child: CircularProgressIndicator()),
           )
         else ...[
+          if (fresh > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                fresh == 1
+                    ? '1 neues Feedback ist noch unbeantwortet.'
+                    : '$fresh neue Feedbacks sind noch unbeantwortet.',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
               for (final (value, label) in [
-                ('new', 'Offen ($open)'),
-                ('done', 'Erledigt ($done)'),
-                ('all', 'Alle (${entries.length})'),
+                (FeedbackStatus.open, 'Offen'),
+                (FeedbackStatus.answered, 'Wartet auf Rückmeldung'),
+                (FeedbackStatus.closed, 'Geschlossen'),
               ])
                 ChoiceChip(
-                  label: Text(label),
-                  selected: _filter == value,
-                  onSelected: (_) => setState(() => _filter = value),
+                  label: Text('$label (${count(value)})'),
+                  selected: _status == value,
+                  onSelected: (_) => setState(() => _status = value),
+                ),
+              ChoiceChip(
+                label: Text('Alle (${ofKind.length})'),
+                selected: _status == null,
+                onSelected: (_) => setState(() => _status = null),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilterChip(
+                label: const Text('Alle Arten'),
+                selected: _category == null,
+                onSelected: (_) => setState(() => _category = null),
+              ),
+              for (final category in feedbackCategories)
+                FilterChip(
+                  avatar: Icon(feedbackCategoryIcon(category), size: 18),
+                  label: Text(feedbackCategoryLabel(category)),
+                  selected: _category == category,
+                  onSelected: (_) => setState(
+                    () => _category = _category == category ? null : category,
+                  ),
                 ),
             ],
           ),
@@ -156,14 +172,14 @@ class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
               icon: Icons.feedback_outlined,
               title: entries.isEmpty
                   ? 'Noch kein Feedback'
-                  : _filter == 'new'
-                  ? 'Alles erledigt'
+                  : _status == FeedbackStatus.open
+                  ? 'Alles beantwortet'
                   : 'Nichts in dieser Ansicht',
               message: entries.isEmpty
                   ? 'Was Mitglieder unter „Mein Bereich“ › „Feedback geben“ '
                         'senden, erscheint hier.'
-                  : _filter == 'new'
-                  ? 'Es gibt kein offenes Feedback. Bearbeitetes findest du unter „Erledigt“.'
+                  : _status == FeedbackStatus.open
+                  ? 'Kein Feedback wartet auf eine Antwort.'
                   : 'Wähle oben eine andere Ansicht.',
             ),
           for (final entry in shown)
@@ -171,8 +187,7 @@ class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
               key: ValueKey('feedback-${entry.id}'),
               controller: widget.controller,
               entry: entry,
-              busy: _updating.contains(entry.id),
-              onToggle: () => _setDone(entry, !entry.done),
+              onTap: () => _open(entry),
             ),
         ],
       ],
@@ -185,55 +200,68 @@ class _FeedbackCard extends StatelessWidget {
     super.key,
     required this.controller,
     required this.entry,
-    required this.busy,
-    required this.onToggle,
+    required this.onTap,
   });
   final AppController controller;
-  final FeedbackEntry entry;
-  final bool busy;
-  final VoidCallback onToggle;
+  final FeedbackTicket entry;
+  final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final date = entry.createdAt;
-    final categoryColor = switch (entry.category) {
-      'bug' => theme.colorScheme.error,
-      'idea' => StageTheme.violet,
-      _ => theme.colorScheme.outline,
-    };
+    final date = entry.lastActivityAt;
+    final answer = entry.lastAdminMessage;
+    final waiting = entry.status == FeedbackStatus.open;
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                StatePill(
-                  feedbackCategoryLabel(entry.category),
-                  color: categoryColor,
-                  icon: feedbackCategoryIcon(entry.category),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  feedbackCategoryPill(context, entry.category),
+                  feedbackStatusPill(entry, admin: true),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                entry.message,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  fontWeight: waiting ? FontWeight.w600 : null,
                 ),
-                entry.done
-                    ? const StatePill('Erledigt', color: StageTheme.green)
-                    : const StatePill('Offen', color: StageTheme.orange),
-              ],
-            ),
-            const SizedBox(height: 10),
-            SelectableText(entry.message, style: theme.textTheme.bodyLarge),
-            const SizedBox(height: 10),
-            Text(
-              [
-                entry.authorName.isEmpty ? 'Unbekannt' : entry.authorName,
-                if (date != null) messageTime(date, controller.now),
-              ].join(' · '),
-              style: theme.textTheme.titleSmall,
-            ),
-            if (entry.appVersion.isNotEmpty || entry.platform.isNotEmpty)
+              ),
+              if (entry.messages.length > 1 && !entry.messages.last.fromAdmin)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Zuletzt: ${entry.messages.last.text}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              const SizedBox(height: 10),
               Text(
                 [
+                  entry.authorName.isEmpty ? 'Unbekannt' : entry.authorName,
+                  if (date != null) messageTime(date, controller.now),
+                ].join(' · '),
+                style: theme.textTheme.titleSmall,
+              ),
+              Text(
+                [
+                  entry.messages.length == 1
+                      ? '1 Nachricht'
+                      : '${entry.messages.length} Nachrichten',
+                  if (answer != null)
+                    'Antwort von ${answer.authorName.isEmpty ? 'Theaterleitung' : answer.authorName}',
                   if (entry.appVersion.isNotEmpty)
                     'Version ${entry.appVersion}',
                   if (entry.platform.isNotEmpty)
@@ -241,17 +269,8 @@ class _FeedbackCard extends StatelessWidget {
                 ].join(' · '),
                 style: theme.textTheme.bodySmall,
               ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: busy ? null : onToggle,
-                icon: Icon(entry.done ? Icons.undo : Icons.check, size: 18),
-                label: Text(
-                  entry.done ? 'Wieder öffnen' : 'Als erledigt markieren',
-                ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

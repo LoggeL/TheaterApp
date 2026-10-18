@@ -2,6 +2,7 @@ import { berlinDateTime, customReminderMinutes, defaultReminders, eventNotificat
 import { berlinParts, fromBerlin, seriesOccurrences, seriesSummary } from './event-series.mjs';
 import { compareProductionsNewestFirst } from './production-order.mjs';
 import { migrateSharedSpeakers, sharedSpeakersMigrationId, splitSharedSpeakers } from './shared-speakers.mjs';
+import { feedbackList, feedbackTicketsMigrationId, forgetFeedbackAccount, forgetFeedbackPerson, migrateFeedbackTickets, setFeedbackStatus, submitFeedback } from './feedback-tickets.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 
 // Machine-readable reasons next to the German message; clients branch on `code`, never on the text.
@@ -29,10 +30,9 @@ export const remindCooldownMs = 10 * 60 * 1000;
 // Declines this close to the start are pushed to admins and the production's directors.
 export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'productionScopeEvents']);
-// Feedback from members to the admins: limits per message and per account and hour.
-export const feedbackMaxLength = 4000, feedbackPerHour = 10;
-const feedbackCategories = ['idea', 'bug', 'other'], feedbackStatuses = ['new', 'done'];
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents']);
+// Feedback from members to the admins as support tickets (see feedback-tickets.mjs).
+export { feedbackMaxLength, feedbackPerHour } from './feedback-tickets.mjs';
 const seriesFields = ['title', 'description', 'place', 'type', 'locked', 'roleIds', 'personIds', 'productionIds', 'productionId'];
 // Legacy records may lack fields; compare them as event.save would store them.
 const sameValue = (field, x, y) => {
@@ -101,6 +101,8 @@ export class Theater {
     if (!store.get('settings', 'groupsMigrated')) store.transaction(() => migrateGroupsToRoles(store));
     // Combined roles like "ROMEO UND JULIA" become cues with several speakers.
     if (!store.get('migrations', sharedSpeakersMigrationId)) store.transaction(() => migrateSharedSpeakers(store));
+    // Existing feedback becomes tickets with its text as the first message; `done` ones are closed.
+    if (!store.get('migrations', feedbackTicketsMigrationId)) store.transaction(() => migrateFeedbackTickets(store));
   }
   session(identity, registrationName) {
     return this.store.transaction(() => {
@@ -291,45 +293,10 @@ export class Theater {
     const invitedIds = this.audienceIds(e), answered = new Set(responses.filter(r => ['yes', 'late', 'no'].includes(r.status)).map(r => r.personId)), absent = new Set(absences.map(x => x.personId));
     return { responses, checkins: this.store.all('checkins').filter(r => r.eventId === eventId), absences, invitedIds, openIds: invitedIds.filter(x => !answered.has(x)), absentIds: invitedIds.filter(x => absent.has(x)), ...this.reminded(this.nudges(), 'event', eventId) };
   }
-  /** Stores member feedback for the admins and notifies them; at most `feedbackPerHour` per account. */
-  submitFeedback(uid, b) {
-    return this.store.transaction(() => {
-      const s = this.store, a = this.account(uid), message = typeof b.message === 'string' ? b.message.trim() : '';
-      if (!message) fail(400, 'Bitte eine Nachricht eingeben.');
-      if (message.length > feedbackMaxLength) fail(400, `Die Nachricht darf höchstens ${feedbackMaxLength} Zeichen lang sein.`);
-      const category = b.category ?? 'other', platform = b.platform ?? null;
-      if (!feedbackCategories.includes(category)) fail(400, 'Ungültige Kategorie.');
-      if (platform !== null && !['android', 'ios', 'web'].includes(platform)) fail(400, 'Ungültige Plattform.');
-      if (b.appVersion != null && (typeof b.appVersion !== 'string' || b.appVersion.trim().length > 40)) fail(400, 'Ungültige App-Version.');
-      const at = this.clock(), since = new Date(+at - 3600000).toISOString();
-      if (s.all('feedback').filter(f => f.authorUid === uid && f.createdAt > since).length >= feedbackPerHour) fail(429, 'Du hast in der letzten Stunde schon viel Feedback geschickt. Bitte versuche es später noch einmal.', 'rate_limited');
-      const name = s.get('members', a.personId)?.name ?? a.name, createdAt = at.toISOString(), feedbackId = id();
-      s.put('feedback', feedbackId, { id: feedbackId, message, category, status: 'new', createdAt, updatedAt: createdAt, version: 1, appVersion: text(b.appVersion, 40) || null, platform, authorUid: uid, authorPersonId: a.personId, authorName: name });
-      const short = message.replace(/\s+/g, ' ');
-      // No deep-link target exists for feedback (see deliverPush); the app just opens.
-      this.enqueuePush({ title: 'Neues Feedback', body: `${name}: ${short.length > 120 ? `${short.slice(0, 119).trimEnd()}…` : short}`, data: { feedback: '1' }, adminsOnly: true });
-      s.audit(uid, 'feedback.create', feedbackId);
-      return { ok: true, id: feedbackId };
-    });
-  }
-  // The current name of a still existing person wins over the name saved with the feedback.
-  feedbackView(f) {
-    const { authorUid, authorPersonId, authorName, ...rest } = f;
-    return { ...rest, author: { uid: authorUid, personId: authorPersonId, name: (authorPersonId != null && this.store.get('members', authorPersonId)?.name) || authorName } };
-  }
-  feedbackList(uid) { this.account(uid, true); return { feedback: this.store.all('feedback').sort((x, y) => y.createdAt.localeCompare(x.createdAt)).map(f => this.feedbackView(f)) }; }
-  feedbackStatus(uid, feedbackId, b) {
-    return this.store.transaction(() => {
-      this.account(uid, true);
-      if (!feedbackStatuses.includes(b.status)) fail(400, 'Ungültiger Status.');
-      const f = this.store.get('feedback', feedbackId);
-      if (!f) fail(404, 'Feedback nicht gefunden.');
-      if (f.version !== b.version) fail(409, 'Das Feedback wurde inzwischen geändert. Bitte neu laden.', 'version_conflict');
-      const next = this.store.put('feedback', f.id, { ...f, status: b.status, version: f.version + 1, updatedAt: this.clock().toISOString() });
-      this.store.audit(uid, 'feedback.status', f.id);
-      return { feedback: this.feedbackView(next) };
-    });
-  }
+  // Feedback tickets live in feedback-tickets.mjs; these keep the existing entry points.
+  submitFeedback(uid, b) { return submitFeedback(this, uid, b); }
+  feedbackList(uid) { return feedbackList(this, uid); }
+  feedbackStatus(uid, feedbackId, b) { return setFeedbackStatus(this, uid, feedbackId, b); }
   /** Deletes a login and its link; the person and their theater data stay. `deleteIdentity` removes the Firebase user. */
   async deleteAccount(uid, targetUid, version, deleteIdentity = null) {
     const check = () => {
@@ -348,7 +315,7 @@ export class Theater {
     for (const d of this.store.all('devices').filter(d => d.uid === targetUid)) this.store.delete('devices', d.id);
     this.store.db.prepare('DELETE FROM requests WHERE uid = ?').run(targetUid);
     // Feedback stays with the person; only the deleted login is removed from it.
-    for (const f of this.store.all('feedback').filter(f => f.authorUid === targetUid)) this.store.put('feedback', f.id, { ...f, authorUid: null });
+    forgetFeedbackAccount(this.store, targetUid);
     this.store.deleteAccount(targetUid);
     this.store.audit(actor, 'account.delete', targetUid);
   }
@@ -1075,7 +1042,8 @@ export class Theater {
     for (const x of s.all('absences').filter(x => x.personId === personId)) s.delete('absences', x.id);
     for (const c of s.all('comments').filter(c => c.authorId === personId)) s.delete('comments', c.id);
     // Feedback is personal data of its author and goes with the person (deleting only the login keeps it).
-    for (const f of s.all('feedback').filter(f => f.authorPersonId === personId)) s.delete('feedback', f.id);
+    // Their answers in other people's tickets stay, without their name.
+    forgetFeedbackPerson(s, personId);
     // Reminder keys are `${eventId}:${startsAt}:${personId}:${kind}`; startsAt contains colons itself.
     for (const { id: key } of s.db.prepare("SELECT id FROM entities WHERE kind = 'reminderSent'").all()) if (key.split(':').at(-2) === String(personId)) s.delete('reminderSent', key);
     s.delete('reminders', personId);

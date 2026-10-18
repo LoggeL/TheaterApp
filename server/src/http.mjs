@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { AppError } from './theater.mjs';
+import { adminTicketView, closeOwnFeedback, markFeedbackRead, ownFeedback, ownTicketView, replyAsAdmin, replyAsMember } from './feedback-tickets.mjs';
 
 // Content-addressed web files from tool/version-web.mjs never change under their name.
 // Entry points (index.html, workers, manifests) and unhashed files must stay revalidated.
@@ -99,6 +100,16 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (route === '/admin/feedback' && req.method === 'GET') return json(res, 200, theater.feedbackList(identity.uid));
       const feedback = route.match(/^\/admin\/feedback\/([^/]+)$/);
       if (feedback && req.method === 'PUT') return json(res, 200, theater.feedbackStatus(identity.uid, feedback[1], body));
+      if (feedback && req.method === 'GET') return json(res, 200, adminTicketView(theater, identity.uid, feedback[1]));
+      const answer = route.match(/^\/admin\/feedback\/([^/]+)\/messages$/);
+      if (answer && req.method === 'POST') return json(res, 200, replyAsAdmin(theater, identity.uid, answer[1], body));
+      // A member's own feedback tickets.
+      if (route === '/feedback' && req.method === 'GET') return json(res, 200, ownFeedback(theater, identity.uid));
+      const ownTicket = route.match(/^\/feedback\/([^/]+)(\/messages|\/read)?$/);
+      if (ownTicket && !ownTicket[2] && req.method === 'GET') return json(res, 200, ownTicketView(theater, identity.uid, ownTicket[1]));
+      if (ownTicket && !ownTicket[2] && req.method === 'PUT') return json(res, 200, closeOwnFeedback(theater, identity.uid, ownTicket[1], body));
+      if (ownTicket?.[2] === '/messages' && req.method === 'POST') return json(res, 200, replyAsMember(theater, identity.uid, ownTicket[1], body));
+      if (ownTicket?.[2] === '/read' && req.method === 'PUT') return json(res, 200, markFeedbackRead(theater, identity.uid, ownTicket[1]));
       if (route === '/admin/accounts' && req.method === 'GET') return json(res, 200, theater.adminData(identity.uid));
       if (route === '/admin/email' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.emailEnabled, jobs: theater.store.all('emailJobs').slice(-50).map(({ acceptedRecipientIds, failedRecipientIds, ...job }) => job) }); }
       if (route === '/admin/push' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.pushEnabled, devices: theater.store.all('devices').map(({ token, ...d }) => d), jobs: theater.store.all('pushJobs').slice(-50).map(({ acceptedDeviceIds, ...j }) => j) }); }

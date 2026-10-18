@@ -61,6 +61,8 @@ class AppTarget {
             'accounts',
             'slots',
             'polls',
+            'feedback',
+            'admin-feedback',
           }.contains(path[0]) ||
           path[1].isEmpty ||
           path[1].length > 200) {
@@ -113,6 +115,17 @@ class AppTarget {
     final poll = data['pollId'];
     if (poll is String && poll.isNotEmpty && poll.length <= 200) {
       return AppTarget('polls', poll);
+    }
+    // An answer to the member's own feedback, or a ticket for the admins.
+    final feedback = data['feedbackId'];
+    if (feedback is String && feedback.isNotEmpty && feedback.length <= 200) {
+      return AppTarget('feedback', feedback);
+    }
+    final adminFeedback = data['adminFeedbackId'];
+    if (adminFeedback is String &&
+        adminFeedback.isNotEmpty &&
+        adminFeedback.length <= 200) {
+      return AppTarget('admin-feedback', adminFeedback);
     }
     return null;
   }

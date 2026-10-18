@@ -201,7 +201,7 @@ test('the snapshot lists the supported API features next to the existing capabil
     assert.deepEqual(capabilities.features, [...apiFeatures]);
     assert.deepEqual(Object.keys(capabilities).slice(0, 6), ['pushConfigured', 'emailConfigured', 'firebaseAuth', 'checkins', 'admin', 'sampleData']);
   }
-  assert.deepEqual([...apiFeatures].sort(), ['absenceOutcome', 'addressedToMe', 'errorCodes', 'eventDetailsV2', 'feedback', 'lateDeclines', 'nudges', 'pollDelete', 'pollPush', 'pollRemind', 'productionScopeEvents', 'seriesEdit', 'slotNotices']);
+  assert.deepEqual([...apiFeatures].sort(), ['absenceOutcome', 'addressedToMe', 'errorCodes', 'eventDetailsV2', 'feedback', 'feedbackTickets', 'lateDeclines', 'nudges', 'pollDelete', 'pollPush', 'pollRemind', 'productionScopeEvents', 'seriesEdit', 'slotNotices']);
 });
 
 test('event saves explain a skipped push and message sends count their recipients', t => {

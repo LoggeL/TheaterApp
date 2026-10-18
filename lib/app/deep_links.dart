@@ -6,6 +6,7 @@ import '../core/app_controller.dart';
 import '../core/device_services.dart';
 import '../features/accounts/ui/accounts_admin_screen.dart';
 import '../features/events/ui/event_detail_screen.dart';
+import '../features/feedback/feedback.dart';
 import '../features/messages/ui/message_detail_screen.dart';
 import '../features/polls/ui/poll_detail_screen.dart';
 import '../features/scripts/ui/script_reader_screen.dart';
@@ -75,6 +76,18 @@ class DeepLinkRouter {
       'productions' => (
         AppSection.scripts,
         ScriptReaderScreen(controller: controller, productionId: target.id),
+      ),
+      'feedback' => (
+        AppSection.me,
+        FeedbackTicketScreen(controller: controller, ticketId: target.id),
+      ),
+      'admin-feedback' when controller.user?.isAdmin == true => (
+        AppSection.admin,
+        FeedbackTicketScreen(
+          controller: controller,
+          ticketId: target.id,
+          admin: true,
+        ),
       ),
       _ => (null, null),
     };

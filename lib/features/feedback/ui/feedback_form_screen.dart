@@ -4,14 +4,16 @@ import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/layout/content_width.dart';
+import '../../../shared/navigation.dart';
 import '../../../shared/widgets/one_line_segmented_button.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../data/feedback_api.dart';
-import '../domain/feedback_entry.dart';
+import '../domain/feedback_ticket.dart';
 import 'feedback_category_icon.dart';
+import 'my_feedback_screen.dart';
 
 /// Lets a member send an idea, a bug report or anything else about the app
-/// to the admins.
+/// to the admins, and leads to their earlier feedback with the answers.
 class FeedbackFormScreen extends StatefulWidget {
   const FeedbackFormScreen({super.key, required this.controller});
   final AppController controller;
@@ -25,7 +27,33 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
   bool _busy = false, _sent = false;
   String? _error;
 
+  /// Own tickets with an unread answer; null until loaded (or unsupported).
+  int? _unread;
+
   AppController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnread();
+  }
+
+  Future<void> _loadUnread() async {
+    if (!feedbackTicketsAvailable(controller)) return;
+    try {
+      final tickets = await loadOwnFeedback(controller);
+      if (mounted) {
+        setState(() => _unread = tickets.where((t) => t.unread > 0).length);
+      }
+    } catch (_) {
+      // Only the hint on the link is missing; the list itself reports errors.
+    }
+  }
+
+  Future<void> _openMine() async {
+    await openPage<void>(context, MyFeedbackScreen(controller: controller));
+    if (mounted) await _loadUnread();
+  }
 
   @override
   void dispose() {
@@ -100,8 +128,12 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Es ist bei der Theaterleitung angekommen und wird dort gelesen.',
+              Text(
+                feedbackTicketsAvailable(controller)
+                    ? 'Es ist bei der Theaterleitung angekommen. Ihre Antwort '
+                          'findest du unter „Mein Feedback“.'
+                    : 'Es ist bei der Theaterleitung angekommen und wird dort '
+                          'gelesen.',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),
@@ -118,6 +150,11 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
                     onPressed: _again,
                     child: const Text('Weiteres Feedback senden'),
                   ),
+                  if (feedbackTicketsAvailable(controller))
+                    OutlinedButton(
+                      onPressed: _openMine,
+                      child: const Text('Mein Feedback'),
+                    ),
                 ],
               ),
             ],
@@ -135,8 +172,10 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
         eyebrow: 'Deine Meinung zählt',
         subtitle:
             'Eine Idee, ein Fehler oder etwas, das dich stört? Schreib es '
-            'hier auf – die Theaterleitung sieht es mit deinem Namen.',
+            'hier auf – die Theaterleitung sieht es mit deinem Namen und '
+            'kann dir antworten.',
       ),
+      _myFeedbackLink(context),
       const SectionTitle('Worum geht es?'),
       SizedBox(
         width: double.infinity,
@@ -221,5 +260,32 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
         style: theme.textTheme.bodySmall,
       ),
     ];
+  }
+
+  Widget _myFeedbackLink(BuildContext context) {
+    final unread = _unread ?? 0;
+    return Card(
+      child: ListTile(
+        key: const ValueKey('my-feedback-link'),
+        leading: Badge(
+          isLabelVisible: unread > 0,
+          label: Text('$unread'),
+          child: const Icon(Icons.forum_outlined),
+        ),
+        title: const Text('Mein Feedback'),
+        subtitle: Text(
+          !feedbackTicketsAvailable(controller)
+              ? 'Antworten der Theaterleitung gibt es nach dem nächsten '
+                    'Server-Update.'
+              : unread == 1
+              ? '1 neue Antwort der Theaterleitung'
+              : unread > 1
+              ? '$unread Feedbacks mit neuer Antwort'
+              : 'Dein bisheriges Feedback mit Status und Antworten',
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: _openMine,
+      ),
+    );
   }
 }
