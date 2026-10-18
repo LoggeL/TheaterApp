@@ -23,6 +23,10 @@ class ProtectedImage extends StatefulWidget {
 
 class _ProtectedImageState extends State<ProtectedImage> {
   late Future<MediaData> _image;
+
+  /// Scrolling a picture back into view shows it right away, without a
+  /// placeholder frame and an extra rebuild.
+  late final MediaData? _cached = widget.controller.cachedMedia(widget.path);
   @override
   void initState() {
     super.initState();
@@ -45,6 +49,7 @@ class _ProtectedImageState extends State<ProtectedImage> {
   @override
   Widget build(BuildContext context) => FutureBuilder<MediaData>(
     future: _image,
+    initialData: _cached,
     builder: (context, state) {
       final placeholder =
           widget.fallback ??

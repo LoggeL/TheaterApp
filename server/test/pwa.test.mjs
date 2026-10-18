@@ -86,7 +86,7 @@ test('asset URLs change with font contents while renderer URLs and prior files r
   assert.equal(await readFile(join(directory,next.assetBase,'assets/fonts/icons.otf'),'utf8'),'new font');
 });
 
-function workerRuntime({networkFails = false, installFails = false} = {}) {
+function workerRuntime({networkFails = false, installFails = false, userAgent = ''} = {}) {
   const handlers = {}, stores = new Map([['unrelated-private-cache', new Map()], ['theater-app-shell-old', new Map()]]);
   const removed = [], additions = [];
   let skipped = false, claimed = false;
@@ -95,20 +95,21 @@ function workerRuntime({networkFails = false, installFails = false} = {}) {
     return {
       addAll: async requests => { additions.push(...requests); if (installFails) throw new Error('Unavailable asset'); stores.get(name).set('/index.html', new Response('offline app')); },
       match: async key => stores.get(name).get(key) ?? (key.endsWith('/main.js') ? new Response('cached main') : undefined),
+      put: async (key, response) => { stores.get(name).set(key, response); },
     };
   };
   const context = {
-    URL, Request, Response,
-    self: {location: {origin: 'https://theater.example'}, addEventListener: (name, handler) => { handlers[name] = handler; }, skipWaiting: async () => { skipped = true; }, clients: {claim: async () => { claimed = true; }}},
+    URL, Request, Response, WebAssembly,
+    self: {location: {origin: 'https://theater.example'}, navigator: {userAgent}, addEventListener: (name, handler) => { handlers[name] = handler; }, skipWaiting: async () => { skipped = true; }, clients: {claim: async () => { claimed = true; }}},
     caches: {open: cache, keys: async () => [...stores.keys()], delete: async key => { removed.push(key); return stores.delete(key); }},
-    fetch: async () => { if (networkFails) throw new Error('Offline'); return new Response('current network app'); },
+    fetch: async () => { if (networkFails) throw new Error('Offline'); return Object.defineProperty(new Response('current network app'), 'type', {value: 'basic'}); },
   };
   return {handlers, context, removed, additions, stores, skipped: () => skipped, claimed: () => claimed};
 }
-async function loadWorker(options) {
+async function loadWorker(options = {}) {
   const runtime = workerRuntime(options);
   let script = await readFile(source('theater-service-worker.js'), 'utf8');
-  script = script.replace("{version: 'development', assets: []}", JSON.stringify({version: 'new', assets: ['/index.html', '/main.js']}));
+  script = script.replace("{version: 'development', assets: []}", JSON.stringify(options.build ?? {version: 'new', assets: ['/index.html', '/main.js']}));
   runInNewContext(script, runtime.context);
   return runtime;
 }
@@ -119,7 +120,7 @@ async function lifecycle(runtime, type) {
 }
 function request(runtime, path, extra = {}) {
   let response;
-  runtime.handlers.fetch({request: {url: 'https://theater.example' + path, method: 'GET', mode: 'cors', headers: new Headers(), ...extra}, respondWith: promise => { response = promise; }});
+  runtime.handlers.fetch({request: {url: 'https://theater.example' + path, method: 'GET', mode: 'cors', headers: new Headers(), ...extra}, respondWith: promise => { response = promise; }, waitUntil: () => {}});
   return response;
 }
 
@@ -146,6 +147,30 @@ test('API, authorized media and mutations bypass the worker; online navigation u
   assert.equal(request(runtime, '/missing.js'), undefined);
   assert.equal(await (await request(runtime, '/main.js')).text(), 'cached main');
   assert.equal(await (await request(runtime, '/', {mode: 'navigate'})).text(), 'current network app');
+});
+test('worker precaches the renderer the Flutter loader starts with and keeps another one once loaded', async () => {
+  const build = {version: 'new', assets: ['/index.html'], renderers: {
+    canvaskit: ['/main.1.dart.js', '/r/canvaskit.js', '/r/canvaskit.wasm'],
+    chromium: ['/main.1.dart.js', '/r/chromium/canvaskit.js', '/r/chromium/canvaskit.wasm'],
+    skwasm: ['/main.1.dart.mjs', '/main.1.dart.wasm', '/r/skwasm.js', '/r/skwasm.wasm'],
+  }};
+  const precached = async userAgent => {
+    const runtime = await loadWorker({build, userAgent});
+    await lifecycle(runtime, 'install');
+    return runtime.additions.map(request => new URL(request.url).pathname);
+  };
+  const chrome = await precached('Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36');
+  assert.deepEqual(chrome, ['/index.html', ...build.renderers.skwasm]);
+  const safari = await precached('Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1');
+  assert.deepEqual(safari, ['/index.html', ...build.renderers.canvaskit]);
+  // Chrome on iOS is WebKit as well.
+  assert.deepEqual(await precached('Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/141.0 Mobile/15E148 Safari/604.1'), safari);
+  const runtime = await loadWorker({build, userAgent: 'Safari'});
+  await lifecycle(runtime, 'install');
+  assert.equal(await (await request(runtime, '/main.1.dart.wasm')).text(), 'current network app');
+  await new Promise(resolve => setTimeout(resolve));
+  assert(runtime.stores.get('theater-app-shell-new').has('https://theater.example/main.1.dart.wasm'));
+  assert.equal(request(runtime, '/r/skwasm_heavy.wasm'), undefined);
 });
 test('offline navigation restores the cached app shell including a deep link', async () => {
   const runtime = await loadWorker({networkFails: true});
@@ -176,8 +201,8 @@ test('content-addressed web files are cached for a year; entry points and unhash
   const directory = await temporary(t);
   const h = '0123456789abcdef';
   const files = {
-    immutable: [`main.${h}.dart.js`, `flutter_bootstrap.${h}.js`, `pwa.${h}.js`, `favicon.${h}.png`, `icons/Icon-maskable-192.${h}.png`, `web-renderer/${h}/canvaskit.wasm`, `web-renderer/${h}/canvaskit.js`, `web-assets/${h}/assets/FontManifest.json`, `web-assets/${h}/assets/fonts/Roboto.ttf`],
-    noStore: ['index.html', 'main.dart.js', 'flutter_bootstrap.js', 'flutter.js', 'pwa.js', 'manifest.json', `manifest.${h}.json`, 'theater-service-worker.js', 'firebase-messaging-sw.js', 'firebase-web-config.js', 'release-assets.json', 'version.json', 'assets/FontManifest.json', 'canvaskit/canvaskit.js', `main.${h.slice(0, 8)}.dart.js`, `other.${h}.js`],
+    immutable: [`main.${h}.dart.js`, `main.${h}.dart.mjs`, `main.${h}.dart.wasm`, `web-renderer/${h}/skwasm.wasm`, `flutter_bootstrap.${h}.js`, `pwa.${h}.js`, `favicon.${h}.png`, `icons/Icon-maskable-192.${h}.png`, `web-renderer/${h}/canvaskit.wasm`, `web-renderer/${h}/canvaskit.js`, `web-assets/${h}/assets/FontManifest.json`, `web-assets/${h}/assets/fonts/Roboto.ttf`],
+    noStore: ['index.html', 'main.dart.js', 'main.dart.mjs', 'flutter_bootstrap.js', 'flutter.js', 'pwa.js', 'manifest.json', `manifest.${h}.json`, 'theater-service-worker.js', 'firebase-messaging-sw.js', 'firebase-web-config.js', 'release-assets.json', 'version.json', 'assets/FontManifest.json', 'canvaskit/canvaskit.js', `main.${h.slice(0, 8)}.dart.js`, `other.${h}.js`],
     hour: ['favicon.png', 'icons/Icon-192.png', 'assets/fonts/Roboto.ttf', 'canvaskit/canvaskit.wasm'],
   };
   for (const name of Object.values(files).flat()) {
@@ -192,6 +217,9 @@ test('content-addressed web files are cached for a year; entry points and unhash
   for (const name of files.immutable) assert.equal(await cacheControl(name), 'public, max-age=31536000, immutable', name);
   for (const name of files.noStore) assert.match(await cacheControl(name), /no-store/, name);
   for (const name of files.hour) assert.equal(await cacheControl(name), 'public, max-age=3600', name);
+  // Module imports and streaming Wasm compilation need their exact types.
+  assert.equal((await fetch(base + `main.${h}.dart.mjs`)).headers.get('content-type'), 'text/javascript');
+  assert.equal((await fetch(base + `main.${h}.dart.wasm`)).headers.get('content-type'), 'application/wasm');
   // A missing hashed file is a 404, and the app fallback for deep links is never cached.
   assert.equal((await fetch(base + `main.${'f'.repeat(16)}.dart.js`)).status, 404);
   assert.equal((await fetch(base + `web-assets/${'f'.repeat(16)}/assets/missing.ttf`)).status, 404);

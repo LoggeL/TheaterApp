@@ -11,6 +11,9 @@ import 'event_detail_screen.dart';
 import 'event_style.dart';
 import 'rsvp/rsvp_status_badge.dart';
 
+// Created once: building a DateFormat parses its pattern.
+final _dayOfMonth = DateFormat('dd'), _weekday = DateFormat('EEE', 'de');
+
 void openEvent(BuildContext context, AppController controller, String id) =>
     openPage(context, EventDetailScreen(controller: controller, eventId: id));
 
@@ -69,7 +72,7 @@ class EventCard extends StatelessWidget {
                       Text(
                         event.startsAt == null
                             ? '–'
-                            : DateFormat('dd').format(event.startsAt!),
+                            : _dayOfMonth.format(event.startsAt!),
                         style: TextStyle(
                           fontSize: 23,
                           fontWeight: FontWeight.w800,
@@ -79,10 +82,7 @@ class EventCard extends StatelessWidget {
                       Text(
                         event.startsAt == null
                             ? 'OFFEN'
-                            : DateFormat(
-                                'EEE',
-                                'de',
-                              ).format(event.startsAt!).toUpperCase(),
+                            : _weekday.format(event.startsAt!).toUpperCase(),
                         style: const TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,

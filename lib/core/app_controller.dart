@@ -300,6 +300,12 @@ class AppController extends ChangeNotifier {
 
   final _mediaCache = <String, MediaData>{};
   final _mediaLoading = <String, Future<MediaData>>{};
+
+  /// The already loaded media at [path], so images can show it in their
+  /// first frame instead of a placeholder.
+  MediaData? cachedMedia(String path) =>
+      _isDemo || !hasAccess || _token == null ? null : _mediaCache[path];
+
   Future<MediaData> mediaBytes(String path, {bool cache = true}) async {
     if (_isDemo || !hasAccess || _token == null) {
       throw const ApiException(

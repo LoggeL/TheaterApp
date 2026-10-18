@@ -54,17 +54,17 @@ void main() {
     final c = server.controller();
     addTearDown(c.dispose);
     await signIn(c);
-    final busy = <bool>[], refreshing = <bool>[];
-    c.addListener(() {
-      busy.add(c.busy);
-      refreshing.add(c.isRefreshing);
-    });
+    final busy = <bool>[];
+    c.addListener(() => busy.add(c.busy));
     final sync = BackgroundSync(c, isStarting: () => false);
     addTearDown(sync.dispose);
+    // New data, so the refresh has something to show.
+    server.data['messages'] = [
+      {'id': 'm-new', 'title': 'Neue Probenzeit', 'read': false},
+    ];
     await sync.refresh();
     expect(busy, isNotEmpty);
     expect(busy, everyElement(isFalse));
-    expect(refreshing, contains(true));
     expect(c.isRefreshing, isFalse);
 
     // Someone waiting for the running background refresh sees progress.
@@ -76,6 +76,30 @@ void main() {
     expect(c.busy, isFalse);
     expect(busy, contains(true));
   });
+
+  test(
+    'a background refresh without new data leaves the screen alone',
+    () async {
+      final server = TestServer();
+      final c = server.controller();
+      addTearDown(c.dispose);
+      await signIn(c);
+      var notifications = 0;
+      c.addListener(() => notifications++);
+      server.data['serverTime'] = '2030-01-01T00:00:00Z';
+      await c.refresh(silent: true);
+      expect(notifications, 0);
+      expect(c.isRefreshing, isFalse);
+      // A manual refresh still reports back, and changed data is shown.
+      await c.refresh();
+      expect(notifications, greaterThan(0));
+      notifications = 0;
+      server.data['events'] = const [];
+      await c.refresh(silent: true);
+      expect(notifications, greaterThan(0));
+      expect(c.events, isEmpty);
+    },
+  );
 
   testWidgets('the automatic refresh shows no progress bar', (tester) async {
     final server = TestServer();

@@ -69,6 +69,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   static const _filters = ['Kommend', 'Offen', 'Zugesagt', 'Vergangen'];
 
+  /// Shared by the month headings of every list item.
+  static final _monthFormat = DateFormat.yMMMM('de');
+
   /// Why a filter is empty, in the words of that filter.
   static const _emptyMessages = [
     'Gerade stehen keine Termine an.',
@@ -347,13 +350,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   final event = events[index];
                   final month = event.startsAt == null
                       ? 'Datum offen'
-                      : DateFormat.yMMMM('de').format(event.startsAt!);
+                      : _monthFormat.format(event.startsAt!);
                   final previousMonth =
                       index == 0 || events[index - 1].startsAt == null
                       ? ''
-                      : DateFormat.yMMMM(
-                          'de',
-                        ).format(events[index - 1].startsAt!);
+                      : _monthFormat.format(events[index - 1].startsAt!);
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

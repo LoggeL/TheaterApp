@@ -345,8 +345,12 @@ extension SyncController on AppController {
     final origin = _apiBaseUrl, token = _token!;
     if (!silent) _busyCount++;
     _refreshing = true;
+    // A background refresh shows nothing while it runs. Every notification
+    // rebuilds the visible screen, which made scrolling on the web stutter.
+    final quietStart = silent && _error == null;
+    var quietEnd = false;
     _error = null;
-    _notify();
+    if (!quietStart) _notify();
     try {
       if (_identity != null) {
         await refreshAccess(refreshData: false);
@@ -374,9 +378,17 @@ extension SyncController on AppController {
       if (jsonMap(snapshot['scriptService'])['available'] == false) {
         snapshot['productions'] = jsonList(_baseSnapshot['productions']);
       }
+      final unchanged =
+          silent && !_isOffline && _sameSnapshot(snapshot, _baseSnapshot);
       _baseSnapshot = snapshot;
       _lastSync = _clock();
       _isOffline = false;
+      // Nothing new: keep the projected view and the stored copy. Only the
+      // in-memory time of the last check moves on.
+      if (unchanged) {
+        quietEnd = quietStart;
+        return;
+      }
       _rebuild();
       await _persistCore(generation);
     } catch (error) {
@@ -391,9 +403,26 @@ extension SyncController on AppController {
       if (_current(generation)) {
         if (!silent) _busyCount = max(0, _busyCount - 1);
         _refreshing = false;
-        _notify();
+        if (!quietEnd) _notify();
       }
     }
+  }
+
+  /// Whether two snapshots carry the same data; `serverTime` differs on
+  /// every response and is not shown.
+  bool _sameSnapshot(JsonMap next, JsonMap previous) {
+    bool shown(String key) => key != 'serverTime';
+    if (next.keys.where(shown).length != previous.keys.where(shown).length) {
+      return false;
+    }
+    for (final entry in next.entries) {
+      if (!shown(entry.key)) continue;
+      if (!previous.containsKey(entry.key) ||
+          !_sameJson(entry.value, previous[entry.key])) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void _rebuild() {
@@ -478,4 +507,25 @@ extension SyncController on AppController {
     return _members.where((m) => m.id == personId).firstOrNull ??
         TheaterMember(id: personId, name: user.name, roleIds: user.roleIds);
   }
+}
+
+bool _sameJson(Object? a, Object? b) {
+  if (identical(a, b)) return true;
+  if (a is Map && b is Map) {
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      if (!b.containsKey(entry.key) || !_sameJson(entry.value, b[entry.key])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (a is List && b is List) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!_sameJson(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  return a == b;
 }

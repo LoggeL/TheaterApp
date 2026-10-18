@@ -28,7 +28,8 @@ def main():
     hosts = list(dict.fromkeys([c['host'], *c.get('additionalHosts', [])]))
     if not args.skip_build:
         run(['node', 'tool/configure.mjs', 'config/production.web.json'])
-        run(['flutter', 'build', 'web', '--release', '--dart-define-from-file=config/production.web.json', '--pwa-strategy=none'])
+        # --wasm adds a dart2wasm/skwasm build for Chromium; Safari and Firefox keep dart2js with CanvasKit.
+        run(['flutter', 'build', 'web', '--release', '--wasm', '--dart-define-from-file=config/production.web.json', '--pwa-strategy=none'])
     run(['node', 'tool/version-web.mjs'])
     # The SW config must belong to the same production project as the backend.
     if c['firebaseProjectId'] not in (ROOT/'build/web/firebase-web-config.js').read_text():
