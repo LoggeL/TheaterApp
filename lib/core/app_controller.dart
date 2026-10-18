@@ -11,6 +11,7 @@ import '../features/casting/domain/casting.dart';
 import 'models.dart';
 import 'identity.dart';
 
+part 'controller/bot_check.dart';
 part 'controller/projection.dart';
 part 'controller/session.dart';
 part 'controller/sync.dart';
@@ -166,6 +167,11 @@ class AppController extends ChangeNotifier {
   final Set<String> _loadingScripts = {};
   JsonMap _preferences = {};
   Future<void> _identityTransition = Future<void>.value();
+
+  /// Bot check state of this device, see `controller/bot_check.dart`.
+  bool _botCheckPassed = false, _botCheckUnsupported = false;
+  String? _botCheckAnswer, _botProof;
+  DateTime? _botProofExpiresAt;
 
   /// Current time of the injected clock, e.g. whether a slot has started.
   DateTime get now => _clock();

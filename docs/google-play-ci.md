@@ -40,7 +40,11 @@ Die normalen Rollen- und Freigabeprüfungen bleiben aktiv. Kein Queryparameter,
 Header oder vom Client gewählter Mandant kann den Datenbestand umschalten.
 
 Die Zugangsdaten liegen lokal in `.secrets/play-review-credentials.json` und werden
-nur im Abschnitt „Sign in details“ der Play Console hinterlegt. Nicht in Git,
+nur im Abschnitt „Sign in details“ der Play Console hinterlegt.
+Vor der Anmeldung stellt die App einmal die Botschutz-Frage „In welchem Ort ist
+das Kolpingtheater?“. In den Anweisungen der „Sign in details“ deshalb ergänzen:
+„Beim ersten Start fragt die App nach dem Ort des Kolpingtheaters. Antwort: Ramsen“.
+Bei einer geänderten Frage in `server/src/bot-check.json` diese Anweisung mit ändern. Nicht in Git,
 Workflows, Screenshots oder öffentliche Release-Artefakte übernehmen. Bei einer
 UID-Änderung ist eine explizite Migration des Testbereichs nötig; der Server startet
 bei widersprüchlicher Konfiguration nicht. Anfragen zur Kontolöschung müssen auch

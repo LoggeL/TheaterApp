@@ -23,6 +23,12 @@ Die Testinstanz enthält beide Sommerstücke aus dem bestehenden Skriptdienst so
 3. Ein bestehendes Ensemblemitglied auswählen oder neu anlegen. Erst „Verknüpfen & freigeben“ gewährt interne Daten.
 4. Verwaltungsrechte ausdrücklich auswählen. Die Datenbank verhindert doppelte Kontoverknüpfungen auf dieselbe Person.
 
+### Botschutz vor der Anmeldung
+
+Vor dem ersten Anmelde- oder Registrierungsbildschirm eines Geräts fragt die App „In welchem Ort ist das Kolpingtheater?“. Frage, Hinweis, Antworten und zulässige Zusatzwörter stehen in `server/src/bot-check.json`; `BOT_CHECK_CONFIG_FILE` kann eine andere Datei angeben. Der Client erhält nur Frage und Hinweis, der Server prüft die Antwort. Groß-/Kleinschreibung, Leerzeichen, Satzzeichen, eine Postleitzahl, Klammerzusätze, Teile nach einem Komma und die Zusatzwörter (etwa „in“, „Pfalz“) spielen keine Rolle; ab fünf Buchstaben ist ein Tippfehler erlaubt. Nach drei falschen Antworten wartet die App 5 Sekunden, danach je weitere 5 Sekunden bis höchstens 30. Der Server erlaubt 10 Versuche je Adresse in 10 Minuten (`CLIENT_IP_HEADER=cf-connecting-ip` hinter Cloudflare) und hält dafür nur Hashwerte im Arbeitsspeicher.
+
+Eine richtige Antwort liefert einen signierten Nachweis, 30 Minuten gültig und nur für ein neues Konto verwendbar. Das Gerät merkt sich die beantwortete Frage und die Antwort, um vor einer späteren Registrierung einen neuen Nachweis zu holen. Geräte mit bestehender Anmeldung werden nie gefragt. Neue Konten ohne gültigen Nachweis, etwa aus älteren App-Versionen, werden weiter angenommen, aber nicht per „Neue Registrierung“ gemeldet und in der Freigabe als „Ohne Botschutz“ markiert. Ein später nachgereichter Nachweis holt die Meldung nach. Das Anlegen eines Firebase-Kontos selbst kann der Server im Spark-Tarif nicht verhindern.
+
 Eine Sperrung gilt für den nächsten geschützten Serverzugriff. Bereits offline gespeicherte Inhalte können technisch erst beim nächsten Kontakt widerrufen werden. Beim Abmelden oder Kontowechsel entfernt die App die lokalen Kontoinhalte.
 
 ## Aktualisieren

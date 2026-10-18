@@ -74,6 +74,8 @@ def main():
       SCRIPT_DIRECTOR_PASSWORD_FILE: /run/secrets/script-director-password
       MOBILE_PUSH_ENABLED: 'true'
       PLAY_REVIEW_CONFIG_FILE: /run/secrets/play-review.json
+      # Cloudflare sets the real client address; the bot check limits attempts per address.
+      CLIENT_IP_HEADER: cf-connecting-ip
 {email_env}    volumes:
       - {remote}/data:/data:Z
       - {remote}/secrets/firebase-service-account.json:/run/secrets/firebase-service-account.json:ro,Z

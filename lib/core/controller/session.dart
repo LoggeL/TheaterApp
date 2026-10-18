@@ -25,9 +25,14 @@ extension SessionController on AppController {
       final settings = await _store.read('_device', 'settings');
       if (!_current(generation)) return;
       if (_apiBaseUrl.isEmpty) _apiBaseUrl = textValue(settings?['baseUrl']);
+      await _loadBotCheck();
       if (_identity != null) {
         await _identity.initialize();
         if (!_current(generation)) return;
+        // Members signed in before the bot check existed are never asked.
+        if (_identity.uid != null && !_botCheckPassed) {
+          await _rememberBotCheck();
+        }
         await _restoreFirebase(generation);
         return;
       }
@@ -105,12 +110,13 @@ extension SessionController on AppController {
       if (!_storeReady) await _ensureStore();
       await _withIdentityTransition(() async {
         await _identity.initialize();
-        await _identity.signIn(email, password);
         _apiBaseUrl = origin;
+        final proof = await _freshBotProof();
+        await _identity.signIn(email, password);
         await _write(
           () => _store.write('_device', 'settings', {'baseUrl': origin}),
         );
-        await _adoptFirebase();
+        await _adoptFirebase(botCheckProof: proof);
       });
       return;
     }
@@ -230,7 +236,10 @@ extension SessionController on AppController {
     }
   }
 
-  Future<void> _adoptFirebase({String? registrationName}) async {
+  Future<void> _adoptFirebase({
+    String? registrationName,
+    String? botCheckProof,
+  }) async {
     if (!_storeReady) await _ensureStore();
     final previousAccount = _account;
     ++_generation;
@@ -240,7 +249,12 @@ extension SessionController on AppController {
     if (previousAccount != null && previousAccount != _account) {
       await _store.clearAccount(previousAccount);
     }
-    await refreshAccess(registrationName: registrationName);
+    await refreshAccess(
+      registrationName: registrationName,
+      botCheckProof: botCheckProof,
+    );
+    if (botCheckProof != null) _consumeBotProof();
+    if (!_botCheckPassed) await _rememberBotCheck();
   }
 
   Future<void> register(String name, String email, String password) async {
@@ -256,16 +270,18 @@ extension SessionController on AppController {
     }
     await _withIdentityTransition(() async {
       await _identity.initialize();
+      final proof = await _freshBotProof();
       await _identity.register(name, email, password);
-      await _adoptFirebase(registrationName: name.trim());
+      await _adoptFirebase(registrationName: name.trim(), botCheckProof: proof);
     });
   }
 
   Future<void> loginWithProvider(String provider) async {
     await _withIdentityTransition(() async {
       await _identity!.initialize();
+      final proof = await _freshBotProof();
       await _identity.social(provider);
-      await _adoptFirebase();
+      await _adoptFirebase(botCheckProof: proof);
     });
   }
 
@@ -295,20 +311,27 @@ extension SessionController on AppController {
     await refreshAccess(registrationName: name.trim());
   }
 
+  /// [botCheckProof] proves the answered bot check when the server creates
+  /// the account; older servers ignore it.
   Future<void> refreshAccess({
     bool refreshData = true,
     String? registrationName,
+    String? botCheckProof,
   }) async {
     if (_identity == null || _identity.uid == null || _isDemo) return;
     var generation = _generation;
+    final post = registrationName != null || botCheckProof != null;
     final result = await _api.request(
       _apiBaseUrl,
-      registrationName == null ? 'GET' : 'POST',
+      post ? 'POST' : 'GET',
       '/auth/session',
       token: _token,
-      body: registrationName == null
-          ? null
-          : {'registrationName': registrationName},
+      body: post
+          ? {
+              'registrationName': ?registrationName,
+              'botCheckProof': ?botCheckProof,
+            }
+          : null,
     );
     if (!_current(generation)) return;
     final previous = _user;

@@ -1,0 +1,290 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:theater_app/app/session_gate.dart';
+import 'package:theater_app/app/theme/stage_theme.dart';
+import 'package:theater_app/core/app_controller.dart';
+import 'package:theater_app/core/device_services.dart';
+import 'package:theater_app/core/models.dart';
+import 'package:theater_app/data/api_client.dart';
+import 'package:theater_app/data/local_store.dart';
+import 'package:theater_app/features/auth/auth.dart';
+
+import 'firebase_access_test.dart' show FakeIdentity;
+
+const _base = 'https://theater.example.invalid';
+const _question = 'In welchem Ort ist das Kolpingtheater?';
+
+class _Identity extends FakeIdentity {
+  @override
+  Future<void> social(String provider, {bool link = false}) async {
+    uid = 'person@example.invalid';
+    email = 'person@example.invalid';
+  }
+}
+
+/// A server with the bot check: only "Ramsen" passes, like the server config.
+class _Server {
+  _Server({this.supportsBotCheck = true});
+  final bool supportsBotCheck;
+  final requests = <http.Request>[];
+  var proofs = 0;
+  DateTime expiresAt = DateTime.utc(2100);
+
+  List<String> get paths =>
+      requests.map((r) => '${r.method} ${r.url.path}').toList();
+  List<JsonMap> bodies(String path) => [
+    for (final r in requests)
+      if (r.url.path == '/api/mobile/v1$path/' && r.body.isNotEmpty)
+        jsonMap(jsonDecode(r.body)),
+  ];
+
+  late final client = MockClient((request) async {
+    requests.add(request);
+    http.Response json(Object body, [int status = 200]) => http.Response(
+      jsonEncode(body),
+      status,
+      headers: {'content-type': 'application/json; charset=utf-8'},
+    );
+    final path = request.url.path;
+    if (path == '/api/mobile/v1/bot-check/') {
+      if (!supportsBotCheck) {
+        return json({'error': 'Bitte zuerst anmelden.'}, 401);
+      }
+      if (request.method == 'GET') {
+        return json({'question': _question, 'hint': 'Ein Wort genügt.'});
+      }
+      final answer = jsonMap(jsonDecode(request.body))['answer'];
+      if (answer.toString().trim().toLowerCase() != 'ramsen') {
+        return json({
+          'error': 'Das passt leider nicht. Schau noch einmal genau hin.',
+          'code': 'bot_check_wrong',
+        }, 400);
+      }
+      return json({
+        'proof': 'proof-${++proofs}',
+        'expiresAt': expiresAt.toIso8601String(),
+      });
+    }
+    return json({
+      'user': {
+        'userId': 'person@example.invalid',
+        'displayName': 'Neue Person',
+        'status': 'pending',
+        'role': 'member',
+        'identityReady': true,
+        'emailVerified': true,
+      },
+    });
+  });
+}
+
+Future<AppController> _controller(
+  _Server server, {
+  MemoryLocalStore? store,
+  FakeIdentity? identity,
+}) async {
+  final local = store ?? MemoryLocalStore();
+  if (store == null) {
+    await local.write('_device', 'settings', {'baseUrl': _base});
+  }
+  final c = AppController(
+    identity: identity ?? FakeIdentity(),
+    localStore: local,
+    credentialStore: MemoryCredentialStore(),
+    apiClient: ApiClient(client: server.client),
+  );
+  await c.init();
+  return c;
+}
+
+Widget _gate(AppController c) => MaterialApp(
+  theme: StageTheme.build(Brightness.light),
+  home: SessionGate(
+    controller: c,
+    devices: DeviceServices(c, onTarget: (_) {}, onForegroundMessage: (_) {}),
+    starting: false,
+    startupError: null,
+    onRetry: () {},
+    promptForPush: false,
+  ),
+);
+
+void main() {
+  test('a device answers once; the proof reaches the new account', () async {
+    final server = _Server();
+    final store = MemoryLocalStore();
+    await store.write('_device', 'settings', {'baseUrl': _base});
+    final c = await _controller(server, store: store);
+    expect(c.needsBotCheck, isTrue);
+    expect((await c.loadBotCheckQuestion())!.question, _question);
+    await expectLater(
+      c.answerBotCheck('Berlin'),
+      throwsA(
+        isA<ApiException>().having((e) => e.code, 'code', 'bot_check_wrong'),
+      ),
+    );
+    expect(c.needsBotCheck, isTrue);
+    await c.answerBotCheck('  Ramsen ');
+    expect(c.needsBotCheck, isFalse);
+    await c.register(
+      'Neue Person',
+      'person@example.invalid',
+      'A long password!',
+    );
+    expect(server.bodies('/auth/session'), [
+      {'registrationName': 'Neue Person', 'botCheckProof': 'proof-1'},
+    ]);
+    c.dispose();
+
+    // The same device is not asked again, also without a session.
+    final again = await _controller(server, store: store);
+    expect(again.needsBotCheck, isFalse);
+    again.dispose();
+  });
+
+  test('an expired proof is renewed with the remembered answer', () async {
+    final server = _Server()..expiresAt = DateTime.utc(2000);
+    final c = await _controller(server, identity: _Identity());
+    await c.answerBotCheck('ramsen');
+    await c.loginWithProvider('google.com');
+    expect(server.bodies('/bot-check'), [
+      {'answer': 'ramsen'},
+      {'answer': 'ramsen'},
+    ]);
+    expect(server.bodies('/auth/session'), [
+      {'botCheckProof': 'proof-2'},
+    ]);
+    c.dispose();
+  });
+
+  test('signed-in members and older servers are never asked', () async {
+    final server = _Server();
+    final store = MemoryLocalStore();
+    await store.write('_device', 'settings', {'baseUrl': _base});
+    final member = await _controller(
+      server,
+      store: store,
+      identity: FakeIdentity()..uid = 'member@example.invalid',
+    );
+    expect(member.needsBotCheck, isFalse);
+    member.dispose();
+    // Remembered for this device, e.g. after a later logout.
+    final later = await _controller(server, store: store);
+    expect(later.needsBotCheck, isFalse);
+    later.dispose();
+
+    final old = _Server(supportsBotCheck: false);
+    final c = await _controller(old);
+    expect(c.needsBotCheck, isTrue);
+    expect(await c.loadBotCheckQuestion(), isNull);
+    expect(c.needsBotCheck, isFalse);
+    // Without an answer no proof is sent; the session call stays a GET.
+    await c.login(
+      email: 'person@example.invalid',
+      password: 'A long password!',
+      baseUrl: _base,
+    );
+    expect(old.paths.last, 'GET /api/mobile/v1/auth/session/');
+    c.dispose();
+  });
+
+  test('the demo and builds without Firebase have no bot check', () async {
+    final c = AppController(
+      localStore: MemoryLocalStore(),
+      credentialStore: MemoryCredentialStore(),
+    );
+    await c.init();
+    expect(c.needsBotCheck, isFalse);
+    await c.startDemo();
+    expect(c.needsBotCheck, isFalse);
+    c.dispose();
+  });
+
+  testWidgets('the question comes first, Enter checks and wrong answers '
+      'slow down without revealing the answer', (tester) async {
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final server = _Server();
+    final c = await _controller(server);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_gate(c));
+    await tester.pumpAndSettle();
+    expect(find.byType(FirebaseWelcomeScreen), findsNothing);
+    expect(
+      find.text('Kurze Frage, damit wir wissen, dass du kein Bot bist.'),
+      findsOneWidget,
+    );
+    expect(find.text(_question), findsOneWidget);
+    expect(find.bySemanticsLabel(_question), findsOneWidget);
+    final field = find.byKey(const ValueKey('bot-check-answer'));
+    expect(tester.widget<TextField>(field).autofocus, isTrue);
+
+    await tester.tap(find.text('Weiter'));
+    await tester.pumpAndSettle();
+    expect(find.text('Bitte gib eine Antwort ein.'), findsOneWidget);
+
+    for (var i = 0; i < BotCheckScreen.freeAttempts; i++) {
+      await tester.enterText(field, 'Mannheim');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      await tester.pump();
+    }
+    expect(server.bodies('/bot-check').length, BotCheckScreen.freeAttempts);
+    expect(find.textContaining('Das passt leider nicht'), findsOneWidget);
+    expect(find.textContaining('Ramsen'), findsNothing);
+    expect(find.text('Noch 5 s warten'), findsOneWidget);
+    expect(find.textContaining('Kurze Pause'), findsOneWidget);
+    // While waiting, Enter does not send.
+    await tester.enterText(field, 'Ramsen');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(server.bodies('/bot-check').length, BotCheckScreen.freeAttempts);
+
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.text('Weiter'), findsOneWidget);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.byType(BotCheckScreen), findsNothing);
+    expect(find.byType(FirebaseWelcomeScreen), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the screen stays readable on a narrow phone with large text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final c = await _controller(_Server());
+    addTearDown(c.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StageTheme.build(Brightness.light),
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(320, 640),
+            textScaler: TextScaler.linear(2),
+          ),
+          child: BotCheckScreen(controller: c),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.scrollUntilVisible(
+      find.text('Weiter'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Weiter'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+}

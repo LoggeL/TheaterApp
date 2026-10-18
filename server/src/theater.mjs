@@ -119,9 +119,17 @@ export class Theater {
     // Existing feedback becomes tickets with its text as the first message; `done` ones are closed.
     if (!store.get('migrations', feedbackTicketsMigrationId)) store.transaction(() => migrateFeedbackTickets(store));
   }
-  session(identity, registrationName) {
+  /**
+   * Creates or refreshes the caller's account. `botCheck` is the evaluated proof of the
+   * knowledge question (see bot-check.mjs): `{ status: 'passed', id }`, `missing` or
+   * `invalid`; undefined for trusted internal callers. New accounts without a valid proof
+   * (e.g. older apps) still register but are marked and not announced to admins by push.
+   */
+  session(identity, registrationName, botCheck) {
     return this.store.transaction(() => {
       let a = this.store.account(identity.uid);
+      // A proof counts once: for the account it was first presented with.
+      if (botCheck?.status === 'passed' && this.store.accounts().some(x => x.botCheckId === botCheck.id && x.uid !== identity.uid)) botCheck = { status: 'invalid' };
       const provider = identity.firebase?.sign_in_provider ?? 'password';
       const identityReady = provider !== 'password' || identity.email_verified === true;
       const identityName = text(identity.name, 120);
@@ -136,7 +144,10 @@ export class Theater {
       const name = suppliedName ?? (a?.nameProvided ? a.name : identityName || a?.name || text(identity.email).split('@')[0] || 'Neues Konto');
       const version = a ? a.version + (suppliedName !== undefined && (a.name !== name || !a.nameProvided) ? 1 : 0) : 1;
       const fields = { name, nameProvided, version, email: text(identity.email), emailVerified: identity.email_verified === true, identityReady, provider, lastSeenAt: now() };
-      a = a ? { ...a, ...fields } : { uid: identity.uid, personId: null, status: 'pending', role: 'member', createdAt: now(), version: 1, ...fields };
+      const checked = botCheck ? { botCheck: botCheck.status, botCheckAt: now(), ...(botCheck.id ? { botCheckId: botCheck.id } : {}) } : {};
+      // A waiting account without proof can still catch up, e.g. after an app update.
+      const catchUp = a?.status === 'pending' && ['missing', 'invalid'].includes(a.botCheck) && botCheck?.status === 'passed';
+      a = a ? { ...a, ...fields, ...(catchUp ? checked : {}) } : { uid: identity.uid, personId: null, status: 'pending', role: 'member', createdAt: now(), version: 1, ...fields, ...checked };
       if (!this.store.get('settings', 'bootstrap') && this.bootstrapEmail && a.email.toLowerCase() === this.bootstrapEmail && a.emailVerified && this.store.accounts().every(x => x.role !== 'admin')) {
         const personId = this.nextPersonId();
         this.store.put('members', personId, { id: personId, name: a.name, initials: initials(a.name), active: true });
@@ -147,7 +158,8 @@ export class Theater {
       // Tell admins once per account, as soon as the registration can actually be linked.
       // Provider accounts (e.g. Google) are linkable without a self-supplied name; a later
       // supplied name does not announce the account again.
-      if (a.status === 'pending' && a.identityReady && !a.adminNotifiedAt) {
+      // Accounts from before the bot check have no `botCheck` and are announced as before.
+      if (a.status === 'pending' && a.identityReady && !a.adminNotifiedAt && !['missing', 'invalid'].includes(a.botCheck)) {
         a = { ...a, adminNotifiedAt: now() };
         this.enqueuePush({ title: 'Neue Registrierung', body: `${a.name} wartet auf Zuordnung.`, data: { accountUid: a.uid }, adminsOnly: true });
       }

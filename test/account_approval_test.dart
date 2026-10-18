@@ -208,4 +208,22 @@ void main() {
     expect(accountNameSource(null), 'Anmeldekonto');
     expect(accountNameSource('example.org'), 'Anmeldekonto');
   });
+
+  testWidgets('registrations without bot check are marked for admins', (
+    tester,
+  ) async {
+    await _pumpApproval(tester, TestServer(), {
+      ..._account('Neu Ohne'),
+      'botCheck': 'missing',
+    });
+    expect(find.text('Ohne Botschutz'), findsOneWidget);
+    expect(find.textContaining('Botschutz-Frage nicht'), findsOneWidget);
+    for (final check in ['passed', null]) {
+      await _pumpApproval(tester, TestServer(), {
+        ..._account('Neu Mit'),
+        'botCheck': check,
+      });
+      expect(find.text('Ohne Botschutz'), findsNothing);
+    }
+  });
 }

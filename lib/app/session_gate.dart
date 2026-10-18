@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/app_controller.dart';
 import '../core/device_services.dart';
 import '../features/auth/ui/approval_pending_screen.dart';
+import '../features/auth/ui/bot_check_screen.dart';
 import '../features/auth/ui/firebase_welcome_screen.dart';
 import '../features/auth/ui/password_screen.dart';
 import '../features/auth/ui/welcome_screen.dart';
@@ -46,7 +47,10 @@ class SessionGate extends StatelessWidget {
       animation: controller,
       builder: (context, _) => controller.user == null
           ? controller.usesFirebase
-                ? FirebaseWelcomeScreen(controller: controller)
+                // The bot check comes before the first sign-in on a device.
+                ? controller.needsBotCheck
+                      ? BotCheckScreen(controller: controller)
+                      : FirebaseWelcomeScreen(controller: controller)
                 : WelcomeScreen(controller: controller)
           : !controller.hasAccess
           ? ApprovalPendingScreen(controller: controller, devices: devices)

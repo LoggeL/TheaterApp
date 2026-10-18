@@ -48,6 +48,11 @@ TheaterMember? uniqueExactMatch(
   return exact.length == 1 ? exact.single : null;
 }
 
+/// Registrations without a valid bot check proof, e.g. from older apps;
+/// accounts from before the bot check have no value and are not marked.
+bool _withoutBotCheck(JsonMap a) =>
+    const ['missing', 'invalid'].contains(a['botCheck']);
+
 class AccountApprovalScreen extends StatefulWidget {
   const AccountApprovalScreen({
     super.key,
@@ -244,6 +249,12 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
                       color: Color(0xFFA25B06),
                       icon: Icons.schedule,
                     ),
+                    if (_withoutBotCheck(a))
+                      const StatePill(
+                        'Ohne Botschutz',
+                        color: Color(0xFFA25B06),
+                        icon: Icons.shield_outlined,
+                      ),
                   ],
                 ),
               ],
@@ -320,6 +331,16 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
           const Padding(
             padding: EdgeInsets.only(bottom: 16),
             child: Text('Die E-Mail-Adresse muss zuerst bestätigt werden.'),
+          ),
+        if (_withoutBotCheck(a))
+          const Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: Text(
+              'Bei dieser Registrierung wurde die Botschutz-Frage nicht '
+              'beantwortet, etwa mit einer älteren App-Version. Deshalb kam '
+              'keine Push-Nachricht. Bitte prüfe die Anfrage besonders '
+              'sorgfältig.',
+            ),
           ),
         if (a['nameProvided'] == false)
           Padding(

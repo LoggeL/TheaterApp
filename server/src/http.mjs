@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { AppError } from './theater.mjs';
+import { clientAddress } from './bot-check.mjs';
 import { linkWebsiteProfile, websiteProfilesView } from './website-team.mjs';
 import { adminTicketView, closeOwnFeedback, markFeedbackRead, ownFeedback, ownTicketView, replyAsAdmin, replyAsMember } from './feedback-tickets.mjs';
 
@@ -10,9 +11,19 @@ import { adminTicketView, closeOwnFeedback, markFeedbackRead, ownFeedback, ownTi
 // Entry points (index.html, workers, manifests) and unhashed files must stay revalidated.
 const hashedWebFile = /^\/(?:main\.[a-f0-9]{16}\.dart\.(?:js|mjs|wasm)|(?:flutter_bootstrap\.[a-f0-9]{16}|pwa\.[a-f0-9]{16})\.js|(?:icons\/)?[\w-]+\.[a-f0-9]{16}\.png|web-(?:renderer|assets)\/[a-f0-9]{16}\/.+)$/;
 
-export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null }) {
+// `botCheck` (see bot-check.mjs) answers the public knowledge question before sign-in and
+// evaluates its proof when an account is created; `clientIpHeader` names the proxy header
+// with the client address for its attempt limit (e.g. `cf-connecting-ip`).
+export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null }) {
   const origins = new Set(allowedOrigins);
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
+  const readBody = async (req, route) => {
+    let body = {}, length = 0; const chunks = [];
+    for await (const chunk of req) { length += chunk.length; if (length > (route === '/media' ? 12 : 2) * 1024 * 1024) throw new AppError(413, 'Die Anfrage ist zu groß.'); chunks.push(chunk); }
+    if (length) { try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new AppError(400, 'Ungültiges JSON.'); } }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AppError(400, 'Ungültige Anfrage.');
+    return body;
+  };
   return createServer(async (req, res) => {
     let theater = defaultTheater, scriptService = defaultScriptService, focusBridge = defaultFocusBridge, media = defaultMedia;
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -46,6 +57,9 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (origin && !origins.has(origin)) throw new AppError(403, 'Diese App-Adresse ist nicht freigegeben.');
       const route = path.slice('/api/mobile/v1'.length);
       if (route === '/config' && req.method === 'GET') return json(res, 200, { authProviders, pushConfigured: theater.pushEnabled, emailConfigured: theater.emailEnabled, scriptSourceConfigured: scriptService?.configured === true });
+      // Public: asked before anyone signs in. The answers never leave the server.
+      if (route === '/bot-check' && botCheck && req.method === 'GET') return json(res, 200, botCheck.question());
+      if (route === '/bot-check' && botCheck && req.method === 'POST') return json(res, 200, botCheck.attempt(clientAddress(req, clientIpHeader), (await readBody(req, route)).answer));
       const token = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
       if (!token || token.length > 12000) throw new AppError(401, 'Bitte zuerst anmelden.');
       let identity;
@@ -55,14 +69,8 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
         ({ theater, scriptService, focusBridge, media } = review);
       }
       if (!['/auth/session', '/auth/logout', '/devices'].includes(route)) theater.account(identity.uid);
-      let body = {};
-      if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
-        let length = 0; const chunks = [];
-        for await (const chunk of req) { length += chunk.length; if (length > (route === '/media' ? 12 : 2) * 1024 * 1024) throw new AppError(413, 'Die Anfrage ist zu groß.'); chunks.push(chunk); }
-        if (length) { try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new AppError(400, 'Ungültiges JSON.'); } }
-        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AppError(400, 'Ungültige Anfrage.');
-      }
-      if (route === '/auth/session' && ['GET', 'POST'].includes(req.method)) return json(res, 200, { user: theater.session(identity, req.method === 'POST' ? body.registrationName : undefined) });
+      const body = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await readBody(req, route) : {};
+      if (route === '/auth/session' && ['GET', 'POST'].includes(req.method)) return json(res, 200, { user: theater.session(identity, req.method === 'POST' ? body.registrationName : undefined, botCheck?.evaluate(body.botCheckProof)) });
       if (route === '/auth/logout' && req.method === 'POST') {
         for (const d of theater.store.all('devices').filter(d => d.uid === identity.uid && d.token === body.deviceToken)) theater.store.delete('devices', d.id);
         return json(res, 200, { ok: true });

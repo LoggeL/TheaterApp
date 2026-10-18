@@ -4,7 +4,7 @@ Flutter-App für das Kolpingtheater Ramsen. Web und Android verwenden denselben 
 
 ## Funktionen
 
-- Selbstregistrierung mit E-Mail/Passwort und Google; manuelle Personenzuordnung und Freigabe durch einen Admin.
+- Selbstregistrierung mit E-Mail/Passwort und Google; manuelle Personenzuordnung und Freigabe durch einen Admin. Vorher fragt die App einmal pro Gerät eine einfache Botschutz-Frage (siehe [docs/operations.md](docs/operations.md#botschutz-vor-der-anmeldung)).
 - Feste Termine mit Beschreibung und zwölf Terminarten für Rollen, das Ensemble eines Stücks (Besetzung, Regie und weitere Mitwirkende) und/oder einzelne Personen, dabei/später/abgesagt, optionale Ankunftszeit und längere Abwesenheiten (meldbar im Reiter „Termine“, über „Länger weg?“ beim Absagen und unter „Mein Bereich“); beim Anlegen oder Ändern kann die Leitung die Eingeladenen direkt per Push benachrichtigen. Serientermine (wöchentlich, alle 2 Wochen, monatlich bis zu einem Enddatum) mit einer einzigen Benachrichtigung; Löschen einzeln oder ab einem Termin. Keine Terminabstimmungen.
 - Terminfinder als Slot-Buchung, z. B. für Fototermine: Zeitfenster mit Platzzahl, Einladung von Rollen und/oder Personen, je Person ein Fenster; belegte Fenster werden automatisch Termine. Erreichbar über den Reiter „Termine“ (Hinweis, solange eine Wahl aussteht, und Menü), „Heute“ und die Admin-Übersicht.
 - Frei verwaltbare Mehrfachrollen pro Person und allgemeine Abstimmungen mit Frist, Stimmwechsel und Ergebnisübersicht; Abstimmungen liegen im Reiter „Mitteilungen“.
