@@ -9,7 +9,7 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/member_avatar.dart';
 import '../../../shared/widgets/page_header.dart';
-import '../../casting/ui/casting_screen.dart';
+import '../../casting/ui/production_overview_screen.dart';
 import '../../profile/ui/profile_screen.dart';
 import '../data/website_profiles.dart';
 import '../domain/website_profile.dart';
@@ -318,7 +318,7 @@ class _MemberProfileScreenState extends State<MemberProfileScreen> {
       onTap: opens
           ? () => openPage(
               context,
-              CastingScreen(
+              ProductionOverviewScreen(
                 controller: widget.controller,
                 productionId: productionId,
               ),

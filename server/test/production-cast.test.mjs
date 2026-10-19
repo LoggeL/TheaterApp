@@ -103,3 +103,18 @@ test('a script reimport keeps the team and its functions', t => {
   assert.deepEqual(production().memberFunctions, { [toni]: 'Licht' });
   assert.deepEqual(theater.snapshot('member').productions.find(p => p.id === 'winter').ensemble, [toni]);
 });
+
+test('members read casting, direction and team of current and archived productions without contact data', t => {
+  const { store, theater, action, cast, mara, kim, toni } = setup(t);
+  cast([{ kind: 'role', roleId: 'LENA', personId: mara }, { kind: 'role', roleId: 'OSKAR', personId: mara }, { kind: 'director', personId: kim, on: true }, { kind: 'member', personId: toni, on: true, function: 'Licht' }]);
+  action({ action: 'production.archive', id: 'winter', version: store.get('productions', 'winter').version, archived: true });
+  const production = theater.snapshot('member').productions.find(p => p.id === 'winter');
+  assert.equal(production.archived, true);
+  assert.deepEqual(production.casting, { LENA: mara, OSKAR: mara });
+  assert.deepEqual(production.directorMemberIds, [kim]);
+  assert.deepEqual(production.memberIds, [toni]);
+  assert.deepEqual(production.memberFunctions, { [toni]: 'Licht' });
+  assert.deepEqual(production.roles.map(r => r.name), ['LENA', 'OSKAR']);
+  // Account e-mail addresses stay out of the production record.
+  assert.doesNotMatch(JSON.stringify(production), /@/);
+});

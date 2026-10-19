@@ -13,7 +13,7 @@ import '../../../shared/feedback.dart';
 import '../../../shared/layout/breakpoints.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
-import '../../casting/ui/casting_screen.dart';
+import '../../casting/ui/production_overview_screen.dart';
 import '../data/comments_repository.dart';
 import '../data/reader_preferences.dart';
 import '../data/script_pdf_exporter.dart';
@@ -659,7 +659,7 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
             case 'casting':
               openPage(
                 context,
-                CastingScreen(
+                ProductionOverviewScreen(
                   controller: widget.controller,
                   productionId: widget.productionId,
                 ),
@@ -692,11 +692,10 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
             value: 'refresh',
             child: Text('Fassung aktualisieren'),
           ),
-          if (widget.controller.user?.isAdmin == true)
-            const PopupMenuItem(
-              value: 'casting',
-              child: Text('Besetzung & Team'),
-            ),
+          const PopupMenuItem(
+            value: 'casting',
+            child: Text('Besetzung & Team'),
+          ),
         ],
       ),
     ],
