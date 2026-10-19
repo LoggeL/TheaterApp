@@ -31,7 +31,7 @@ export const remindCooldownMs = 10 * 60 * 1000;
 // Declines this close to the start are pushed to admins and the production's directors.
 export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole']);
 // A short self-written "Über mich" text on the ensemble profile.
 export const aboutMaxLength = 600;
 // Feedback from members to the admins as support tickets (see feedback-tickets.mjs).
@@ -513,6 +513,23 @@ export class Theater {
         if (b.status === 'approved' && (!target.personId || !target.identityReady)) fail(409, 'Das Konto benötigt erst eine bestätigte Identität und Personenzuordnung.');
         if (target.role === 'admin' && target.status === 'approved' && s.accounts().filter(x => x.status === 'approved' && x.role === 'admin').length <= 1) fail(409, 'Der letzte Admin muss erhalten bleiben.');
         s.saveAccount({ ...target, status: b.status, statusChangedAt: now(), version: target.version + 1 }); return {};
+      }
+      case 'account.role': {
+        // Admin rights of a linked account after its approval; the role is read on every request,
+        // so the change applies with the next request and the affected app's next snapshot.
+        admin(); const target = s.account(b.uid);
+        if (!target || target.version !== b.version) fail(409, 'Das Konto hat sich geändert.', 'version_conflict');
+        if (!['member', 'admin'].includes(b.role)) fail(400, 'Ungültige Berechtigung.');
+        if (target.status !== 'approved' || !target.personId) fail(409, 'Admin-Rechte gibt es nur für freigegebene Konten.');
+        if (target.role === b.role) return {};
+        if (target.role === 'admin' && s.accounts().filter(x => x.status === 'approved' && x.role === 'admin').length <= 1) fail(409, 'Der letzte Admin muss erhalten bleiben.');
+        // Like suspending or deleting: only another admin takes away one's own rights.
+        if (target.uid === a.uid) fail(409, 'Die eigenen Admin-Rechte kann nur ein anderer Admin entziehen.');
+        s.saveAccount({ ...target, role: b.role, roleChangedBy: a.uid, roleChangedAt: now(), version: target.version + 1 });
+        this.enqueuePush(b.role === 'admin'
+          ? { title: 'Admin-Rechte erhalten', body: 'Du kannst jetzt die Verwaltung der Theater-App nutzen.', data: {}, recipientPersonIds: [target.personId] }
+          : { title: 'Admin-Rechte entzogen', body: 'Dein Zugang gilt jetzt als Mitglied.', data: {}, recipientPersonIds: [target.personId] });
+        return {};
       }
       case 'account.reconsider': {
         admin(); const target = s.account(b.uid);

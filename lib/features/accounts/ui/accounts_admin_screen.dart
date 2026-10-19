@@ -155,6 +155,55 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
     }
   }
 
+  /// Gives or takes admin rights of an approved account. The server keeps
+  /// the last admin and only lets another admin take one's own rights.
+  Future<void> _setRole(JsonMap a, String role) async {
+    final name = _accountName(a);
+    final grant = role == 'admin';
+    final confirmed = grant
+        ? await confirmAction(
+            context,
+            title: 'Admin-Rechte geben?',
+            message:
+                '$name kann danach Termine, Mitteilungen, Produktionen, '
+                'Personen und Konten verwalten und anderen Admin-Rechte geben '
+                'oder entziehen. Die Änderung gilt in der App ab der nächsten '
+                'Aktualisierung.',
+            confirmLabel: 'Admin-Rechte geben',
+          )
+        : await confirmDestructive(
+            context,
+            title: 'Admin-Rechte entziehen?',
+            message:
+                '$name behält den Zugang als Mitglied, kann die Verwaltung '
+                'aber nicht mehr nutzen. Die Änderung gilt in der App ab der '
+                'nächsten Aktualisierung.',
+            confirmLabel: 'Entziehen',
+          );
+    if (!confirmed || !mounted) return;
+    try {
+      final outcome = await widget.controller.performAction({
+        'action': 'account.role',
+        'uid': a['uid'],
+        'version': a['version'],
+        'role': role,
+      });
+      if (!mounted) return;
+      showDone(
+        context,
+        outcomeText(
+          outcome,
+          done: grant ? '$name ist jetzt Admin.' : '$name ist jetzt Mitglied.',
+          queued: 'Änderung vorgemerkt – wird bei Verbindung übertragen.',
+        ),
+      );
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+    // Also after a conflict: the reloaded list shows the current rights.
+    if (mounted) await _load();
+  }
+
   Future<void> _reconsider(JsonMap a) async {
     final uid = textValue(a['uid']);
     if (_reconsidering.contains(uid)) return;
@@ -290,9 +339,21 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
             onSelected: (s) => switch (s) {
               'delete' => _delete(a),
               'suspended' => _suspend(a),
+              'admin' || 'member' => _setRole(a, s),
               _ => _release(a),
             },
             itemBuilder: (_) => [
+              if (a['status'] == 'approved' &&
+                  widget.controller.supports('accountRole'))
+                a['role'] == 'admin'
+                    ? const PopupMenuItem(
+                        value: 'member',
+                        child: Text('Admin-Rechte entziehen'),
+                      )
+                    : const PopupMenuItem(
+                        value: 'admin',
+                        child: Text('Admin-Rechte geben'),
+                      ),
               if (a['status'] == 'approved')
                 const PopupMenuItem(
                   value: 'suspended',
@@ -436,7 +497,8 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
             Text(
               person == null
                   ? 'Noch keiner Person zugeordnet'
-                  : 'Verknüpft mit ${textValue(person['name'])}',
+                  : 'Verknüpft mit ${textValue(person['name'])} · '
+                        '${a['role'] == 'admin' ? 'Admin' : 'Mitglied'}',
             ),
             _accountActions(a, roster),
           ],

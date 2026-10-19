@@ -145,6 +145,165 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('admins give and take admin rights after a confirmation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final server = TestServer();
+    server.data['capabilities'] = {
+      ...jsonMap(server.data['capabilities']),
+      'features': ['accountRole'],
+    };
+    final data = fixture();
+    (data['accounts'] as List).add({
+      'uid': 'sam',
+      'name': 'Sam',
+      'email': 'sam@example.test',
+      'personId': 2,
+      'role': 'member',
+      'status': 'approved',
+      'identityReady': true,
+      'version': 3,
+    });
+    final changes = <JsonMap>[];
+    var conflict = false;
+    server.override = (request) {
+      final path = request.url.path.replaceFirst(RegExp(r'/$'), '');
+      if (path.endsWith('/admin/accounts')) {
+        return Future.value(jsonResponse(data));
+      }
+      if (path.endsWith('/actions')) {
+        final body = jsonMap(jsonDecode(request.body));
+        changes.add(body);
+        if (conflict) {
+          return Future.value(
+            jsonResponse({
+              'error': 'Das Konto hat sich geändert.',
+              'code': 'version_conflict',
+            }, 409),
+          );
+        }
+        final account = (data['accounts'] as List).cast<JsonMap>().firstWhere(
+          (a) => a['uid'] == body['uid'],
+        );
+        account['role'] = body['role'];
+        account['version'] = intValue(account['version']) + 1;
+        return Future.value(jsonResponse({'ok': true}));
+      }
+      return null;
+    };
+    final controller = server.controller();
+    addTearDown(controller.dispose);
+    await signIn(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StageTheme.build(Brightness.light),
+        home: AccountsAdminScreen(
+          controller: controller,
+          initialView: 'accounts',
+          initialFilter: 'approved',
+          initialQuery: 'Sam',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Verknüpft mit Sam · Mitglied'), findsOneWidget);
+    await tester.tap(find.byTooltip('Zugang verwalten'));
+    await tester.pumpAndSettle();
+    expect(find.text('Admin-Rechte entziehen'), findsNothing);
+    await tester.tap(find.text('Admin-Rechte geben'));
+    await tester.pumpAndSettle();
+    expect(find.text('Admin-Rechte geben?'), findsOneWidget);
+    await tester.tap(find.text('Abbrechen'));
+    await tester.pumpAndSettle();
+    expect(changes, isEmpty);
+
+    await tester.tap(find.byTooltip('Zugang verwalten'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Admin-Rechte geben'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Admin-Rechte geben'));
+    await tester.pumpAndSettle();
+    expect(changes.single, {
+      'action': 'account.role',
+      'uid': 'sam',
+      'version': 3,
+      'role': 'admin',
+    });
+    expect(find.text('Sam ist jetzt Admin.'), findsOneWidget);
+    expect(find.text('Verknüpft mit Sam · Admin'), findsOneWidget);
+    ScaffoldMessenger.of(
+      tester.element(find.byType(Scaffold).first),
+    ).clearSnackBars();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Zugang verwalten'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Admin-Rechte entziehen'));
+    await tester.pumpAndSettle();
+    expect(find.text('Admin-Rechte entziehen?'), findsOneWidget);
+    await tester.tap(find.text('Entziehen'));
+    await tester.pumpAndSettle();
+    expect(changes.last, {
+      'action': 'account.role',
+      'uid': 'sam',
+      'version': 4,
+      'role': 'member',
+    });
+    expect(find.text('Sam ist jetzt Mitglied.'), findsOneWidget);
+    ScaffoldMessenger.of(
+      tester.element(find.byType(Scaffold).first),
+    ).clearSnackBars();
+    await tester.pumpAndSettle();
+
+    // A conflict is reported and the list reloads the current rights.
+    conflict = true;
+    await tester.tap(find.byTooltip('Zugang verwalten'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Admin-Rechte geben'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Admin-Rechte geben'));
+    await tester.pumpAndSettle();
+    expect(changes, hasLength(3));
+    expect(find.text('Sam ist jetzt Admin.'), findsNothing);
+    expect(find.text('Verknüpft mit Sam · Mitglied'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('without server support the admin rights stay hidden', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final server = TestServer();
+    server.override = (request) => request.url.path.contains('/admin/accounts')
+        ? Future.value(jsonResponse(fixture()))
+        : null;
+    final controller = server.controller();
+    addTearDown(controller.dispose);
+    await signIn(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StageTheme.build(Brightness.light),
+        home: AccountsAdminScreen(
+          controller: controller,
+          initialView: 'accounts',
+          initialFilter: 'approved',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Zugang verwalten'));
+    await tester.pumpAndSettle();
+    expect(find.text('Zugang sperren'), findsOneWidget);
+    expect(find.text('Admin-Rechte entziehen'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('a failed reload keeps the last list visible', (tester) async {
     tester.view.physicalSize = const Size(1000, 2400);
     tester.view.devicePixelRatio = 1;
