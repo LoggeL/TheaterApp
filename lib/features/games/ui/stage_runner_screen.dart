@@ -274,7 +274,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         'Bühnenlauf',
         eyebrow: 'Hinter der Bühne',
         subtitle:
-            'Engel Ewald hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt. Vorbei an Kisten, Kulissen, Scheinwerfern und Sandsäcken, immer schneller, bis der Vorhang fällt.',
+            'Engel Logge hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt. Vorbei an Kisten, Kulissen, Scheinwerfern und Sandsäcken, immer schneller, bis der Vorhang fällt.',
       ),
       if (_art case final art?)
         Center(
@@ -1203,7 +1203,7 @@ class _StagePainter extends CustomPainter {
     }
   }
 
-  /// Engel Ewald: runs on the floor, flies with arms forward, dangles when
+  /// Engel Logge: runs on the floor, flies with arms forward, dangles when
   /// sinking, cheers at a pickup and crashes comically.
   void _runner(
     Canvas canvas,
@@ -1237,12 +1237,14 @@ class _StagePainter extends CustomPainter {
       sprite = g.vy < -.05 ? RunnerSprite.fly : RunnerSprite.dangle;
       angle = (g.vy * .12).clamp(-.2, .2).toDouble();
     }
-    // Same scale for all poses: the tallest frame is .155 stage heights.
-    final scale = .155 * s / 200;
+    final scale = RunnerSprite.stagePerPixel * s;
     final width = sprite.width * scale, height = sprite.height * scale;
+    // Flying flat, the body lies around the middle of the hitbox; every
+    // other pose stands on its feet.
+    if (sprite == RunnerSprite.fly) feet = g.y + height / s / 2;
     final cx = StageRunner.runnerX * s, bottom = feet * s;
     final dst = Rect.fromLTWH(cx - width / 2, bottom - height, width, height);
-    final harness = Offset(cx - width * .08, dst.top + height * .3);
+    final harness = dst.topLeft + sprite.harness * scale;
     if (!g.over) {
       canvas.drawLine(Offset(harness.dx, 0), harness, _ropePaint);
     } else if (wireTop > 0) {

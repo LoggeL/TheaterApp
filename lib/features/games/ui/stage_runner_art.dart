@@ -8,17 +8,18 @@ import '../domain/stage_runner.dart';
 
 /// Where each picture sits in `assets/games/stage_runner/atlas.webp`.
 enum RunnerSprite {
-  fly(4, 4, 175, 179),
-  dangle(183, 4, 144, 182),
+  // Engel Logge.
+  fly(752, 386, 210, 130),
+  dangle(797, 4, 125, 165),
   // The run, in this order: the near leg forward ([runA]), passing under
   // the body ([passA]), back while the far leg is forward ([runB]), and
   // the far leg passing ([passB]). The far leg is in the shade.
-  runA(331, 4, 144, 187),
-  passA(576, 386, 144, 187),
-  runB(4, 386, 144, 187),
-  passB(724, 386, 144, 187),
-  cheer(621, 4, 152, 200),
-  crash(777, 4, 180, 110),
+  runA(4, 4, 172, 187),
+  passA(180, 4, 172, 187),
+  runB(621, 4, 172, 187),
+  passB(576, 386, 172, 187),
+  cheer(356, 4, 108, 195),
+  crash(152, 454, 207, 88),
   crate(4, 208, 150, 147),
   lamp(158, 208, 92, 170),
   sandbag(254, 208, 118, 140),
@@ -34,6 +35,9 @@ enum RunnerSprite {
   final double x, y, width, height;
   ui.Rect get rect => ui.Rect.fromLTWH(x, y, width, height);
 
+  /// Stage heights per pixel of the runner's poses, all drawn alike.
+  static const stagePerPixel = .155 / 200;
+
   /// The poses of the run in order; a whole cycle covers two ninths of a
   /// unit, so the legs keep pace with the floor.
   static const strides = [runA, passA, runB, passB];
@@ -41,6 +45,16 @@ enum RunnerSprite {
   /// The pose of the run after running [distance].
   static RunnerSprite stride(double distance) =>
       strides[(distance * 18).floor() % strides.length];
+
+  /// Where the flying wire meets the harness, in pixels of the picture;
+  /// only for the poses of the runner.
+  ui.Offset get harness => switch (this) {
+    fly => const ui.Offset(106, 42),
+    dangle => const ui.Offset(54, 28),
+    cheer => const ui.Offset(44, 68),
+    runA => const ui.Offset(83, 66),
+    _ => const ui.Offset(91, 66),
+  };
 
   static RunnerSprite of(PickupKind kind) => switch (kind) {
     PickupKind.rose => rose,

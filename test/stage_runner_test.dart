@@ -103,8 +103,8 @@ int _serverMax(double seconds) =>
 /// be at their worst (a sandbag landed, a drop at its lowest).
 void _pilotStep(StageRunner game) {
   const f = StageRunner.floor, c = StageRunner.ceiling;
-  const hw = StageRunner.runnerWidth * .4 + .01;
-  const hh = StageRunner.runnerHeight * .42 + .015;
+  const hw = StageRunner.hitHalfWidth + .01;
+  const hh = StageRunner.hitHalfHeight + .015;
   const minY = c + StageRunner.runnerHeight / 2;
   const maxY = f - StageRunner.runnerHeight / 2;
   final x = game.runnerWorldX;
@@ -198,6 +198,28 @@ void main() {
         game.update(.02);
       }
       expect(game.vy >= 0 || game.over, isTrue);
+    });
+
+    test('the hitbox is a little smaller than the slim body', () {
+      // Wings, arms, head and shoes may graze an obstacle.
+      expect(StageRunner.hitHalfWidth * 2, lessThan(StageRunner.runnerWidth));
+      expect(StageRunner.hitHalfHeight * 2, lessThan(StageRunner.runnerHeight));
+      // A crate just ahead of the box, then just inside its front edge.
+      for (final (gap, crashes) in [(.002, false), (-.002, true)]) {
+        final game = StageRunner(random: Random(1))..update(1e-4);
+        game.obstacles.clear();
+        final left = game.runnerWorldX + StageRunner.hitHalfWidth + gap;
+        game.obstacles.add(
+          Obstacle()
+            ..kind = ObstacleKind.crate
+            ..left = left
+            ..width = .09
+            ..top = StageRunner.floor - .09
+            ..bottom = StageRunner.floor,
+        );
+        game.update(1e-4);
+        expect(game.over, crashes, reason: 'gap $gap');
+      }
     });
 
     test('doing nothing ends the run soon; long frames never skip', () {
@@ -916,10 +938,33 @@ void main() {
         return (brightX / bright, darkX / dark);
       }
 
+      // Mean position of the golden halo at the top of a pose.
+      (double, double) halo(RunnerSprite s) {
+        var sumX = 0, sumY = 0, count = 0;
+        for (var y = 0; y < 30; y++) {
+          for (var x = 0; x < s.width; x++) {
+            final i = at(s, x, y);
+            final r = bytes.getUint8(i), g = bytes.getUint8(i + 1);
+            final b = bytes.getUint8(i + 2), alpha = bytes.getUint8(i + 3);
+            if (alpha > 200 && r > 180 && g > 130 && b < 90) {
+              sumX += x;
+              sumY += y;
+              count++;
+            }
+          }
+        }
+        expect(count, greaterThan(50), reason: '$s has a halo');
+        return (sumX / count, sumY / count);
+      }
+
+      final (haloX, haloY) = halo(a);
       for (final pose in RunnerSprite.strides) {
-        // Same size and the same head, so the runner does not jump.
+        // Same size and the head in the same place, so the runner does not
+        // jump.
         expect((pose.width, pose.height), (a.width, a.height));
-        expect(difference(pose, 0, .4), lessThan(10), reason: '$pose');
+        final (x, y) = halo(pose);
+        expect((x - haloX).abs(), lessThan(3), reason: '$pose');
+        expect((y - haloY).abs(), lessThan(4), reason: '$pose');
       }
       expect(difference(RunnerSprite.runB, 2 / 3, 1), greaterThan(8));
       // The near shoe is in front in runA and behind in runB, the far shoe
@@ -930,6 +975,46 @@ void main() {
       expect(farB, greaterThan(nearB + 30));
       expect(nearA, greaterThan(nearB + 50));
       expect(farB, greaterThan(farA + 15));
+
+      // The wire meets the harness at the top of its ring, on the body.
+      for (final pose in [
+        ...RunnerSprite.strides,
+        RunnerSprite.fly,
+        RunnerSprite.dangle,
+        RunnerSprite.cheer,
+      ]) {
+        final h = pose.harness;
+        var opaque = 0;
+        for (var y = h.dy.round() - 3; y <= h.dy.round() + 3; y++) {
+          for (var x = h.dx.round() - 3; x <= h.dx.round() + 3; x++) {
+            if (bytes.getUint8(at(pose, x, y) + 3) > 128) opaque++;
+          }
+        }
+        expect(opaque, greaterThan(15), reason: '$pose');
+      }
+
+      // The hitbox, where the stage draws it on each pose: it lies on the
+      // body, and wings, arms, head and shoes stick out of it, so grazing
+      // them is no crash.
+      const px = RunnerSprite.stagePerPixel;
+      const hw = StageRunner.hitHalfWidth / px;
+      const hh = StageRunner.hitHalfHeight / px;
+      for (final pose in RunnerSprite.strides) {
+        // The stage puts the soles .006 below the bottom of the runner.
+        final cy = pose.height - (StageRunner.runnerHeight / 2 + .006) / px;
+        final cx = pose.width / 2;
+        var opaque = 0, count = 0;
+        for (var y = (cy - hh).round(); y < cy + hh; y++) {
+          for (var x = (cx - hw).round(); x < cx + hw; x++) {
+            if (bytes.getUint8(at(pose, x, y) + 3) > 128) opaque++;
+            count++;
+          }
+        }
+        expect(opaque / count, greaterThan(.65), reason: '$pose');
+        expect(2 * hw, lessThan(pose.width * .4), reason: '$pose');
+        expect(cy - hh, greaterThan(haloY + 30), reason: '$pose');
+        expect(cy + hh, lessThan(pose.height - 15), reason: '$pose');
+      }
     });
   });
 

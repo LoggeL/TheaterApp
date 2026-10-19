@@ -107,7 +107,13 @@ class StageRunner {
 
   /// Visible course width in stage heights; the runner stays at [runnerX].
   static const viewWidth = 1.6, runnerX = .4;
-  static const runnerWidth = .07, runnerHeight = .11;
+
+  /// The runner's body without wings, arms and halo.
+  static const runnerWidth = .06, runnerHeight = .11;
+
+  /// Half the hitbox: a bit smaller than the body, which feels fair.
+  static const hitHalfWidth = runnerWidth * .4;
+  static const hitHalfHeight = runnerHeight * .42;
   static const ceiling = .07, floor = .86;
 
   /// Vertical acceleration and speed limits (stage heights per second).
@@ -239,8 +245,7 @@ class StageRunner {
         default:
       }
     }
-    // A slightly smaller hitbox feels fair.
-    const hw = runnerWidth * .4, hh = runnerHeight * .42;
+    const hw = hitHalfWidth, hh = hitHalfHeight;
     if (!invincible) {
       for (final o in obstacles) {
         if (o.left < x + hw &&
