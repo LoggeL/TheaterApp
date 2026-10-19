@@ -55,7 +55,9 @@ test('only open events of the production without an audience go to its ensemble,
     const e = store.get('events', id);
     assert.deepEqual(e.productionIds, ['winter'], id);
     assert.equal(e.version, (before[id].version ?? 1) + 1, id);
-    const { productionIds, version, ...rest } = e, { productionIds: _p, version: _v, ...was } = before[id];
+    // The change time moves with the version (LAST-MODIFIED in the calendar feed).
+    assert.ok(e.updatedAt, id);
+    const { productionIds, version, updatedAt, ...rest } = e, { productionIds: _p, version: _v, updatedAt: _u, ...was } = before[id];
     assert.deepEqual(rest, was, `${id}: nothing else changes`);
   }
   for (const id of Object.keys(before).filter(id => !scoped.includes(id))) assert.deepEqual(store.get('events', id), before[id], `${id} stays`);

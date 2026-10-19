@@ -31,7 +31,7 @@ export const remindCooldownMs = 10 * 60 * 1000;
 // Declines this close to the start are pushed to admins and the production's directors.
 export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed']);
 // A short self-written "Über mich" text on the ensemble profile.
 export const aboutMaxLength = 600;
 // Feedback from members to the admins as support tickets (see feedback-tickets.mjs).
@@ -215,7 +215,7 @@ export class Theater {
     const personIds = s.all('slotBookings').filter(b => b.poolId === pool.id && b.slotId === slot.id).map(b => b.personId).sort((x, y) => x - y);
     for (const kind of ['responses', 'checkins']) for (const x of s.all(kind).filter(x => x.eventId === eventId && !personIds.includes(x.personId))) s.delete(kind, `${eventId}:${x.personId}`);
     if (!personIds.length) { if (old) s.delete('events', eventId); return; }
-    s.put('events', eventId, { id: eventId, title: pool.title, description: pool.description, startsAt: slot.startsAt, endsAt: slot.endsAt, place: pool.place, type: pool.type, locked: false, productionId: null, sceneIds: [], roleIds: [], personIds, slotPoolId: pool.id, version: (old?.version ?? 0) + 1 });
+    s.put('events', eventId, { id: eventId, title: pool.title, description: pool.description, startsAt: slot.startsAt, endsAt: slot.endsAt, place: pool.place, type: pool.type, locked: false, productionId: null, sceneIds: [], roleIds: [], personIds, slotPoolId: pool.id, version: (old?.version ?? 0) + 1, updatedAt: now() });
     for (const personId of personIds) if (s.get('responses', `${eventId}:${personId}`)?.status !== 'yes') s.put('responses', `${eventId}:${personId}`, { eventId, personId, status: 'yes', reason: '', expectedArrivalAt: null, updatedAt: now() });
   }
   bookSlot(pool, personId, slotId) {
@@ -383,6 +383,7 @@ export class Theater {
   }
   forgetAccount(targetUid, actor) {
     for (const d of this.store.all('devices').filter(d => d.uid === targetUid)) this.store.delete('devices', d.id);
+    for (const f of this.store.all('calendarFeeds').filter(f => f.uid === targetUid)) this.store.delete('calendarFeeds', f.id);
     this.store.db.prepare('DELETE FROM requests WHERE uid = ?').run(targetUid);
     // Feedback stays with the person; only the deleted login is removed from it.
     forgetFeedbackAccount(this.store, targetUid);
@@ -754,7 +755,7 @@ export class Theater {
         if (b.productionId && !doc) fail(400, 'Drehbuch nicht gefunden.');
         const sceneIds = [...new Set(list(b.sceneIds).map(String))];
         if (doc && sceneIds.some(x => !doc.scenes.some(scene => scene.id === x))) fail(400, 'Szene nicht gefunden.');
-        s.put('events', e.id, { ...e, productionId: b.productionId || null, sceneIds: doc ? sceneIds : [], version: (e.version ?? 1) + 1 }); return {};
+        s.put('events', e.id, { ...e, productionId: b.productionId || null, sceneIds: doc ? sceneIds : [], version: (e.version ?? 1) + 1, updatedAt: now() }); return {};
       }
       case 'production.archive': {
         admin(); const p = s.get('productions', b.id);
@@ -1052,6 +1053,8 @@ export class Theater {
   /** Saves an event and settles its responses: arrivals outside the new time are cleared, absences decline. */
   storeEvent(e) {
     const s = this.store, eventId = e.id;
+    // `updatedAt` is the LAST-MODIFIED of the calendar feed (see calendar-feed.mjs).
+    e = { ...e, updatedAt: now() };
     s.put('events', eventId, e);
     for (const r of s.all('responses').filter(r => r.eventId === eventId && r.expectedArrivalAt && (r.expectedArrivalAt <= e.startsAt || r.expectedArrivalAt >= e.endsAt))) s.put('responses', `${eventId}:${r.personId}`, { ...r, expectedArrivalAt: null });
     for (const absence of s.all('absences')) if (inAudience(s.get('members', absence.personId), e, s) && absence.from <= day(e.startsAt) && absence.to >= day(e.startsAt) && !s.get('responses', `${eventId}:${absence.personId}`)) s.put('responses', `${eventId}:${absence.personId}`, { eventId, personId: absence.personId, status: 'no', expectedArrivalAt: null, reason: absence.reason, absenceId: absence.id, updatedAt: now() });
@@ -1129,7 +1132,7 @@ export class Theater {
     }
     for (const e of s.all('events').filter(named)) {
       if (onlyThem(e)) this.removeEvent(e.id);
-      else s.put('events', e.id, { ...e, personIds: others(e.personIds), version: (e.version ?? 1) + 1 });
+      else s.put('events', e.id, { ...e, personIds: others(e.personIds), version: (e.version ?? 1) + 1, updatedAt: now() });
     }
     for (const p of s.all('polls').filter(named)) {
       if (onlyThem(p)) { this.forgetPollVotes(p.id); s.delete('polls', p.id); s.delete('nudges', `poll:${p.id}`); }

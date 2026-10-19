@@ -6,6 +6,7 @@ import { AppError } from './theater.mjs';
 import { clientAddress } from './bot-check.mjs';
 import { linkWebsiteProfile, websiteProfilesView } from './website-team.mjs';
 import { adminTicketView, closeOwnFeedback, markFeedbackRead, ownFeedback, ownTicketView, replyAsAdmin, replyAsMember } from './feedback-tickets.mjs';
+import { CalendarFeedLimiter, calendarFeed, calendarFeedLink, resetCalendarFeed } from './calendar-feed.mjs';
 
 // Content-addressed web files from tool/version-web.mjs never change under their name.
 // Entry points (index.html, workers, manifests) and unhashed files must stay revalidated.
@@ -14,8 +15,9 @@ const hashedWebFile = /^\/(?:main\.[a-f0-9]{16}\.dart\.(?:js|mjs|wasm)|(?:flutte
 // `botCheck` (see bot-check.mjs) answers the public knowledge question before sign-in and
 // evaluates its proof and the form's bot trap (`botTrap`) when an account is created;
 // `clientIpHeader` names the proxy header with the client address for its attempt limit
-// (e.g. `cf-connecting-ip`).
-export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null }) {
+// (e.g. `cf-connecting-ip`). `appOrigin` is the public address of the app, used for the
+// personal calendar feed links (see calendar-feed.mjs).
+export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null, appOrigin = null, calendarLimiter = new CalendarFeedLimiter() }) {
   const origins = new Set(allowedOrigins);
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   const readBody = async (req, route) => {
@@ -35,6 +37,20 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       const requestUrl = new URL(req.url, 'http://localhost');
       const path = decodeURIComponent(requestUrl.pathname).replace(/\/+$/, '') || '/';
       if (path === '/api/healthz') return json(res, 200, { ok: true, service: 'theater-app', firebase: true, release: process.env.RELEASE_SHA ?? 'development' });
+      // Public: calendar apps send no sign-in; the secret token in the path is the only proof.
+      // Unknown tokens and accounts without access look the same (404).
+      const calendar = path.match(/^\/api\/calendar\/([^/]+)\.ics$/);
+      if (calendar && ['GET', 'HEAD'].includes(req.method)) {
+        const feed = calendarFeed(defaultTheater, calendar[1], { appOrigin }) ?? (review ? calendarFeed(review.theater, calendar[1], { appOrigin }) : null);
+        const wait = feed ? calendarLimiter.token(calendar[1]) : calendarLimiter.miss(clientAddress(req, clientIpHeader));
+        if (wait) throw Object.assign(new AppError(429, 'Zu viele Abrufe. Bitte später erneut versuchen.', 'rate_limited'), { retryAfter: wait });
+        if (!feed) throw new AppError(404, 'Nicht gefunden.');
+        const headers = { ETag: feed.etag, 'Cache-Control': 'private, max-age=300', 'X-Robots-Tag': 'noindex, nofollow' };
+        if (String(req.headers['if-none-match'] ?? '').split(',').map(x => x.trim().replace(/^W\//, '')).includes(feed.etag)) { res.writeHead(304, headers); res.end(); return; }
+        const body = Buffer.from(feed.body, 'utf8');
+        res.writeHead(200, { ...headers, 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Length': body.length, 'Content-Disposition': 'inline; filename="kolpingtheater.ics"' });
+        res.end(req.method === 'HEAD' ? undefined : body); return;
+      }
       if (req.method === 'OPTIONS') { if (origin && !origins.has(origin)) throw new AppError(403, 'Diese App-Adresse ist nicht freigegeben.'); res.writeHead(204); res.end(); return; }
       if (!path.startsWith('/api/mobile/v1')) {
         if (webDir && ['GET', 'HEAD'].includes(req.method)) {
@@ -105,6 +121,8 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       }
       if (route === '/snapshot' && req.method === 'GET') return json(res, 200, theater.snapshot(identity.uid));
       if (route === '/actions' && req.method === 'POST') return json(res, 200, theater.action(identity.uid, body, req.headers['idempotency-key']));
+      if (route === '/calendar-feed' && req.method === 'GET') return json(res, 200, calendarFeedLink(theater, identity.uid, appOrigin));
+      if (route === '/calendar-feed/reset' && req.method === 'POST') return json(res, 200, resetCalendarFeed(theater, identity.uid, appOrigin));
       if (route === '/participation' && req.method === 'GET') return json(res, 200, theater.participation(identity.uid));
       if (route === '/ensemble/website-profiles' && req.method === 'GET') return json(res, 200, websiteProfilesView(theater, identity.uid));
       const websiteProfile = route.match(/^\/ensemble\/website-profiles\/([^/]+)$/);
