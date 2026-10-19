@@ -25,6 +25,7 @@ import '../domain/script_roles.dart';
 import '../state/live_focus_controller.dart';
 import 'annotations/cue_comments_screen.dart';
 import 'annotations/private_note_editor.dart';
+import 'line_learning_screen.dart';
 import 'widgets/cue_card.dart';
 import 'widgets/reader_sheet_frame.dart';
 import 'widgets/reader_style.dart';
@@ -637,6 +638,14 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
           switch (value) {
             case 'settings':
               _showSettings();
+            case 'learn':
+              openPage(
+                context,
+                LineLearningScreen(
+                  controller: widget.controller,
+                  productionId: widget.productionId,
+                ),
+              );
             case 'notes':
               _showNotes();
             case 'bookmarks':
@@ -661,6 +670,11 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
           const PopupMenuItem(
             value: 'settings',
             child: Text('Leseeinstellungen'),
+          ),
+          PopupMenuItem(
+            value: 'learn',
+            enabled: _document != null,
+            child: const Text('Text lernen'),
           ),
           const PopupMenuItem(value: 'notes', child: Text('Private Notizen')),
           PopupMenuItem(

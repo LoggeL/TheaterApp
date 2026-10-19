@@ -11,6 +11,7 @@ class ProductionCard extends StatelessWidget {
     required this.cached,
     required this.roles,
     required this.onTap,
+    this.onLearn,
     this.highlightLatest = true,
   });
   final Production production;
@@ -20,6 +21,9 @@ class ProductionCard extends StatelessWidget {
   /// Names of the member's roles in this production; may be empty.
   final List<String> roles;
   final VoidCallback onTap;
+
+  /// Opens the line learning; the button shows only with [roles].
+  final VoidCallback? onLearn;
   final bool highlightLatest;
   bool get latest => highlightLatest && number == 1;
 
@@ -127,6 +131,20 @@ class ProductionCard extends StatelessWidget {
                 }, style: const TextStyle(color: Colors.white70)),
               ],
             ),
+            if (onLearn != null && roles.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                key: ValueKey('production-learn.${production.id}'),
+                onPressed: onLearn,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white38),
+                  minimumSize: const Size(0, 48),
+                ),
+                icon: const Icon(Icons.record_voice_over_outlined, size: 20),
+                label: const Text('Text lernen'),
+              ),
+            ],
             const SizedBox(height: 22),
             Row(
               children: [

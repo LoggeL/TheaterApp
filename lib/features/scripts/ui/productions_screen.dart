@@ -10,6 +10,7 @@ import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/state_pill.dart';
 import '../../../shared/widgets/visible_listenable_builder.dart';
 import '../domain/script_roles.dart';
+import 'line_learning_screen.dart';
 import 'production_card.dart';
 import 'script_reader_screen.dart';
 
@@ -121,6 +122,13 @@ class ProductionsScreen extends StatelessWidget {
                         onTap: () => openPage(
                           context,
                           ScriptReaderScreen(
+                            controller: controller,
+                            productionId: production.id,
+                          ),
+                        ),
+                        onLearn: () => openPage(
+                          context,
+                          LineLearningScreen(
                             controller: controller,
                             productionId: production.id,
                           ),
