@@ -111,15 +111,17 @@ test('absences decline each occurrence they cover', t => {
 });
 
 test('deleting this and all following occurrences of a series', t => {
-  const { app, store, action, sam } = setup(t);
+  const { app, store, action, sam, tech, kim } = setup(t);
   app.emailEnabled = true;
   const { ids } = action(series({ every: 'week', until: '2026-12-01' }));
+  // Kim declined one occurrence but is still expected at the others.
+  action({ action: 'attendance', eventId: ids[3], status: 'no', reason: 'Urlaub' }, 'kim');
   const other = action(series({ every: 'week', until: '2026-10-06' }, { title: 'Andere' }));
   action({ action: 'attendance', eventId: ids[5], status: 'yes' }, 'sam');
   action({ action: 'checkin.save', eventId: ids[5], members: [{ id: sam, present: true }] });
   const moved = store.get('events', ids[7]);
   action(series(undefined, { id: ids[7], version: 1, title: 'Umbenannt', startsAt: moved.startsAt, endsAt: moved.endsAt }));
-  for (const j of store.all('emailJobs')) store.delete('emailJobs', j.id);
+  for (const kind of ['pushJobs', 'emailJobs']) for (const j of store.all(kind)) store.delete(kind, j.id);
 
   assert.throws(() => action({ action: 'event.delete', id: ids[3], version: 2, series: 'following' }), { status: 409 });
   assert.throws(() => action({ action: 'event.delete', id: ids[3], version: 1, series: 'all' }), { status: 400 });
@@ -134,6 +136,9 @@ test('deleting this and all following occurrences of a series', t => {
   assert.equal(emails.length, 1, 'one cancellation email for the series');
   assert.deepEqual([emails[0].cancelled, emails[0].seriesCount, emails[0].event.id], [true, 9, ids[3]]);
   assert.equal(eventEmail(emails[0], emails[0].event, 'https://app.example.com').subject, 'Termine abgesagt: Probe');
+  // Push is not opt-in like email: one push for the series, too, without the deleting admin.
+  const pushes = store.all('pushJobs');
+  assert.deepEqual(pushes.map(j => [j.title, j.body, j.pushKind, j.recipientPersonIds.sort()]), [['Termine abgesagt: Probe', '9 Termine entfallen, ab Di., 06.10.2026, 19:00 Uhr', 'changes', [sam, tech, kim].sort()]]);
 
   // Without the choice only the one occurrence goes.
   assert.deepEqual(action({ action: 'event.delete', id: ids[1], version: 1 }).ids, [ids[1]]);
@@ -198,11 +203,17 @@ test('a series edit is announced with one push and one email', async t => {
   await deliverPush({ pushEnabled: true, store }, { sendEachForMulticast: async p => { calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) }; } });
   assert.deepEqual(calls.map(p => [p.tokens, p.notification.title]), [[['token-sam'], 'Terminserie geändert: Probe']]);
 
-  // Without the push switch the usual change notice is sent once for the series.
+  // Without the push switch nothing is pushed; the change is only mailed once for the series.
   for (const kind of ['pushJobs', 'emailJobs']) for (const j of store.all(kind)) store.delete(kind, j.id);
   action(edit(store, ids[2], { place: 'Aula', series: 'following' }));
-  assert.deepEqual(store.all('pushJobs').map(j => [j.title, j.announce, j.change, j.series.count]), [['Terminserie geändert: Probe', undefined, true, 10]]);
-  assert.equal(store.all('emailJobs').length, 1);
+  assert.equal(store.all('pushJobs').length, 0);
+  assert.deepEqual(store.all('emailJobs').map(j => [j.title, j.change, j.series.count]), [['Terminserie geändert: Probe', true, 10]]);
+
+  // A new description alone is no reason to notify anyone, even with the switch on.
+  for (const j of store.all('emailJobs')) store.delete('emailJobs', j.id);
+  const typo = action(edit(store, ids[3], { description: 'Bitte pünktlich', series: 'following', push: true }));
+  assert.deepEqual([typo.pushQueued, typo.pushSkipped, typo.ids.length], [false, 'unchanged', 9]);
+  assert.deepEqual([store.all('pushJobs').length, store.all('emailJobs').length], [0, 0]);
 });
 
 test('a series edit without changes leaves the following occurrences alone', t => {

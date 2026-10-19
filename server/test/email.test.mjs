@@ -98,7 +98,7 @@ test('event creation, change and cancellation queue mail; test only targets the 
   const payload = { action: 'event.save', title: 'Probe', startsAt: new Date(+now + 3600000).toISOString(), endsAt: new Date(+now + 7200000).toISOString() };
   const { id } = theater.action('admin', payload, 'new');
   await deliverEmail(theater, email, 'https://app.example.com');
-  theater.action('admin', { ...payload, id, version: 1 }, 'change');
+  theater.action('admin', { ...payload, id, version: 1, place: 'Saal' }, 'change');
   await deliverEmail(theater, email, 'https://app.example.com');
   assert.equal(sent.length, 2);
   theater.action('admin', { action: 'event.delete', id, version: 2 }, 'delete');

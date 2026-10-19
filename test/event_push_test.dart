@@ -136,18 +136,62 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('editing an event does not push unless asked', (tester) async {
-    final (server, controller) = await open(
-      tester,
-      event: (c) => c.events.firstWhere((e) => e.slotPoolId == null),
+  // An upcoming event within the two weeks in which changes are pushed.
+  TheaterEvent nearEvent(AppController c) => c.events.firstWhere(
+    (e) =>
+        e.slotPoolId == null &&
+        e.startsAt != null &&
+        e.startsAt!.isAfter(c.now) &&
+        e.startsAt!.isBefore(c.now.add(const Duration(days: 14))),
+  );
+
+  testWidgets('editing pushes nothing unless time or place change', (
+    tester,
+  ) async {
+    final (server, controller) = await open(tester, event: nearEvent);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Beschreibung'),
+      'Tippfehler korrigiert',
     );
     await scrollTo(tester, find.byKey(const ValueKey('event-push')));
-    expect(pushSwitch(tester).value, isFalse);
+    expect(pushSwitch(tester).value, isTrue);
+    expect(
+      find.text('Neue Zeit oder neuen Ort per Push melden'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Datum, Uhrzeit und Ort sind unverändert'),
+      findsOneWidget,
+    );
     final body = await save(tester, server);
     expect(body['push'], isFalse);
     await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
+  });
+
+  testWidgets('a new place is pushed to attendees unless switched off', (
+    tester,
+  ) async {
+    for (final on in [true, false]) {
+      final (server, controller) = await open(tester, event: nearEvent);
+      await tester.enterText(find.widgetWithText(TextField, 'Ort'), 'Aula');
+      await scrollTo(tester, find.byKey(const ValueKey('event-push')));
+      expect(
+        find.textContaining('Geht an alle, die zugesagt haben'),
+        findsOneWidget,
+      );
+      if (!on) {
+        await tester.tap(find.byKey(const ValueKey('event-push')));
+        await tester.pump();
+      }
+      expect(pushSwitch(tester).value, on);
+      final body = await save(tester, server);
+      expect(body['push'], on);
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    }
   });
 
   testWidgets('the switch is disabled without push setup', (tester) async {

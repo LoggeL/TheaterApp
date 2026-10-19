@@ -205,7 +205,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     (
                       'changes',
                       'Bei Änderungen',
-                      'Wenn sich ein Termin ändert',
+                      'Wenn sich Zeit oder Ort ändern oder ein Termin ausfällt',
                     ),
                   ])
                     SwitchListTile(

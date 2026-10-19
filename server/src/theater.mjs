@@ -663,9 +663,11 @@ export class Theater {
           return { id: eventId, ids: events.map(x => x.id), pushQueued: b.push === true && this.pushEnabled, pushSkipped: b.push === true && !this.pushEnabled ? 'disabled' : null };
         }
         this.storeEvent(e);
-        // An explicit push replaces the automatic change notification; its email mirror keeps the usual rules.
+        // Only a new date, time or place is worth a notification; typo fixes, locking and the like stay quiet.
+        // Such a change is pushed only with the push switch on and otherwise just mailed (email is opt-in).
+        const moved = (x, y) => ['startsAt', 'endsAt', 'place'].some(f => !sameValue(f, x[f], y[f]));
         const near = at => { const until = Date.parse(at) - +this.clock(); return until > 0 && until <= changePushWindowDays * 86400000; };
-        const pushSkipped = soon => b.push !== true ? null : !this.pushEnabled ? 'disabled' : soon ? null : 'far_future';
+        const pushSkipped = (soon, relevant = true) => b.push !== true ? null : !this.pushEnabled ? 'disabled' : !relevant ? 'unchanged' : soon ? null : 'far_future';
         if (b.series === 'following') {
           // "This and all following": later occurrences take over only the fields changed
           // here, so their own edits survive; times move by the Berlin wall-clock delta.
@@ -673,27 +675,35 @@ export class Theater {
           if (followers.length) {
             const touched = [old.startsAt, startsAt, ...followers.flatMap(x => [x.before.startsAt, x.after.startsAt])];
             // Moving a near event far away still concerns those who expect it soon.
-            const soon = touched.some(near);
+            const soon = touched.some(near), relevant = moved(old, e) || followers.some(x => moved(x.before, x.after));
             const notice = { title: `Terminserie geändert: ${e.title}`, body: `Gilt für ${followers.length + 1} Termine ab ${eventNotificationBody(e)}`, data: { eventId }, roleIds, personIds, productionIds, change: true, soon, series: { id: old.seriesId, count: followers.length + 1 } };
-            this.enqueuePush(b.push === true ? { ...notice, announce: 'changed' } : notice);
-            return { id: eventId, ids: [eventId, ...followers.map(x => x.after.id)], pushQueued: b.push === true && this.pushEnabled && soon, pushSkipped: pushSkipped(soon) };
+            if (relevant && b.push === true) this.enqueuePush({ ...notice, announce: 'changed' });
+            else if (relevant) this.enqueueEmail(notice);
+            return { id: eventId, ids: [eventId, ...followers.map(x => x.after.id)], pushQueued: b.push === true && this.pushEnabled && soon && relevant, pushSkipped: pushSkipped(soon, relevant) };
           }
         }
         // Moving a near event far away still concerns those who expect it soon.
         const soon = !old || near(old.startsAt) || near(startsAt);
-        const kind = old ? { change: true, soon } : { newEvent: true };
-        if (b.push === true) this.enqueuePush({ title: `${old ? 'Termin geändert' : 'Neuer Termin'}: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, ...kind, announce: old ? 'changed' : 'new' });
-        else if (old) this.enqueuePush({ title: `Termin aktualisiert: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, change: true, soon });
-        else this.enqueueEmail({ data: { eventId }, roleIds, personIds, productionIds, newEvent: true });
-        return { id: eventId, ...(b.series === 'following' ? { ids: [eventId] } : {}), pushQueued: b.push === true && this.pushEnabled && soon, pushSkipped: pushSkipped(soon) };
+        const kind = old ? { change: true, soon } : { newEvent: true }, relevant = !old || moved(old, e);
+        if (relevant && b.push === true) this.enqueuePush({ title: `${old ? 'Termin geändert' : 'Neuer Termin'}: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, ...kind, announce: old ? 'changed' : 'new' });
+        else if (relevant) this.enqueueEmail({ data: { eventId }, roleIds, personIds, productionIds, ...kind });
+        return { id: eventId, ...(b.series === 'following' ? { ids: [eventId] } : {}), pushQueued: b.push === true && this.pushEnabled && soon && relevant, pushSkipped: pushSkipped(soon, relevant) };
       }
       case 'event.delete': {
         admin(); const e = s.get('events', b.id); if (!e) fail(404, 'Termin nicht gefunden.');
         if (e.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.', 'closed');
         if ((e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.', 'version_conflict');
         if (b.series !== undefined && b.series !== 'following') fail(400, 'Unbekannte Auswahl für die Terminserie.');
+        // Email is opt-in, so invitees of upcoming events also hear of the cancellation by push (kind
+        // `changes`), except who declined them and the admin deleting. The event is gone: no deep link.
+        const pushCancelled = (events, title, body) => {
+          const upcoming = events.filter(x => Date.parse(x.endsAt) > +this.clock());
+          const recipients = [...new Set(upcoming.flatMap(x => this.audienceIds(x).filter(p => s.get('responses', `${x.id}:${p}`)?.status !== 'no')))].filter(p => p !== a.personId);
+          if (recipients.length) this.enqueuePush({ title, body, data: {}, recipientPersonIds: recipients, pushKind: 'changes' });
+        };
         if (b.series !== 'following' || !e.seriesId) {
           this.enqueueEmail({ data: { eventId: e.id }, roleIds: e.roleIds, personIds: e.personIds, productionIds: e.productionIds, cancelled: true, event: cancelledEvent(e) });
+          pushCancelled([e], `Termin abgesagt: ${e.title}`, eventNotificationBody(e));
           this.removeEvent(e.id);
           return { ids: [e.id] };
         }
@@ -703,6 +713,8 @@ export class Theater {
         // One cancellation email for the series, naming the next affected date.
         const upcoming = doomed.filter(x => Date.parse(x.endsAt) > +this.clock());
         if (upcoming.length) { const first = upcoming[0]; this.enqueueEmail({ data: { eventId: first.id }, roleIds: first.roleIds, personIds: first.personIds, productionIds: first.productionIds, cancelled: true, event: cancelledEvent(first), ...(upcoming.length > 1 ? { seriesCount: upcoming.length } : {}) }); }
+        // Likewise a single push for the series.
+        if (upcoming.length) pushCancelled(upcoming, `${upcoming.length > 1 ? 'Termine' : 'Termin'} abgesagt: ${upcoming[0].title}`, `${upcoming.length > 1 ? `${upcoming.length} Termine entfallen, ab ` : ''}${eventNotificationBody(upcoming[0])}`);
         for (const x of doomed) this.removeEvent(x.id);
         return { ids: doomed.map(x => x.id) };
       }

@@ -455,15 +455,16 @@ test('every push kind is recognized, also for jobs queued by older servers', t =
   const fresh = () => { for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id); };
   const later = event('2026-09-20T15:00:00Z');
   fresh();
-  act({ action: 'event.save', id: later, title: 'Probe', startsAt: '2026-09-20T15:00:00Z', endsAt: '2026-09-20T17:00:00Z', place: 'Bühne', version: 1, productionId: 'winter' });
-  act({ action: 'event.save', title: 'Fest', startsAt: '2026-09-21T15:00:00Z', endsAt: '2026-09-21T17:00:00Z', push: true });
+  act({ action: 'event.save', id: later, title: 'Probe', startsAt: '2026-09-20T15:00:00Z', endsAt: '2026-09-20T17:00:00Z', place: 'Bühne', version: 1, productionId: 'winter', push: true });
+  const party = act({ action: 'event.save', title: 'Fest', startsAt: '2026-09-21T15:00:00Z', endsAt: '2026-09-21T17:00:00Z', push: true }).id;
+  act({ action: 'event.delete', id: party, version: 1 });
   act({ action: 'event.remindOpen', eventId: later });
   const message = act({ action: 'message.send', title: 'Hallo', body: 'Text', audience: 'all', push: true }).id;
   act({ action: 'message.remind', id: message });
   act({ action: 'poll.save', title: 'Wahl', options: [{ label: 'A' }, { label: 'B' }], push: true });
   act({ action: 'push.send', title: 'Kurz', body: 'Bitte', audience: 'all' });
   act({ action: 'push.test' });
-  assert.deepEqual(kinds(), [['Erinnerung', 'messages'], ['Hallo', 'messages'], ['Kurz', 'direct'], ['Neue Abstimmung', 'polls'], ['Neuer Termin', 'eventAnnouncements'], ['Rückmeldung fehlt', 'eventRequests'], ['Termin aktualisiert', 'changes'], ['Theater-App', null]]);
+  assert.deepEqual(kinds(), [['Erinnerung', 'messages'], ['Hallo', 'messages'], ['Kurz', 'direct'], ['Neue Abstimmung', 'polls'], ['Neuer Termin', 'eventAnnouncements'], ['Rückmeldung fehlt', 'eventRequests'], ['Termin abgesagt', 'changes'], ['Termin geändert', 'changes'], ['Theater-App', null]]);
   fresh();
   const slots = [{ id: 's1', startsAt: '2026-09-22T15:00:00Z', endsAt: '2026-09-22T16:00:00Z', capacity: 2 }];
   const pool = act({ action: 'slotPool.save', title: 'Foto', slots }).id;
@@ -477,6 +478,10 @@ test('every push kind is recognized, also for jobs queued by older servers', t =
     [{ title: 'Terminfinder entfällt: Foto', data: {} }, 'slots'],
     [{ title: 'Antwort auf dein Feedback', data: { feedbackId: 'f' } }, 'feedbackReplies'],
     [{ title: 'Neue Terminserie: Probe', data: { eventId: 'e' }, newEvent: true, announce: 'new', series: {} }, 'eventAnnouncements'],
+    // Announced changes counted as announcements before; they follow "Bei Änderungen" now.
+    [{ title: 'Termin geändert: Probe', data: { eventId: 'e' }, change: true, soon: true, announce: 'changed' }, 'changes'],
+    [{ title: 'Terminserie geändert: Probe', data: { eventId: 'e' }, change: true, soon: true, announce: 'changed', series: {} }, 'changes'],
+    [{ title: 'Termin aktualisiert: Probe', data: { eventId: 'e' }, change: true, soon: true }, 'changes'],
     [{ title: 'Probe', data: { eventId: 'e' } }, 'reminders'],
     [{ title: 'Zugang freigegeben', data: {} }, null],
   ];

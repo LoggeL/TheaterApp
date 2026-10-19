@@ -208,12 +208,14 @@ test('event saves explain a skipped push and message sends count their recipient
   const { app, action, approve } = setup(t); approve();
   const far = { action: 'event.save', title: 'Hauptprobe', startsAt: '2026-10-02T17:00:00Z', endsAt: '2026-10-02T19:00:00Z' };
   const id = action(far).id;
-  assert.deepEqual(action({ ...far, id, version: 1, push: true }), { ok: true, id, pushQueued: false, pushSkipped: 'disabled' });
+  assert.deepEqual(action({ ...far, id, version: 1, place: 'Saal', push: true }), { ok: true, id, pushQueued: false, pushSkipped: 'disabled' });
   app.pushEnabled = true;
-  const result = action({ ...far, id, version: 2, push: true });
+  const result = action({ ...far, id, version: 2, place: 'Bühne', push: true });
   assert.equal(result.pushQueued, false);
   assert.equal(result.pushSkipped, 'far_future');
-  assert.deepEqual([action({ ...far, id, version: 3 }).pushSkipped, action({ ...far, id, version: 4, startsAt: '2026-09-20T17:00:00Z', endsAt: '2026-09-20T19:00:00Z', push: true }).pushSkipped], [null, null]);
+  // Neither date, time nor place changed: the switch alone sends nothing.
+  assert.deepEqual(action({ ...far, id, version: 3, place: 'Bühne', title: 'Generalprobe', push: true }), { ok: true, id, pushQueued: false, pushSkipped: 'unchanged' });
+  assert.deepEqual([action({ ...far, id, version: 4 }).pushSkipped, action({ ...far, id, version: 5, startsAt: '2026-09-20T17:00:00Z', endsAt: '2026-09-20T19:00:00Z', push: true }).pushSkipped], [null, null]);
   assert.equal(action({ action: 'message.send', title: 'Hallo', body: 'Alle', audience: 'all' }).recipients, 2);
 });
 

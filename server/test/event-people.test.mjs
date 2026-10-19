@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Store } from '../src/store.mjs';
 import { Theater } from '../src/theater.mjs';
 import { deliverPush, scheduleReminders } from '../src/push.mjs';
+import { pushKind } from '../src/push-kinds.mjs';
 
 const now = new Date('2026-09-12T12:00:00Z');
 function setup(t) {
@@ -95,22 +96,29 @@ test('saving an event can push the invited people once', async t => {
   assert.equal(calls[0].notification.title, 'Neuer Termin: Lichtprobe');
   assert.equal(calls[0].data.eventId, created.id);
 
-  // Changes only reach people who plan to attend: Sam accepted, Toni never answered.
-  // Sam opted out of automatic change notifications; the explicit push still reaches him.
+  // Typo fixes stay quiet even with the switch on; the server says why.
   action({ action: 'attendance', eventId: created.id, status: 'yes' }, 'sam');
-  action({ action: 'settings.reminders', value: { changes: false } }, 'sam');
   for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
-  action(event({ id: created.id, version: 1, title: 'Lichtprobe neu', push: true }));
-  assert.equal(eventJobs(created.id).length, 1, 'explicit push replaces the automatic change notification');
-  assert.equal(eventJobs(created.id)[0].title, 'Termin geändert: Lichtprobe neu');
+  const typo = action(event({ id: created.id, version: 1, title: 'Lichtprobe neu', description: 'Mit Nebel', locked: true, push: true }));
+  assert.deepEqual([typo.pushQueued, typo.pushSkipped, eventJobs(created.id).length], [false, 'unchanged', 0]);
+
+  // A new place is pushed, but only to people who plan to attend: Sam accepted, Toni never answered.
+  const moved = action(event({ id: created.id, version: 2, title: 'Lichtprobe neu', place: 'Saal', push: true }));
+  assert.deepEqual([moved.pushQueued, moved.pushSkipped], [true, null]);
+  assert.deepEqual(eventJobs(created.id).map(j => [j.title, j.change, j.announce, pushKind(j)]), [['Termin geändert: Lichtprobe neu', true, 'changed', 'changes']]);
   calls = await deliver();
-  assert.deepEqual(calls.flatMap(p => p.tokens).sort(), ['token-sam']);
+  assert.deepEqual(calls.flatMap(p => p.tokens), ['token-sam']);
   assert.equal(calls[0].notification.title, 'Termin geändert: Lichtprobe neu');
 
-  // Without the switch an edit keeps the automatic change notification, again only for answers.
+  // With the switch off nothing is pushed, not even a new time.
   action({ action: 'attendance', eventId: created.id, status: 'yes' }, 'tech');
-  action(event({ id: created.id, version: 2, title: 'Lichtprobe alt' }));
-  assert.deepEqual(eventJobs(created.id).filter(j => j.status === 'pending').map(j => [j.title, j.change, j.announce]), [['Termin aktualisiert: Lichtprobe alt', true, undefined]]);
+  for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
+  const quiet = action(event({ id: created.id, version: 3, title: 'Lichtprobe neu', place: 'Saal', startsAt: '2026-09-13T10:00:00Z', endsAt: '2026-09-13T12:00:00Z' }));
+  assert.deepEqual([quiet.pushQueued, quiet.pushSkipped, eventJobs(created.id).length], [false, null, 0]);
+
+  // A person who switched off "Bei Änderungen" does not get the change pushed.
+  action({ action: 'settings.reminders', value: { changes: false } }, 'sam');
+  action(event({ id: created.id, version: 4, title: 'Lichtprobe neu', place: 'Saal', startsAt: '2026-09-13T11:00:00Z', endsAt: '2026-09-13T13:00:00Z', push: true }));
   calls = await deliver();
   assert.deepEqual(calls.flatMap(p => p.tokens), ['token-tech'], 'Sam opted out, Toni answered meanwhile');
 });
@@ -158,10 +166,40 @@ test('changes to events more than two weeks ahead are not pushed', async t => {
   assert.deepEqual(await deliver(), []);
 
   // Moving it into the next two weeks is pushed, and so is moving a near event far away.
-  action(event({ id, version: 3, personIds: [sam], title: 'Vorgezogen' }));
+  action(event({ id, version: 3, personIds: [sam], title: 'Vorgezogen', push: true }));
   assert.deepEqual(await deliver(), ['token-sam']);
-  action(event({ id, version: 4, ...far, personIds: [sam], title: 'Wieder verschoben' }));
+  action(event({ id, version: 4, ...far, personIds: [sam], title: 'Wieder verschoben', push: true }));
   assert.deepEqual(await deliver(), ['token-sam']);
+});
+
+test('a deleted event is pushed as cancelled to everyone invited who has not declined', async t => {
+  const { store, action, sam, tech, kim } = setup(t);
+  for (const uid of ['admin', 'sam', 'tech', 'kim']) store.put('devices', uid, { id: uid, uid, token: `token-${uid}`, platform: 'web' });
+  const deliver = async () => {
+    const calls = [];
+    await deliverPush({ pushEnabled: true, store }, { sendEachForMulticast: async p => { calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) }; } });
+    return calls;
+  };
+  const adminId = store.account('admin').personId;
+  const id = action(event({ place: 'Saal', personIds: [sam, tech, kim, adminId] })).id;
+  action({ action: 'attendance', eventId: id, status: 'no', reason: 'Krank' }, 'kim');
+  for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
+  action({ action: 'event.delete', id, version: 1 });
+  const [job] = store.all('pushJobs');
+  assert.equal(store.all('pushJobs').length, 1);
+  // Open invitations count, too; the deleting admin and Kim, who declined, are left out.
+  assert.deepEqual([job.title, job.body, job.data, pushKind(job), job.recipientPersonIds.sort()], ['Termin abgesagt: Lichtprobe', 'So., 13.09.2026, 11:00 Uhr · Saal', {}, 'changes', [sam, tech].sort()]);
+  // "Bei Änderungen" also switches off cancellations.
+  action({ action: 'settings.reminders', value: { changes: false } }, 'tech');
+  const calls = await deliver();
+  assert.deepEqual(calls.flatMap(p => p.tokens), ['token-sam']);
+  assert.deepEqual([calls[0].notification.title, calls[0].webpush], ['Termin abgesagt: Lichtprobe', undefined]);
+
+  // Past events are not pushed when deleted.
+  for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
+  const past = action(event({ startsAt: '2026-09-11T09:00:00Z', endsAt: '2026-09-11T11:00:00Z' })).id;
+  action({ action: 'event.delete', id: past, version: 1 });
+  assert.equal(store.all('pushJobs').length, 0);
 });
 
 test('absences report the declined events by Berlin date and can reopen them', t => {

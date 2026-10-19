@@ -91,8 +91,19 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       ? planSeries(_start, _end, _repeat!, _until)
       : null;
 
-  /// New events notify their invitees by default; edits only on request.
-  late bool _push = widget.event == null;
+  /// On by default. For an edit the server pushes only a new date, time or
+  /// place; switched off, nothing is pushed.
+  bool _push = true;
+
+  /// Whether an edit changes what attendees must know: date, time or place.
+  /// Typo fixes in title or description are never pushed (as on the server).
+  bool get _relevantChange {
+    final old = widget.event;
+    return old == null ||
+        !(old.startsAt?.isAtSameMomentAs(_start) ?? false) ||
+        !(old.endsAt?.isAtSameMomentAs(_end) ?? false) ||
+        old.place.trim() != _place.text.trim();
+  }
 
   /// Changes are pushed only for events within the next two weeks (before or
   /// after the change), mirroring the server.
@@ -260,7 +271,11 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     }
     final following = scope == 'following';
     setState(() => _busy = true);
-    final push = _push && widget.controller.pushConfigured && _changeIsNear;
+    final push =
+        _push &&
+        widget.controller.pushConfigured &&
+        _changeIsNear &&
+        _relevantChange;
     final series = _series;
     try {
       final result = await widget.controller.performActionWithResult({
@@ -302,6 +317,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         'far_future' =>
           ' – kein Push, der Termin liegt mehr als $changePushWindowDays Tage entfernt.',
         'disabled' => ' – kein Push, der Versand ist nicht eingerichtet.',
+        'unchanged' => ' – kein Push, Zeit und Ort sind unverändert.',
         _ => ' – ohne Push.',
       };
       showDone(
@@ -335,11 +351,18 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
 
   /// 'single' or, for a series, 'following'; null when cancelled.
   Future<String?> _confirmDelete() async {
+    // Deleting an upcoming event always pushes the cancellation (server).
+    final notice =
+        widget.controller.pushConfigured &&
+            (widget.event!.endsAt?.isAfter(widget.controller.now) ?? false)
+        ? ' Wer eingeladen ist und nicht abgesagt hat, erfährt per Push von '
+              'der Absage.'
+        : '';
     if (!widget.event!.inSeries) {
       final confirmed = await confirmDestructive(
         context,
         title: 'Termin löschen?',
-        message: 'Der Termin und seine Rückmeldungen werden entfernt.',
+        message: 'Der Termin und seine Rückmeldungen werden entfernt.$notice',
         confirmLabel: 'Löschen',
       );
       return confirmed ? 'single' : null;
@@ -348,9 +371,9 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Serientermin löschen?'),
-        content: const Text(
+        content: Text(
           'Der Termin gehört zu einer Serie. Gelöschte Termine verlieren '
-          'ihre Rückmeldungen.',
+          'ihre Rückmeldungen.$notice',
         ),
         actions: [
           TextButton(
@@ -609,7 +632,11 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
             onChanged: widget.controller.pushConfigured && _changeIsNear
                 ? (v) => setState(() => _push = v)
                 : null,
-            title: const Text('Eingeladene per Push benachrichtigen'),
+            title: Text(
+              widget.event == null
+                  ? 'Eingeladene per Push benachrichtigen'
+                  : 'Neue Zeit oder neuen Ort per Push melden',
+            ),
             subtitle: Text(
               !_changeIsNear
                   ? 'Der Termin liegt mehr als $changePushWindowDays Tage in der '
@@ -619,9 +646,13 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
                   ? widget.event == null
                         ? '${_series == null ? '' : 'Eine Benachrichtigung für die ganze Serie. '}'
                               'Geht an: $audience'
-                        // Changes only reach people who already answered.
-                        : 'Geht an alle, die schon zu- oder abgesagt haben '
-                              '($audience)'
+                        // Changes only reach people who accepted (server).
+                        : !_relevantChange
+                        ? 'Datum, Uhrzeit und Ort sind unverändert, daher geht '
+                              'kein Push raus. Änderungen an Titel oder '
+                              'Beschreibung werden nie gepusht.'
+                        : 'Geht an alle, die zugesagt haben ($audience). '
+                              'Ausgeschaltet geht kein Push raus.'
                   : 'Push ist noch nicht eingerichtet.',
             ),
           ),
