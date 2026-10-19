@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/data/demo_data.dart';
 import 'package:theater_app/features/today/domain/today_digest.dart';
@@ -173,6 +174,80 @@ void main() {
         controller.activeProductions.first.id,
       );
       expect(digest.scriptEvent, isNull);
+    });
+  });
+
+  group('next event skips events the person will not attend', () {
+    test('declined, absent or unanswered on an absence day', () async {
+      final absent = dateOnly(fixedNow.add(const Duration(days: 2)));
+      final server = TestServer()
+        ..data['events'] = [
+          _event('declined', 1),
+          // Locked, so the server could not decline it for the absence.
+          {..._event('away', 2), 'locked': true},
+          _event('mine', 3),
+          _event('later', 4),
+        ]
+        ..data['attendanceByEvent'] = {'declined': 'no'}
+        ..data['absences'] = [
+          {'id': 'urlaub', 'from': absent, 'to': absent, 'reason': 'Urlaub'},
+        ];
+      final digest = await _digest(server);
+      expect(digest.next?.id, 'mine');
+      expect(digest.nextOpen, isTrue);
+      // The lists below are unchanged: the skipped events still show there.
+      expect(digest.laterEvents.map((e) => e.id), ['declined', 'away']);
+      expect(digest.openResponses.map((e) => e.id), ['later']);
+    });
+
+    test('a confirmation on an absence day keeps the event', () async {
+      final day = dateOnly(fixedNow.add(const Duration(days: 1)));
+      final server = TestServer()
+        ..data['events'] = [_event('trotzdem', 1), _event('later', 2)]
+        ..data['attendanceByEvent'] = {'trotzdem': 'yes'}
+        ..data['absences'] = [
+          {'id': 'urlaub', 'from': day, 'to': day, 'reason': ''},
+        ];
+      expect((await _digest(server)).next?.id, 'trotzdem');
+    });
+
+    test('only declined events leave the empty state', () async {
+      final server = TestServer()
+        ..data['events'] = [_event('a', 1), _event('b', 2)]
+        ..data['attendanceByEvent'] = {'a': 'no', 'b': 'no'};
+      final digest = await _digest(server);
+      expect(digest.next, isNull);
+      expect(digest.nextOpen, isFalse);
+      expect(digest.laterEvents.map((e) => e.id), ['a', 'b']);
+    });
+
+    test('a queued deletion by the organizer is skipped', () async {
+      final server = TestServer()
+        ..data['events'] = [
+          _event('single', 1),
+          {..._event('s1', 2), 'seriesId': 'serie'},
+          {..._event('s2', 3), 'seriesId': 'serie'},
+          _event('mine', 4),
+        ];
+      final controller = server.controller();
+      addTearDown(controller.dispose);
+      await signIn(controller);
+      server.offline = true;
+      for (final body in [
+        {'action': 'event.delete', 'id': 'single', 'version': 1},
+        {
+          'action': 'event.delete',
+          'id': 's1',
+          'version': 1,
+          'series': 'following',
+        },
+      ]) {
+        await controller.performAction(body);
+      }
+      expect(controller.pendingCount, 2);
+      // Deletions are not projected, so the events are still listed.
+      expect(controller.events.map((e) => e.id), contains('s2'));
+      expect(TodayDigest.from(controller).next?.id, 'mine');
     });
   });
 

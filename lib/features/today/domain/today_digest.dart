@@ -35,8 +35,18 @@ class TodayDigest {
     final now = controller.now;
     final upcoming = upcomingEvents(controller, now);
     // Admins also receive events they are not invited to; those are never
-    // "Dein nächster Termin" but still appear among the later events.
-    final next = upcoming.where((e) => e.addressedToMe).firstOrNull;
+    // "Dein nächster Termin" but still appear among the later events. The
+    // same goes for events the person declined or misses for an absence, and
+    // for events an admin's queued deletion cancels.
+    final deleting = _deleting(controller);
+    final next = upcoming
+        .where(
+          (e) =>
+              e.addressedToMe &&
+              !deleting.contains(e.id) &&
+              _attends(e, controller.absences),
+        )
+        .firstOrNull;
     final soon = now.add(responseBadgeWindow);
     final open = upcoming
         .where((e) => e != next)
@@ -88,6 +98,51 @@ class TodayDigest {
     );
   }
 
+  /// Whether the person still plans to come: not declined, and not left
+  /// unanswered on a day of an own absence (which the server only declines
+  /// while responses are still accepted). A confirmation keeps the event.
+  static bool _attends(TheaterEvent event, List<Absence> absences) {
+    if (event.response == 'no') return false;
+    final start = event.startsAt;
+    if (event.response != 'open' || start == null) return true;
+    final day = dateOnly(start);
+    return !absences.any(
+      (a) =>
+          day.compareTo(dateOnly(a.from)) >= 0 &&
+          day.compareTo(dateOnly(a.to)) <= 0,
+    );
+  }
+
+  /// Ids of the events a queued, not yet confirmed `event.delete` removes;
+  /// deletions are not projected, so the events still show until the sync.
+  static Set<String> _deleting(AppController controller) {
+    final ids = <String>{};
+    for (final action in controller.outbox) {
+      final body = action.payload;
+      if (action.failed || body['action'] != 'event.delete') continue;
+      final id = textValue(body['id']);
+      ids.add(id);
+      final first = controller.events.where((e) => e.id == id).firstOrNull;
+      final series = first?.seriesId, start = first?.startsAt;
+      if (body['series'] != 'following' || series == null || start == null) {
+        continue;
+      }
+      // "This and all following" mirrors the server's choice of occurrences.
+      ids.addAll(
+        controller.events
+            .where(
+              (e) =>
+                  e.seriesId == series &&
+                  !e.fromSlotPool &&
+                  e.startsAt != null &&
+                  !e.startsAt!.isBefore(start),
+            )
+            .map((e) => e.id),
+      );
+    }
+    return ids;
+  }
+
   /// The script worth opening first: the one the next event rehearses, else
   /// an active production the person belongs to, else the newest active one.
   /// The event is only set when the production comes from it.
@@ -111,7 +166,8 @@ class TodayDigest {
 
   final DateTime now;
 
-  /// The first event that has not ended yet.
+  /// The first event addressed to the person that has not ended yet and that
+  /// they have not declined (themselves or through an absence).
   final TheaterEvent? next;
 
   /// Whether [next] still waits for an answer and can get one.
