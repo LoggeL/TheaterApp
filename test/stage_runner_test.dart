@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/features/changelog/changelog.dart';
 import 'package:theater_app/features/games/domain/stage_runner.dart';
 import 'package:theater_app/features/games/games.dart';
+import 'package:theater_app/features/games/ui/stage_runner_art.dart';
 import 'package:theater_app/features/games/ui/stage_runner_fx.dart';
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
 import 'package:theater_app/features/me/me.dart';
@@ -680,6 +682,79 @@ void main() {
       await pumpEventQueue();
       expect(next.enabled.value, isFalse);
       next.dispose();
+    });
+  });
+
+  group('art', () {
+    test('the two strides take turns as the runner moves', () {
+      final strides = [
+        for (var i = 0; i < 8; i++) RunnerSprite.stride((i + .5) / 9),
+      ];
+      expect(strides, [
+        for (var i = 0; i < 4; i++) ...[RunnerSprite.runA, RunnerSprite.runB],
+      ]);
+    });
+
+    testWidgets('the strides share the body and swap the legs', (tester) async {
+      final atlas = await tester.runAsync(() async {
+        final data = await rootBundle.load(
+          'assets/games/stage_runner/atlas.webp',
+        );
+        final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+        final image = (await codec.getNextFrame()).image;
+        final bytes = await image.toByteData(
+          format: ui.ImageByteFormat.rawStraightRgba,
+        );
+        return (image.width, image.height, bytes!);
+      });
+      final (width, height, bytes) = atlas!;
+
+      // Every picture lies inside the atlas and none overlaps another.
+      for (final sprite in RunnerSprite.values) {
+        expect(
+          Rect.fromLTWH(
+            0,
+            0,
+            width.toDouble(),
+            height.toDouble(),
+          ).intersect(sprite.rect),
+          sprite.rect,
+          reason: '$sprite',
+        );
+        for (final other in RunnerSprite.values) {
+          if (other.index <= sprite.index) continue;
+          final overlap = sprite.rect.intersect(other.rect);
+          expect(
+            overlap.width <= 0 || overlap.height <= 0,
+            isTrue,
+            reason: '$sprite and $other overlap',
+          );
+        }
+      }
+
+      final a = RunnerSprite.runA, b = RunnerSprite.runB;
+      // Same size, so the runner does not jump between the strides.
+      expect((b.width, b.height), (a.width, a.height));
+      // Mean difference per channel of the rows from [from] to [to].
+      double difference(double from, double to) {
+        var sum = 0, count = 0;
+        for (var y = (a.height * from).floor(); y < a.height * to; y++) {
+          for (var x = 0; x < a.width; x++) {
+            int at(RunnerSprite s) =>
+                ((s.y.toInt() + y) * width + s.x.toInt() + x) * 4;
+            final i = at(a), j = at(b);
+            for (var c = 0; c < 4; c++) {
+              sum += (bytes.getUint8(i + c) - bytes.getUint8(j + c)).abs();
+            }
+            count += 4;
+          }
+        }
+        return sum / count;
+      }
+
+      // The head is the same picture; the legs are not.
+      expect(difference(0, .4), lessThan(10));
+      expect(difference(2 / 3, 1), greaterThan(15));
     });
   });
 

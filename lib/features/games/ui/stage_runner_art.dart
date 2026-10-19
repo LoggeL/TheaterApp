@@ -10,8 +10,10 @@ import '../domain/stage_runner.dart';
 enum RunnerSprite {
   fly(4, 4, 175, 179),
   dangle(183, 4, 144, 182),
+  // The two strides of the run: the near leg forward in [runA], the far
+  // leg forward in [runB], with the arms swinging the other way.
   runA(331, 4, 144, 187),
-  runB(479, 4, 138, 186),
+  runB(4, 386, 144, 187),
   cheer(621, 4, 152, 200),
   crash(777, 4, 180, 110),
   crate(4, 208, 150, 147),
@@ -25,6 +27,11 @@ enum RunnerSprite {
   const RunnerSprite(this.x, this.y, this.width, this.height);
   final double x, y, width, height;
   ui.Rect get rect => ui.Rect.fromLTWH(x, y, width, height);
+
+  /// The stride shown after running [distance]: the two strides take turns
+  /// every ninth of a unit, so the legs keep pace with the floor.
+  static RunnerSprite stride(double distance) =>
+      (distance * 9).floor().isEven ? runA : runB;
 
   static RunnerSprite of(PickupKind kind) => switch (kind) {
     PickupKind.rose => rose,

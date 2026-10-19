@@ -1144,9 +1144,7 @@ class _StagePainter extends CustomPainter {
     } else if (f.cheer > 0) {
       sprite = RunnerSprite.cheer;
     } else if (onFloor) {
-      sprite = (g.distance * 9).floor().isEven
-          ? RunnerSprite.runA
-          : RunnerSprite.runB;
+      sprite = RunnerSprite.stride(g.distance);
     } else {
       sprite = g.vy < -.05 ? RunnerSprite.fly : RunnerSprite.dangle;
       angle = (g.vy * .12).clamp(-.2, .2).toDouble();
