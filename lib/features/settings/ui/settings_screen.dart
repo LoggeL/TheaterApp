@@ -4,10 +4,13 @@ import '../../../app/brand.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/device_services.dart';
 import '../../../shared/feedback.dart';
+import '../../../shared/navigation.dart';
 import '../../../shared/layout/content_width.dart';
 import '../../../shared/widgets/one_line_segmented_button.dart';
 import '../../../shared/widgets/page_header.dart';
+import '../data/calendar_feed.dart';
 import '../domain/reminder_lead_times.dart';
+import 'calendar_feed_screen.dart';
 
 /// Answer of [DeviceServices.enablePush] when the operating system or browser
 /// blocks notifications for the app.
@@ -331,6 +334,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ],
               ]),
+            ],
+            if (calendarFeedAvailable(controller)) ...[
+              const SectionTitle('Kalender'),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.event_repeat_outlined),
+                  title: const Text('Kalender abonnieren'),
+                  subtitle: const Text(
+                    'Deine Termine automatisch in Google, Apple-Kalender oder Outlook',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => openPage(
+                    context,
+                    CalendarFeedScreen(controller: controller),
+                  ),
+                ),
+              ),
             ],
             const SectionTitle('Darstellung'),
             Card(

@@ -25,6 +25,7 @@ import '../../galleries/ui/gallery_list_screen.dart';
 import '../../games/games.dart';
 import '../../participation/ui/participation_screen.dart';
 import '../../profile/ui/profile_screen.dart';
+import '../../settings/data/calendar_feed.dart';
 import '../../settings/ui/settings_screen.dart';
 import '../../sync/ui/sync_screen.dart';
 import '../domain/absence_summary.dart';
@@ -228,7 +229,9 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                     GroupTile(
                       icon: Icons.tune,
                       title: 'Benachrichtigungen & Darstellung',
-                      subtitle: 'Push, E-Mail, Erinnerungen und Farbschema',
+                      subtitle: calendarFeedAvailable(controller)
+                          ? 'Push, E-Mail, Erinnerungen, Kalender-Abo und Farbschema'
+                          : 'Push, E-Mail, Erinnerungen und Farbschema',
                       onTap: () => openPage(
                         context,
                         SettingsScreen(
