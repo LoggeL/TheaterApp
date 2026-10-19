@@ -192,7 +192,7 @@ class _AppShellState extends State<AppShell> {
       ),
       bottomNavigationBar: wide
           ? null
-          : NavigationBar(
+          : AppNavigationBar(
               selectedIndex: selectedTab,
               onDestinationSelected: selectTab,
               destinations: destinations,

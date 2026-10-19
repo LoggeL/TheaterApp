@@ -48,7 +48,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Zurück'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Drehbücher'));
+      await tester.tap(find.text('Skript'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Wenn das Licht angeht'));
       await tester.pumpAndSettle();

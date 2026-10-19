@@ -105,7 +105,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(AppNavigationRail),
-          matching: find.text('Mitteilungen'),
+          matching: find.text('Post'),
         ),
       );
       await tester.pumpAndSettle();
@@ -179,13 +179,7 @@ void main() {
       expect(c.user!.isAdmin, isTrue);
       expect(find.byType(NavigationRail), findsNothing);
       expect(find.byType(NavigationDestination), findsNWidgets(5));
-      for (final label in [
-        'Heute',
-        'Termine',
-        'Drehbücher',
-        'Mitteilungen',
-        'Mein Bereich',
-      ]) {
+      for (final label in ['Heute', 'Termine', 'Skript', 'Post', 'Ich']) {
         expect(
           find.descendant(
             of: find.byType(NavigationBar),
@@ -267,7 +261,10 @@ void main() {
       TheaterApp(controller: c, enableDeviceServices: false),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('2 ungelesen · 1 Abstimmung offen'), findsOneWidget);
+    expect(
+      find.byTooltip('Mitteilungen · 2 ungelesen · 1 Abstimmung offen'),
+      findsOneWidget,
+    );
     expect(
       find.descendant(
         of: find.byType(NavigationBar),
@@ -337,7 +334,7 @@ void main() {
   ) async {
     setWidth(tester, 390);
     final c = await pumpDemo(tester);
-    await tester.tap(find.text('Mitteilungen').last);
+    await tester.tap(find.text('Post').last);
     await tester.pumpAndSettle();
     await tester.tap(
       find.descendant(

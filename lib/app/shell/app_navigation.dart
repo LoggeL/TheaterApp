@@ -37,16 +37,42 @@ class AppNavigationScope extends InheritedNotifier<ValueNotifier<int>> {
 String _count(int n, String one, String many) => n == 1 ? one : '$n $many';
 
 /// A badge whose count is read out as [semantics] instead of a bare number.
-Widget _badged(IconData icon, int count, String semantics) => Semantics(
-  label: count == 0 ? null : semantics,
-  child: ExcludeSemantics(
-    child: Badge(
-      isLabelVisible: count > 0,
-      label: Text('$count'),
-      child: Icon(icon),
-    ),
-  ),
-);
+/// [tooltip] is announced by screen readers as the tooltip.
+Widget _badged(IconData icon, int count, String semantics, {String? tooltip}) =>
+    Semantics(
+      label: count == 0 ? null : semantics,
+      tooltip: tooltip,
+      child: ExcludeSemantics(
+        child: Badge(
+          isLabelVisible: count > 0,
+          label: Text('$count'),
+          child: Icon(icon),
+        ),
+      ),
+    );
+
+/// One section of the navigation. The visible [label] is a single short word,
+/// so it stays on one line at large text sizes too. [name] is the section's
+/// full name where it differs from [label]: the long-press tooltip shows it,
+/// and screen readers announce it as the tooltip after the visible label.
+/// A [count] above zero shows a badge that is read out as [status].
+NavigationDestination _destination(
+  IconData icon,
+  IconData selectedIcon, {
+  required String label,
+  String? name,
+  int count = 0,
+  String status = '',
+}) {
+  Widget badged(IconData data) => _badged(data, count, status, tooltip: name);
+  final tooltip = [?name, if (count > 0) status].join(' · ');
+  return NavigationDestination(
+    icon: badged(icon),
+    selectedIcon: badged(selectedIcon),
+    label: label,
+    tooltip: tooltip.isEmpty ? null : tooltip,
+  );
+}
 
 /// The shell sections in [AppSection] order. Admin is left out where
 /// [includeAdmin] is false: phones reach it from the app bar instead.
@@ -56,7 +82,6 @@ List<NavigationDestination> appNavigationDestinations(
 }) {
   final unanswered = unansweredSoon(controller, controller.now);
   final slots = slotPoolsAwaitingChoice(controller);
-  final events = unanswered + slots;
   final eventText = [
     if (unanswered > 0)
       _count(
@@ -67,61 +92,90 @@ List<NavigationDestination> appNavigationDestinations(
     if (slots > 0)
       _count(slots, '1 Terminfinder wartet', 'Terminfinder warten'),
   ].join(' · ');
-  Widget eventIcon(IconData icon) => _badged(icon, events, eventText);
 
   final unread = unreadMessageCount(controller);
   final polls = pollsToVote(controller).length;
-  final messages = unread + polls;
   final messageText = [
     if (unread > 0) '$unread ungelesen',
     if (polls > 0) _count(polls, '1 Abstimmung offen', 'Abstimmungen offen'),
   ].join(' · ');
-  Widget messageIcon(IconData icon) => _badged(icon, messages, messageText);
 
   final registrations = controller.openRegistrationCount;
-  final adminText = _count(
-    registrations,
-    '1 neue Registrierung wartet auf Zuordnung',
-    'neue Registrierungen warten auf Zuordnung',
-  );
-  Widget adminIcon(IconData icon) => _badged(icon, registrations, adminText);
-
   return [
-    const NavigationDestination(
-      icon: Icon(Icons.wb_sunny_outlined),
-      selectedIcon: Icon(Icons.wb_sunny),
-      label: 'Heute',
-    ),
-    NavigationDestination(
-      icon: eventIcon(Icons.calendar_month_outlined),
-      selectedIcon: eventIcon(Icons.calendar_month),
+    _destination(Icons.wb_sunny_outlined, Icons.wb_sunny, label: 'Heute'),
+    _destination(
+      Icons.calendar_month_outlined,
+      Icons.calendar_month,
       label: 'Termine',
-      tooltip: events == 0 ? null : eventText,
+      count: unanswered + slots,
+      status: eventText,
     ),
-    const NavigationDestination(
-      icon: Icon(Icons.auto_stories_outlined),
-      selectedIcon: Icon(Icons.auto_stories),
-      label: 'Drehbücher',
+    _destination(
+      Icons.auto_stories_outlined,
+      Icons.auto_stories,
+      label: 'Skript',
+      name: 'Drehbücher',
     ),
-    NavigationDestination(
-      icon: messageIcon(Icons.chat_bubble_outline),
-      selectedIcon: messageIcon(Icons.chat_bubble),
-      label: 'Mitteilungen',
-      tooltip: messages == 0 ? null : messageText,
+    _destination(
+      Icons.chat_bubble_outline,
+      Icons.chat_bubble,
+      label: 'Post',
+      name: 'Mitteilungen',
+      count: unread + polls,
+      status: messageText,
     ),
-    const NavigationDestination(
-      icon: Icon(Icons.person_outline),
-      selectedIcon: Icon(Icons.person),
-      label: 'Mein Bereich',
+    _destination(
+      Icons.person_outline,
+      Icons.person,
+      label: 'Ich',
+      name: 'Mein Bereich',
     ),
     if (includeAdmin && controller.user?.isAdmin == true)
-      NavigationDestination(
-        icon: adminIcon(Icons.admin_panel_settings_outlined),
-        selectedIcon: adminIcon(Icons.admin_panel_settings),
+      _destination(
+        Icons.admin_panel_settings_outlined,
+        Icons.admin_panel_settings,
         label: 'Admin',
-        tooltip: registrations == 0 ? null : adminText,
+        count: registrations,
+        status: _count(
+          registrations,
+          '1 neue Registrierung wartet auf Zuordnung',
+          'neue Registrierungen warten auf Zuordnung',
+        ),
       ),
   ];
+}
+
+/// Keeps a navigation label on one line: a label too wide for its slot ends
+/// with an ellipsis instead of breaking inside a word. The full name stays in
+/// the tooltip and the semantics.
+Widget _oneLine(Widget child) => DefaultTextStyle.merge(
+  maxLines: 1,
+  softWrap: false,
+  overflow: TextOverflow.ellipsis,
+  child: child,
+);
+
+/// The phone navigation bar. [NavigationBar] already caps the label text
+/// scale at 1.3; on top of that every label keeps to one line.
+class AppNavigationBar extends StatelessWidget {
+  const AppNavigationBar({
+    super.key,
+    required this.destinations,
+    required this.selectedIndex,
+    required this.onDestinationSelected,
+  });
+  final List<NavigationDestination> destinations;
+  final int selectedIndex;
+  final ValueChanged<int> onDestinationSelected;
+
+  @override
+  Widget build(BuildContext context) => NavigationBar(
+    selectedIndex: selectedIndex,
+    onDestinationSelected: onDestinationSelected,
+    destinations: [
+      for (final destination in destinations) _oneLine(destination),
+    ],
+  );
 }
 
 /// The admin entry in the phone app bar, with the registration badge.
@@ -148,6 +202,17 @@ class AdminShortcutButton extends StatelessWidget {
     );
   }
 }
+
+/// The rail has no tooltips of its own: show the destination's on hover.
+/// Screen readers already get the full name from the icon's semantics.
+Widget _railTooltip(NavigationDestination destination, Widget icon) =>
+    destination.tooltip == null
+    ? icon
+    : Tooltip(
+        message: destination.tooltip,
+        excludeFromSemantics: true,
+        child: icon,
+      );
 
 class AppNavigationRail extends StatelessWidget {
   const AppNavigationRail({
@@ -194,9 +259,17 @@ class AppNavigationRail extends StatelessWidget {
       destinations: [
         for (final destination in destinations)
           NavigationRailDestination(
-            icon: destination.icon,
-            selectedIcon: destination.selectedIcon,
-            label: Text(destination.label),
+            icon: _railTooltip(destination, destination.icon),
+            selectedIcon: _railTooltip(
+              destination,
+              destination.selectedIcon ?? destination.icon,
+            ),
+            label: Text(
+              destination.label,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
       ],
     );

@@ -43,7 +43,7 @@ void main() {
     await tester.tap(find.text('Termin ansehen'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('desktop-route-frame')), findsOneWidget);
-    await selectSection(tester, 'Drehbücher');
+    await selectSection(tester, 'Skript');
     expect(find.text('Aktuelle Produktionen'), findsOneWidget);
     await tester.tap(
       find.byKey(

@@ -86,7 +86,7 @@ void main() {
       final profileBytes = await c.mediaBytes('/media/${uploaded['id']}');
       expect(profileBytes.mime, 'image/webp');
       expect(profileBytes.bytes.length, greaterThan(1000));
-      await tester.tap(find.text('Mein Bereich'));
+      await tester.tap(find.text('Ich'));
       await tester.pumpAndSettle();
       expect(c.user!.avatarId, uploaded['id']);
       await tester.tap(find.text('Profil bearbeiten'));

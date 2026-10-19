@@ -149,7 +149,7 @@ class _ProductionEditorScreenState extends State<ProductionEditorScreen> {
           context,
           title: 'Ins Archiv verschieben?',
           message:
-              '„$title“ verschwindet für alle aus dem Reiter Drehbücher und '
+              '„$title“ verschwindet für alle aus dem Reiter „Skript“ und '
               'steht danach im Drehbucharchiv.'
               '${_dirty ? ' Ungespeicherte Änderungen gehen dabei verloren.' : ''}',
           confirmLabel: 'Archivieren',

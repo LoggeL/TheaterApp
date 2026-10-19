@@ -194,7 +194,7 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
           title: const Text('Auch als Push benachrichtigen'),
           subtitle: Text(
             widget.controller.pushConfigured
-                ? 'Die Mitteilung bleibt zusätzlich im Reiter Mitteilungen zum Nachlesen.'
+                ? 'Die Mitteilung bleibt zusätzlich im Reiter „Post“ zum Nachlesen.'
                 : 'Push ist noch nicht eingerichtet.',
           ),
         ),
