@@ -116,10 +116,10 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
           padding: const EdgeInsets.all(24),
           child: Column(
             children: [
-              const Icon(
+              Icon(
                 Icons.check_circle_outline,
                 size: 48,
-                color: StageTheme.green,
+                color: StageTheme.greenTone.of(theme.brightness),
               ),
               const SizedBox(height: 16),
               Text(

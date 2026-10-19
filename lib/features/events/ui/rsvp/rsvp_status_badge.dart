@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../app/theme/stage_theme.dart';
 import '../../../../core/app_controller.dart';
 import '../../../../core/models.dart';
 import '../../domain/event_format.dart';
@@ -56,11 +57,15 @@ class RsvpStatusBadge extends StatelessWidget {
       _ => Icons.help_outline,
     };
     final dark = onDark || Theme.of(context).brightness == Brightness.dark;
-    final color = pending
-        ? dark
-              ? const Color(0xFFFFB18A)
-              : const Color(0xFFB83E16)
-        : responseColor(status, dark: dark);
+    final (fill: _, foreground: color) = StageTheme.tintedLabel(
+      pending
+          ? dark
+                ? const Color(0xFFFFB18A)
+                : StageTheme.orangeTone.light
+          : responseColor(status, dark: dark),
+      dark ? Brightness.dark : Brightness.light,
+      alpha: pending ? .16 : .12,
+    );
     return Tooltip(
       message: label,
       excludeFromSemantics: true,

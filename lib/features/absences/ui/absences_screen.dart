@@ -425,7 +425,7 @@ class _AffectedEvents extends StatelessWidget {
     final theme = Theme.of(context);
     final color = events.isEmpty
         ? theme.colorScheme.onSurfaceVariant
-        : StageTheme.orange;
+        : StageTheme.orangeTone.of(theme.brightness);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(

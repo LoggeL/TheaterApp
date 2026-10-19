@@ -29,7 +29,7 @@ extension _ReaderLive on _ScriptReaderScreenState {
                       padding: const EdgeInsets.only(bottom: 16),
                       child: Text(
                         _live.error!,
-                        style: const TextStyle(color: readerAccent),
+                        style: TextStyle(color: readerAccentText(context)),
                       ),
                     ),
                   SwitchListTile.adaptive(

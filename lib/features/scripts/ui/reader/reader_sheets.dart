@@ -33,13 +33,13 @@ extension _ReaderSheets on _ScriptReaderScreenState {
             return ListTile(
               selected: ownCount > 0,
               selectedTileColor: readerAccent.withValues(alpha: 0.08),
-              selectedColor: readerAccent,
+              selectedColor: readerAccentText(context),
               leading: ExcludeSemantics(
                 child: CircleAvatar(
                   backgroundColor: readerAccent.withValues(
                     alpha: ownCount > 0 ? 0.25 : 0.06,
                   ),
-                  foregroundColor: readerAccent,
+                  foregroundColor: readerAccentText(context),
                   child: Text('${index + 1}'),
                 ),
               ),

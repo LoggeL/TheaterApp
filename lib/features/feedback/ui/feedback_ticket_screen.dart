@@ -286,7 +286,10 @@ class _FeedbackTicketScreenState extends State<FeedbackTicketScreen> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          const Icon(Icons.check_circle_outline, color: StageTheme.green),
+          Icon(
+            Icons.check_circle_outline,
+            color: StageTheme.greenTone.of(theme.brightness),
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

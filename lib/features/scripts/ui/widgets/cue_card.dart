@@ -69,7 +69,7 @@ class _CueCardState extends State<CueCard> {
                           fontWeight: FontWeight.w800,
                           letterSpacing: 1,
                           color: widget.own
-                              ? readerAccent
+                              ? readerAccentText(context)
                               : technical
                               ? category.color
                               : theme.colorScheme.onSurfaceVariant,

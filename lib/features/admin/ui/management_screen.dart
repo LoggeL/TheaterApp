@@ -284,7 +284,7 @@ class _NextEventCard extends StatelessWidget {
               final buttons = <Widget>[
                 FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor: StageTheme.orange,
+                    backgroundColor: StageTheme.orangeDeep,
                     foregroundColor: Colors.white,
                   ),
                   onPressed: () => openPage(

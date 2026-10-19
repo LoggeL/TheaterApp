@@ -373,7 +373,10 @@ class _JobTile extends StatelessWidget {
     final accepted = intValue(job['accepted']);
     return Card(
       child: ListTile(
-        leading: Icon(icon, color: color),
+        leading: Icon(
+          icon,
+          color: StageTheme.accentText(color, Theme.of(context).brightness),
+        ),
         title: Text(textValue(job['title'])),
         subtitle: Text(
           [

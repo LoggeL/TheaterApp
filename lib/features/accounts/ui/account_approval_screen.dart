@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../shared/feedback.dart';
@@ -255,19 +256,19 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
                     ),
                     const StatePill(
                       'Ausstehend',
-                      color: Color(0xFFA25B06),
+                      color: StageTheme.amber,
                       icon: Icons.schedule,
                     ),
                     if (_withoutBotCheck(a))
                       const StatePill(
                         'Ohne Botschutz',
-                        color: Color(0xFFA25B06),
+                        color: StageTheme.amber,
                         icon: Icons.shield_outlined,
                       ),
                     if (_caughtByBotTrap(a))
                       const StatePill(
                         'Verdacht: Bot-Falle',
-                        color: Color(0xFFA25B06),
+                        color: StageTheme.amber,
                         icon: Icons.smart_toy_outlined,
                       ),
                   ],

@@ -8,11 +8,97 @@ abstract final class StageTheme {
   static const green = Color(0xFF32775D);
   static const violet = Color(0xFF74619B);
 
+  /// Amber for "later" and "unknown" states.
+  static const amber = Color(0xFFA25B06);
+
   /// Accent for text and icons on [ink] cards (e.g. the next-event card).
   static const onInkAccent = Color(0xFFFFA584);
 
+  /// The brand orange deepened just enough to carry white text (WCAG AA),
+  /// for filled buttons and markers on [ink] cards.
+  static const orangeDeep = Color(0xFFCB4516);
+
   /// Cards and input fields in the dark theme.
   static const inkCard = Color(0xFF222923);
+
+  /// Text and icon tones of the accents. The brand colours above stay for
+  /// fills, bars and borders; as text they are too light on cream (orange)
+  /// or too dark on the dark cards (green, violet). Each tone reaches 4.5:1
+  /// on the cards, the surface and the tinted [StatePill]s of its theme.
+  static const orangeTone = AccentTone(Color(0xFFB13C15), onInkAccent);
+  static const greenTone = AccentTone(Color(0xFF2F7057), Color(0xFF9ED6B6));
+  static const violetTone = AccentTone(Color(0xFF6D5B92), Color(0xFFC9B8F0));
+  static const amberTone = AccentTone(Color(0xFF965406), Color(0xFFFFB18A));
+  static const redTone = AccentTone(Color(0xFFAA4040), Color(0xFFFFB3AB));
+  static const neutralTone = AccentTone(Color(0xFF5B665E), Color(0xFFBFC8C0));
+
+  static final Map<Color, AccentTone> _tones = {
+    orange: orangeTone,
+    const Color(0xFFB83E16): orangeTone,
+    green: greenTone,
+    violet: violetTone,
+    amber: amberTone,
+  };
+
+  /// [accent] as a text or icon colour in [brightness]: the brand colours
+  /// map to their [AccentTone], anything else is returned unchanged.
+  static Color accentText(Color accent, Brightness brightness) =>
+      _tones[accent]?.of(brightness) ?? accent;
+
+  /// Tint alpha of [StatePill]s and similar status labels.
+  static const tintAlpha = .12;
+
+  /// The base a tinted label is checked against: the lowest-contrast of
+  /// the surfaces it sits on (cream in light, the card in dark).
+  static Color labelBase(Brightness brightness) =>
+      brightness == Brightness.dark ? inkCard : cream;
+
+  /// Fill and foreground of a label tinted with [accent]. The fill is the
+  /// accent's tone at [alpha]; the foreground keeps the tone's hue and
+  /// reaches [minimum] contrast on that fill over [labelBase].
+  static ({Color fill, Color foreground}) tintedLabel(
+    Color accent,
+    Brightness brightness, {
+    double alpha = tintAlpha,
+    double minimum = 4.5,
+  }) {
+    final tone = accentText(accent, brightness);
+    final fill = tone.withValues(alpha: alpha);
+    final background = Color.alphaBlend(fill, labelBase(brightness));
+    return (
+      fill: fill,
+      foreground: legible(tone, background, minimum: minimum),
+    );
+  }
+
+  /// WCAG 2 contrast ratio of two opaque colours (1 to 21).
+  static double contrast(Color a, Color b) {
+    final la = a.computeLuminance(), lb = b.computeLuminance();
+    return la > lb ? (la + .05) / (lb + .05) : (lb + .05) / (la + .05);
+  }
+
+  /// [foreground] darkened or lightened (hue and saturation kept) until it
+  /// reaches [minimum] contrast against [background].
+  static Color legible(
+    Color foreground,
+    Color background, {
+    double minimum = 4.5,
+  }) {
+    if (contrast(foreground, background) >= minimum) return foreground;
+    final darken =
+        contrast(Colors.black, background) >=
+        contrast(Colors.white, background);
+    final hsl = HSLColor.fromColor(foreground);
+    for (var step = 1; step <= 100; step++) {
+      final lightness = (hsl.lightness + (darken ? -step : step) / 100).clamp(
+        0.0,
+        1.0,
+      );
+      final candidate = hsl.withLightness(lightness).toColor();
+      if (contrast(candidate, background) >= minimum) return candidate;
+    }
+    return darken ? Colors.black : Colors.white;
+  }
 
   /// Background of selected chips, segments and navigation indicators.
   static Color selectedTint(Brightness brightness) =>
@@ -192,4 +278,13 @@ abstract final class StageTheme {
       ),
     );
   }
+}
+
+/// An accent as text or icon colour: [light] on cream and white,
+/// [dark] on the dark surfaces and cards.
+class AccentTone {
+  const AccentTone(this.light, this.dark);
+  final Color light, dark;
+  Color of(Brightness brightness) =>
+      brightness == Brightness.dark ? dark : light;
 }

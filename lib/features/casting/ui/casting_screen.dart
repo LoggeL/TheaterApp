@@ -471,13 +471,15 @@ class _CastingScreenState extends State<CastingScreen> {
                   Text.rich(
                     TextSpan(
                       children: [
-                        const WidgetSpan(
+                        WidgetSpan(
                           alignment: PlaceholderAlignment.middle,
                           child: Padding(
-                            padding: EdgeInsetsDirectional.only(end: 8),
+                            padding: const EdgeInsetsDirectional.only(end: 8),
                             child: Icon(
                               Icons.auto_awesome_outlined,
-                              color: StageTheme.green,
+                              color: StageTheme.greenTone.of(
+                                Theme.of(context).brightness,
+                              ),
                             ),
                           ),
                         ),

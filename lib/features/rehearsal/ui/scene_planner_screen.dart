@@ -361,7 +361,7 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
                         color: state.playable
                             ? StageTheme.green
                             : state.status == 'unknown'
-                            ? const Color(0xFFA25B06)
+                            ? StageTheme.amber
                             : StageTheme.orange,
                       ),
                     ],

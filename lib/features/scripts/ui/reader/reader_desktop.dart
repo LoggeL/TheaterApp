@@ -62,7 +62,7 @@ extension _ReaderDesktop on _ScriptReaderScreenState {
                       ),
                       title: Text(scene.title),
                       selected: _visibleSceneId == scene.id,
-                      selectedColor: readerAccent,
+                      selectedColor: readerAccentText(context),
                       selectedTileColor: readerAccent.withValues(alpha: 0.1),
                       onTap: () => _jumpToScene(scene.id),
                     ),

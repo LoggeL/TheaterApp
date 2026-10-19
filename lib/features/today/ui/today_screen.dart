@@ -743,7 +743,7 @@ class _NextRehearsal extends StatelessWidget {
             width: double.infinity,
             child: FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: StageTheme.orange,
+                backgroundColor: StageTheme.orangeDeep,
                 foregroundColor: Colors.white,
               ),
               onPressed: () => openEvent(context, controller, event.id),

@@ -288,7 +288,7 @@ extension _ReaderToolbars on _ScriptReaderScreenState {
       visualDensity: VisualDensity.compact,
       leading: Icon(
         _live.directing ? Icons.cell_tower : Icons.sync,
-        color: readerAccent,
+        color: readerAccentText(context),
         size: 19,
       ),
       title: Text(

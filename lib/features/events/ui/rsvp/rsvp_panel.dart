@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../../../app/theme/stage_theme.dart';
 
 import '../../../../core/app_controller.dart';
 import '../../../../core/models.dart';
 import '../../../../shared/feedback.dart';
+import '../event_style.dart';
 import 'rsvp_actions.dart';
 import 'rsvp_status_badge.dart';
 
@@ -64,7 +66,10 @@ class _RsvpPanelState extends State<RsvpPanel> {
         (status == 'no'
             ? widget.controller.canDecline(widget.event)
             : widget.controller.canRespondTo(widget.event));
-    final color = statusColor(status);
+    final color = responseColor(
+      status,
+      dark: Theme.of(context).brightness == Brightness.dark,
+    );
     if (widget.compact) {
       return Semantics(
         selected: selected,
@@ -297,12 +302,21 @@ class _RsvpPanelState extends State<RsvpPanel> {
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFE9BF).withValues(alpha: .35),
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? StageTheme.amberTone.dark.withValues(alpha: .12)
+                  : const Color(0xFFFFE9BF).withValues(alpha: .35),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Row(
               children: [
-                const Icon(Icons.schedule, color: Color(0xFFA25B06), size: 30),
+                Icon(
+                  Icons.schedule,
+                  color: responseColor(
+                    'late',
+                    dark: Theme.of(context).brightness == Brightness.dark,
+                  ),
+                  size: 30,
+                ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(

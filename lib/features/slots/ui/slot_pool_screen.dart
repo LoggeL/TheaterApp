@@ -571,15 +571,16 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
             : 'Du kannst hier kein Zeitfenster buchen.',
       ),
     };
+    final tone = StageTheme.accentText(color, Theme.of(context).brightness);
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: .1),
+        color: tone.withValues(alpha: .1),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
         children: [
-          Icon(icon, color: color, size: 28),
+          Icon(icon, color: tone, size: 28),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -797,7 +798,7 @@ class _SlotCard extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                     color: started || slot.full
                         ? scheme.onSurfaceVariant
-                        : StageTheme.green,
+                        : StageTheme.greenTone.of(theme.brightness),
                   ),
                 ),
               ],

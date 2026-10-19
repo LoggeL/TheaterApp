@@ -25,14 +25,14 @@ IconData eventKindIcon(String kind) => switch (kind) {
 
 /// Accent per event family, tuned for text contrast on light and dark cards.
 Color eventKindColor(String kind, {bool dark = false}) => switch (kind) {
-  'performance' => dark ? const Color(0xFFFFA584) : const Color(0xFFB83E16),
-  'dress' => dark ? const Color(0xFFC9B8F0) : StageTheme.violet,
+  'performance' => StageTheme.orangeTone,
+  'dress' => StageTheme.violetTone,
   'rehearsal' ||
   'readthrough' ||
   'technical' ||
-  'costume' => dark ? const Color(0xFF9ED6B6) : StageTheme.green,
-  _ => dark ? const Color(0xFFBFC8C0) : const Color(0xFF657168),
-};
+  'costume' => StageTheme.greenTone,
+  _ => StageTheme.neutralTone,
+}.of(dark ? Brightness.dark : Brightness.light);
 
 Color eventAccent(BuildContext context, TheaterEvent event) => eventKindColor(
   event.kind,
@@ -47,7 +47,7 @@ class EventMarker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final background = onDark ? StageTheme.orange : scheme.primary;
+    final background = onDark ? StageTheme.orangeDeep : scheme.primary;
     final foreground = onDark ? Colors.white : scheme.onPrimary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
@@ -96,10 +96,10 @@ class NotInvitedPill extends StatelessWidget {
 
 /// Colour of an own response: yes, late, no; anything else counts as open.
 Color responseColor(String status, {bool dark = false}) => switch (status) {
-  'yes' => dark ? const Color(0xFFA8D6B6) : StageTheme.green,
-  'late' => dark ? const Color(0xFFFFB18A) : const Color(0xFFA25B06),
-  'no' => dark ? const Color(0xFFFFB3AB) : const Color(0xFFB34343),
-  _ => dark ? const Color(0xFFBFC8C0) : const Color(0xFF657168),
-};
+  'yes' => StageTheme.greenTone,
+  'late' => StageTheme.amberTone,
+  'no' => StageTheme.redTone,
+  _ => StageTheme.neutralTone,
+}.of(dark ? Brightness.dark : Brightness.light);
 
 bool hasResponse(String status) => const ['yes', 'late', 'no'].contains(status);

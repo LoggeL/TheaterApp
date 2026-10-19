@@ -62,7 +62,7 @@ class ProductionCard extends StatelessWidget {
                           vertical: 6,
                         ),
                         decoration: BoxDecoration(
-                          color: readerAccent,
+                          color: readerAccentFill,
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: const Text(
