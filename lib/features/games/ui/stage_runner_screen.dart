@@ -827,7 +827,7 @@ class _StagePainter extends CustomPainter {
       if (a == null) {
         _plainObstacle(canvas, o.kind, rect, s, floorY);
       } else {
-        _obstacle(canvas, a, o.kind, rect, s, floorY);
+        _obstacle(canvas, a, o, rect, s, floorY);
       }
     }
 
@@ -947,12 +947,12 @@ class _StagePainter extends CustomPainter {
   void _obstacle(
     Canvas canvas,
     RunnerArt a,
-    ObstacleKind kind,
+    Obstacle o,
     Rect rect,
     double s,
     double floorY,
   ) {
-    switch (kind) {
+    switch (o.kind) {
       case ObstacleKind.crate:
         // A tall pile is two crates, so none gets stretched much.
         if (rect.height > rect.width * 1.35) {
@@ -977,31 +977,20 @@ class _StagePainter extends CustomPainter {
       case ObstacleKind.border:
         _velvetPiece(canvas, rect, s);
       case ObstacleKind.lamp:
-        final sprite = RunnerSprite.lamp;
         final width = rect.width * 1.05;
-        final height = width * sprite.height / sprite.width;
-        final body = Rect.fromLTWH(
-          rect.center.dx - width / 2,
-          rect.bottom - height,
+        final body = _lamp(
+          canvas,
+          a,
+          rect.center.dx,
+          rect.bottom,
           width,
-          height,
+          floorY,
         );
         canvas.drawLine(
           Offset(rect.center.dx, 0),
           Offset(rect.center.dx, body.top),
           _ropePaint,
         );
-        // The beam from the lens down to the floor.
-        final lens = Offset(body.center.dx, body.bottom - height * .06);
-        _path
-          ..reset()
-          ..moveTo(lens.dx - width * .3, lens.dy)
-          ..lineTo(lens.dx + width * .3, lens.dy)
-          ..lineTo(lens.dx + width * .9, floorY)
-          ..lineTo(lens.dx - width * .9, floorY)
-          ..close();
-        canvas.drawPath(_path, _beamPaint);
-        _sprite(canvas, a, sprite, body);
       case ObstacleKind.sandbag:
         final sprite = RunnerSprite.sandbag;
         final width = rect.width * 1.25;
@@ -1018,7 +1007,106 @@ class _StagePainter extends CustomPainter {
           _ropePaint,
         );
         _sprite(canvas, a, sprite, bag);
+      case ObstacleKind.drum:
+        // The spokes turn with the way it rolled.
+        final r = rect.width * .56;
+        final center = Offset(rect.center.dx, rect.bottom - r);
+        canvas
+          ..save()
+          ..translate(center.dx, center.dy)
+          ..rotate(o.left * s / r);
+        _sprite(
+          canvas,
+          a,
+          RunnerSprite.drum,
+          Rect.fromCircle(center: Offset.zero, radius: r),
+        );
+        canvas.restore();
+      case ObstacleKind.pile:
+        // The lower part holds two crates side by side, the top one.
+        final count = max(1, (rect.width / rect.height).round());
+        final width = rect.width / count;
+        for (var i = 0; i < count; i++) {
+          _sprite(
+            canvas,
+            a,
+            RunnerSprite.crate,
+            Rect.fromLTWH(rect.left + i * width, rect.top, width, rect.height),
+          );
+        }
+      case ObstacleKind.truss:
+        // Four lamps under the truss, the outer ones flush with its ends.
+        final bar = RunnerSprite.truss;
+        final lampWidth = rect.width * .19;
+        final lampHeight =
+            lampWidth * RunnerSprite.lamp.height / RunnerSprite.lamp.width;
+        final barHeight = rect.width * bar.height / bar.width;
+        final barTop = rect.bottom - lampHeight - barHeight * .5;
+        for (var i = 0; i < 4; i++) {
+          final x =
+              rect.left + lampWidth / 2 + i * (rect.width - lampWidth) / 3;
+          _lamp(canvas, a, x, rect.bottom, lampWidth, floorY);
+        }
+        for (final x in [rect.left + s * .012, rect.right - s * .012]) {
+          canvas.drawLine(Offset(x, 0), Offset(x, barTop), _ropePaint);
+        }
+        _sprite(
+          canvas,
+          a,
+          bar,
+          Rect.fromLTWH(rect.left, barTop, rect.width, barHeight),
+        );
+      case ObstacleKind.drop:
+        final sprite = RunnerSprite.drop;
+        final height = rect.width * sprite.height / sprite.width;
+        final frame = Rect.fromLTWH(
+          rect.left,
+          rect.bottom - height,
+          rect.width,
+          height,
+        );
+        for (final x in [.28, .72]) {
+          final dx = frame.left + frame.width * x;
+          canvas.drawLine(
+            Offset(dx, 0),
+            Offset(dx, frame.top + height * .02),
+            _ropePaint,
+          );
+        }
+        _sprite(canvas, a, sprite, frame);
     }
+  }
+
+  /// A stage light hanging with its lens at [bottom], with its beam down to
+  /// the floor; returns where the lamp is.
+  Rect _lamp(
+    Canvas canvas,
+    RunnerArt a,
+    double centerX,
+    double bottom,
+    double width,
+    double floorY,
+  ) {
+    final sprite = RunnerSprite.lamp;
+    final height = width * sprite.height / sprite.width;
+    final body = Rect.fromLTWH(
+      centerX - width / 2,
+      bottom - height,
+      width,
+      height,
+    );
+    // The beam from the lens down to the floor.
+    final lens = Offset(body.center.dx, body.bottom - height * .06);
+    _path
+      ..reset()
+      ..moveTo(lens.dx - width * .3, lens.dy)
+      ..lineTo(lens.dx + width * .3, lens.dy)
+      ..lineTo(lens.dx + width * .9, floorY)
+      ..lineTo(lens.dx - width * .9, floorY)
+      ..close();
+    canvas.drawPath(_path, _beamPaint);
+    _sprite(canvas, a, sprite, body);
+    return body;
   }
 
   /// A painted flat in three slices: frame top and feet keep their shape,
@@ -1345,6 +1433,47 @@ class _StagePainter extends CustomPainter {
           _sackPaint,
         );
         _paintCentered(canvas, _glyphs.kg(rect.width), rect.center);
+      case ObstacleKind.drum:
+        canvas
+          ..drawCircle(rect.center, rect.width / 2, _woodPaint)
+          ..drawCircle(rect.center, rect.width / 2 - 1, _woodLine)
+          ..drawCircle(rect.center, rect.width * .15, _metalPaint);
+      case ObstacleKind.pile:
+        canvas.drawRect(rect, _woodPaint);
+        canvas.drawRect(rect.deflate(1), _woodLine);
+      case ObstacleKind.truss:
+        final bar = Rect.fromLTRB(
+          rect.left,
+          rect.bottom - s * .1,
+          rect.right,
+          rect.bottom - s * .06,
+        );
+        for (final x in [bar.left + 2, bar.right - 2]) {
+          canvas.drawLine(Offset(x, 0), Offset(x, bar.top), _ropePaint);
+        }
+        canvas.drawRect(bar, _metalPaint);
+        canvas.drawRect(
+          Rect.fromLTRB(rect.left, bar.bottom, rect.right, rect.bottom),
+          _metalPaint,
+        );
+        canvas.drawRect(
+          Rect.fromLTRB(rect.left, rect.bottom, rect.right, floorY),
+          _beamPaint,
+        );
+      case ObstacleKind.drop:
+        final frame = Rect.fromLTRB(
+          rect.left,
+          rect.bottom - rect.width * 1.4,
+          rect.right,
+          rect.bottom,
+        );
+        canvas.drawLine(
+          Offset(frame.center.dx, 0),
+          Offset(frame.center.dx, frame.top),
+          _ropePaint,
+        );
+        canvas.drawRect(frame, _canvasPaint);
+        canvas.drawRect(frame.deflate(1), _canvasLine);
     }
   }
 

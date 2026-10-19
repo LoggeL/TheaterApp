@@ -98,6 +98,43 @@ int _serverMax(double seconds) =>
             60)
         .ceil();
 
+/// Steers around the obstacles like a careful player: towards the free
+/// height of the next obstacle ahead, counting moving ones where they can
+/// be at their worst (a sandbag landed, a drop at its lowest).
+void _pilotStep(StageRunner game) {
+  const f = StageRunner.floor, c = StageRunner.ceiling;
+  const hw = StageRunner.runnerWidth * .4 + .01;
+  const hh = StageRunner.runnerHeight * .42 + .015;
+  const minY = c + StageRunner.runnerHeight / 2;
+  const maxY = f - StageRunner.runnerHeight / 2;
+  final x = game.runnerWorldX;
+  final ahead = game.obstacles.where((o) => o.right > x - hw).toList()
+    ..sort((a, b) => a.left.compareTo(b.left));
+  var lo = minY, hi = maxY;
+  if (ahead.isNotEmpty) {
+    final first = ahead.first;
+    for (final o in ahead.where((o) => o.left < first.right + hw)) {
+      switch (o.kind) {
+        case ObstacleKind.sandbag:
+          hi = min(hi, f - (o.bottom - o.top) - hh);
+        case ObstacleKind.drop:
+          lo = max(lo, o.anchor + StageRunner.dropSwing + hh);
+        case _ when o.top <= 0:
+          lo = max(lo, o.bottom + hh);
+        case _:
+          hi = min(hi, o.top - hh);
+      }
+    }
+  }
+  final y = game.y;
+  final target = lo > hi ? (lo + hi) / 2 : y.clamp(lo, hi).toDouble();
+  final wanted = ((target - y) * 10)
+      .clamp(-StageRunner.maxRise, StageRunner.maxFall)
+      .toDouble();
+  game.holding = game.vy > wanted;
+  game.update(1 / 60);
+}
+
 /// Flies towards the next pickup, ignoring obstacles (the runner is
 /// invincible), to collect as much as possible.
 void _greedyStep(StageRunner game) {
@@ -217,6 +254,109 @@ void main() {
         expect(game.score, lessThanOrEqualTo(_serverMax(game.time)));
         // Passed objects go back to the pool instead of piling up.
         expect(most, lessThan(40), reason: 'seed $seed');
+      }
+    });
+  });
+
+  group('new obstacles', () {
+    test('each joins once the score reaches its points, and shows at once', () {
+      for (var seed = 0; seed < 4; seed++) {
+        final game = StageRunner(random: Random(seed))..invincible = true;
+        final firstSeen = <ObstacleKind, int>{};
+        final debuts = <ObstacleKind>[];
+        while (game.time < 200) {
+          _greedyStep(game);
+          for (final o in game.obstacles) {
+            firstSeen.putIfAbsent(o.kind, () => game.score);
+          }
+          final debut = game.debut;
+          if (debut != null && !debuts.contains(debut.kind)) {
+            debuts.add(debut.kind);
+            // The first one of its kind is the newest obstacle.
+            expect(
+              game.obstacles.where((o) => o.kind == debut.kind).length,
+              anyOf(1, 2),
+            );
+          }
+        }
+        expect(game.score, greaterThan(1000), reason: 'seed $seed');
+        expect(debuts, [for (final (_, kind) in StageRunner.debuts) kind]);
+        for (final (points, kind) in StageRunner.debuts) {
+          expect(
+            firstSeen[kind],
+            greaterThanOrEqualTo(points),
+            reason: '$kind, seed $seed',
+          );
+        }
+      }
+    });
+
+    test('the stage announces a new obstacle as it comes into view', () {
+      final game = StageRunner(random: Random(4))..invincible = true;
+      final fx = RunnerFx(random: Random(1));
+      final banners = <String>[];
+      while (game.time < 200) {
+        _greedyStep(game);
+        fx.update(1 / 60, game);
+        final banner = fx.banner;
+        if (banner != null && banner.startsWith('Neu: ')) {
+          if (!banners.contains(banner)) {
+            banners.add(banner);
+            final debut = game.debut!;
+            expect(game.score, greaterThanOrEqualTo(250));
+            expect(debut.x - game.distance, lessThan(StageRunner.viewWidth));
+          }
+        }
+      }
+      expect(banners, [
+        'Neu: Kabeltrommel!',
+        'Neu: Kistenstapel!',
+        'Neu: Lichttraverse!',
+        'Neu: Prospekt!',
+      ]);
+    });
+
+    test('a careful player gets past all of them', () {
+      const hw = StageRunner.runnerWidth * .4;
+      for (var seed = 0; seed < 8; seed++) {
+        final game = StageRunner(random: Random(seed));
+        final passed = <ObstacleKind, int>{};
+        while (!game.over && game.time < 300) {
+          final before = game.runnerWorldX;
+          _pilotStep(game);
+          final x = game.runnerWorldX;
+          for (final o in game.obstacles) {
+            if (o.right < x && o.right >= before) {
+              passed.update(o.kind, (n) => n + 1, ifAbsent: () => 1);
+            }
+            // A drum has come to rest where it was placed before the
+            // runner gets to it, so the space before it is as usual.
+            if (o.kind == ObstacleKind.drum && o.left < x + hw) {
+              expect(o.left, o.anchor, reason: 'seed $seed');
+            }
+          }
+        }
+        expect(game.meters, greaterThan(1200), reason: 'seed $seed');
+        for (final (_, kind) in StageRunner.debuts) {
+          expect(passed[kind], greaterThan(2), reason: '$kind, seed $seed');
+        }
+      }
+    });
+
+    test('a drop never moves faster than the runner and leaves a lane', () {
+      const lowest = StageRunner.dropMiddle + StageRunner.dropSwing;
+      const highest = StageRunner.dropMiddle - StageRunner.dropSwing;
+      expect(
+        StageRunner.floor - lowest,
+        greaterThan(StageRunner.runnerHeight * 2.5),
+      );
+      expect(highest, greaterThan(StageRunner.ceiling + .15));
+      final edgeSpeed = 2 * pi * StageRunner.dropSwing / StageRunner.dropPeriod;
+      expect(edgeSpeed, lessThan(StageRunner.maxRise / 3));
+      expect(edgeSpeed, lessThan(StageRunner.maxFall / 3));
+      for (var t = 0.0; t < 5; t += .1) {
+        final bottom = StageRunner.dropBottom(StageRunner.dropMiddle, 1, t);
+        expect(bottom, inInclusiveRange(highest - 1e-9, lowest + 1e-9));
       }
     });
   });
@@ -836,6 +976,13 @@ void main() {
       expect(lines.length, greaterThan(5));
       expect(lines, contains('Der Sandsack hatte Vorfahrt.'));
       expect(lines, contains('Text vergessen!'));
+      for (final kind in ObstacleKind.values) {
+        expect(obstacleName(kind), isNotEmpty);
+        expect(
+          {for (var i = 0; i < 60; i++) curtainLine(kind, random)}.length,
+          greaterThan(3),
+        );
+      }
     });
   });
 }

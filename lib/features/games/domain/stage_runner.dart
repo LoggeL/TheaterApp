@@ -42,6 +42,19 @@ enum ObstacleKind {
 
   /// Sandbag that drops from the fly loft shortly before the runner arrives.
   sandbag,
+
+  /// Cable drum that rolls towards the runner along the floor and comes to
+  /// rest just before the runner gets there: hop over it.
+  drum,
+
+  /// Pile of three props crates, twice as wide as one: a long hop.
+  pile,
+
+  /// Lighting truss with a row of lamps: a long stretch to stay below.
+  truss,
+
+  /// Painted drop that rides up and down on its fly line: pass below it.
+  drop,
 }
 
 enum PickupKind {
@@ -58,7 +71,17 @@ enum PickupKind {
 class Obstacle {
   ObstacleKind kind = ObstacleKind.crate;
   double left = 0, width = 0, top = 0, bottom = 0;
+
+  /// A sandbag is falling or a drum is rolling.
   bool falling = false;
+
+  /// Where a drum comes to rest (its left edge), or the middle height of a
+  /// drop's lower edge.
+  double anchor = 0;
+
+  /// Where a drop is in its ride up and down, in radians.
+  double phase = 0;
+
   double get right => left + width;
 }
 
@@ -90,6 +113,23 @@ class StageRunner {
   /// Vertical acceleration and speed limits (stage heights per second).
   static const lift = 5.2, gravity = 4.6, maxRise = 1.6, maxFall = 1.8;
 
+  /// Obstacles that join the course once the score reaches their points; the
+  /// earlier ones stay. Each one's first appearance comes right after.
+  static const debuts = [
+    (250, ObstacleKind.drum),
+    (500, ObstacleKind.pile),
+    (750, ObstacleKind.truss),
+    (1000, ObstacleKind.drop),
+  ];
+
+  /// A drum starts rolling this far ahead of the runner, at this speed.
+  static const rollFrom = 1.0, rollSpeed = .3;
+
+  /// A drop's lower edge rides between [dropMiddle] ± [dropSwing], once in
+  /// [dropPeriod] seconds: never faster than the runner climbs or sinks, and
+  /// at its lowest the floor lane below stays wide open.
+  static const dropMiddle = .4, dropSwing = .12, dropPeriod = 2.4;
+
   double time = 0, distance = 0;
   double y = floor - runnerHeight / 2, vy = 0;
   bool holding = false, over = false;
@@ -104,6 +144,14 @@ class StageRunner {
 
   /// What ended the run, for the closing line.
   ObstacleKind? hitBy;
+
+  /// How many of the [debuts] the score has reached.
+  int unlocked = 0;
+
+  /// The newest obstacle kind and where its first one stands, so the stage
+  /// can announce it when it comes into view.
+  ({ObstacleKind kind, double x})? debut;
+  int _debuted = 0;
 
   /// Told about every pickup as it is taken, for sound and sparkle; it does
   /// not change the score.
@@ -140,6 +188,16 @@ class StageRunner {
   /// Height of a gap between a border and a flat.
   static double gapHeight(double meters) => max(.25, .46 - meters / 6000);
 
+  /// Lower edge of a drop at [time].
+  static double dropBottom(double middle, double phase, double time) =>
+      middle + dropSwing * sin(2 * pi * time / dropPeriod + phase);
+
+  /// How far ahead of its resting place a drum starts, so that it gets there
+  /// before a runner at [speed]: it rolls while both close in on each other,
+  /// counted from a little nearer than [rollFrom] to be sure.
+  static double rollLead(double speed) =>
+      rollSpeed * (rollFrom - .1) / (speed + rollSpeed);
+
   void update(double dt) {
     dt = dt.clamp(0, .05).toDouble();
     if (over) {
@@ -162,13 +220,23 @@ class StageRunner {
     }
     final x = runnerWorldX;
     for (final o in obstacles) {
-      if (o.kind != ObstacleKind.sandbag) continue;
-      if (!o.falling && o.left - x < speed * .9) o.falling = true;
-      if (o.falling && o.bottom < floor) {
-        final drop = min(1.3 * dt, floor - o.bottom);
-        o
-          ..top += drop
-          ..bottom += drop;
+      switch (o.kind) {
+        case ObstacleKind.sandbag:
+          if (!o.falling && o.left - x < speed * .9) o.falling = true;
+          if (o.falling && o.bottom < floor) {
+            final drop = min(1.3 * dt, floor - o.bottom);
+            o
+              ..top += drop
+              ..bottom += drop;
+          }
+        case ObstacleKind.drum:
+          if (!o.falling && o.left - x <= rollFrom) o.falling = true;
+          if (o.falling && o.left > o.anchor) {
+            o.left -= min(rollSpeed * dt, o.left - o.anchor);
+          }
+        case ObstacleKind.drop:
+          o.bottom = dropBottom(o.anchor, o.phase, time);
+        default:
       }
     }
     // A slightly smaller hitbox feels fair.
@@ -250,14 +318,25 @@ class StageRunner {
     final arrival = time + max(0.0, x - runnerWorldX) / max(speed, .01);
     final v = RunnerRules.speedAt(arrival);
     final spacing = max(.6, v * reactionTime(m));
-    final kinds = [
-      ObstacleKind.crate,
-      ObstacleKind.flat,
-      ObstacleKind.lamp,
-      if (m >= 80) ...[ObstacleKind.border, ObstacleKind.border],
-      if (m >= 150) ObstacleKind.sandbag,
-    ];
-    final kind = kinds[_random.nextInt(kinds.length)];
+    while (unlocked < debuts.length && score >= debuts[unlocked].$1) {
+      unlocked++;
+    }
+    final ObstacleKind kind;
+    if (_debuted < unlocked) {
+      // A newly reached obstacle shows itself right away.
+      kind = debuts[_debuted++].$2;
+      debut = (kind: kind, x: x);
+    } else {
+      final kinds = [
+        ObstacleKind.crate,
+        ObstacleKind.flat,
+        ObstacleKind.lamp,
+        if (m >= 80) ...[ObstacleKind.border, ObstacleKind.border],
+        if (m >= 150) ObstacleKind.sandbag,
+        for (final (_, kind) in debuts.take(unlocked)) kind,
+      ];
+      kind = kinds[_random.nextInt(kinds.length)];
+    }
     var width = .1;
     // The middle of the safe space, where pickups go.
     double safeY;
@@ -298,6 +377,37 @@ class StageRunner {
         _lastGapX = x;
         _lastGapCenter = center;
         safeY = center;
+      case ObstacleKind.drum:
+        width = .12;
+        // Placed a little further on: it rolls back to x by the time the
+        // runner gets there, so the space before it stays as long as usual.
+        _obstacle(kind, x + rollLead(v), width, floor - width, floor).anchor =
+            x;
+        safeY = floor - width - .12;
+      case ObstacleKind.pile:
+        width = .22;
+        final height = .2 + _random.nextDouble() * .06;
+        _obstacle(kind, x, width, floor - height / 2, floor);
+        _obstacle(
+          kind,
+          x + width / 4,
+          width / 2,
+          floor - height,
+          floor - height / 2,
+        );
+        safeY = floor - height - .12;
+      case ObstacleKind.truss:
+        width = .3;
+        final bottom = ceiling + .2 + _random.nextDouble() * .16;
+        _obstacle(kind, x, width, 0, bottom);
+        safeY = (bottom + floor) / 2;
+      case ObstacleKind.drop:
+        width = .13;
+        final phase = _random.nextDouble() * 2 * pi;
+        _obstacle(kind, x, width, 0, dropBottom(dropMiddle, phase, time))
+          ..anchor = dropMiddle
+          ..phase = phase;
+        safeY = (dropMiddle + dropSwing + floor) / 2;
     }
     final length = width + spacing;
     _nextX = x + length;

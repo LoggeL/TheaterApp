@@ -53,6 +53,7 @@ class RunnerFx {
   bool _wasHolding = false, _crashed = false, _curtain = false;
   bool recordBroken = false;
   int _milestone = 0;
+  ObstacleKind? _announced;
 
   /// The metres that get a banner, then every further thousand.
   static int milestoneAt(int index) => switch (index) {
@@ -69,6 +70,9 @@ class RunnerFx {
     2000 => '2000 m – Standing Ovations!',
     _ => '$meters m – Bühnenlegende!',
   };
+
+  /// The banner for a new kind of obstacle.
+  static String debutText(ObstacleKind kind) => 'Neu: ${obstacleName(kind)}!';
 
   static String? comboText(int combo) => switch (combo) {
     5 => 'Kombo ×5 – Bravo!',
@@ -189,6 +193,14 @@ class RunnerFx {
       _milestone++;
       onSound?.call(RunnerSfx.bravo);
     }
+    // A new obstacle is announced when its first one comes into view.
+    final debut = game.debut;
+    if (debut != null &&
+        debut.kind != _announced &&
+        debut.x - game.distance < StageRunner.viewWidth) {
+      _announced = debut.kind;
+      _banner(debutText(debut.kind));
+    }
     final best = this.best;
     if (!recordBroken && best != null && best > 0 && game.score > best) {
       recordBroken = true;
@@ -205,6 +217,19 @@ class RunnerFx {
     return (sin(t) * strength, cos(t * 1.3) * strength * .7);
   }
 }
+
+/// The name of an obstacle, as the stage announces it.
+String obstacleName(ObstacleKind kind) => switch (kind) {
+  ObstacleKind.crate => 'Requisitenkiste',
+  ObstacleKind.flat => 'Kulisse',
+  ObstacleKind.lamp => 'Scheinwerfer',
+  ObstacleKind.border => 'Soffitte',
+  ObstacleKind.sandbag => 'Sandsack',
+  ObstacleKind.drum => 'Kabeltrommel',
+  ObstacleKind.pile => 'Kistenstapel',
+  ObstacleKind.truss => 'Lichttraverse',
+  ObstacleKind.drop => 'Prospekt',
+};
 
 /// A line for the falling curtain, now and then about what was hit.
 String curtainLine(ObstacleKind? hitBy, Random random) {
@@ -226,6 +251,10 @@ String curtainLine(ObstacleKind? hitBy, Random random) {
     ObstacleKind.border => 'Mitten in den Soffitten hängen geblieben.',
     ObstacleKind.lamp => 'Ins Scheinwerferlicht geflogen. Wörtlich.',
     ObstacleKind.sandbag => 'Der Sandsack hatte Vorfahrt.',
+    ObstacleKind.drum => 'Von der Kabeltrommel überrollt.',
+    ObstacleKind.pile => 'Der Kistenstapel war höher als gedacht.',
+    ObstacleKind.truss => 'An der Lichttraverse hängen geblieben.',
+    ObstacleKind.drop => 'Der Prospekt kam von oben. Wie geprobt.',
     null => null,
   };
   if (specific != null && random.nextBool()) return specific;

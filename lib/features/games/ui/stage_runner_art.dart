@@ -22,7 +22,10 @@ enum RunnerSprite {
   rose(376, 208, 89, 120),
   mask(469, 208, 120, 87),
   star(593, 208, 116, 120),
-  flat(961, 4, 159, 360);
+  flat(961, 4, 159, 360),
+  drum(713, 208, 150, 150),
+  truss(152, 386, 420, 64),
+  drop(479, 4, 128, 176);
 
   const RunnerSprite(this.x, this.y, this.width, this.height);
   final double x, y, width, height;
