@@ -18,9 +18,17 @@ class GalleryScreen extends StatefulWidget {
     super.key,
     required this.controller,
     required this.gallery,
+    this.pickImages,
+    this.wait,
   });
   final AppController controller;
   final JsonMap gallery;
+
+  /// Chooses the images to upload; tests replace the system picker.
+  final Future<List<XFile>> Function()? pickImages;
+
+  /// Waits before another upload attempt; tests skip the real delay.
+  final Future<void> Function(Duration)? wait;
   @override
   State<GalleryScreen> createState() => _GalleryScreenState();
 }
@@ -28,18 +36,25 @@ class GalleryScreen extends StatefulWidget {
 class _GalleryScreenState extends State<GalleryScreen> {
   final _scroll = ScrollController();
   final _assets = <JsonMap>[];
+
+  /// Images of earlier uploads that did not reach the server yet.
+  final _unsent = <XFile>[];
   Future<String?>? _loadTask;
   late JsonMap _gallery;
   int? _next = 0;
   int _total = 0, _loadGeneration = 0, _uploadDone = 0, _uploadTotal = 0;
   bool _loading = false, _uploading = false, _hidden = false;
-  String? _error, _sourceError;
+  String? _error, _sourceError, _uploadNote;
   @override
   void initState() {
     super.initState();
     _gallery = widget.gallery;
+    // After a failed page only "Erneut laden" (or pulling down) tries again,
+    // so scrolling offline does not start one request after another.
     _scroll.addListener(() {
-      if (_scroll.position.extentAfter < 900) _load();
+      if (_error == null && !_loading && _scroll.position.extentAfter < 900) {
+        _load();
+      }
     });
     _load();
   }
@@ -106,64 +121,139 @@ class _GalleryScreenState extends State<GalleryScreen> {
   Future<void> _upload() async {
     final List<XFile> picked;
     try {
-      picked = (await ImagePicker().pickMultiImage(
-        maxWidth: 2048,
-        imageQuality: 85,
-        requestFullMetadata: false,
-        limit: 20,
-      )).take(20).toList();
+      picked = (await (widget.pickImages ?? _pickFromDevice)())
+          .take(20)
+          .toList();
     } catch (e) {
       if (mounted) showProblem(context, e);
       return;
     }
     if (picked.isEmpty || !mounted) return;
+    await _uploadFiles(picked);
+  }
+
+  Future<List<XFile>> _pickFromDevice() => ImagePicker().pickMultiImage(
+    maxWidth: 2048,
+    imageQuality: 85,
+    requestFullMetadata: false,
+    limit: 20,
+  );
+
+  Future<void> _uploadUnsent() async {
+    final files = List.of(_unsent);
+    setState(_unsent.clear);
+    await _uploadFiles(files);
+  }
+
+  static const _uploadAttempts = 5, _maxUploadWait = Duration(seconds: 30);
+
+  /// Uploads one by one. A file the server rejects (format, size) is
+  /// counted and the next one follows; any other failure stops and keeps
+  /// this and all later files for "Rest erneut hochladen".
+  Future<void> _uploadFiles(List<XFile> files) async {
     setState(() {
       _uploading = true;
       _uploadDone = 0;
-      _uploadTotal = picked.length;
+      _uploadTotal = files.length;
+      _uploadNote = null;
     });
-    var added = 0, skipped = 0;
+    var added = 0, skipped = 0, rejected = 0;
+    final unsent = <XFile>[];
     Object? failure;
-    for (final file in picked) {
+    for (var i = 0; i < files.length; i++) {
+      final file = files[i];
       try {
         if (await file.length() > 8 * 1024 * 1024) {
           skipped++;
         } else {
-          await widget.controller.remote(
-            '/media',
-            method: 'POST',
-            body: {
-              'kind': 'gallery',
-              'galleryId': _gallery['id'],
-              'content': base64Encode(await file.readAsBytes()),
-            },
-          );
+          await _send(file);
           added++;
         }
-      } catch (e) {
+      } on ApiException catch (e) {
         failure = e;
-        break;
+        if (e.statusCode == 400 || e.statusCode == 413) {
+          rejected++;
+        } else {
+          unsent.addAll(files.skip(i));
+          break;
+        }
+      } catch (e) {
+        // The picked file itself could not be read.
+        failure = e;
+        rejected++;
       }
       if (mounted) setState(() => _uploadDone++);
     }
     if (!mounted) return;
-    setState(() => _uploading = false);
+    setState(() {
+      _uploading = false;
+      _uploadNote = null;
+      _unsent.addAll(unsent);
+    });
+    String count(int n, String one, String many) => n == 1 ? one : '$n $many';
     final summary = [
-      added == 1 ? '1 Bild hinzugefügt' : '$added Bilder hinzugefügt',
+      count(added, '1 Bild hinzugefügt', 'Bilder hinzugefügt'),
       if (skipped > 0)
-        skipped == 1
-            ? '1 Bild über 8 MB übersprungen'
-            : '$skipped Bilder über 8 MB übersprungen',
-    ].join(' · ');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          failure == null ? '$summary.' : '$summary. ${userMessage(failure)}',
+        count(
+          skipped,
+          '1 Bild über 8 MB übersprungen',
+          'Bilder über 8 MB übersprungen',
         ),
-        duration: Duration(seconds: failure == null && skipped == 0 ? 4 : 8),
-      ),
-    );
+      if (rejected > 0) count(rejected, '1 Bild abgelehnt', 'Bilder abgelehnt'),
+      if (unsent.isNotEmpty)
+        count(
+          unsent.length,
+          '1 Bild nicht hochgeladen',
+          'Bilder nicht hochgeladen',
+        ),
+    ].join(' · ');
+    // A new summary replaces the one of an earlier round.
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            failure == null ? '$summary.' : '$summary. ${userMessage(failure)}',
+          ),
+          duration: Duration(seconds: failure == null && skipped == 0 ? 4 : 8),
+        ),
+      );
     if (added > 0) await _load(refresh: true);
+  }
+
+  /// Sends one image. "Busy" (429) and an unavailable server are tried again
+  /// after the server's Retry-After or a growing pause. Lost connections are
+  /// not, since the server may already have stored the image.
+  Future<void> _send(XFile file) async {
+    final body = {
+      'kind': 'gallery',
+      'galleryId': _gallery['id'],
+      'content': base64Encode(await file.readAsBytes()),
+    };
+    for (var attempt = 1; ; attempt++) {
+      try {
+        await widget.controller.remote('/media', method: 'POST', body: body);
+        if (mounted && _uploadNote != null) {
+          setState(() => _uploadNote = null);
+        }
+        return;
+      } on ApiException catch (e) {
+        final temporary =
+            (e.statusCode == 429 && e.code != 'upload_limit') ||
+            const {502, 503, 504}.contains(e.statusCode);
+        if (!temporary || attempt >= _uploadAttempts) rethrow;
+        var pause = e.retryAfter ?? Duration(seconds: 1 << (attempt - 1));
+        if (pause > _maxUploadWait) pause = _maxUploadWait;
+        if (mounted) {
+          setState(
+            () => _uploadNote = e.statusCode == 429
+                ? 'Der Server verarbeitet gerade andere Bilder. Neuer Versuch gleich …'
+                : 'Der Server ist kurz nicht erreichbar. Neuer Versuch gleich …',
+          );
+        }
+        await (widget.wait ?? Future<void>.delayed)(pause);
+      }
+    }
   }
 
   Future<void> _togglePublication() async {
@@ -343,6 +433,20 @@ class _GalleryScreenState extends State<GalleryScreen> {
                         ),
                       ),
                     ),
+                  if (_uploading && _uploadNote != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        _uploadNote!,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  if (!_uploading && _unsent.isNotEmpty && _admin)
+                    _UnsentBanner(
+                      count: _unsent.length,
+                      onRetry: _uploadUnsent,
+                      onDiscard: () => setState(_unsent.clear),
+                    ),
                 ],
               ),
             ),
@@ -465,6 +569,54 @@ class _UnpublishedBanner extends StatelessWidget {
           ),
           if (onPublish != null)
             TextButton(onPressed: onPublish, child: const Text('Freigeben')),
+        ],
+      ),
+    );
+  }
+}
+
+class _UnsentBanner extends StatelessWidget {
+  const _UnsentBanner({
+    required this.count,
+    required this.onRetry,
+    required this.onDiscard,
+  });
+  final int count;
+  final VoidCallback onRetry, onDiscard;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            count == 1
+                ? '1 Bild wurde nicht hochgeladen.'
+                : '$count Bilder wurden nicht hochgeladen.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onErrorContainer,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 4,
+            children: [
+              TextButton(onPressed: onDiscard, child: const Text('Verwerfen')),
+              TextButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.upload),
+                label: const Text('Rest erneut hochladen'),
+              ),
+            ],
+          ),
         ],
       ),
     );

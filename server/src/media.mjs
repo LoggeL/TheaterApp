@@ -53,7 +53,8 @@ export class MediaService {
   }
   async upload(uid, b) {
     this.theater.account(uid);
-    if ((this.processing ?? 0) >= 2) fail(429, 'Es werden gerade andere Bilder verarbeitet. Bitte kurz danach erneut versuchen.');
+    // Busy is temporary: the client waits Retry-After seconds and tries again.
+    if ((this.processing ?? 0) >= 2) throw Object.assign(new AppError(429, 'Es werden gerade andere Bilder verarbeitet. Bitte kurz danach erneut versuchen.', 'busy'), { retryAfter: 2 });
     this.processing = (this.processing ?? 0) + 1;
     try { return await this.processUpload(uid, b); } finally { this.processing--; }
   }
@@ -63,7 +64,7 @@ export class MediaService {
     if (typeof b.content !== 'string' || b.content.length > 12 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(b.content)) fail(400, 'Bitte ein Bild bis 8 MB auswählen.');
     const input = Buffer.from(b.content, 'base64'); if (!input.length || input.length > 8 * 1024 * 1024) fail(413, 'Bitte ein Bild bis 8 MB auswählen.');
     const recent = this.store.all('media').filter(m => m.ownerPersonId === a.personId && Date.parse(m.createdAt) > Date.now() - 86400_000);
-    if (recent.length >= (a.role === 'admin' ? 500 : 30)) fail(429, 'Für heute wurden bereits viele Bilder hochgeladen. Bitte später erneut versuchen.');
+    if (recent.length >= (a.role === 'admin' ? 500 : 30)) throw new AppError(429, 'Für heute wurden bereits viele Bilder hochgeladen. Bitte später erneut versuchen.', 'upload_limit');
     let result;
     try {
       const image = sharp(input, { limitInputPixels: 40_000_000, animated: false }); const metadata = await image.metadata();

@@ -109,6 +109,23 @@ test('media HTTP routes are authenticated, binary, private and revoke immediatel
   r = await fetch(path, { headers: { Authorization: 'Bearer sam' } }); assert.equal(r.status, 403);
 });
 
+test('a busy upload answers 429 with Retry-After, the daily limit without it', async t => {
+  const { app, media, content } = await setup(t);
+  const g = await media.saveGallery('admin', { title: 'Busy' });
+  const server = createHttpServer({ theater: app, media, verifyToken: async uid => ({ uid }) });
+  await new Promise(r => server.listen(0, '127.0.0.1', r)); t.after(() => new Promise(r => server.close(r)));
+  const post = () => fetch(`http://127.0.0.1:${server.address().port}/api/mobile/v1/media/`, { method: 'POST', headers: { Authorization: 'Bearer admin', 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'gallery', galleryId: g.id, content }) });
+  media.processing = 2;
+  let r = await post();
+  assert.equal(r.status, 429); assert.equal(r.headers.get('retry-after'), '2'); assert.equal((await r.json()).code, 'busy');
+  media.processing = 0;
+  assert.equal((await post()).status, 201);
+  const all = media.store.all.bind(media.store), personId = app.account('admin').personId;
+  media.store.all = kind => kind === 'media' ? Array.from({ length: 500 }, () => ({ ownerPersonId: personId, createdAt: new Date().toISOString() })) : all(kind);
+  r = await post();
+  assert.equal(r.status, 429); assert.equal(r.headers.get('retry-after'), null); assert.equal((await r.json()).code, 'upload_limit');
+});
+
 test('withdrawing an album blocks member metadata and images while admins can restore it', async t => {
   const { media, content } = await setup(t);
   const g = await media.saveGallery('admin', { title: 'Withdrawable' });

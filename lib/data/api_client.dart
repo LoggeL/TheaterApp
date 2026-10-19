@@ -7,9 +7,17 @@ import 'package:http/http.dart' as http;
 import '../core/models.dart';
 
 class ApiException implements Exception {
-  const ApiException(this.message, {this.statusCode = 0, this.code});
+  const ApiException(
+    this.message, {
+    this.statusCode = 0,
+    this.code,
+    this.retryAfter,
+  });
   final String message;
   final int statusCode;
+
+  /// The server's `Retry-After` wait, when it sent one in seconds.
+  final Duration? retryAfter;
 
   /// The server's machine-readable reason, e.g. `closed` or
   /// `version_conflict`; null for older servers and local errors.
@@ -125,6 +133,7 @@ class ApiClient {
               : 'Die Anfrage wurde vom Server abgelehnt (${response.statusCode}).',
           statusCode: response.statusCode,
           code: _errorCode(decoded['code']),
+          retryAfter: retryAfterOf(response.headers['retry-after']),
         );
       }
       return decoded;
@@ -237,6 +246,13 @@ class ApiClient {
         token: token,
       );
   void close() => _client.close();
+
+  /// Reads a `Retry-After` header given in seconds; HTTP dates and
+  /// unusable values count as absent.
+  static Duration? retryAfterOf(String? header) {
+    final seconds = int.tryParse(header?.trim() ?? '');
+    return seconds == null || seconds < 0 ? null : Duration(seconds: seconds);
+  }
 
   /// A short machine-readable error code; anything else is ignored.
   static String? _errorCode(Object? value) =>
