@@ -27,6 +27,34 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.9.0',
+    date: '19. Oktober 2026',
+    items: [
+      'Neu: „Text lernen“ – du siehst das Stichwort, deckst deinen Text '
+          'Schritt für Schritt auf und merkst dir, was schon sitzt. Du '
+          'findest es bei jedem Stück unter „Skript“.',
+      'Zu jedem Stück siehst du jetzt, wer welche Rolle spielt und wer in '
+          'Regie und Team dabei ist – auch bei älteren Stücken.',
+      'Unter „Benachrichtigungen & Darstellung“ wählst du selbst, welche '
+          'Push-Nachrichten du bekommst.',
+      'Fällt ein Termin aus, bekommst du eine Push-Nachricht. Bei '
+          'Änderungen meldet sich die App nur noch, wenn sich Zeit oder Ort '
+          'ändern.',
+      '„Dein nächster Termin“ zeigt keine Termine mehr, die abgesagt sind '
+          'oder bei denen du nicht kommst.',
+      'Tippst du auf den Ort eines Termins, öffnet sich die Karte.',
+      'Galerien und deine Rollen im Profil stehen jetzt mit dem Neuesten '
+          'zuerst.',
+      'Kürzere Namen unten in der Leiste: Skript, Post und Ich. „Mein '
+          'Bereich“ ist übersichtlicher sortiert.',
+      'Bessere Lesbarkeit durch stärkere Kontraste, hell wie dunkel.',
+      'Fotos in Galerien laden zuverlässiger hoch, wenn gerade viel los ist.',
+      'Für die Theaterleitung: Admin-Rechte vergeben und entziehen, '
+          'Ortsvorschläge beim Anlegen von Terminen und eigene Push-Schalter '
+          'für Meldungen an die Leitung.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.8.2',
     date: '19. Oktober 2026',
     items: [
