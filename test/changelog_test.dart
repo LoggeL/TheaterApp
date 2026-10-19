@@ -66,10 +66,10 @@ void main() {
 
     final tile = find.text('Changelog');
     await tester.scrollUntilVisible(tile, 200);
-    // Listed in the App section, right before "Über die App".
+    // Listed under "Hilfe & Info", right before "Über die App".
     expect(
       tester.getTopLeft(tile).dy,
-      greaterThan(tester.getTopLeft(find.text('Datenschutz')).dy),
+      greaterThan(tester.getTopLeft(find.text('Hilfe & Info')).dy),
     );
     expect(
       tester.getTopLeft(tile).dy,

@@ -97,8 +97,7 @@ void main() {
       'Für mich',
       'Ensemble',
       'Einstellungen',
-      'Konto',
-      'App',
+      'Hilfe & Info',
       'Abwesenheiten',
       'Meine Teilnahme',
       'Unser Ensemble',
@@ -121,6 +120,31 @@ void main() {
     expect(find.text('Anmeldearten'), findsNothing);
     // No web installation on test hosts.
     expect(find.text('App installieren'), findsNothing);
+    // Account entries join the settings; the old single-entry groups and the
+    // long "App" group are gone.
+    expect(find.text('Konto'), findsNothing);
+    expect(find.text('App'), findsNothing);
+    double top(String text) => tester.getTopLeft(find.text(text)).dy;
+    final order = [
+      'Für mich',
+      'Abwesenheiten',
+      'Meine Teilnahme',
+      'Ensemble',
+      'Unser Ensemble',
+      'Galerien',
+      'Einstellungen',
+      'Benachrichtigungen & Darstellung',
+      'Synchronisierung',
+      'Passwort ändern',
+      'Hilfe & Info',
+      'Changelog',
+      'Über die App',
+      'Datenschutz',
+      'Abmelden',
+    ];
+    for (final (i, title) in order.indexed.skip(1)) {
+      expect(top(title), greaterThan(top(order[i - 1])), reason: title);
+    }
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.text('Profil bearbeiten'));
@@ -141,7 +165,6 @@ void main() {
     await controller.startDemo();
     await _pump(tester, controller);
 
-    expect(find.text('Konto'), findsNothing);
     expect(find.text('Passwort ändern'), findsNothing);
     expect(find.text('Meine Teilnahme'), findsNothing);
     expect(find.text('Demo · alles bleibt auf diesem Gerät'), findsOneWidget);

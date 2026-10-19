@@ -155,24 +155,6 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
         !controller.isDemo &&
         (!controller.usesFirebase ||
             controller.identity?.linkedProviders.contains('password') == true);
-    final account = [
-      if (showPassword)
-        GroupTile(
-          icon: Icons.lock_outline,
-          title: 'Passwort ändern',
-          subtitle: 'Deinen Zugang schützen',
-          onTap: () =>
-              openPage(context, PasswordScreen(controller: controller)),
-        ),
-      if (controller.usesFirebase)
-        GroupTile(
-          icon: Icons.login_outlined,
-          title: 'Anmeldearten',
-          subtitle: 'Zugänge zu deinem Konto',
-          onTap: () =>
-              openPage(context, AccountProvidersScreen(controller: controller)),
-        ),
-    ];
     return RefreshIndicator(
       onRefresh: () => refreshWithFeedback(context, controller),
       child: ListView(
@@ -238,6 +220,8 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                     ),
                   ],
                 ),
+                // Device and account settings share one group, so no group
+                // is left with a single entry.
                 TileGroup(
                   title: 'Einstellungen',
                   tiles: [
@@ -253,13 +237,6 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                         ),
                       ),
                     ),
-                  ],
-                ),
-                if (account.isNotEmpty)
-                  TileGroup(title: 'Konto', tiles: account),
-                TileGroup(
-                  title: 'App',
-                  tiles: [
                     GroupTile(
                       icon: Icons.sync_outlined,
                       title: 'Synchronisierung',
@@ -278,6 +255,26 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                       onTap: () =>
                           openPage(context, SyncScreen(controller: controller)),
                     ),
+                    if (showPassword)
+                      GroupTile(
+                        icon: Icons.lock_outline,
+                        title: 'Passwort ändern',
+                        subtitle: 'Deinen Zugang schützen',
+                        onTap: () => openPage(
+                          context,
+                          PasswordScreen(controller: controller),
+                        ),
+                      ),
+                    if (controller.usesFirebase)
+                      GroupTile(
+                        icon: Icons.login_outlined,
+                        title: 'Anmeldearten',
+                        subtitle: 'Zugänge zu deinem Konto',
+                        onTap: () => openPage(
+                          context,
+                          AccountProvidersScreen(controller: controller),
+                        ),
+                      ),
                     if (_installation.available && !_installation.installed)
                       GroupTile(
                         icon: Icons.install_mobile_outlined,
@@ -285,6 +282,11 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                         subtitle: 'Direkt über ein Symbol auf deinem Gerät',
                         onTap: _install,
                       ),
+                  ],
+                ),
+                TileGroup(
+                  title: 'Hilfe & Info',
+                  tiles: [
                     if (feedbackAvailable(controller))
                       GroupTile(
                         icon: Icons.feedback_outlined,
@@ -296,12 +298,6 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                         ),
                       ),
                     GroupTile(
-                      icon: Icons.privacy_tip_outlined,
-                      title: 'Datenschutz',
-                      subtitle: 'Datenschutzerklärung und Kontolöschung',
-                      onTap: _privacy,
-                    ),
-                    GroupTile(
                       icon: Icons.history,
                       title: 'Changelog',
                       subtitle: 'Alle Versionen und was neu ist',
@@ -312,6 +308,12 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                       title: 'Über die App',
                       subtitle: '$appVersionLabel · Lizenzen',
                       onTap: _about,
+                    ),
+                    GroupTile(
+                      icon: Icons.privacy_tip_outlined,
+                      title: 'Datenschutz',
+                      subtitle: 'Datenschutzerklärung und Kontolöschung',
+                      onTap: _privacy,
                     ),
                   ],
                 ),
