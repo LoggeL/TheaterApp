@@ -9,8 +9,10 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../slots/ui/slot_pools_screen.dart';
+import '../domain/event_places.dart';
 import '../domain/event_series.dart';
 import '../domain/event_types.dart';
+import 'event_place_field.dart';
 
 /// Matches `changePushWindowDays` on the server.
 const changePushWindowDays = 14;
@@ -531,9 +533,9 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          TextField(
+          EventPlaceField(
             controller: _place,
-            decoration: const InputDecoration(labelText: 'Ort'),
+            places: knownPlaces(widget.controller.events),
           ),
           const SectionTitle('Eingeladen'),
           AudiencePicker(

@@ -18,6 +18,7 @@ import '../admin/event_editor_screen.dart';
 import '../data/ics_export.dart';
 import '../domain/event_dates.dart';
 import '../domain/event_format.dart';
+import 'event_place.dart';
 import 'event_style.dart';
 import 'rsvp/rsvp_panel.dart';
 
@@ -164,12 +165,7 @@ class EventDetailContent extends StatelessWidget {
                   gap,
                   _DetailMeta(Icons.schedule, eventTime(event)),
                   gap,
-                  _DetailMeta(
-                    Icons.location_on_outlined,
-                    event.place.isEmpty
-                        ? 'Ort wird noch bekannt gegeben'
-                        : event.place,
-                  ),
+                  EventPlaceRow(event.place),
                   gap,
                   _DetailMeta(Icons.group_outlined, _audience),
                 ],
