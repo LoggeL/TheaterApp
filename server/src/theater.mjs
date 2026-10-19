@@ -1,6 +1,7 @@
 import { berlinDateTime, customReminderMinutes, defaultReminders, eventNotificationBody } from './event-notification.mjs';
 import { berlinParts, fromBerlin, seriesOccurrences, seriesSummary } from './event-series.mjs';
 import { compareProductionsNewestFirst } from './production-order.mjs';
+import { leadPushKinds, memberPushKinds } from './push-kinds.mjs';
 import { migrateSharedSpeakers, sharedSpeakersMigrationId, splitSharedSpeakers } from './shared-speakers.mjs';
 import { feedbackList, feedbackTicketsMigrationId, forgetFeedbackAccount, forgetFeedbackPerson, migrateFeedbackTickets, setFeedbackStatus, submitFeedback } from './feedback-tickets.mjs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -30,7 +31,7 @@ export const remindCooldownMs = 10 * 60 * 1000;
 // Declines this close to the start are pushed to admins and the production's directors.
 export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings']);
 // A short self-written "Über mich" text on the ensemble profile.
 export const aboutMaxLength = 600;
 // Feedback from members to the admins as support tickets (see feedback-tickets.mjs).
@@ -487,8 +488,9 @@ export class Theater {
         const emailEnabled = v.emailEnabled === undefined ? s.get('reminders', a.personId)?.emailEnabled === true : v.emailEnabled === true;
         if (emailEnabled && (!this.emailEnabled || !a.emailVerified)) fail(409, 'Termin-E-Mails benötigen einen eingerichteten Versand und eine bestätigte E-Mail-Adresse.');
         // Older clients send the whole record without newer keys; those keep their stored value.
-        const lateDeclines = v.lateDeclines === undefined ? s.get('reminders', a.personId)?.lateDeclines !== false : v.lateDeclines === true;
-        s.put('reminders', a.personId, { dayBefore: v.dayBefore === true, twoHours: v.twoHours === true, changes: v.changes === true, emailEnabled, customMinutes, lateDeclines }); return {};
+        const kept = key => v[key] === undefined ? s.get('reminders', a.personId)?.[key] !== false : v[key] === true;
+        const kinds = Object.fromEntries([...memberPushKinds, ...leadPushKinds].map(key => [key, kept(key)]));
+        s.put('reminders', a.personId, { dayBefore: v.dayBefore === true, twoHours: v.twoHours === true, changes: v.changes === true, emailEnabled, customMinutes, ...kinds }); return {};
       }
       case 'account.approve': {
         admin(); const target = s.account(required(b.uid, 'Konto')); const member = s.get('members', Number(b.personId));
@@ -927,7 +929,7 @@ export class Theater {
         // Future bookings are cancelled with a notice; the pool is gone, so there is no deep link.
         for (const slot of pool.slots.filter(x => Date.parse(x.startsAt) > +this.clock())) {
           const booked = bookings.filter(x => x.slotId === slot.id).map(x => x.personId);
-          if (booked.length) this.enqueuePush({ title: `Terminfinder entfällt: ${pool.title}`, body: `Dein Zeitfenster entfällt: ${eventNotificationBody({ ...slot, place: pool.place })}`, data: {}, recipientPersonIds: booked });
+          if (booked.length) this.enqueuePush({ title: `Terminfinder entfällt: ${pool.title}`, body: `Dein Zeitfenster entfällt: ${eventNotificationBody({ ...slot, place: pool.place })}`, data: {}, recipientPersonIds: booked, pushKind: 'slots' });
         }
         for (const x of bookings) s.delete('slotBookings', `${pool.id}:${x.personId}`);
         for (const slot of pool.slots) this.syncSlotEvent(pool, slot);
@@ -1064,7 +1066,7 @@ export class Theater {
       .filter(x => x !== personId && s.get('reminders', x)?.lateDeclines !== false);
     if (!recipients.length) return;
     // Never the reason: it may be health information on a lock screen.
-    this.enqueuePush({ title: `Kurzfristige Absage: ${e.title}`, body: `${s.get('members', personId)?.name ?? 'Jemand'} kommt nicht · ${eventNotificationBody(e)}`, data: { eventId: e.id }, recipientPersonIds: recipients, fixedText: true, email: false });
+    this.enqueuePush({ title: `Kurzfristige Absage: ${e.title}`, body: `${s.get('members', personId)?.name ?? 'Jemand'} kommt nicht · ${eventNotificationBody(e)}`, data: { eventId: e.id }, recipientPersonIds: recipients, fixedText: true, email: false, pushKind: 'lateDeclines' });
     s.put('reminderSent', key, { at: now() });
   }
   forgetPollVotes(pollId) { this.store.db.prepare("DELETE FROM entities WHERE kind = 'pollVotes' AND json_extract(data, '$.pollId') = ?").run(pollId); }

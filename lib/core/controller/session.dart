@@ -546,13 +546,7 @@ extension SessionController on AppController {
     _checkinVersions = {};
     _capabilities = {};
     _mutationVersion = 0;
-    _reminders = {
-      'dayBefore': false,
-      'twoHours': true,
-      'changes': true,
-      'emailEnabled': false,
-      'lateDeclines': true,
-    };
+    _reminders = {..._defaultReminders};
     _customReminderMinutes = null;
   }
 

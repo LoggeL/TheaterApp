@@ -176,13 +176,7 @@ class AppController extends ChangeNotifier {
   /// Current time of the injected clock, e.g. whether a slot has started.
   DateTime get now => _clock();
 
-  Map<String, bool> _reminders = {
-    'dayBefore': false,
-    'twoHours': true,
-    'changes': true,
-    'emailEnabled': false,
-    'lateDeclines': true,
-  };
+  Map<String, bool> _reminders = {..._defaultReminders};
 
   /// Personal reminder lead time in minutes; null when switched off.
   int? _customReminderMinutes;

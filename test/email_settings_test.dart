@@ -161,6 +161,94 @@ void main() {
       controller.dispose();
     });
   }
+
+  for (final (role, flagged) in [
+    ('admin', true),
+    ('admin', false),
+    ('member', true),
+    ('member', false),
+  ]) {
+    testWidgets('personal push kinds: $role, '
+        '${flagged ? 'with' : 'without'} the flag', (tester) async {
+      tester.view.physicalSize = const Size(1000, 3600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final server = _RoleServer(role);
+      server.data['capabilities'] = {
+        'features': ['lateDeclines', if (flagged) 'pushSettings'],
+      };
+      // A stored opt-out comes back from the server; a missing key means on.
+      server.data['reminders'] = {'adminFeedback': false, 'polls': false};
+      final controller = server.controller();
+      await signIn(controller);
+      expect(controller.reminders['adminRegistrations'], isTrue);
+      expect(controller.reminders['messages'], isTrue);
+      expect(controller.reminders['adminFeedback'], isFalse);
+      expect(controller.reminders['polls'], isFalse);
+      final devices = DeviceServices(
+        controller,
+        onTarget: (_) {},
+        onForegroundMessage: (_) {},
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SettingsScreen(controller: controller, devices: devices),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Finder toggle(String title) => find.widgetWithText(SwitchListTile, title);
+      bool on(String title) =>
+          tester.widget<SwitchListTile>(toggle(title)).value;
+      final admin = role == 'admin';
+      for (final title in [
+        'Neue Termine',
+        'Fehlende Rückmeldung',
+        'Terminfinder',
+        'Mitteilungen',
+        'Abstimmungen',
+        'Pushes der Leitung',
+        'Antworten auf dein Feedback',
+      ]) {
+        expect(toggle(title), flagged ? findsOneWidget : findsNothing);
+      }
+      for (final title in ['Neue Registrierungen', 'Feedback']) {
+        expect(toggle(title), flagged && admin ? findsOneWidget : findsNothing);
+      }
+      expect(
+        toggle('Kurzfristige Absagen melden'),
+        admin ? findsOneWidget : findsNothing,
+      );
+      if (flagged) {
+        expect(on('Mitteilungen'), isTrue);
+        expect(on('Abstimmungen'), isFalse);
+        await tester.tap(toggle('Mitteilungen'));
+        await tester.pumpAndSettle();
+        var value = jsonMap(server.actionBodies.last['value']);
+        expect(value['messages'], isFalse);
+        expect(value['polls'], isFalse);
+        expect(value['adminFeedback'], isFalse);
+        expect(value['direct'], isTrue);
+        if (admin) {
+          expect(on('Neue Registrierungen'), isTrue);
+          expect(on('Feedback'), isFalse);
+          await tester.tap(toggle('Neue Registrierungen'));
+          await tester.pumpAndSettle();
+          value = jsonMap(server.actionBodies.last['value']);
+          expect(value['adminRegistrations'], isFalse);
+          expect(value['lateDeclines'], isTrue);
+        }
+      } else {
+        // Older servers never get the unknown keys.
+        await controller.saveReminders(controller.reminders);
+        final value = jsonMap(server.actionBodies.last['value']);
+        for (final key in ['messages', 'polls', 'adminRegistrations']) {
+          expect(value.containsKey(key), isFalse);
+        }
+      }
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    });
+  }
 }
 
 class _RoleServer extends TestServer {

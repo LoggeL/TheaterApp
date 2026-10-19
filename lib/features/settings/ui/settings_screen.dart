@@ -66,6 +66,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  /// One card of personal push switches: preference key, icon, title, hint.
+  /// A missing preference counts as on.
+  Widget _switchCard(List<(String, IconData, String, String)> items) => Card(
+    child: Column(
+      children: [
+        for (final (index, (key, icon, title, hint)) in items.indexed) ...[
+          if (index > 0) const Divider(height: 1),
+          SwitchListTile(
+            secondary: Icon(icon),
+            title: Text(title),
+            subtitle: Text(hint),
+            value: controller.reminders[key] ?? true,
+            onChanged: (value) => runAction(
+              context,
+              () => controller.saveReminders({
+                ...controller.reminders,
+                key: value,
+              }),
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
@@ -76,6 +101,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           controller.supports('lateDeclines') &&
           (user?.isAdmin == true ||
               user?.directorProductionIds.isNotEmpty == true);
+      final pushKinds = controller.supports('pushSettings');
+      final adminPush = pushKinds && user?.isAdmin == true;
       final emailOn =
           controller.emailConfigured &&
           (controller.reminders['emailEnabled'] ?? false);
@@ -132,24 +159,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                       ),
                     ),
-                  if (lateDeclines) ...[
-                    const Divider(height: 1),
-                    SwitchListTile(
-                      secondary: const Icon(Icons.event_busy_outlined),
-                      title: const Text('Kurzfristige Absagen melden'),
-                      subtitle: const Text(
-                        'Push, wenn jemand weniger als 24 Stunden vor Beginn absagt',
-                      ),
-                      value: controller.reminders['lateDeclines'] ?? true,
-                      onChanged: (value) => runAction(
-                        context,
-                        () => controller.saveReminders({
-                          ...controller.reminders,
-                          'lateDeclines': value,
-                        }),
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -243,6 +252,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
             ),
+            if (pushKinds) ...[
+              const SectionTitle('Push-Nachrichten'),
+              _switchCard(const [
+                (
+                  'eventAnnouncements',
+                  Icons.event_available_outlined,
+                  'Neue Termine',
+                  'Wenn die Leitung Termine ankündigt oder neu einteilt',
+                ),
+                (
+                  'eventRequests',
+                  Icons.pending_actions_outlined,
+                  'Fehlende Rückmeldung',
+                  'Nachfrage, wenn deine Zu- oder Absage fehlt',
+                ),
+                (
+                  'slots',
+                  Icons.event_note_outlined,
+                  'Terminfinder',
+                  'Neue Terminfinder und Änderungen an deinem Zeitfenster',
+                ),
+                (
+                  'messages',
+                  Icons.campaign_outlined,
+                  'Mitteilungen',
+                  'Neue Mitteilungen und Erinnerungen ans Lesen',
+                ),
+                (
+                  'polls',
+                  Icons.how_to_vote_outlined,
+                  'Abstimmungen',
+                  'Neue Abstimmungen und Erinnerungen ans Abstimmen',
+                ),
+                (
+                  'direct',
+                  Icons.send_outlined,
+                  'Pushes der Leitung',
+                  'Kurznachrichten, die die Leitung direkt schickt',
+                ),
+                (
+                  'feedbackReplies',
+                  Icons.mark_chat_read_outlined,
+                  'Antworten auf dein Feedback',
+                  'Wenn die Leitung auf dein Feedback antwortet',
+                ),
+              ]),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Gilt für alle deine Geräte. Die Freischaltung deines Zugangs und Test-Pushes kommen immer.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            ],
+            if (lateDeclines || adminPush) ...[
+              const SectionTitle('Meldungen an die Leitung'),
+              _switchCard([
+                if (lateDeclines)
+                  (
+                    'lateDeclines',
+                    Icons.event_busy_outlined,
+                    'Kurzfristige Absagen melden',
+                    'Push, wenn jemand weniger als 24 Stunden vor Beginn absagt',
+                  ),
+                if (adminPush) ...const [
+                  (
+                    'adminRegistrations',
+                    Icons.person_add_alt_outlined,
+                    'Neue Registrierungen',
+                    'Push, wenn ein neues Konto auf Zuordnung wartet',
+                  ),
+                  (
+                    'adminFeedback',
+                    Icons.feedback_outlined,
+                    'Feedback',
+                    'Push bei neuem Feedback und Rückmeldungen dazu',
+                  ),
+                ],
+              ]),
+            ],
             const SectionTitle('Darstellung'),
             Card(
               child: Padding(

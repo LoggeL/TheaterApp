@@ -485,8 +485,9 @@ extension SyncController on AppController {
     _reminders = {
       for (final key in ['dayBefore', 'twoHours', 'changes', 'emailEnabled'])
         key: reminders[key] == true,
-      // Short-notice decline alerts are on unless switched off.
-      'lateDeclines': reminders['lateDeclines'] != false,
+      // Push kinds are on unless switched off.
+      for (final key in ['lateDeclines', ...memberPushKeys, ...adminPushKeys])
+        key: reminders[key] != false,
     };
     final customMinutes = jsonMap(view['reminders'])['customMinutes'];
     _customReminderMinutes = customMinutes is num

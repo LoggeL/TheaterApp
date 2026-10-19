@@ -1,4 +1,5 @@
 import { customReminderMinutes, defaultReminders, eventNotificationBody } from './event-notification.mjs';
+import { pushWanted } from './push-kinds.mjs';
 import { inAudience } from './theater.mjs';
 
 const hourMs = 3600000;
@@ -61,7 +62,7 @@ export async function deliverPush(theater, messaging, appOrigin = process.env.AP
   if (!theater.pushEnabled || !messaging) return;
   const s = theater.store;
   for (const job of s.all('pushJobs').filter(j => j.status === 'pending' && Date.parse(j.nextAttemptAt) <= Date.now()).slice(0, 20)) {
-    const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && s.get('members', a.personId)?.active && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId)) && (!job.adminsOnly || a.role === 'admin') && inAudience(s.get('members', a.personId), job, s) && (!job.change || job.announce || (s.get('reminders', a.personId)?.changes ?? true)) && (!job.change || (job.soon !== false && answered(s, job, a.personId))) && (!job.remindOpen || !answered(s, job, a.personId))
+    const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && s.get('members', a.personId)?.active && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId)) && (!job.adminsOnly || a.role === 'admin') && inAudience(s.get('members', a.personId), job, s) && pushWanted(s.get('reminders', a.personId), job) && (!job.change || (job.soon !== false && answered(s, job, a.personId))) && (!job.remindOpen || !answered(s, job, a.personId))
       && eventPushEligible(s, job, a.personId) && (!job.remindPoll || !s.get('pollVotes', `${job.data?.pollId}:${a.personId}`)) && (!job.remindSlot || !s.get('slotBookings', `${job.data?.slotPoolId}:${a.personId}`)));
     const uids = new Set(accounts.map(a => a.uid));
     const accountsByUid = new Map(accounts.map(a => [a.uid, a]));

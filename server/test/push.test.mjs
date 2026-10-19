@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { Store } from '../src/store.mjs';
 import { Theater } from '../src/theater.mjs';
 import { deliverPush, scheduleReminders } from '../src/push.mjs';
+import { leadPushKinds, memberPushKinds, pushKind } from '../src/push-kinds.mjs';
+
+const allOn = Object.fromEntries([...memberPushKinds, ...leadPushKinds].map(kind => [kind, true]));
 
 function setup(t) {
   const store = new Store(); t.after(() => store.close());
@@ -55,7 +58,7 @@ test('one-day reminder defaults off, two-hour reminder defaults on, opt-in survi
   const { store, theater, a } = setup(t);
   const now = new Date('2026-09-14T12:00:00Z');
   store.put('events', 'e', { id: 'e', title: 'Abbau', startsAt: '2026-09-15T11:00:00Z', place: 'Kolpingheim' });
-  assert.deepEqual(theater.snapshot('admin').reminders, { dayBefore: false, twoHours: true, changes: true, emailEnabled: false, customMinutes: null, lateDeclines: true });
+  assert.deepEqual(theater.snapshot('admin').reminders, { dayBefore: false, twoHours: true, changes: true, emailEnabled: false, customMinutes: null, ...allOn });
   store.put('responses', `e:${a.personId}`, { status: 'yes' });
   scheduleReminders(theater, now);
   assert.equal(store.all('pushJobs').length, 0);
@@ -405,4 +408,106 @@ test('declines further ahead stay quiet; absences and opt-outs are respected', t
   // The director declining is not told about their own decline.
   act({ action: 'attendance', eventId: soon, status: 'no' }, 'dir');
   assert.equal(late().length, 1, 'the only remaining recipient is the director themselves');
+});
+
+test('admins choose which admin pushes they get; missing preferences mean on', async t => {
+  const { store, theater, act, admin, sam } = lateSetup(t);
+  // A second admin keeps the defaults.
+  const other = act({ action: 'member.save', name: 'Zweite Leitung' }).id;
+  theater.session({ uid: 'admin2', name: 'Zweite Leitung', email: 'admin2@example.com', email_verified: true });
+  act({ action: 'account.approve', uid: 'admin2', personId: other, version: 1, role: 'admin' });
+  for (const [uid, token] of [['admin', 'token-admin'], ['admin2', 'token-admin2'], ['sam', 'token-sam']]) store.put('devices', token, { id: token, uid, token, platform: 'web' });
+  assert.deepEqual(theater.snapshot('admin').reminders, { dayBefore: false, twoHours: true, changes: true, emailEnabled: false, customMinutes: null, ...allOn });
+
+  act({ action: 'settings.reminders', value: { dayBefore: false, twoHours: true, changes: true, adminRegistrations: false, adminFeedback: true } });
+  // Older clients send the record without the new keys; the stored choice survives.
+  act({ action: 'settings.reminders', value: { dayBefore: false, twoHours: true, changes: true } });
+  assert.equal(store.get('reminders', admin).adminRegistrations, false);
+  assert.equal(store.get('reminders', admin).adminFeedback, true);
+  assert.equal(theater.snapshot('admin').reminders.adminRegistrations, false);
+
+  for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
+  theater.session({ uid: 'neu', name: 'Neu', email: 'neu@example.com', email_verified: true });
+  theater.submitFeedback('sam', { message: 'Die Probe fehlt.' });
+  // A registration push queued by an older server version carries no `adminPush`.
+  theater.enqueuePush({ title: 'Neue Registrierung', body: 'Alt wartet auf Zuordnung.', data: { accountUid: 'alt' }, adminsOnly: true });
+  assert.deepEqual(store.all('pushJobs').map(pushKind).sort(), ['adminFeedback', 'adminRegistrations', 'adminRegistrations']);
+
+  const calls = [];
+  const deliver = () => deliverPush(theater, { sendEachForMulticast: async p => { calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) }; } });
+  await deliver();
+  const tokensFor = title => calls.filter(p => p.notification.title === title).flatMap(p => p.tokens).sort();
+  assert.deepEqual(tokensFor('Neue Registrierung'), ['token-admin2', 'token-admin2']);
+  assert.deepEqual(tokensFor('Neues Feedback'), ['token-admin', 'token-admin2']);
+
+  // Feedback switched off as well: the admin hears nothing, the other admin still does.
+  act({ action: 'settings.reminders', value: { dayBefore: false, twoHours: true, changes: true, adminRegistrations: false, adminFeedback: false } });
+  calls.length = 0;
+  theater.submitFeedback('sam', { message: 'Noch etwas.' });
+  await deliver();
+  assert.deepEqual(tokensFor('Neues Feedback'), ['token-admin2']);
+  assert.equal(store.get('reminders', sam), null, 'members are untouched');
+});
+
+test('every push kind is recognized, also for jobs queued by older servers', t => {
+  const { store, theater, act, admin, sam, event } = lateSetup(t);
+  const kinds = () => store.all('pushJobs').map(j => [j.title.replace(/:.*/, ''), pushKind(j)]).sort(([x], [y]) => x.localeCompare(y));
+  const fresh = () => { for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id); };
+  const later = event('2026-09-20T15:00:00Z');
+  fresh();
+  act({ action: 'event.save', id: later, title: 'Probe', startsAt: '2026-09-20T15:00:00Z', endsAt: '2026-09-20T17:00:00Z', place: 'Bühne', version: 1, productionId: 'winter' });
+  act({ action: 'event.save', title: 'Fest', startsAt: '2026-09-21T15:00:00Z', endsAt: '2026-09-21T17:00:00Z', push: true });
+  act({ action: 'event.remindOpen', eventId: later });
+  const message = act({ action: 'message.send', title: 'Hallo', body: 'Text', audience: 'all', push: true }).id;
+  act({ action: 'message.remind', id: message });
+  act({ action: 'poll.save', title: 'Wahl', options: [{ label: 'A' }, { label: 'B' }], push: true });
+  act({ action: 'push.send', title: 'Kurz', body: 'Bitte', audience: 'all' });
+  act({ action: 'push.test' });
+  assert.deepEqual(kinds(), [['Erinnerung', 'messages'], ['Hallo', 'messages'], ['Kurz', 'direct'], ['Neue Abstimmung', 'polls'], ['Neuer Termin', 'eventAnnouncements'], ['Rückmeldung fehlt', 'eventRequests'], ['Termin aktualisiert', 'changes'], ['Theater-App', null]]);
+  fresh();
+  const slots = [{ id: 's1', startsAt: '2026-09-22T15:00:00Z', endsAt: '2026-09-22T16:00:00Z', capacity: 2 }];
+  const pool = act({ action: 'slotPool.save', title: 'Foto', slots }).id;
+  act({ action: 'slot.assign', poolId: pool, personId: sam, slotId: store.get('slotPools', pool).slots[0].id });
+  act({ action: 'slotPool.delete', id: pool, version: 1 });
+  assert.deepEqual(kinds(), [['Terminfinder', 'slots'], ['Terminfinder', 'slots'], ['Terminfinder entfällt', 'slots']]);
+  // Jobs as older servers queued them, without `pushKind`.
+  const legacy = [
+    [{ title: 'Kurzfristige Absage: Probe', data: { eventId: 'e' }, fixedText: true }, 'lateDeclines'],
+    [{ title: 'Ensemble: Winterstück', data: { eventId: 'e' }, fixedText: true }, 'eventAnnouncements'],
+    [{ title: 'Terminfinder entfällt: Foto', data: {} }, 'slots'],
+    [{ title: 'Antwort auf dein Feedback', data: { feedbackId: 'f' } }, 'feedbackReplies'],
+    [{ title: 'Neue Terminserie: Probe', data: { eventId: 'e' }, newEvent: true, announce: 'new', series: {} }, 'eventAnnouncements'],
+    [{ title: 'Probe', data: { eventId: 'e' } }, 'reminders'],
+    [{ title: 'Zugang freigegeben', data: {} }, null],
+  ];
+  for (const [job, kind] of legacy) assert.equal(pushKind(job), kind, job.title);
+  assert.ok(admin);
+});
+
+test('members switch off single push kinds; approval and test pushes always arrive', async t => {
+  const { store, theater, act, admin, sam, kim } = lateSetup(t);
+  for (const [uid, token] of [['admin', 'token-admin'], ['sam', 'token-sam'], ['kim', 'token-kim']]) store.put('devices', token, { id: token, uid, token, platform: 'web' });
+  act({ action: 'settings.reminders', value: { dayBefore: false, twoHours: true, changes: true, messages: false, direct: false } }, 'sam');
+  // Older clients send the record without the new keys; the stored choices survive.
+  act({ action: 'settings.reminders', value: { dayBefore: true, twoHours: true, changes: true } }, 'sam');
+  assert.equal(store.get('reminders', sam).messages, false);
+  assert.equal(store.get('reminders', sam).polls, true);
+  assert.equal(theater.snapshot('sam').reminders.direct, false);
+  for (const j of store.all('pushJobs')) store.delete('pushJobs', j.id);
+
+  act({ action: 'message.send', title: 'Hallo', body: 'Text', audience: 'all', push: true });
+  act({ action: 'push.send', title: 'Kurz', body: 'Bitte', audience: 'all' });
+  act({ action: 'poll.save', title: 'Wahl', options: [{ label: 'A' }, { label: 'B' }], push: true });
+  act({ action: 'push.test' }, 'sam');
+  // A queued job without `pushKind` from before the update is filtered the same way.
+  theater.enqueuePush({ title: 'Alt', body: 'Text', data: { messageId: 'old' }, recipientPersonIds: [sam, kim] });
+  const calls = [];
+  await deliverPush(theater, { sendEachForMulticast: async p => { calls.push(p); return { responses: p.tokens.map(() => ({ success: true })) }; } });
+  const tokensFor = title => calls.filter(p => p.notification.title === title).flatMap(p => p.tokens).sort();
+  assert.deepEqual(tokensFor('Hallo'), ['token-admin', 'token-kim']);
+  assert.deepEqual(tokensFor('Kurz'), ['token-admin', 'token-kim']);
+  assert.deepEqual(tokensFor('Neue Abstimmung: Wahl'), ['token-admin', 'token-kim', 'token-sam']);
+  assert.deepEqual(tokensFor('Theater-App'), ['token-sam']);
+  assert.deepEqual(tokensFor('Alt'), ['token-kim']);
+  assert.ok(admin);
 });

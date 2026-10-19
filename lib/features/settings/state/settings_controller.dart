@@ -1,5 +1,30 @@
 part of '../../../core/app_controller.dart';
 
+/// Push kinds everyone can switch off for themselves; stored with the
+/// reminder settings and on unless switched off (see server/src/push-kinds.mjs).
+const memberPushKeys = [
+  'eventAnnouncements',
+  'eventRequests',
+  'slots',
+  'messages',
+  'polls',
+  'direct',
+  'feedbackReplies',
+];
+
+/// Push kinds only admins get and can switch off.
+const adminPushKeys = ['adminRegistrations', 'adminFeedback'];
+
+/// Reminder settings before the server sent any; push kinds are on.
+final Map<String, bool> _defaultReminders = Map.unmodifiable({
+  'dayBefore': false,
+  'twoHours': true,
+  'changes': true,
+  'emailEnabled': false,
+  'lateDeclines': true,
+  for (final key in [...memberPushKeys, ...adminPushKeys]) key: true,
+});
+
 /// Local preferences and reminder settings.
 extension SettingsController on AppController {
   Future<void> setPreference(String key, Object? value) async {
@@ -33,6 +58,9 @@ extension SettingsController on AppController {
           // when an older app leaves it out.
           if (supports('lateDeclines'))
             'lateDeclines': value['lateDeclines'] ?? true,
+          if (supports('pushSettings'))
+            for (final key in [...memberPushKeys, ...adminPushKeys])
+              key: value[key] ?? true,
           'customMinutes': customMinutes,
         },
       });
