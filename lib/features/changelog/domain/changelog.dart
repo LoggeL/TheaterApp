@@ -27,6 +27,19 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.9.1',
+    date: '19. Oktober 2026',
+    items: [
+      'Neu: Kalender abonnieren – deine Termine erscheinen automatisch in '
+          'deinem eigenen Kalender und bleiben dort aktuell. Termine, bei '
+          'denen du abgesagt hast, tauchen nicht auf. Du findest es unter '
+          '„Benachrichtigungen & Darstellung“.',
+      'Speicherst du einen einzelnen Termin für deinen Kalender, trägt die '
+          'Datei jetzt den Namen des Termins.',
+      'Kleine Verbesserungen und Feinschliff.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.9.0',
     date: '19. Oktober 2026',
     items: [
