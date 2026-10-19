@@ -48,7 +48,11 @@ class Production {
   /// Cast, directors and crew added by hand; computed by the server.
   final List<int> ensemble;
 
-  DateTime get sortDate {
+  /// When the production ran, as far as known: the premiere, else the
+  /// season in the title or id ("Winterstück 2026" is December 2026).
+  /// Null when neither says anything; mirrors `productionSeasonTime` on
+  /// the server.
+  DateTime? get seasonDate {
     if (premiereAt != null) return premiereAt!.toUtc();
     final label = '$title $id'.toLowerCase();
     final years = RegExp(
@@ -63,9 +67,13 @@ class Production {
           : 1;
       return DateTime.utc(years.last, month);
     }
-    return createdAt?.toUtc() ??
-        DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+    return null;
   }
+
+  DateTime get sortDate =>
+      seasonDate ??
+      createdAt?.toUtc() ??
+      DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
   static int compareNewestFirst(Production left, Production right) {
     final chronology = right.sortDate.compareTo(left.sortDate);

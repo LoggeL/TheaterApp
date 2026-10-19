@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { AppError } from './theater.mjs';
 import { Immich } from './immich.mjs';
+import { compareGalleriesNewestFirst, gallerySortTime } from './production-order.mjs';
 sharp.cache({ memory: 16, files: 0, items: 20 });
 const fail = (status, message) => { throw new AppError(status, message); };
 const text = (v, max) => typeof v === 'string' ? v.trim().slice(0, max) : '';
@@ -30,12 +31,15 @@ export class MediaService {
   async list(uid) {
     this.theater.account(uid);
     const galleries = this.store.all('galleries').filter(g => !g.hidden && (g.published !== false || this.theater.account(uid).role === 'admin'));
-    return { galleries: await Promise.all(galleries.map(async g => {
+    // Newest play first: by linked production, season in the title or newest photo.
+    const sorted = await Promise.all(galleries.map(async g => {
       let source = null, sourceError = null;
       if (g.sourceUrl) { try { source = await this.immich.album(g.sourceUrl); } catch (e) { sourceError = e.message; } }
       const local = this.localAssets(g.id), cover = source?.coverId ?? (local[0] ? `local-${local[0].id}` : source?.assets.find(a => a.type === 'IMAGE')?.id);
-      return { ...g, count: local.length + (source?.assets.length ?? 0), sourceError, coverPath: cover ? `/galleries/${g.id}/assets/${cover}?size=preview` : null };
-    })) };
+      const time = gallerySortTime(g, g.productionId ? this.store.get('productions', g.productionId) : null, [local[0]?.createdAt, source?.assets[0]?.date]);
+      return { time, title: g.title, id: g.id, gallery: { ...g, count: local.length + (source?.assets.length ?? 0), sourceError, coverPath: cover ? `/galleries/${g.id}/assets/${cover}?size=preview` : null } };
+    }));
+    return { galleries: sorted.sort(compareGalleriesNewestFirst).map(x => x.gallery) };
   }
   async page(uid, id, { offset = 0, limit = 60, includeHidden = false } = {}) {
     const a = this.theater.account(uid); if (includeHidden && a.role !== 'admin') fail(403, 'Admin-Zugang erforderlich.');

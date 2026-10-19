@@ -129,6 +129,20 @@ bool sameRoleLabel(String a, String b) {
   return parts(a).any((x) => parts(b).any((y) => within(x, y) || within(y, x)));
 }
 
+/// When a website play ran. The website only gives the year; its open-air
+/// plays are the summer plays, the others the winter plays on the indoor
+/// stage, matching `Production.seasonDate` ("Sommerstück" July, "Winterstück"
+/// December).
+DateTime? websiteSeasonDate(WebsiteCredit credit) {
+  final year = credit.year;
+  if (year == null) return null;
+  final openAir = RegExp(
+    r'open.?air',
+    caseSensitive: false,
+  ).hasMatch(credit.location ?? '');
+  return DateTime.utc(year, openAir ? 7 : 12);
+}
+
 /// A person's productions, newest first, from the website and the app
 /// without duplicates: a website role and the app production it belongs to
 /// become one entry; the website's wording wins for the same role.
@@ -149,7 +163,8 @@ List<ProfileCredit> mergeProfileCredits({
     ))
       credit.production.id: credit.duties,
   };
-  final entries = <(ProfileCredit, int)>[];
+  // Each entry with when it ran (null: unknown) and its position as tie-break.
+  final entries = <(ProfileCredit, DateTime?, int)>[];
   final used = <String>{};
   for (final (i, credit) in (website?.credits ?? const []).indexed) {
     final id = credit.productionId;
@@ -160,6 +175,8 @@ List<ProfileCredit> mergeProfileCredits({
         if (!duties.any((d) => sameRoleLabel(d, duty))) duties.add(duty);
       }
     }
+    // The app's premiere or season is more precise than the website's year.
+    final season = known ? productions[id]!.seasonDate : null;
     entries.add((
       ProfileCredit(
         title: credit.title,
@@ -168,6 +185,9 @@ List<ProfileCredit> mergeProfileCredits({
         location: credit.location,
         productionId: known ? id : null,
       ),
+      season != null && (credit.year == null || season.year == credit.year)
+          ? season
+          : websiteSeasonDate(credit),
       i,
     ));
   }
@@ -183,13 +203,21 @@ List<ProfileCredit> mergeProfileCredits({
         year: year < 1990 ? null : year,
         productionId: id,
       ),
+      production.seasonDate ?? production.createdAt?.toUtc(),
       offset + i,
     ));
   }
-  // Newest first; entries without a year (new app productions) lead.
+  // Newest first; entries without a date (new app productions) lead, ties
+  // keep the website's order (newest first) before the app's.
   entries.sort((a, b) {
-    final ya = a.$1.year ?? 9999, yb = b.$1.year ?? 9999;
-    return ya != yb ? yb.compareTo(ya) : a.$2.compareTo(b.$2);
+    final da = a.$2, db = b.$2;
+    if (da != db) {
+      if (da == null) return -1;
+      if (db == null) return 1;
+      final chronology = db.compareTo(da);
+      if (chronology != 0) return chronology;
+    }
+    return a.$3.compareTo(b.$3);
   });
-  return [for (final (credit, _) in entries) credit];
+  return [for (final (credit, _, _) in entries) credit];
 }

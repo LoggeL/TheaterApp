@@ -151,14 +151,62 @@ void main() {
         credits.map((c) => (c.title, c.year, c.duties.join(' · '))).toList(),
         [
           ('Creepshow', 2026, 'Drusilla · Regie'),
-          ('Anno 1146', 2025, 'Maribel / Mathilde'),
+          // The winter play follows the open-air play of the same year.
           ('Winterstück 2025 (Kleines Stück)', 2025, 'Julia Capulet'),
+          ('Anno 1146', 2025, 'Maribel / Mathilde'),
           ('Die Geschichte der Black Swan', 2016, 'Jacky'),
         ],
       );
       expect(credits.first.productionId, 'p-2026');
-      expect(credits[1].productionId, isNull);
+      expect(credits[2].productionId, isNull);
       expect(credits.first.location, 'Open-Air-Bühne');
+    });
+
+    test('a new winter play leads the open-air play of the same year', () {
+      final credits = mergeProfileCredits(
+        personId: 5,
+        productionRecords: [
+          ..._productions,
+          {
+            'id': 'winterstueck2026',
+            'title': 'Romeo und Julia',
+            'roles': [
+              {'id': 'AMME', 'name': 'AMME'},
+            ],
+            'casting': {'AMME': 5},
+          },
+        ],
+        website: WebsiteProfile.fromJson({
+          ..._carina(),
+          'credits': [
+            for (final credit in _carina()['credits'] as List)
+              {...credit as JsonMap, 'productionId': null},
+            // Same year, listed after the open-air play: the website's winter play.
+            {
+              'title': 'Sagenhaft',
+              'year': 2023,
+              'location': 'Kreativbühne',
+              'role': 'Fee',
+            },
+            {
+              'title': 'Traum von Freiheit',
+              'year': 2023,
+              'location': 'Open-Air-Bühne',
+              'role': 'Magd',
+            },
+          ],
+        }),
+      );
+      expect(credits.map((c) => c.title), [
+        'Romeo und Julia',
+        'Creepshow',
+        'Sommerstück 2026 (Creepshow)',
+        'Winterstück 2025 (Kleines Stück)',
+        'Anno 1146',
+        'Sagenhaft',
+        'Traum von Freiheit',
+        'Die Geschichte der Black Swan',
+      ]);
     });
 
     test('without website data the app productions remain', () {
