@@ -826,16 +826,20 @@ void main() {
   });
 
   group('art', () {
-    test('the two strides take turns as the runner moves', () {
-      final strides = [
-        for (var i = 0; i < 8; i++) RunnerSprite.stride((i + .5) / 9),
+    test('the poses of the run follow each other in a cycle', () {
+      final poses = [
+        for (var i = 0; i < 8; i++) RunnerSprite.stride((i + .5) / 18),
       ];
-      expect(strides, [
-        for (var i = 0; i < 4; i++) ...[RunnerSprite.runA, RunnerSprite.runB],
+      expect(poses, [...RunnerSprite.strides, ...RunnerSprite.strides]);
+      expect(RunnerSprite.strides, [
+        RunnerSprite.runA,
+        RunnerSprite.passA,
+        RunnerSprite.runB,
+        RunnerSprite.passB,
       ]);
     });
 
-    testWidgets('the strides share the body and swap the legs', (tester) async {
+    testWidgets('the poses share the body and swap the legs', (tester) async {
       final atlas = await tester.runAsync(() async {
         final data = await rootBundle.load(
           'assets/games/stage_runner/atlas.webp',
@@ -872,17 +876,15 @@ void main() {
         }
       }
 
-      final a = RunnerSprite.runA, b = RunnerSprite.runB;
-      // Same size, so the runner does not jump between the strides.
-      expect((b.width, b.height), (a.width, a.height));
-      // Mean difference per channel of the rows from [from] to [to].
-      double difference(double from, double to) {
+      final a = RunnerSprite.runA;
+      int at(RunnerSprite s, int x, int y) =>
+          ((s.y.toInt() + y) * width + s.x.toInt() + x) * 4;
+      // Mean difference per channel from [a] in the rows from [from] to [to].
+      double difference(RunnerSprite b, double from, double to) {
         var sum = 0, count = 0;
         for (var y = (a.height * from).floor(); y < a.height * to; y++) {
           for (var x = 0; x < a.width; x++) {
-            int at(RunnerSprite s) =>
-                ((s.y.toInt() + y) * width + s.x.toInt() + x) * 4;
-            final i = at(a), j = at(b);
+            final i = at(a, x, y), j = at(b, x, y);
             for (var c = 0; c < 4; c++) {
               sum += (bytes.getUint8(i + c) - bytes.getUint8(j + c)).abs();
             }
@@ -892,9 +894,42 @@ void main() {
         return sum / count;
       }
 
-      // The head is the same picture; the legs are not.
-      expect(difference(0, .4), lessThan(10));
-      expect(difference(2 / 3, 1), greaterThan(15));
+      // Mean x of the shoe pixels in the lower half: the near shoe is bright
+      // red, the far one in the shade.
+      (double, double) shoes(RunnerSprite s) {
+        var brightX = 0, bright = 0, darkX = 0, dark = 0;
+        for (var y = s.height ~/ 2 + 16; y < s.height; y++) {
+          for (var x = 0; x < s.width; x++) {
+            final i = at(s, x, y);
+            final r = bytes.getUint8(i), g = bytes.getUint8(i + 1);
+            final b = bytes.getUint8(i + 2), alpha = bytes.getUint8(i + 3);
+            if (alpha < 200 || g > 90 || b > 90) continue;
+            if (r > 150) {
+              brightX += x;
+              bright++;
+            } else if (r > 60 && r < 135 && g < 45 && b < 60 && r - g > 45) {
+              darkX += x;
+              dark++;
+            }
+          }
+        }
+        return (brightX / bright, darkX / dark);
+      }
+
+      for (final pose in RunnerSprite.strides) {
+        // Same size and the same head, so the runner does not jump.
+        expect((pose.width, pose.height), (a.width, a.height));
+        expect(difference(pose, 0, .4), lessThan(10), reason: '$pose');
+      }
+      expect(difference(RunnerSprite.runB, 2 / 3, 1), greaterThan(8));
+      // The near shoe is in front in runA and behind in runB, the far shoe
+      // the other way round.
+      final (nearA, farA) = shoes(RunnerSprite.runA);
+      final (nearB, farB) = shoes(RunnerSprite.runB);
+      expect(nearA, greaterThan(farA + 30));
+      expect(farB, greaterThan(nearB + 30));
+      expect(nearA, greaterThan(nearB + 50));
+      expect(farB, greaterThan(farA + 15));
     });
   });
 
