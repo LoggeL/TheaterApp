@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -35,7 +36,7 @@ class StageRunnerScreen extends StatefulWidget {
   });
   final AppController controller;
 
-  /// Replaced in tests; by default the `audioplayers` plugin.
+  /// Replaced in tests; by default the [RunnerSound] of this platform.
   @visibleForTesting
   final RunnerSound? sound;
 
@@ -58,7 +59,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   StageRunner _game = StageRunner();
   RunnerFx _fx = RunnerFx();
   RunnerArt? _art = RunnerArt.loaded;
-  late final RunnerSound _sound = widget.sound ?? PluginRunnerSound();
+  late final RunnerSound _sound = widget.sound ?? RunnerSound();
 
   /// The closing line of the last run; its own dice, so courses stay
   /// reproducible.
@@ -646,6 +647,12 @@ Color _pickupColor(PickupKind kind) => switch (kind) {
 /// different sizes must not push each other out.
 @visibleForTesting
 class RunnerGlyphs {
+  /// On the web the labels name the bundled font. For a style without a
+  /// family, CanvasKit takes every character from U+00A0 on (the "–" and
+  /// "×" of the banners) as missing and searches the Noto fallback fonts;
+  /// the first time it downloads one, and then lays out all text again.
+  static const _font = kIsWeb ? 'Roboto' : null;
+
   double _stage = 0;
   final Map<Object, TextPainter> _cache = {};
 
@@ -674,6 +681,7 @@ class RunnerGlyphs {
     return _cache[('kg', size)] ??= _layout(
       'kg',
       TextStyle(
+        fontFamily: _font,
         color: const Color(0xFFF3E6CF),
         fontSize: size * .45,
         fontWeight: FontWeight.w800,
@@ -687,6 +695,7 @@ class RunnerGlyphs {
     return _cache[(text, size, shadow)] ??= _layout(
       text,
       TextStyle(
+        fontFamily: _font,
         color: shadow ? const Color(0xE6000000) : const Color(0xFFFFE7A3),
         fontSize: size,
         fontWeight: FontWeight.w900,

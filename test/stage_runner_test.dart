@@ -116,6 +116,74 @@ class _RecordingPlayer extends Fake implements AudioPlayer {
   Future<void> dispose() async => _log('dispose');
 }
 
+/// Logs the Web Audio calls; a decoded clip is named after its asset.
+class _FakeWebAudio implements WebAudio {
+  _FakeWebAudio(this.assets);
+
+  /// The bytes of each asset, to tell the decoded sounds apart.
+  final Map<String, Uint8List> assets;
+  final log = <String>[];
+  final clips = <String, double>{};
+  var plays = 0;
+
+  /// Assets that fail to decode.
+  final broken = <String>{};
+
+  @override
+  void resume() => log.add('resume');
+  @override
+  void suspend() => log.add('suspend');
+  @override
+  Future<WebAudioClip> decode(Uint8List bytes, double volume) async {
+    final name = assets.entries
+        .singleWhere((e) => listEquals(e.value, bytes))
+        .key
+        .split('/')
+        .last;
+    if (broken.contains(name)) throw StateError('cannot decode $name');
+    clips[name] = volume;
+    return _FakeClip(this, name);
+  }
+
+  @override
+  void close() => log.add('close');
+}
+
+class _FakeClip implements WebAudioClip {
+  _FakeClip(this.audio, this.name);
+  final _FakeWebAudio audio;
+  final String name;
+  @override
+  WebAudioVoice play({bool loop = false}) {
+    final voice = '$name#${++audio.plays}';
+    audio.log.add('play $voice${loop ? ' loop' : ''}');
+    return _FakeVoice(audio, voice);
+  }
+}
+
+class _FakeVoice implements WebAudioVoice {
+  _FakeVoice(this.audio, this.name);
+  final _FakeWebAudio audio;
+  final String name;
+  @override
+  void stop() => audio.log.add('stop $name');
+}
+
+/// The game's sounds as the asset bundle has them.
+Future<Map<String, Uint8List>> _soundAssets() async => {
+  for (final asset in [
+    for (final sfx in RunnerSfx.values) sfx.asset,
+    'games/stage_runner/music.mp3',
+  ])
+    asset: Uint8List.sublistView(await rootBundle.load('assets/$asset')),
+};
+
+Future<void> _decoded(_FakeWebAudio audio, int count) async {
+  for (var i = 0; i < 200 && audio.clips.length < count; i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
 String _path(http.Request request) =>
     request.url.path.replaceFirst(RegExp(r'/$'), '');
 
@@ -1033,6 +1101,101 @@ void main() {
       star.state = PlayerState.completed;
       await Future<void>.delayed(const Duration(milliseconds: 80));
       expect(log, [(star, 'resume')]);
+      sound.dispose();
+    });
+
+    test('outside browsers the plugin plays', () {
+      SharedPreferences.setMockInitialValues({});
+      final sound = RunnerSound();
+      expect(sound, isA<PluginRunnerSound>());
+      sound.dispose();
+    });
+
+    test('in browsers one audio context decodes every sound once; a pickup '
+        'only starts it', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      SharedPreferences.setMockInitialValues({});
+      final audio = _FakeWebAudio(await _soundAssets());
+      var opened = 0;
+      final sound = WebRunnerSound(
+        open: () {
+          opened++;
+          return audio;
+        },
+      );
+      await pumpEventQueue();
+      expect(opened, 0);
+
+      // Within the tap: Safari only starts audio in a user gesture.
+      sound
+        ..prepare()
+        ..startMusic();
+      expect(audio.log, ['resume']);
+      await _decoded(audio, RunnerSfx.values.length + 1);
+      expect(audio.clips, {
+        for (final sfx in RunnerSfx.values) '${sfx.name}.mp3': sfx.volume,
+        'music.mp3': .32,
+      });
+      // The tune starts once it is decoded.
+      expect(audio.log, ['resume', 'play music.mp3#1 loop']);
+
+      audio.log.clear();
+      sound
+        ..prepare()
+        ..play(RunnerSfx.rose)
+        ..play(RunnerSfx.mask)
+        ..play(RunnerSfx.rose);
+      expect(opened, 1);
+      expect(audio.log, [
+        'resume',
+        'play rose.mp3#2',
+        'play mask.mp3#3',
+        // Still sounding or not, a new play starts the effect over.
+        'stop rose.mp3#2',
+        'play rose.mp3#4',
+      ]);
+
+      // Muted, the music waits where it is and effects are cut.
+      audio.log.clear();
+      sound.setEnabled(false);
+      sound.play(RunnerSfx.star);
+      expect(audio.log, ['stop mask.mp3#3', 'stop rose.mp3#4', 'suspend']);
+      audio.log.clear();
+      sound.setEnabled(true);
+      expect(audio.log, ['resume']);
+
+      audio.log.clear();
+      sound
+        ..stopMusic()
+        ..dispose();
+      expect(audio.log, ['stop music.mp3#1', 'close']);
+      expect(opened, 1);
+    });
+
+    test('in browsers every failure only means silence', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      SharedPreferences.setMockInitialValues({});
+      final missing = WebRunnerSound(
+        open: () => throw UnsupportedError('no Web Audio'),
+      );
+      missing
+        ..prepare()
+        ..startMusic()
+        ..play(RunnerSfx.rose)
+        ..setEnabled(false)
+        ..setEnabled(true)
+        ..stopMusic()
+        ..dispose();
+
+      final audio = _FakeWebAudio(await _soundAssets())
+        ..broken.add('rose.mp3');
+      final sound = WebRunnerSound(open: () => audio)..prepare();
+      await _decoded(audio, RunnerSfx.values.length);
+      audio.log.clear();
+      sound
+        ..play(RunnerSfx.rose)
+        ..play(RunnerSfx.star);
+      expect(audio.log, [startsWith('play star.mp3')]);
       sound.dispose();
     });
   });

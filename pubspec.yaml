@@ -33,6 +33,7 @@ dependencies:
   flutter_local_notifications: ^21.0.0
   in_app_update: ^5.0.0
   audioplayers: ^6.8.1
+  web: ^1.1.1
 dev_dependencies:
   integration_test:
     sdk: flutter
