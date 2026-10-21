@@ -211,8 +211,8 @@ void main() {
 
   for (final flagged in [true, false]) {
     testWidgets(
-      'saving a series occurrence ${flagged ? 'asks' : 'does not ask'} '
-      'about the following ones',
+      'a series occurrence ${flagged ? 'offers' : 'does not offer'} the '
+      'whole series',
       (tester) async {
         late String id;
         final (server, controller) = await open(
@@ -226,10 +226,19 @@ void main() {
             id = event['id'] as String;
             if (flagged) {
               server.data['capabilities'] = {
-                'features': ['seriesEdit'],
+                'features': ['seriesEdit', 'seriesManage'],
               };
             }
           },
+        );
+        final scope = find.byKey(const ValueKey('event-series-scope'));
+        expect(scope, flagged ? findsOneWidget : findsNothing);
+        // "Nur dieser Termin" is the default; saving asks nothing more.
+        expect(
+          find.text(
+            'Teil einer Serie – Änderungen gelten nur für diesen Termin.',
+          ),
+          findsOneWidget,
         );
         await tester.enterText(
           find.widgetWithText(TextField, 'Titel'),
@@ -240,15 +249,8 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(save);
         await tester.pumpAndSettle();
-        if (flagged) {
-          expect(find.text('Serientermin ändern?'), findsOneWidget);
-          await tester.tap(find.text('Diesen und alle folgenden'));
-          await tester.pumpAndSettle();
-          expect(server.actionBodies.last['series'], 'following');
-        } else {
-          expect(find.text('Serientermin ändern?'), findsNothing);
-          expect(server.actionBodies.last.containsKey('series'), isFalse);
-        }
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(server.actionBodies.last.containsKey('series'), isFalse);
         expect(server.actionBodies.last['title'], 'Neuer Titel');
         expect(find.byType(EventEditorScreen), findsNothing);
         await tester.pumpWidget(const SizedBox());

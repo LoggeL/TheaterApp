@@ -1,5 +1,5 @@
 import { berlinDateTime, customReminderMinutes, defaultReminders, eventNotificationBody } from './event-notification.mjs';
-import { berlinParts, fromBerlin, seriesOccurrences, seriesSummary } from './event-series.mjs';
+import { berlinDay, berlinParts, fromBerlin, seriesExtension, seriesOccurrences, seriesRetime, seriesRhythm, seriesSummary, seriesUntil } from './event-series.mjs';
 import { compareProductionsNewestFirst } from './production-order.mjs';
 import { leadPushKinds, memberPushKinds } from './push-kinds.mjs';
 import { migrateSharedSpeakers, sharedSpeakersMigrationId, splitSharedSpeakers } from './shared-speakers.mjs';
@@ -35,7 +35,7 @@ export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
 export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -69,6 +69,9 @@ const sameValue = (field, x, y) => {
   const norm = v => field.endsWith('Ids') ? list(v) : field === 'locked' || field === 'autoAccept' ? v === true : field === 'type' ? v ?? 'rehearsal' : field === 'productionId' ? v || null : v ?? '';
   return JSON.stringify(norm(x)) === JSON.stringify(norm(y));
 };
+// Only a new date, time or place is worth a notification; typo fixes, locking and the like stay quiet.
+const moved = (x, y) => ['startsAt', 'endsAt', 'place'].some(f => !sameValue(f, x[f], y[f]));
+const switchedOn = (before, after) => before.autoAccept !== true && after.autoAccept === true;
 // Target audiences are person roles; an empty list addresses everyone.
 export const inRoles = (member, roleIds) => !list(roleIds).length || list(member?.roleIds).some(x => list(roleIds).includes(x));
 // A production's ensemble: its cast, its directors and people added by hand (crew).
@@ -219,10 +222,19 @@ export class Theater {
     const statusOf = new Map(responses.map(r => [`${r.eventId}:${r.personId}`, r.status])), absences = this.store.all('absences'), members = this.store.all('members');
     // Implicit attendance of auto-accepted events stays out of memberAttendanceByEvent: older apps only know real answers there.
     const implicitAttendanceByEvent = {};
+    // Those managing events see each series' rhythm (`seriesRepeat.every`), also inferred for older series.
+    const rhythms = new Map();
+    if (events) for (const e of this.store.all('events')) if (e.seriesId) rhythms.set(e.seriesId, [...rhythms.get(e.seriesId) ?? [], e]);
+    for (const [seriesId, occurrences] of rhythms) rhythms.set(seriesId, seriesRhythm(occurrences));
+    const withRhythm = e => {
+      if (!rhythms.has(e.seriesId)) return e;
+      const { seriesRepeat, ...rest } = e, every = rhythms.get(e.seriesId);
+      return every ? { ...rest, seriesRepeat: { ...seriesRepeat, every } } : rest;
+    };
     const visibleEvents = this.store.all('events').filter(e => this.canSee(a, e, 'events')).map(e => {
       const implicit = this.implicitIds(e, statusOf, absences, members);
       if (events && implicit.length) implicitAttendanceByEvent[e.id] = implicit;
-      return { ...this.editors(e, events), eventDate: day(e.startsAt), people: responses.filter(r => r.eventId === e.id && ['yes', 'late'].includes(r.status)).length + implicit.length, ...(e.autoAccept === true ? { implicitPeople: implicit.length, implicitYes: implicit.includes(a.personId) } : {}), addressedToMe: inAudience(member, e, this.store), ...(events ? this.reminded(nudges, 'event', e.id) : {}) };
+      return { ...this.editors(withRhythm(e), events), eventDate: day(e.startsAt), people: responses.filter(r => r.eventId === e.id && ['yes', 'late'].includes(r.status)).length + implicit.length, ...(e.autoAccept === true ? { implicitPeople: implicit.length, implicitYes: implicit.includes(a.personId) } : {}), addressedToMe: inAudience(member, e, this.store), ...(events ? this.reminded(nudges, 'event', e.id) : {}) };
     });
     const own = responses.filter(r => r.personId === a.personId);
     const checkinsByEvent = {}, memberAttendanceByEvent = {}, arrivalsByEvent = {};
@@ -755,11 +767,12 @@ export class Theater {
         const personIds = b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds);
         const productionIds = b.productionIds === undefined ? list(old?.productionIds) : this.productionAudience(b.productionIds);
         if (b.repeat != null && old) fail(400, 'Eine Wiederholung lässt sich nur beim Anlegen eines Termins festlegen.');
-        if (b.series !== undefined && b.series !== 'following') fail(400, 'Unbekannte Auswahl für die Terminserie.');
-        if (b.series === 'following' && !old?.seriesId) fail(400, 'Dieser Termin gehört zu keiner Terminserie.');
+        if (b.series !== undefined && b.series !== 'following' && b.series !== 'all') fail(400, 'Unbekannte Auswahl für die Terminserie.');
+        if (b.series !== undefined && !old?.seriesId) fail(400, 'Dieser Termin gehört zu keiner Terminserie.');
+        if (b.until !== undefined && b.series !== 'all') fail(400, 'Das Serienende lässt sich nur für die ganze Serie ändern.');
         const e = { id: eventId, title: required(b.title, 'Titel'), description: text(b.description ?? old?.description, 5000), startsAt, endsAt, place: text(b.place), type: eventTypes.includes(b.type) ? b.type : 'rehearsal', locked: b.locked === true,
           // Older apps do not send the switch; the event keeps its stored value then.
-          autoAccept: b.autoAccept === undefined ? old?.autoAccept === true : b.autoAccept, productionId: b.productionId || null, sceneIds: b.productionId ? sceneIds : [], roleIds, personIds, productionIds, ...(old?.seriesId ? { seriesId: old.seriesId } : {}),
+          autoAccept: b.autoAccept === undefined ? old?.autoAccept === true : b.autoAccept, productionId: b.productionId || null, sceneIds: b.productionId ? sceneIds : [], roleIds, personIds, productionIds, ...(old?.seriesId ? { seriesId: old.seriesId } : {}), ...(old?.seriesRepeat ? { seriesRepeat: old.seriesRepeat } : {}),
           // Who planned the event (person ids), shown to everyone who manages events; older events have no creator.
           createdBy: old ? old.createdBy ?? null : a.personId, updatedBy: a.personId, version: (old?.version ?? 0) + 1 };
         if (b.repeat != null) {
@@ -768,8 +781,9 @@ export class Theater {
           // declines, but the invitees hear about the series only once: one push
           // (when requested) and one email job, both for the first occurrence
           // with the series summary. Per-occurrence emails would flood inboxes.
-          const occurrences = seriesOccurrences(startsAt, endsAt, b.repeat), seriesId = id();
-          const events = occurrences.map((o, i) => this.storeEvent({ ...e, id: i ? id() : eventId, ...o, seriesId }));
+          // The rhythm stays with every occurrence, so the series can be extended later.
+          const occurrences = seriesOccurrences(startsAt, endsAt, b.repeat), seriesId = id(), seriesRepeat = { every: b.repeat.every, until: b.repeat.until };
+          const events = occurrences.map((o, i) => this.storeEvent({ ...e, id: i ? id() : eventId, ...o, seriesId, seriesRepeat }));
           const series = { id: seriesId, count: events.length, every: b.repeat.every, until: b.repeat.until };
           const notice = { title: `Neue Terminserie: ${e.title}`, body: seriesSummary(occurrences, b.repeat.every), data: { eventId }, roleIds, personIds, productionIds, newEvent: true, series };
           // A series push keeps its summary without "Du bist eingeplant" or the decline action,
@@ -778,15 +792,13 @@ export class Theater {
           else this.enqueueEmail(notice);
           return { id: eventId, ids: events.map(x => x.id), pushQueued: b.push === true && this.pushEnabled, pushSkipped: b.push === true && !this.pushEnabled ? 'disabled' : null };
         }
+        if (b.series === 'all') return this.saveWholeSeries(a, b, old, e);
         this.storeEvent(e);
         // Switching auto-accept on is silent, also within two days of the start (see markPlannedReminders).
-        const switchedOn = (before, after) => before.autoAccept !== true && after.autoAccept === true;
         if (old && switchedOn(old, e)) this.markPlannedReminders([e]);
-        // Only a new date, time or place is worth a notification; typo fixes, locking and the like stay quiet.
-        // Such a change is pushed only with the push switch on and otherwise just mailed (email is opt-in).
-        const moved = (x, y) => ['startsAt', 'endsAt', 'place'].some(f => !sameValue(f, x[f], y[f]));
-        const near = at => { const until = Date.parse(at) - +this.clock(); return until > 0 && until <= changePushWindowDays * 86400000; };
-        const pushSkipped = (soon, relevant = true) => b.push !== true ? null : !this.pushEnabled ? 'disabled' : !relevant ? 'unchanged' : soon ? null : 'far_future';
+        // A relevant change (see `moved`) is pushed only with the push switch on and otherwise just mailed (email is opt-in).
+        const near = at => this.nearChange(at);
+        const pushSkipped = (soon, relevant = true) => this.pushSkipped(b, soon, relevant);
         if (b.series === 'following') {
           // "This and all following": later occurrences take over only the fields changed
           // here, so their own edits survive; times move by the Berlin wall-clock delta.
@@ -816,28 +828,16 @@ export class Theater {
         if (e.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.', 'closed');
         if ((e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.', 'version_conflict');
         if (b.series !== undefined && b.series !== 'following') fail(400, 'Unbekannte Auswahl für die Terminserie.');
-        // Email is opt-in, so invitees of upcoming events also hear of the cancellation by push (kind
-        // `changes`), except who declined them and the admin deleting. The event is gone: no deep link.
-        const pushCancelled = (events, title, body) => {
-          const upcoming = events.filter(x => Date.parse(x.endsAt) > +this.clock());
-          const recipients = [...new Set(upcoming.flatMap(x => this.audienceIds(x).filter(p => s.get('responses', `${x.id}:${p}`)?.status !== 'no')))].filter(p => p !== a.personId);
-          if (recipients.length) this.enqueuePush({ title, body, data: {}, recipientPersonIds: recipients, pushKind: 'changes' });
-        };
         if (b.series !== 'following' || !e.seriesId) {
           this.enqueueEmail({ data: { eventId: e.id }, roleIds: e.roleIds, personIds: e.personIds, productionIds: e.productionIds, cancelled: true, event: cancelledEvent(e) });
-          pushCancelled([e], `Termin abgesagt: ${e.title}`, eventNotificationBody(e));
+          this.pushCancelled(a, [e], `Termin abgesagt: ${e.title}`, eventNotificationBody(e));
           this.removeEvent(e.id);
           return { ids: [e.id] };
         }
         // "This and all following": later occurrences of the series go, too
         // (each was saved independently, so later edits do not protect them).
         const doomed = s.all('events').filter(x => x.seriesId === e.seriesId && !x.slotPoolId && x.startsAt >= e.startsAt).sort((x, y) => x.startsAt.localeCompare(y.startsAt));
-        // One cancellation email for the series, naming the next affected date.
-        const upcoming = doomed.filter(x => Date.parse(x.endsAt) > +this.clock());
-        if (upcoming.length) { const first = upcoming[0]; this.enqueueEmail({ data: { eventId: first.id }, roleIds: first.roleIds, personIds: first.personIds, productionIds: first.productionIds, cancelled: true, event: cancelledEvent(first), ...(upcoming.length > 1 ? { seriesCount: upcoming.length } : {}) }); }
-        // Likewise a single push for the series.
-        if (upcoming.length) pushCancelled(upcoming, `${upcoming.length > 1 ? 'Termine' : 'Termin'} abgesagt: ${upcoming[0].title}`, `${upcoming.length > 1 ? `${upcoming.length} Termine entfallen, ab ` : ''}${eventNotificationBody(upcoming[0])}`);
-        for (const x of doomed) this.removeEvent(x.id);
+        this.cancelSeriesEvents(a, doomed);
         return { ids: doomed.map(x => x.id) };
       }
       case 'checkin.save': {
@@ -1202,15 +1202,93 @@ export class Theater {
     if (!changed.length && !retime) return [];
     return s.all('events').filter(x => x.seriesId === old.seriesId && x.id !== e.id && !x.slotPoolId && Date.parse(x.startsAt) > Date.parse(old.startsAt) && Date.parse(x.endsAt) > at)
       .sort((x, y) => x.startsAt.localeCompare(y.startsAt)).map(before => {
-        const next = { ...before, updatedBy: e.updatedBy ?? before.updatedBy ?? null, version: (before.version ?? 1) + 1 };
-        for (const f of changed) next[f] = e[f];
-        if (changed.includes('productionId')) next.sceneIds = [];
-        if (retime) {
-          next.startsAt = move(before.startsAt, start); next.endsAt = move(before.endsAt, end);
-          if (next.endsAt <= next.startsAt) next.endsAt = new Date(Date.parse(next.startsAt) + Date.parse(e.endsAt) - Date.parse(e.startsAt)).toISOString();
-        }
-        return { before, after: this.storeEvent(next) };
+        if (!retime) return this.takeOver(before, e, changed);
+        const startsAt = move(before.startsAt, start);
+        let endsAt = move(before.endsAt, end);
+        if (endsAt <= startsAt) endsAt = new Date(Date.parse(startsAt) + Date.parse(e.endsAt) - Date.parse(e.startsAt)).toISOString();
+        return this.takeOver(before, e, changed, { startsAt, endsAt });
       });
+  }
+  /** Saves occurrence `before` with the `changed` fields of `e` and the given times; returns both versions. */
+  takeOver(before, e, changed, times = {}) {
+    const next = { ...before, ...times, updatedBy: e.updatedBy ?? before.updatedBy ?? null, version: (before.version ?? 1) + 1 };
+    for (const f of changed) next[f] = e[f];
+    if (changed.includes('productionId')) next.sceneIds = [];
+    return { before, after: this.storeEvent(next) };
+  }
+  /** Changes are pushed only for events in the near future (before or after the change), like the events badge. */
+  nearChange(at) { const until = Date.parse(at) - +this.clock(); return until > 0 && until <= changePushWindowDays * 86400000; }
+  pushSkipped(b, soon, relevant = true) { return b.push !== true ? null : !this.pushEnabled ? 'disabled' : !relevant ? 'unchanged' : soon ? null : 'far_future'; }
+  /**
+   * Email is opt-in, so invitees of upcoming events also hear of a cancellation by push (kind
+   * `changes`), except who declined them and the person deleting. The event is gone: no deep link.
+   */
+  pushCancelled(a, events, title, body) {
+    const s = this.store, upcoming = events.filter(x => Date.parse(x.endsAt) > +this.clock());
+    const recipients = [...new Set(upcoming.flatMap(x => this.audienceIds(x).filter(p => s.get('responses', `${x.id}:${p}`)?.status !== 'no')))].filter(p => p !== a.personId);
+    if (recipients.length) this.enqueuePush({ title, body, data: {}, recipientPersonIds: recipients, pushKind: 'changes' });
+  }
+  /** Removes occurrences of a series with one cancellation email and one push, naming the next affected date. */
+  cancelSeriesEvents(a, doomed) {
+    const upcoming = doomed.filter(x => Date.parse(x.endsAt) > +this.clock());
+    if (upcoming.length) {
+      const first = upcoming[0];
+      this.enqueueEmail({ data: { eventId: first.id }, roleIds: first.roleIds, personIds: first.personIds, productionIds: first.productionIds, cancelled: true, event: cancelledEvent(first), ...(upcoming.length > 1 ? { seriesCount: upcoming.length } : {}) });
+      this.pushCancelled(a, upcoming, `${upcoming.length > 1 ? 'Termine' : 'Termin'} abgesagt: ${first.title}`, `${upcoming.length > 1 ? `${upcoming.length} Termine entfallen, ab ` : ''}${eventNotificationBody(first)}`);
+    }
+    for (const x of doomed) this.removeEvent(x.id);
+  }
+  /**
+   * "Ganze Serie" (`series: 'all'`), edited from any occurrence `old`: every occurrence that has
+   * not started yet takes over the fields changed from `old` to `e`, so individual edits of other
+   * fields survive. Started occurrences, `old` included, stay as they are. A changed start or end
+   * time applies on each occurrence's own day in Berlin wall-clock time; moving the date of a
+   * whole series is not offered. A later `until` adds occurrences in the series rhythm (limits and
+   * absence declines as at creation, one summary push or email); an earlier one ends the series
+   * after that day, with the cancellation notices of "this and all following".
+   */
+  saveWholeSeries(a, b, old, e) {
+    const s = this.store, at = +this.clock(), started = x => Date.parse(x.startsAt) <= at;
+    const series = () => s.all('events').filter(x => x.seriesId === old.seriesId && !x.slotPoolId).sort((x, y) => x.startsAt.localeCompare(y.startsAt));
+    if (berlinDay(e.startsAt) !== berlinDay(old.startsAt)) fail(400, 'Für die ganze Serie lässt sich nur die Uhrzeit ändern, nicht das Datum.');
+    const until = b.until === undefined ? null : seriesUntil(b.until);
+    const changed = seriesFields.filter(f => !sameValue(f, old[f], e[f])), retime = old.startsAt !== e.startsAt || old.endsAt !== e.endsAt;
+    const updated = [];
+    if (!started(old)) updated.push({ before: old, after: this.storeEvent(e) });
+    if (changed.length || retime) for (const x of series().filter(x => x.id !== old.id && !started(x))) updated.push(this.takeOver(x, e, changed, seriesRetime(x, old, e)));
+    updated.sort((x, y) => x.after.startsAt.localeCompare(y.after.startsAt));
+    this.markPlannedReminders(updated.filter(x => switchedOn(x.before, x.after)).map(x => x.after));
+    // One notice for all changed occurrences, only for a new time or place (see event.save).
+    const soon = updated.some(x => this.nearChange(x.before.startsAt) || this.nearChange(x.after.startsAt)), relevant = updated.some(x => moved(x.before, x.after));
+    const result = { id: e.id, ids: updated.map(x => x.after.id), added: [], removed: [], pushQueued: b.push === true && this.pushEnabled && soon && relevant, pushSkipped: this.pushSkipped(b, soon, relevant) };
+    if (relevant) {
+      const first = updated.find(x => moved(x.before, x.after)).after;
+      const notice = { title: `Terminserie geändert: ${e.title}`, body: `Gilt für ${updated.length} ${updated.length > 1 ? 'Termine' : 'Termin'} ab ${eventNotificationBody(first)}`, data: { eventId: first.id }, roleIds: e.roleIds, personIds: e.personIds, productionIds: e.productionIds, change: true, soon, series: { id: old.seriesId, count: updated.length } };
+      if (b.push === true) this.enqueuePush({ ...notice, announce: 'changed' });
+      else this.enqueueEmail(notice);
+    }
+    if (until == null) return result;
+    const all = series(), last = all.at(-1), lastDay = berlinDay(last.startsAt);
+    if (until > lastDay) {
+      const every = seriesRhythm(all), occurrences = seriesExtension(last, every, until, all.map(x => berlinDay(x.startsAt)), e);
+      // New occurrences look like the form: its fields and times, on the rhythm's days.
+      const template = { title: e.title, description: e.description, place: e.place, type: e.type, locked: e.locked, autoAccept: e.autoAccept, productionId: e.productionId, sceneIds: e.sceneIds, roleIds: e.roleIds, personIds: e.personIds, productionIds: e.productionIds, seriesId: old.seriesId, seriesRepeat: { every, until }, createdBy: a.personId, updatedBy: a.personId, version: 1 };
+      const added = occurrences.map(o => this.storeEvent({ ...template, id: id(), ...o }));
+      result.added = added.map(x => x.id);
+      const notice = { title: `Terminserie verlängert: ${e.title}`, body: seriesSummary(occurrences, every), data: { eventId: added[0].id }, roleIds: e.roleIds, personIds: e.personIds, productionIds: e.productionIds, newEvent: true, extended: true, series: { id: old.seriesId, count: added.length, every, until } };
+      // Like a new series: one summary push when asked for, else one email; no planned reminders are marked.
+      if (b.push === true) this.enqueuePush({ ...notice, announce: 'new' });
+      else this.enqueueEmail(notice);
+      if (b.push === true) { result.pushQueued = this.pushEnabled; result.pushSkipped = this.pushEnabled ? null : 'disabled'; }
+    } else if (until < lastDay) {
+      if (until < berlinDay(old.startsAt)) fail(400, 'Das Serienende darf nicht vor diesem Termin liegen.');
+      if (all.some(x => started(x) && berlinDay(x.startsAt) > until)) fail(400, 'Begonnene Termine bleiben erhalten. Bitte ein späteres Serienende wählen.');
+      const doomed = all.filter(x => berlinDay(x.startsAt) > until);
+      this.cancelSeriesEvents(a, doomed);
+      result.removed = doomed.map(x => x.id);
+      result.ids = result.ids.filter(x => !result.removed.includes(x));
+    }
+    return result;
   }
   /** Tells admins, holders of the events right and the production's directors when someone cancels within a day of the start; once per person and start time. */
   notifyLateDecline(e, personId) {

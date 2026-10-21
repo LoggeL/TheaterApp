@@ -249,6 +249,33 @@ void main() {
       expect(controller.events.map((e) => e.id), contains('s2'));
       expect(TodayDigest.from(controller).next?.id, 'mine');
     });
+
+    test('a queued earlier end of a whole series is skipped', () async {
+      final server = TestServer()
+        ..data['events'] = [
+          {..._event('s1', 1), 'seriesId': 'serie'},
+          {..._event('s2', 2), 'seriesId': 'serie'},
+          {..._event('s3', 3), 'seriesId': 'serie'},
+          _event('mine', 4),
+        ]
+        ..data['attendanceByEvent'] = {'s1': 'no'};
+      final controller = server.controller();
+      addTearDown(controller.dispose);
+      await signIn(controller);
+      expect(TodayDigest.from(controller).next?.id, 's2');
+      server.offline = true;
+      final first = controller.events.firstWhere((e) => e.id == 's1');
+      await controller.performAction({
+        'action': 'event.save',
+        'id': 's1',
+        'version': 1,
+        'series': 'all',
+        'until': dateOnly(first.startsAt!),
+      });
+      expect(controller.pendingCount, 1);
+      // s2 and s3 end with the series; s1, which was declined, stays.
+      expect(TodayDigest.from(controller).next?.id, 'mine');
+    });
   });
 
   for (final flagged in [true, false]) {

@@ -8,6 +8,7 @@ import '../../../shared/audience/audience_pickers.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
+import '../../../shared/widgets/one_line_segmented_button.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../slots/ui/slot_pools_screen.dart';
 import '../domain/event_places.dart';
@@ -96,13 +97,66 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       ? planSeries(_start, _end, _repeat!, _until)
       : null;
 
+  /// "Ganze Serie" instead of "Nur dieser Termin" for an occurrence of a
+  /// series: the changes reach all its occurrences that have not started yet.
+  bool _wholeSeries = false;
+
+  /// "Wiederholen bis" of the whole series; the day of its last occurrence
+  /// until changed.
+  late DateTime _seriesEnd;
+  late final DateTime _lastSeriesDay;
+
+  /// Whether an occurrence can be edited for the whole series (servers with
+  /// `seriesManage`).
+  bool get _canEditSeries =>
+      widget.event?.inSeries == true &&
+      widget.controller.supports('seriesManage');
+
+  /// All occurrences of the edited series, by start.
+  List<TheaterEvent> get _occurrences {
+    final series = widget.event?.seriesId;
+    if (series == null) return const [];
+    return widget.controller.events
+        .where(
+          (e) => e.seriesId == series && !e.fromSlotPool && e.startsAt != null,
+        )
+        .toList()
+      ..sort((a, b) => a.startsAt!.compareTo(b.startsAt!));
+  }
+
+  /// Occurrences that have not started yet: those a whole-series edit changes.
+  List<TheaterEvent> get _upcoming => _occurrences
+      .where((e) => e.startsAt!.isAfter(widget.controller.now))
+      .toList();
+
+  /// The series rhythm; null when unknown (older series with irregular
+  /// dates), which leaves its end as it is.
+  SeriesRhythm? get _rhythm => SeriesRhythm.fromWire(
+    _occurrences.map((e) => e.seriesEvery).nonNulls.firstOrNull,
+  );
+
+  /// What the picked "Wiederholen bis" day adds or removes.
+  SeriesEndChange? get _endChange =>
+      _wholeSeries && _rhythm != null && _occurrences.isNotEmpty
+      ? planSeriesEnd(
+          starts: [for (final e in _occurrences) e.startsAt!],
+          anchor: widget.event!.startsAt!,
+          rhythm: _rhythm,
+          until: _seriesEnd,
+          now: widget.controller.now,
+        )
+      : null;
+  bool get _extending => _endChange?.added.isNotEmpty ?? false;
+
   /// On by default. For an edit the server pushes only a new date, time or
   /// place; switched off, nothing is pushed.
   bool _push = true;
 
-  /// Whether an edit changes what attendees must know: date, time or place.
-  /// Typo fixes in title or description are never pushed (as on the server).
-  bool get _relevantChange {
+  /// Whether an edit changes what attendees must know: date, time or place,
+  /// or new dates of a series. Typo fixes in title or description are never
+  /// pushed (as on the server).
+  bool get _relevantChange => _extending || _relevantTimeOrPlace;
+  bool get _relevantTimeOrPlace {
     final old = widget.event;
     return old == null ||
         !(old.startsAt?.isAtSameMomentAs(_start) ?? false) ||
@@ -111,14 +165,15 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
   }
 
   /// Changes are pushed only for events within the next two weeks (before or
-  /// after the change), mirroring the server.
+  /// after the change), mirroring the server; new dates of a series always.
   bool get _changeIsNear {
     final old = widget.event?.startsAt;
-    if (old == null) return true;
+    if (old == null || _extending) return true;
     final now = widget.controller.now;
     bool near(DateTime at) =>
         at.isAfter(now) &&
         !at.isAfter(now.add(const Duration(days: changePushWindowDays)));
+    if (_wholeSeries) return _upcoming.any((e) => near(e.startsAt!));
     return near(old) || near(_start);
   }
 
@@ -130,7 +185,11 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
           'offen.';
     }
     return 'Eingeladene sagen nur ab, wenn sie nicht können. Sie werden zwei '
-        'Tage vorher erinnert.${_series != null ? ' Gilt für alle Termine der Serie.' : ''}';
+        'Tage vorher erinnert.${_series != null
+            ? ' Gilt für alle Termine der Serie.'
+            : _wholeSeries
+            ? ' Gilt für alle kommenden Termine der Serie.'
+            : ''}';
   }
 
   bool get _titleMissing => _title.text.trim().isEmpty;
@@ -144,7 +203,10 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     return null;
   }
 
-  bool get _valid => _formProblem == null && _series?.problem == null;
+  bool get _valid =>
+      _formProblem == null &&
+      _series?.problem == null &&
+      _endChange?.problem == null;
 
   String get _state => [
     _title.text,
@@ -158,6 +220,8 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     _push,
     _repeat,
     _until,
+    _wholeSeries,
+    _seriesEnd,
     (_roleIds.toList()..sort()).join(','),
     (_personIds.toList()..sort()).join(','),
     (_productionIds.toList()..sort()).join(','),
@@ -181,6 +245,13 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     _end = e?.endsAt ?? _start.add(const Duration(hours: 2));
     // Eight weeks; calendar arithmetic, as a Duration would shift at DST.
     _until = DateTime(_start.year, _start.month, _start.day + 56);
+    _lastSeriesDay = DateUtils.dateOnly(
+      [
+        _start,
+        for (final o in _occurrences) o.startsAt!,
+      ].reduce((a, b) => a.isAfter(b) ? a : b),
+    );
+    _seriesEnd = _lastSeriesDay;
     _locked = e?.locked ?? false;
     _autoAccept = e?.autoAccept ?? false;
     _kind = e?.kind ?? 'rehearsal';
@@ -206,12 +277,15 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
 
   Future<void> _pick(bool start) async {
     final current = start ? _start : _end;
-    final d = await showDatePicker(
-      context: context,
-      initialDate: current,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-    );
+    // For the whole series only the time changes; each date stays.
+    final d = _wholeSeries
+        ? current
+        : await showDatePicker(
+            context: context,
+            initialDate: current,
+            firstDate: DateTime(2020),
+            lastDate: DateTime(2100),
+          );
     if (d == null || !mounted) return;
     final time = await showTimePicker(
       context: context,
@@ -247,47 +321,66 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     if (d != null && mounted) setState(() => _until = d);
   }
 
-  /// Whether a change of a series occurrence can also reach the following
-  /// ones (servers with `seriesEdit`).
-  bool get _canEditFollowing =>
-      widget.event?.inSeries == true &&
-      widget.controller.supports('seriesEdit');
+  /// Switches between "Nur dieser Termin" and "Ganze Serie". The whole
+  /// series keeps each occurrence's date, so a date picked for this one alone
+  /// goes back to its own (with the picked times).
+  void _setWholeSeries(bool whole) => setState(() {
+    _wholeSeries = whole;
+    _seriesEnd = _lastSeriesDay;
+    final s = widget.event!.startsAt, e = widget.event!.endsAt;
+    if (!whole || s == null || e == null) return;
+    _start = DateTime(s.year, s.month, s.day, _start.hour, _start.minute);
+    _end = DateTime(e.year, e.month, e.day, _end.hour, _end.minute);
+  });
 
-  /// 'single' or 'following' for an occurrence of a series; null when
-  /// cancelled.
-  Future<String?> _confirmSeriesSave() => showDialog<String>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Serientermin ändern?'),
-      content: const Text(
-        'Der Termin gehört zu einer Serie. Geänderte Angaben kannst du auch '
-        'für alle folgenden Termine übernehmen.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: const Text('Abbrechen'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, 'following'),
-          child: const Text('Diesen und alle folgenden'),
-        ),
-        // The narrower choice is the safe default.
-        FilledButton(
-          onPressed: () => Navigator.pop(ctx, 'single'),
-          child: const Text('Nur diesen Termin'),
-        ),
-      ],
-    ),
-  );
+  /// "Wiederholen bis": from this occurrence (or the last started one) up to
+  /// a year after the last occurrence, as the server allows.
+  Future<void> _pickSeriesEnd() async {
+    final now = widget.controller.now;
+    var first = DateUtils.dateOnly(widget.event!.startsAt!);
+    for (final o in _occurrences.where((o) => !o.startsAt!.isAfter(now))) {
+      final day = DateUtils.dateOnly(o.startsAt!);
+      if (day.isAfter(first)) first = day;
+    }
+    final last = DateTime(
+      _lastSeriesDay.year + 1,
+      _lastSeriesDay.month,
+      _lastSeriesDay.day,
+    );
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _seriesEnd.isBefore(first) ? first : _seriesEnd,
+      firstDate: first,
+      lastDate: last,
+    );
+    if (d != null && mounted) setState(() => _seriesEnd = d);
+  }
+
+  /// Ending a series earlier deletes its later occurrences; asked first.
+  Future<bool> _confirmSeriesEnd(List<DateTime> removed) {
+    final n = removed.length;
+    // Deleting upcoming events always pushes the cancellation (server).
+    final notice = widget.controller.pushConfigured
+        ? ' Wer eingeladen ist und nicht abgesagt hat, erfährt per Push von '
+              'der Absage.'
+        : '';
+    final day = DateFormat('d. MMMM', 'de').format(_seriesEnd);
+    return confirmDestructive(
+      context,
+      title: 'Serie verkürzen?',
+      message: n == 1
+          ? 'Der Termin nach dem $day wird mit seinen Rückmeldungen '
+                'gelöscht.$notice'
+          : 'Die $n Termine nach dem $day werden mit ihren Rückmeldungen '
+                'gelöscht.$notice',
+      confirmLabel: n == 1 ? 'Termin löschen' : '$n Termine löschen',
+    );
+  }
 
   Future<void> _save() async {
-    String? scope;
-    if (_canEditFollowing) {
-      scope = await _confirmSeriesSave();
-      if (scope == null || !mounted) return;
-    }
-    final following = scope == 'following';
+    final whole = _wholeSeries, end = _endChange;
+    final ending = end != null && end.removed.isNotEmpty;
+    if (ending && (!await _confirmSeriesEnd(end.removed) || !mounted)) return;
     setState(() => _busy = true);
     final push =
         _push &&
@@ -319,18 +412,29 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         'push': push,
         if (series != null)
           'repeat': {'every': _repeat!.wire, 'until': seriesUntilValue(_until)},
-        if (following) 'series': 'following',
+        if (whole) 'series': 'all',
+        if (whole && (_extending || ending))
+          'until': seriesUntilValue(_seriesEnd),
       });
       if (!mounted) return;
       final outcome = result.outcome, data = result.data;
       final what = series != null
           ? 'Terminserie'
-          : following
+          : whole
           ? 'Serie'
           : 'Termin';
-      final changed = jsonList(data?['ids']).length;
-      final saved = following && changed > 1
-          ? '$changed Termine der Serie gespeichert'
+      String count(String key, String label) {
+        final n = jsonList(data?[key]).length;
+        return n == 0 ? '' : '$n $label';
+      }
+
+      final details = [
+        count('ids', 'geändert'),
+        count('added', 'neu'),
+        count('removed', 'gelöscht'),
+      ].where((x) => x.isNotEmpty).join(', ');
+      final saved = whole && details.isNotEmpty
+          ? 'Serie gespeichert ($details)'
           : '$what gespeichert';
       // Without a reply (queued, demo, older server) the request decides.
       final skipped = switch (data?['pushSkipped']) {
@@ -355,9 +459,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
                 outcome,
                 done: series != null
                     ? 'Terminserie mit ${series.starts.length} Terminen angelegt'
-                    : following
-                    ? saved
-                    : 'Termin gespeichert',
+                    : saved,
                 queued: '$what vorgemerkt – wird bei Verbindung übertragen.',
               ),
       );
@@ -445,6 +547,101 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     }
   }
 
+  /// "Nur dieser Termin" or "Ganze Serie", with what the choice means.
+  Widget _seriesScope(ThemeData theme) {
+    final upcoming = _upcoming.length;
+    final String hint;
+    if (!_wholeSeries) {
+      hint = 'Teil einer Serie – Änderungen gelten nur für diesen Termin.';
+    } else if (upcoming == 0) {
+      hint =
+          'Alle Termine der Serie haben schon begonnen und bleiben, wie sie '
+          'sind.${_rhythm == null ? '' : ' Über „Wiederholen bis“ kannst du die Serie verlängern.'}';
+    } else {
+      hint =
+          'Gilt für ${upcoming == 1 ? 'den kommenden Termin' : 'alle $upcoming kommenden Termine'} '
+          'der Serie, vergangene bleiben unverändert. Übernommen wird nur, '
+          'was du hier änderst: Einzeln angepasste Termine behalten ihre '
+          'übrigen Angaben. Jeder Termin behält sein Datum, nur die Uhrzeit '
+          'lässt sich ändern.';
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          OneLineSegmentedButton<bool>(
+            key: const ValueKey('event-series-scope'),
+            segments: const [
+              ButtonSegment(
+                value: false,
+                label: Text('Nur dieser Termin'),
+                icon: Icon(Icons.event_outlined),
+              ),
+              ButtonSegment(
+                value: true,
+                label: Text('Ganze Serie'),
+                icon: Icon(Icons.repeat),
+              ),
+            ],
+            selected: {_wholeSeries},
+            onSelectionChanged: _busy
+                ? null
+                : (selection) => _setWholeSeries(selection.single),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            hint,
+            key: const ValueKey('event-series-scope-hint'),
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The rhythm of the series (read-only) and its end, which extends or
+  /// shortens the series; an unknown rhythm only allows editing.
+  List<Widget> _seriesEndTiles(ThemeData theme) {
+    final rhythm = _rhythm, end = _endChange;
+    final starts = [for (final e in _occurrences) e.startsAt!];
+    return [
+      const Divider(),
+      ListTile(
+        key: const ValueKey('event-series-rhythm'),
+        leading: const Icon(Icons.repeat),
+        title: const Text('Wiederholung'),
+        subtitle: Text(
+          rhythm == null || starts.isEmpty
+              ? 'Unregelmäßig – das Serienende lässt sich hier nicht ändern.'
+              : seriesRhythmLabel(rhythm, starts),
+        ),
+      ),
+      if (end != null) ...[
+        ListTile(
+          key: const ValueKey('event-series-until'),
+          leading: const Icon(Icons.event_repeat),
+          title: const Text('Wiederholen bis'),
+          subtitle: Text(
+            DateFormat('EEEE, d. MMMM yyyy', 'de').format(_seriesEnd),
+          ),
+          onTap: _busy ? null : _pickSeriesEnd,
+        ),
+        if ((end.problem ?? end.summary).isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+            child: Text(
+              end.problem ?? end.summary,
+              key: const ValueKey('event-series-end-summary'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: end.problem == null ? null : theme.colorScheme.error,
+              ),
+            ),
+          ),
+      ],
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -459,9 +656,15 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       child: AdminPage(
         controller: widget.controller,
         permission: eventsPermission,
-        title: widget.event == null ? 'Termin anlegen' : 'Termin bearbeiten',
+        title: widget.event == null
+            ? 'Termin anlegen'
+            : _wholeSeries
+            ? 'Serie bearbeiten'
+            : 'Termin bearbeiten',
         children: (context) => [
-          if (widget.event?.inSeries == true)
+          if (_canEditSeries)
+            _seriesScope(theme)
+          else if (widget.event?.inSeries == true)
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
               child: Row(
@@ -470,9 +673,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      _canEditFollowing
-                          ? 'Teil einer Serie – beim Speichern wählst du, ob die Änderungen auch für die folgenden Termine gelten.'
-                          : 'Teil einer Serie – Änderungen gelten nur für diesen Termin.',
+                      'Teil einer Serie – Änderungen gelten nur für diesen Termin.',
                       style: theme.textTheme.bodySmall,
                     ),
                   ),
@@ -506,13 +707,18 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
             child: Column(
               children: [
                 ListTile(
+                  key: const ValueKey('event-start'),
                   leading: const Icon(Icons.calendar_month),
                   title: const Text('Beginn'),
                   subtitle: Text(
-                    DateFormat(
-                      'EEEE, d. MMMM yyyy · HH:mm',
-                      'de',
-                    ).format(_start),
+                    // Each occurrence keeps its date; only the time changes.
+                    _wholeSeries
+                        ? '${DateFormat('HH:mm', 'de').format(_start)} Uhr · '
+                              'Datum je Termin'
+                        : DateFormat(
+                            'EEEE, d. MMMM yyyy · HH:mm',
+                            'de',
+                          ).format(_start),
                   ),
                   onTap: () => _pick(true),
                 ),
@@ -525,8 +731,10 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
                   title: const Text('Ende'),
                   subtitle: Text(
                     _endBeforeStart
-                        ? '${DateFormat('d. MMMM yyyy · HH:mm', 'de').format(_end)}'
+                        ? '${DateFormat(_wholeSeries ? 'HH:mm' : 'd. MMMM yyyy · HH:mm', 'de').format(_end)}'
                               ' – das Ende muss nach dem Beginn liegen'
+                        : _wholeSeries
+                        ? '${DateFormat('HH:mm', 'de').format(_end)} Uhr'
                         : DateFormat('d. MMMM yyyy · HH:mm', 'de').format(_end),
                     style: _endBeforeStart ? TextStyle(color: error) : null,
                   ),
@@ -573,6 +781,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
                     ),
                   ],
                 ],
+                if (_wholeSeries) ..._seriesEndTiles(theme),
               ],
             ),
           ),
@@ -662,18 +871,24 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
                 ? (v) => setState(() => _push = v)
                 : null,
             title: Text(
-              widget.event == null
+              widget.event == null || _extending
                   ? 'Eingeladene per Push benachrichtigen'
                   : 'Neue Zeit oder neuen Ort per Push melden',
             ),
             subtitle: Text(
               !_changeIsNear
-                  ? 'Der Termin liegt mehr als $changePushWindowDays Tage in der '
+                  ? '${_wholeSeries ? 'Die kommenden Termine liegen' : 'Der Termin liegt'} '
+                        'mehr als $changePushWindowDays Tage in der '
                         'Zukunft. Änderungen werden erst ab $changePushWindowDays '
                         'Tagen vorher gepusht.'
                   : widget.controller.pushConfigured
                   ? widget.event == null
                         ? '${_series == null ? '' : 'Eine Benachrichtigung für die ganze Serie. '}'
+                              'Geht an: $audience'
+                        // Like a new series: one push for all new dates.
+                        : _extending
+                        ? 'Eine Benachrichtigung für die neuen Termine'
+                              '${_relevantTimeOrPlace ? ', eine weitere für die neue Zeit oder den neuen Ort' : ''}. '
                               'Geht an: $audience'
                         // Changes only reach people who accepted (server).
                         : !_relevantChange
@@ -693,7 +908,11 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
           FilledButton(
             onPressed: _busy || !_valid ? null : _save,
             child: Text(
-              _series == null ? 'Termin speichern' : 'Terminserie speichern',
+              _series != null
+                  ? 'Terminserie speichern'
+                  : _wholeSeries
+                  ? 'Serie speichern'
+                  : 'Termin speichern',
             ),
           ),
           if (_formProblem case final problem?)

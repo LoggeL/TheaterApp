@@ -151,7 +151,7 @@ test('editing this and all following occurrences applies only the changed fields
   const { store, action } = setup(t);
   const { ids } = action(series({ every: 'week', until: '2026-12-01' }, { place: 'Kolpingheim' }));
   action(edit(store, ids[3], { title: 'Sonderprobe' }));
-  assert.throws(() => action(edit(store, ids[1], { series: 'all' })), { status: 400 });
+  assert.throws(() => action(edit(store, ids[1], { series: 'some' })), { status: 400 });
   const single = action(series(undefined)).id;
   assert.throws(() => action(edit(store, single, { series: 'following' })), e => e.status === 400 && /keiner Terminserie/.test(e.message));
 

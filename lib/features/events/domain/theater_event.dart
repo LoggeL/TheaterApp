@@ -25,6 +25,7 @@ class TheaterEvent {
     this.productionIds = const [],
     this.slotPoolId,
     this.seriesId,
+    this.seriesEvery,
     this.addressedToMe = true,
     this.lastRemindedAt,
     this.remindCount = 0,
@@ -69,6 +70,11 @@ class TheaterEvent {
   /// still edited on its own.
   final String? seriesId;
   bool get inSeries => seriesId != null;
+
+  /// Rhythm of the series (`seriesRepeat.every`: 'week', '2weeks' or
+  /// 'month'), sent to those managing events; null when unknown, e.g. for an
+  /// older series with irregular dates.
+  final String? seriesEvery;
 
   /// Whether the signed-in person is invited. Always true for members; admins
   /// also receive events of other groups and other people's slot events.
@@ -144,6 +150,10 @@ class TheaterEvent {
         ? null
         : textValue(json['slotPoolId']),
     seriesId: json['seriesId'] == null ? null : textValue(json['seriesId']),
+    seriesEvery: switch (jsonMap(json['seriesRepeat'])['every']) {
+      final String every when every.isNotEmpty => every,
+      _ => null,
+    },
     addressedToMe: json['addressedToMe'] != false,
     lastRemindedAt: dateValue(json['lastRemindedAt'])?.toLocal(),
     remindCount: intValue(json['remindCount']),
@@ -186,6 +196,7 @@ class TheaterEvent {
     productionIds: productionIds,
     slotPoolId: slotPoolId,
     seriesId: seriesId,
+    seriesEvery: seriesEvery,
     addressedToMe: addressedToMe ?? this.addressedToMe,
     lastRemindedAt: lastRemindedAt,
     remindCount: remindCount,
@@ -219,6 +230,7 @@ class TheaterEvent {
     'sceneIds': sceneIds,
     if (slotPoolId != null) 'slotPoolId': slotPoolId,
     if (seriesId != null) 'seriesId': seriesId,
+    if (seriesEvery != null) 'seriesRepeat': {'every': seriesEvery},
     if (!addressedToMe) 'addressedToMe': false,
     if (lastRemindedAt != null)
       'lastRemindedAt': lastRemindedAt!.toUtc().toIso8601String(),

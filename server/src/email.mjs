@@ -36,14 +36,14 @@ export function emailFromEnvironment(env = process.env) {
 export function eventEmail(job, event, appOrigin) {
   const link = new URL('/', appOrigin);
   if (link.protocol !== 'https:' || link.username || link.password) throw new Error('HTTPS app origin required');
-  const subject = (job.test ? 'Theater-App: Test-E-Mail' : `${job.cancelled ? job.seriesCount ? 'Termine abgesagt' : 'Termin abgesagt' : job.series && job.change ? 'Terminserie geändert' : job.series ? 'Neue Terminserie' : job.newEvent ? 'Neuer Termin' : job.change ? 'Termin aktualisiert' : job.remindOpen ? 'Rückmeldung fehlt' : job.planned ? 'Du bist eingeplant' : 'Erinnerung'}: ${event.title}`).replace(/[\r\n]/g, ' ').slice(0, 200);
+  const subject = (job.test ? 'Theater-App: Test-E-Mail' : `${job.cancelled ? job.seriesCount ? 'Termine abgesagt' : 'Termin abgesagt' : job.series && job.change ? 'Terminserie geändert' : job.series && job.extended ? 'Terminserie verlängert' : job.series ? 'Neue Terminserie' : job.newEvent ? 'Neuer Termin' : job.change ? 'Termin aktualisiert' : job.remindOpen ? 'Rückmeldung fehlt' : job.planned ? 'Du bist eingeplant' : 'Erinnerung'}: ${event.title}`).replace(/[\r\n]/g, ' ').slice(0, 200);
   // The "Du bist eingeplant" reminder opens the decline right away (older apps just open the event).
   if (event) link.searchParams.set('target', `theaterapp://app/events/${encodeURIComponent(event.id)}${job.planned ? '?intent=decline' : ''}`);
   // A series is announced (or cancelled) by a single email about its next occurrence.
   const body = job.test ? 'Deine Test-E-Mail ist da.'
     : job.cancelled && job.seriesCount ? `${job.seriesCount} Termine der Serie entfallen, ab ${eventNotificationBody(event)}.`
       : job.series && job.change ? `${job.body}.` // "Gilt für n Termine ab <first changed occurrence>"
-        : job.series && !job.cancelled ? `${job.body} Erster Termin: ${eventNotificationBody(event)}`
+        : job.series && !job.cancelled ? `${job.body} ${job.extended ? 'Erster neuer Termin' : 'Erster Termin'}: ${eventNotificationBody(event)}`
           : job.planned ? `${eventNotificationBody(event)}. Kannst du nicht? Bitte in der App absagen.` : eventNotificationBody(event);
   const footer = 'Termin-E-Mails kannst du in der App unter Darstellung & Erinnerungen ausschalten.';
   return { subject, text: `${subject}\n\n${body}\n\nTheater-App öffnen: ${link.href}\n\n${footer}`,

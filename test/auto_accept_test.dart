@@ -23,7 +23,7 @@ class _MemberServer extends TestServer {
   JsonMap get user => {...super.user, 'role': 'member'};
 }
 
-const _features = ['autoAccept', 'pushSettings', 'seriesEdit'];
+const _features = ['autoAccept', 'pushSettings', 'seriesEdit', 'seriesManage'];
 
 String _at(Duration offset) => fixedNow.add(offset).toUtc().toIso8601String();
 
@@ -242,6 +242,8 @@ void main() {
         event: controller.events.single,
       ),
     );
+    await tester.tap(find.text('Ganze Serie'));
+    await tester.pumpAndSettle();
     final toggle = find.byKey(const ValueKey('event-auto-accept'));
     await scrollTo(tester, toggle);
     expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
@@ -253,13 +255,11 @@ void main() {
       ),
       findsOneWidget,
     );
-    await scrollTo(tester, find.text('Termin speichern'));
-    await tester.tap(find.text('Termin speichern'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Diesen und alle folgenden'));
+    await scrollTo(tester, find.text('Serie speichern'));
+    await tester.tap(find.text('Serie speichern'));
     await tester.pumpAndSettle();
     final body = server.actionBodies.last;
-    expect([body['autoAccept'], body['series']], [false, 'following']);
+    expect([body['autoAccept'], body['series']], [false, 'all']);
     await finish(tester, controller);
   });
 

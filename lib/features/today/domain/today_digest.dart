@@ -114,7 +114,30 @@ class TodayDigest {
     final ids = <String>{};
     for (final action in controller.outbox) {
       final body = action.payload;
-      if (action.failed || body['action'] != 'event.delete') continue;
+      if (action.failed) continue;
+      // A whole-series edit with an earlier end removes the later occurrences.
+      if (body['action'] == 'event.save' &&
+          body['series'] == 'all' &&
+          body['until'] is String) {
+        final edited = controller.events
+            .where((e) => e.id == textValue(body['id']))
+            .firstOrNull;
+        ids.addAll(
+          controller.events
+              .where(
+                (e) =>
+                    edited?.seriesId != null &&
+                    e.seriesId == edited!.seriesId &&
+                    !e.fromSlotPool &&
+                    e.startsAt != null &&
+                    dateOnly(e.startsAt!).compareTo(body['until'] as String) >
+                        0,
+              )
+              .map((e) => e.id),
+        );
+        continue;
+      }
+      if (body['action'] != 'event.delete') continue;
       final id = textValue(body['id']);
       ids.add(id);
       final first = controller.events.where((e) => e.id == id).firstOrNull;

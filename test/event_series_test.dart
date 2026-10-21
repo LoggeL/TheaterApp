@@ -344,9 +344,282 @@ void main() {
       'id': 'a',
       'title': 'Probe',
       'seriesId': 's',
+      'seriesRepeat': {'every': '2weeks', 'until': '2026-12-01'},
     });
     expect(event.copyWith(response: 'yes').seriesId, 's');
     expect(TheaterEvent.fromJson(event.toJson()).seriesId, 's');
+    expect(TheaterEvent.fromJson(event.toJson()).seriesEvery, '2weeks');
     expect(TheaterEvent.fromJson({'id': 'b', 'title': 'X'}).inSeries, isFalse);
+    expect(
+      TheaterEvent.fromJson({'id': 'b', 'title': 'X'}).seriesEvery,
+      isNull,
+    );
+  });
+
+  group('planSeriesEnd', () {
+    // Tuesdays 1 to 29 September; 1 and 8 September have begun.
+    final starts = [
+      for (final d in [1, 8, 15, 22, 29]) DateTime(2026, 9, d, 19),
+    ];
+    final now = DateTime(2026, 9, 12, 12);
+    SeriesEndChange plan(
+      DateTime until, {
+      SeriesRhythm? rhythm = SeriesRhythm.week,
+      DateTime? anchor,
+    }) => planSeriesEnd(
+      starts: starts,
+      anchor: anchor ?? starts[2],
+      rhythm: rhythm,
+      until: until,
+      now: now,
+    );
+
+    test('a later end adds dates in the rhythm, an earlier one removes', () {
+      final later = plan(DateTime(2026, 10, 14));
+      expect(later.added, [DateTime(2026, 10, 6), DateTime(2026, 10, 13)]);
+      expect(later.summary, 'Fügt 2 Termine hinzu: 6.10. bis 13.10.');
+      expect(
+        plan(DateTime(2026, 10, 14), rhythm: SeriesRhythm.twoWeeks).summary,
+        'Fügt 1 Termin hinzu: 13.10.',
+      );
+      final earlier = plan(DateTime(2026, 9, 20));
+      expect(earlier.removed, starts.sublist(3));
+      expect(earlier.summary, 'Entfernt 2 Termine nach dem 20.9.');
+      expect(plan(DateTime(2026, 9, 29)).summary, isEmpty);
+    });
+
+    test('mirrors the server limits', () {
+      expect(plan(DateTime(2026, 9, 14)).problem, contains('vor diesem'));
+      expect(
+        plan(DateTime(2026, 9, 1), anchor: starts.first).problem,
+        contains('Begonnene Termine'),
+      );
+      expect(plan(DateTime(2026, 10, 5)).problem, contains('kein Termin'));
+      expect(plan(DateTime(2027, 9, 30)).problem, contains('ein Jahr'));
+      expect(plan(DateTime(2027, 9, 29)).added, hasLength(52));
+      expect(
+        plan(DateTime(2026, 10, 14), rhythm: null).problem,
+        contains('Rhythmus'),
+      );
+    });
+
+    test('monthly series return to their day of the month', () {
+      final monthly = [DateTime(2027, 1, 31, 19), DateTime(2027, 2, 28, 19)];
+      final plan = planSeriesEnd(
+        starts: monthly,
+        anchor: monthly.first,
+        rhythm: SeriesRhythm.month,
+        until: DateTime(2027, 4, 30),
+        now: now,
+      );
+      expect(plan.added, [DateTime(2027, 3, 31), DateTime(2027, 4, 30)]);
+      expect(
+        seriesRhythmLabel(SeriesRhythm.month, monthly),
+        'Monatlich am 31.',
+      );
+      expect(seriesRhythmLabel(SeriesRhythm.week, starts), 'Jeden Dienstag');
+      expect(
+        seriesRhythmLabel(SeriesRhythm.twoWeeks, starts),
+        'Alle 2 Wochen dienstags',
+      );
+    });
+  });
+
+  group('whole series', () {
+    // Tuesdays 19:00–21:30; 1 and 8 September have begun (now: 12 September).
+    void weekly(TestServer server, {bool rhythm = true}) {
+      server.data['capabilities'] = {
+        'pushConfigured': true,
+        'features': ['seriesEdit', 'seriesManage'],
+      };
+      server.data['events'] = [
+        for (final d in [1, 8, 15, 22, 29])
+          {
+            'id': 'probe-$d',
+            'title': 'Probe',
+            'startsAt': DateTime(2026, 9, d, 19).toUtc().toIso8601String(),
+            'endsAt': DateTime(2026, 9, d, 21, 30).toUtc().toIso8601String(),
+            'place': 'Saal',
+            'seriesId': 'serie',
+            if (rhythm) 'seriesRepeat': {'every': 'week'},
+            'version': 1,
+          },
+      ];
+    }
+
+    Future<(TestServer, AppController)> openSeries(
+      WidgetTester tester, {
+      bool rhythm = true,
+    }) => pump(
+      tester,
+      (c) => EventEditorScreen(
+        controller: c,
+        event: c.events.firstWhere((e) => e.id == 'probe-15'),
+      ),
+      prepare: (server) => weekly(server, rhythm: rhythm),
+    );
+
+    Future<void> pickSeriesEnd(
+      WidgetTester tester,
+      String day, {
+      bool nextMonth = false,
+    }) async {
+      await tester.tap(find.byKey(const ValueKey('event-series-until')));
+      await tester.pumpAndSettle();
+      if (nextMonth) {
+        await tester.tap(find.byTooltip('Next month'));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text(day));
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+    }
+
+    String endSummary(WidgetTester tester) => tester
+        .widget<Text>(find.byKey(const ValueKey('event-series-end-summary')))
+        .data!;
+
+    testWidgets('edits all upcoming dates and explains the choice', (
+      tester,
+    ) async {
+      final (server, controller) = await openSeries(tester);
+      final hint = find.byKey(const ValueKey('event-series-scope-hint'));
+      expect(
+        tester.widget<Text>(hint).data,
+        'Teil einer Serie – Änderungen gelten nur für diesen Termin.',
+      );
+      expect(find.byKey(const ValueKey('event-series-rhythm')), findsNothing);
+      await tester.tap(find.text('Ganze Serie'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<Text>(hint).data,
+        startsWith(
+          'Gilt für alle 3 kommenden Termine der Serie, vergangene bleiben '
+          'unverändert. Übernommen wird nur, was du hier änderst',
+        ),
+      );
+      expect(find.text('Serie bearbeiten'), findsOneWidget);
+      expect(find.text('Jeden Dienstag'), findsOneWidget);
+      // The end shows the last date; unchanged, it is not sent.
+      expect(find.text('Dienstag, 29. September 2026'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('event-series-end-summary')),
+        findsNothing,
+      );
+      expect(find.text('19:00 Uhr · Datum je Termin'), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, 'Ort'), 'Aula');
+      final save = find.text('Serie speichern');
+      await scrollTo(tester, save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      final body = server.actionBodies.lastWhere(
+        (b) => b['action'] == 'event.save',
+      );
+      expect(
+        [body['id'], body['series'], body['place']],
+        ['probe-15', 'all', 'Aula'],
+      );
+      expect(body.containsKey('until'), isFalse);
+      expect(
+        body['startsAt'],
+        DateTime(2026, 9, 15, 19).toUtc().toIso8601String(),
+      );
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    });
+
+    testWidgets('a later end extends the series with one push', (tester) async {
+      final (server, controller) = await openSeries(tester);
+      await tester.tap(find.text('Ganze Serie'));
+      await tester.pumpAndSettle();
+      await pickSeriesEnd(tester, '13', nextMonth: true);
+      expect(endSummary(tester), 'Fügt 2 Termine hinzu: 6.10. bis 13.10.');
+      await scrollTo(tester, find.byKey(const ValueKey('event-push')));
+      expect(find.text('Eingeladene per Push benachrichtigen'), findsOneWidget);
+      expect(
+        find.textContaining('Eine Benachrichtigung für die neuen Termine.'),
+        findsOneWidget,
+      );
+      final save = find.text('Serie speichern');
+      await scrollTo(tester, save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      final body = server.actionBodies.lastWhere(
+        (b) => b['action'] == 'event.save',
+      );
+      expect(
+        [body['series'], body['until'], body['push']],
+        ['all', '2026-10-13', isTrue],
+      );
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    });
+
+    testWidgets('an earlier end asks before dates are removed', (tester) async {
+      final (server, controller) = await openSeries(tester);
+      await tester.tap(find.text('Ganze Serie'));
+      await tester.pumpAndSettle();
+      await pickSeriesEnd(tester, '15');
+      expect(endSummary(tester), 'Entfernt 2 Termine nach dem 15.9.');
+      final save = find.text('Serie speichern');
+      await scrollTo(tester, save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(find.text('Serie verkürzen?'), findsOneWidget);
+      expect(
+        find.textContaining(
+          'Die 2 Termine nach dem 15. September werden mit ihren '
+          'Rückmeldungen gelöscht.',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Abbrechen'));
+      await tester.pumpAndSettle();
+      expect(
+        server.actionBodies.where((b) => b['action'] == 'event.save'),
+        isEmpty,
+      );
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('2 Termine löschen'));
+      await tester.pumpAndSettle();
+      final body = server.actionBodies.lastWhere(
+        (b) => b['action'] == 'event.save',
+      );
+      expect([body['series'], body['until']], ['all', '2026-09-15']);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    });
+
+    testWidgets('without a known rhythm the end stays as it is', (
+      tester,
+    ) async {
+      final (server, controller) = await openSeries(tester, rhythm: false);
+      await tester.tap(find.text('Ganze Serie'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'Unregelmäßig – das Serienende lässt sich hier nicht ändern.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('event-series-until')), findsNothing);
+      // Back to this date alone, nothing of the series is sent.
+      await tester.tap(find.text('Nur dieser Termin'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('event-series-rhythm')), findsNothing);
+      final save = find.text('Termin speichern');
+      await scrollTo(tester, save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      final body = server.actionBodies.lastWhere(
+        (b) => b['action'] == 'event.save',
+      );
+      expect(body.containsKey('series'), isFalse);
+      expect(body.containsKey('until'), isFalse);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    });
   });
 }
