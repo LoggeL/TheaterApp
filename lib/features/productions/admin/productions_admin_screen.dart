@@ -8,6 +8,7 @@ import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../casting/domain/casting.dart';
 import '../../casting/ui/casting_screen.dart';
+import '../../casting/ui/script_roles_screen.dart';
 import 'production_editor_screen.dart';
 
 class ProductionsAdminScreen extends StatefulWidget {
@@ -153,6 +154,38 @@ class _ProductionsAdminScreenState extends State<ProductionsAdminScreen> {
     );
   }
 
+  /// All script roles of the current productions; the subtitle counts the
+  /// ones nobody plays yet, which the list then opens with.
+  Widget _scriptRoles(BuildContext context, List<JsonMap> active) {
+    final casts = active.map(ProductionCast.fromRecord);
+    final open = casts.fold(0, (n, p) => n + p.roles.length - p.castCount);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: Card(
+        child: ListTile(
+          key: const ValueKey('productions-script-roles'),
+          leading: const Icon(Icons.theater_comedy_outlined),
+          title: const Text('Drehbuchrollen'),
+          subtitle: Text(
+            open == 0
+                ? 'Alle Rollen der aktuellen Stücke besetzt'
+                : open == 1
+                ? '1 Rolle ohne Besetzung'
+                : '$open Rollen ohne Besetzung',
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => openPage(
+            context,
+            ScriptRolesScreen(
+              controller: widget.controller,
+              initialFilter: open > 0 ? 'unassigned' : 'all',
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => AdminPage(
     controller: widget.controller,
@@ -174,6 +207,8 @@ class _ProductionsAdminScreenState extends State<ProductionsAdminScreen> {
         ),
         const SizedBox(height: 22),
         if (_busy) const LinearProgressIndicator(),
+        if (active.any((p) => jsonList(p['roles']).isNotEmpty))
+          _scriptRoles(context, active),
         if (records.isEmpty)
           const EmptyState(
             icon: Icons.auto_stories_outlined,

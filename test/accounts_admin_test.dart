@@ -8,6 +8,8 @@ import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/accounts/accounts.dart';
+import 'package:theater_app/features/casting/casting.dart';
+import 'package:theater_app/features/ensemble/ensemble.dart';
 
 import 'account_roster_test.dart' show fixture;
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
@@ -65,6 +67,14 @@ Future<void> _menu(WidgetTester tester, String key) async {
       matching: find.byTooltip('Zugang verwalten'),
     ),
   );
+  await tester.pumpAndSettle();
+}
+
+/// Opens the collapsed section of inactive people.
+Future<void> _showInactive(WidgetTester tester) async {
+  final toggle = find.byKey(const ValueKey('access-inactive-toggle'));
+  await tester.ensureVisible(toggle);
+  await tester.tap(toggle);
   await tester.pumpAndSettle();
 }
 
@@ -150,16 +160,14 @@ void main() {
       ),
     );
     expect(find.text('1 Eintrag'), findsOneWidget);
-    await tester.tap(find.byTooltip('Zugang verwalten'));
-    await tester.pumpAndSettle();
+    await _menu(tester, '4');
     await tester.tap(find.text('Konto löschen'));
     await tester.pumpAndSettle();
     expect(find.text('Konto löschen?'), findsOneWidget);
     await tester.tap(find.text('Abbrechen'));
     await tester.pumpAndSettle();
     expect(deletions, isEmpty);
-    await tester.tap(find.byTooltip('Zugang verwalten'));
-    await tester.pumpAndSettle();
+    await _menu(tester, '4');
     await tester.tap(find.text('Konto löschen'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Löschen'));
@@ -187,8 +195,7 @@ void main() {
       ),
     );
     expect(find.text('1 Eintrag'), findsOneWidget);
-    await tester.tap(find.byTooltip('Zugang verwalten'));
-    await tester.pumpAndSettle();
+    await _menu(tester, '1');
     await tester.tap(find.text('Zugang sperren'));
     await tester.pumpAndSettle();
     expect(find.text('Zugang sperren?'), findsOneWidget);
@@ -196,8 +203,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(statusChanges, isEmpty);
 
-    await tester.tap(find.byTooltip('Zugang verwalten'));
-    await tester.pumpAndSettle();
+    await _menu(tester, '1');
     await tester.tap(find.text('Zugang sperren'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Sperren'));
@@ -343,7 +349,7 @@ void main() {
     await _pump(tester, server, (c) => AccountsAdminScreen(controller: c));
     await _menu(tester, '2');
     expect(find.text('Zugang sperren'), findsOneWidget);
-    expect(find.text('In Ensemble bearbeiten'), findsOneWidget);
+    expect(find.text('Person bearbeiten'), findsOneWidget);
     expect(find.text('Rechte bearbeiten…'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
@@ -390,6 +396,9 @@ void main() {
     final changes = <JsonMap>[];
     _serve(server, data, changes);
     await _pump(tester, server, (c) => AccountsAdminScreen(controller: c));
+    // Kim is inactive: the section at the end opens on demand.
+    expect(find.byKey(const ValueKey('access-entry-4')), findsNothing);
+    await _showInactive(tester);
     expect(_inRow('4', 'Termine verwalten · ruht'), findsOneWidget);
     expect(_inRow('4', 'Person inaktiv'), findsOneWidget);
     await _menu(tester, '4');
@@ -552,16 +561,16 @@ void main() {
       );
     };
     await _pump(tester, server, (c) => AccountsAdminScreen(controller: c));
-    expect(find.text('Zugänge & Rechte'), findsOneWidget);
-    // Four people and the registration without a person.
-    expect(find.text('5 Einträge'), findsOneWidget);
-    expect(find.text('Zugänge (5)'), findsOneWidget);
-    expect(find.text('Drehbuchrollen (4)'), findsOneWidget);
+    expect(find.text('Personen & Zugänge'), findsOneWidget);
+    // Four people; the waiting registration stands apart on top.
+    expect(find.text('4 Einträge'), findsOneWidget);
+    expect(find.text('Wartet auf Zuordnung (1)'), findsOneWidget);
+    expect(find.text('Drehbuchrollen (4)'), findsNothing);
     fail = true;
     await tester.tap(find.byTooltip('Aktualisieren'));
     await tester.pumpAndSettle();
-    expect(find.text('5 Einträge'), findsOneWidget);
-    expect(find.text('Konten nicht geladen'), findsNothing);
+    expect(find.text('4 Einträge'), findsOneWidget);
+    expect(find.byKey(const ValueKey('access-not-loaded')), findsNothing);
     expect(find.byType(SnackBar), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
@@ -610,7 +619,22 @@ void main() {
         initialUid: 'new',
       ),
     );
-    expect(find.text('1 Eintrag'), findsOneWidget);
+    // The former waiting filter shows the whole list; the registration is
+    // highlighted in the block on top.
+    expect(find.text('4 Einträge'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilterChip>(find.byKey(const ValueKey('status-all')))
+          .selected,
+      isTrue,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('access-waiting')),
+        matching: find.byKey(const ValueKey('access-entry-new')),
+      ),
+      findsOneWidget,
+    );
     final card = tester.widget<Card>(
       find.byKey(const ValueKey('access-entry-new')),
     );
@@ -622,13 +646,14 @@ void main() {
   });
 
   for (final (view, filter, status, count) in [
-    ('accounts', 'pending', 'waiting', '1 Eintrag'),
+    // Waiting registrations always show on top, so no filter is needed.
+    ('accounts', 'pending', 'all', '4 Einträge'),
     ('accounts', 'approved', 'approved', '1 Eintrag'),
     ('accounts', 'suspended', 'suspended', '1 Eintrag'),
     ('accounts', 'rejected', 'rejected', '0 Einträge'),
     ('people', 'linked', 'approved', '1 Eintrag'),
     ('people', 'unlinked', 'noAccount', '2 Einträge'),
-    ('people', 'all', 'all', '5 Einträge'),
+    ('people', 'all', 'all', '4 Einträge'),
   ]) {
     testWidgets('the former view $view/$filter opens the $status filter', (
       tester,
@@ -655,11 +680,13 @@ void main() {
     });
   }
 
-  testWidgets('the former unassigned roles view lists uncast roles', (
-    tester,
-  ) async {
+  testWidgets('the former roles view opens the script roles', (tester) async {
     final server = TestServer();
-    _serve(server, jsonMap(jsonDecode(jsonEncode(fixture()))), []);
+    var loads = 0;
+    server.override = (request) {
+      if (request.url.path.contains('/admin/accounts')) loads++;
+      return null;
+    };
     await _pump(
       tester,
       server,
@@ -669,9 +696,17 @@ void main() {
         initialFilter: 'unassigned',
       ),
     );
-    expect(find.text('1 Drehbuchrolle'), findsOneWidget);
-    expect(find.text('Chor'), findsOneWidget);
-    expect(find.text('Graf'), findsNothing);
+    // They live in "Produktionen & Besetzung" now and need no account list.
+    expect(find.byType(ScriptRolesScreen), findsOneWidget);
+    expect(
+      tester
+          .widget<FilterChip>(
+            find.byKey(const ValueKey('script-roles-unassigned')),
+          )
+          .selected,
+      isTrue,
+    );
+    expect(loads, 0);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -698,21 +733,22 @@ void main() {
       find.descendant(of: summary, matching: find.text('4 Personen')),
     );
     await tester.pumpAndSettle();
-    expect(find.text('5 Einträge'), findsOneWidget);
+    expect(find.text('4 Einträge'), findsOneWidget);
     expect(find.text('Alle Rollen'), findsOneWidget);
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
       '',
     );
 
-    // "Keine offenen Freigaben" only shows without other filters.
-    await tester.tap(find.byKey(const ValueKey('status-waiting')));
+    // Filters that find nobody say so.
+    await tester.tap(find.byKey(const ValueKey('status-suspended')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('right-admin')));
     await tester.pumpAndSettle();
     expect(find.text('0 Einträge'), findsOneWidget);
-    expect(find.text('Keine offenen Freigaben'), findsNothing);
     expect(find.text('Keine Treffer'), findsOneWidget);
+    // The waiting registration stays on top, whatever the filters say.
+    expect(find.text('Wartet auf Zuordnung (1)'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
@@ -728,6 +764,104 @@ void main() {
     expect(find.text('Rechte bearbeiten…'), findsNothing);
     expect(find.text('Zugang sperren'), findsNothing);
     expect(find.text('Konto löschen'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('waiting registrations stay on top, inactive people at the end', (
+    tester,
+  ) async {
+    final server = TestServer();
+    _serve(server, jsonMap(jsonDecode(jsonEncode(fixture()))), []);
+    await _pump(tester, server, (c) => AccountsAdminScreen(controller: c));
+    final block = find.byKey(const ValueKey('access-waiting'));
+    expect(
+      find.descendant(of: block, matching: find.text('Prüfen & verknüpfen')),
+      findsOneWidget,
+    );
+    double top(Finder f) => tester.getTopLeft(f).dy;
+    expect(top(block), lessThan(top(find.byType(TextField))));
+    // A search narrows the list below, never the block.
+    await tester.enterText(find.byType(TextField), 'Alex');
+    await tester.pumpAndSettle();
+    expect(find.text('1 Eintrag'), findsOneWidget);
+    expect(find.byKey(const ValueKey('access-entry-new')), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '');
+    await tester.pumpAndSettle();
+
+    // Kim is inactive: collapsed at the end until opened.
+    expect(find.text('Nicht aktiv (1)'), findsOneWidget);
+    expect(find.byKey(const ValueKey('access-entry-4')), findsNothing);
+    await _showInactive(tester);
+    expect(
+      top(find.byKey(const ValueKey('access-entry-4'))),
+      greaterThan(top(find.byKey(const ValueKey('access-entry-3')))),
+    );
+    // Searching shows inactive matches right away.
+    await _showInactive(tester);
+    expect(find.byKey(const ValueKey('access-entry-4')), findsNothing);
+    await tester.enterText(find.byType(TextField), 'Kim');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('access-entry-4')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a row opens the person; the button creates one', (tester) async {
+    final server = TestServer();
+    _serve(server, jsonMap(jsonDecode(jsonEncode(fixture()))), []);
+    await _pump(tester, server, (c) => AccountsAdminScreen(controller: c));
+    await tester.tap(_inRow('1', 'Alex'));
+    await tester.pumpAndSettle();
+    expect(find.text('Person bearbeiten'), findsOneWidget);
+    expect(find.byType(PersonAccessSection), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    // A registration has no person to open.
+    await tester.tap(_inRow('new', 'Sam'));
+    await tester.pumpAndSettle();
+    expect(find.byType(MemberEditorScreen), findsNothing);
+    await tester.tap(
+      find.widgetWithText(FloatingActionButton, 'Person anlegen'),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(MemberEditorScreen), findsOneWidget);
+    expect(
+      tester.widget<MemberEditorScreen>(find.byType(MemberEditorScreen)).member,
+      isNull,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('without the account list the people stay editable', (
+    tester,
+  ) async {
+    final server = TestServer();
+    server.override = (request) => request.url.path.contains('/admin/accounts')
+        ? Future.value(jsonResponse({'error': 'Server nicht erreichbar.'}, 503))
+        : null;
+    final controller = await _pump(
+      tester,
+      server,
+      (c) => AccountsAdminScreen(controller: c),
+    );
+    expect(find.text('Zugänge nicht geladen'), findsOneWidget);
+    // The people come from the app's own data, without access details.
+    final person = controller.memberRecords.firstWhere(
+      (m) => m['active'] != false,
+    );
+    final row = find.byKey(ValueKey('access-entry-${person['id']}'));
+    expect(row, findsOneWidget);
+    expect(find.byKey(const ValueKey('access-summary')), findsNothing);
+    expect(find.byKey(const ValueKey('status-all')), findsNothing);
+    expect(
+      find.descendant(of: row, matching: find.text('Kein Konto')),
+      findsNothing,
+    );
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+    expect(find.text('Person bearbeiten'), findsOneWidget);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
 }

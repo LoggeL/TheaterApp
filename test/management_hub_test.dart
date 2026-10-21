@@ -102,18 +102,33 @@ void main() {
         {'uid': 'unverified', 'status': 'pending', 'identityReady': false},
       ];
       await _pumpHub(tester, server);
-      expect(find.text('Zugänge & Rechte'), findsOneWidget);
-      expect(find.text('Konten & Verknüpfungen'), findsNothing);
+      // One tile for people and their access.
+      expect(find.text('Personen & Zugänge'), findsOneWidget);
+      for (final gone in [
+        'Zugänge & Rechte',
+        'Ensemble verwalten',
+        'Konten & Verknüpfungen',
+      ]) {
+        expect(find.text(gone), findsNothing, reason: gone);
+      }
+      for (final kept in [
+        'Rollen verwalten',
+        'Ensembles & Verteiler',
+        'Teilnahme im Ensemble',
+      ]) {
+        expect(find.text(kept), findsOneWidget, reason: kept);
+      }
       final subtitle = waiting == 0
-          ? 'Freigaben, Verknüpfungen und Rechte'
+          ? 'Personen, Zugänge und Rechte'
           : '1 neue Registrierung wartet auf Zuordnung';
       expect(find.text(subtitle), findsOneWidget);
-      await tester.tap(find.text('Zugänge & Rechte'));
+      await tester.tap(find.text('Personen & Zugänge'));
       await tester.pumpAndSettle();
       final screen = tester.widget<AccountsAdminScreen>(
         find.byType(AccountsAdminScreen),
       );
-      expect(screen.initialStatus, waiting == 0 ? 'all' : 'waiting');
+      // Waiting registrations stand on top of the list, so it opens whole.
+      expect(screen.initialStatus, isNull);
       expect(tester.takeException(), isNull);
     });
   }

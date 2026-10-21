@@ -146,8 +146,8 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
           message:
               'Die Anfrage von ${textValue(widget.account['name'])} '
               '(${textValue(widget.account['email'])}) wird abgelehnt. '
-              'Das Konto erhält keinen Zugang. Du kannst es später in der '
-              'Kontenverwaltung erneut prüfen.',
+              'Das Konto erhält keinen Zugang. Du kannst es später unter '
+              '„Personen & Zugänge“ erneut prüfen.',
           confirmLabel: 'Ablehnen',
           scrollable: true,
         );

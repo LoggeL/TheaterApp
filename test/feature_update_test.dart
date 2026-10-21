@@ -108,7 +108,7 @@ void main() {
       }
       await tester.pumpAndSettle();
       expect(find.text('Administration.'), findsOneWidget);
-      expect(find.text('Zugänge & Rechte'), findsOneWidget);
+      expect(find.text('Personen & Zugänge'), findsOneWidget);
       expect(tester.takeException(), isNull);
       if (width < 900) {
         await tester.tap(find.byTooltip('Zurück'));

@@ -370,7 +370,8 @@ void main() {
     final screen = tester.widget<AccountsAdminScreen>(
       find.byType(AccountsAdminScreen),
     );
-    expect(screen.initialStatus, 'waiting');
+    // The waiting registrations stand on top of the whole list.
+    expect(screen.initialStatus, isNull);
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });

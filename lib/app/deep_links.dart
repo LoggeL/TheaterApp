@@ -62,8 +62,7 @@ class DeepLinkRouter {
         AppSection.admin,
         AccountsAdminScreen(
           controller: controller,
-          initialStatus: 'waiting',
-          // The registration from the push, highlighted in the list.
+          // The registration from the push, highlighted among the waiting.
           initialUid: target.id,
         ),
       ),

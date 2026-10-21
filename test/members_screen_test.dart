@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
+import 'package:theater_app/features/accounts/accounts.dart';
 import 'package:theater_app/features/ensemble/ensemble.dart';
 
 import 'app_controller_test.dart' show TestServer, signIn;
@@ -34,9 +35,9 @@ void main() {
       expect(find.text('Niemand gefunden'), findsNothing);
       expect(find.text('Nicht aktiv (1)'), findsOneWidget);
 
-      await tester.tap(find.byTooltip('Ensemble verwalten'));
+      await tester.tap(find.byTooltip('Personen & Zugänge'));
       await tester.pumpAndSettle();
-      expect(find.byType(MembersAdminScreen), findsOneWidget);
+      expect(find.byType(AccountsAdminScreen), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       controller.dispose();

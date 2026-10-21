@@ -81,17 +81,24 @@ void main() {
         home: ManagementScreen(controller: controller),
       ),
     );
-    expect(find.text('Zugänge & Rechte'), findsOneWidget);
+    expect(find.text('Personen & Zugänge'), findsOneWidget);
     await tester.tap(find.text('2 neue Registrierungen warten auf Zuordnung'));
     await tester.pumpAndSettle();
     expect(find.byType(AccountsAdminScreen), findsOneWidget);
-    // The waiting filter, counted like the hub: confirmed registrations.
-    final status = tester.widget<FilterChip>(
-      find.byKey(const ValueKey('status-waiting')),
+    // The waiting block on top, counted like the hub: confirmed
+    // registrations.
+    final block = find.byKey(const ValueKey('access-waiting'));
+    expect(
+      find.descendant(
+        of: block,
+        matching: find.text('Wartet auf Zuordnung (2)'),
+      ),
+      findsOneWidget,
     );
-    expect(status.selected, isTrue);
-    expect(find.text('Wartet (2)'), findsOneWidget);
-    expect(find.text('2 Einträge'), findsOneWidget);
+    expect(
+      find.descendant(of: block, matching: find.text('Prüfen & verknüpfen')),
+      findsNWidgets(2),
+    );
     expect(find.text('Prüfen & verknüpfen'), findsNWidgets(2));
     // The unconfirmed registration is counted apart.
     expect(find.text('Unbestätigt (1)'), findsOneWidget);
@@ -139,7 +146,7 @@ void main() {
     final screen = tester.widget<AccountsAdminScreen>(
       find.byType(AccountsAdminScreen),
     );
-    expect((screen.initialStatus, screen.initialUid), ('waiting', 'new'));
+    expect((screen.initialStatus, screen.initialUid), (null, 'new'));
     expect(selection.value, AppSection.admin.index);
     final card = tester.widget<Card>(
       find.byKey(const ValueKey('access-entry-new')),

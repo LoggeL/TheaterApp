@@ -336,10 +336,8 @@ class _TodayScreenState extends State<TodayScreen> {
           highlight: true,
           onTap: () => openPage(
             context,
-            AccountsAdminScreen(
-              controller: controller,
-              initialStatus: 'waiting',
-            ),
+            // Waiting registrations stand on top of the list.
+            AccountsAdminScreen(controller: controller),
           ),
         ),
       ],

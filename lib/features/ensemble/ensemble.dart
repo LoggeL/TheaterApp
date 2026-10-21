@@ -2,7 +2,6 @@
 library;
 
 export 'admin/member_editor_screen.dart';
-export 'admin/members_admin_screen.dart';
 export 'admin/roles_admin_screen.dart';
 export 'admin/website_profile_link.dart';
 export 'data/website_profiles.dart';

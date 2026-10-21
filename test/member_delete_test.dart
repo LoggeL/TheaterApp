@@ -87,7 +87,15 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('$name endgültig löschen?'), findsOneWidget);
-      expect(find.textContaining('weg@example.invalid'), findsOneWidget);
+      // The dialog names the linked login, which the App-Zugang section
+      // behind it shows as well.
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining('weg@example.invalid'),
+        ),
+        findsOneWidget,
+      );
       expect(find.textContaining('Besetzungen'), findsOneWidget);
       expect(find.textContaining('Rückmeldungen'), findsOneWidget);
       // Inactive people are already deactivated: no "Nur deaktivieren" here.

@@ -9,7 +9,6 @@ import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/tile_group.dart';
 import '../../accounts/ui/accounts_admin_screen.dart';
-import '../../ensemble/admin/members_admin_screen.dart';
 import '../../ensemble/admin/roles_admin_screen.dart';
 import '../../events/admin/events_admin_screen.dart';
 import '../../events/domain/event_format.dart';
@@ -85,24 +84,15 @@ class ManagementScreen extends StatelessWidget {
             title: 'Personen',
             tiles: [
               tile(
-                Icons.person_add_alt,
-                'Zugänge & Rechte',
-                AccountsAdminScreen(
-                  controller: controller,
-                  initialStatus: registrations > 0 ? 'waiting' : 'all',
-                ),
+                Icons.groups_outlined,
+                'Personen & Zugänge',
+                AccountsAdminScreen(controller: controller),
                 registrations == 0
-                    ? 'Freigaben, Verknüpfungen und Rechte'
+                    ? 'Personen, Zugänge und Rechte'
                     : registrations == 1
                     ? '1 neue Registrierung wartet auf Zuordnung'
                     : '$registrations neue Registrierungen warten auf Zuordnung',
                 registrations == 0 ? null : theme.colorScheme.primary,
-              ),
-              tile(
-                Icons.groups_outlined,
-                'Ensemble verwalten',
-                MembersAdminScreen(controller: controller),
-                'Personen anlegen, Rollen zuordnen',
               ),
               tile(
                 Icons.badge_outlined,

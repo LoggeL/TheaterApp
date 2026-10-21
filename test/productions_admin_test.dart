@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/data/demo_data.dart';
+import 'package:theater_app/features/casting/casting.dart';
 import 'package:theater_app/features/productions/productions.dart';
 
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
@@ -207,6 +208,62 @@ void main() {
     await tester.pumpAndSettle();
     expect(jsonDecode(imports.single.body), {'productionId': 'frisch'});
     expect(find.text('Drehbuch importiert.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the script roles of current productions show their casting', (
+    tester,
+  ) async {
+    final server = TestServer();
+    server.data['productions'] = [
+      {
+        'id': 'one',
+        'title': 'Sommerstück',
+        'version': 1,
+        'casting': {'A': 5},
+        'roles': [
+          {'id': 'A', 'name': 'Graf', 'actor': 'Sam'},
+          {'id': 'B', 'name': 'Bote', 'actor': 'Robin'},
+          {'id': 'C', 'name': 'Chor', 'actor': ''},
+        ],
+      },
+      {
+        'id': 'old',
+        'title': 'Altes Stück',
+        'archived': true,
+        'version': 1,
+        'roles': [
+          {'id': 'A', 'name': 'Geist', 'actor': ''},
+        ],
+      },
+    ];
+    await _pump(tester, server);
+    final tile = find.byKey(const ValueKey('productions-script-roles'));
+    expect(
+      find.descendant(of: tile, matching: find.text('2 Rollen ohne Besetzung')),
+      findsOneWidget,
+    );
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    // Opens with the roles nobody plays yet; archived plays stay out.
+    expect(find.byType(ScriptRolesScreen), findsOneWidget);
+    expect(find.text('2 Drehbuchrollen'), findsOneWidget);
+    expect(
+      find.text('Sommerstück\nBesetzung offen · Skript: Robin'),
+      findsOneWidget,
+    );
+    expect(find.text('Sommerstück\nOhne Einzelbesetzung'), findsOneWidget);
+    expect(find.text('Geist'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('script-roles-all')));
+    await tester.pumpAndSettle();
+    expect(find.text('3 Drehbuchrollen'), findsOneWidget);
+    expect(find.text('Sommerstück\nSam Vorhang'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'sam');
+    await tester.pumpAndSettle();
+    expect(find.text('1 Drehbuchrolle'), findsOneWidget);
+    await tester.tap(find.byTooltip('Besetzung bearbeiten'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CastingScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

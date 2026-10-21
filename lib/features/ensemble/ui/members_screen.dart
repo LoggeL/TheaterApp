@@ -7,7 +7,7 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/member_avatar.dart';
 import '../../../shared/widgets/page_header.dart';
-import '../admin/members_admin_screen.dart';
+import '../../accounts/ui/accounts_admin_screen.dart';
 import 'member_profile_screen.dart';
 
 class MembersScreen extends StatefulWidget {
@@ -37,10 +37,10 @@ class _MembersScreenState extends State<MembersScreen> {
         actions: [
           if (widget.controller.user?.isAdmin == true)
             IconButton(
-              tooltip: 'Ensemble verwalten',
+              tooltip: 'Personen & Zugänge',
               onPressed: () => openPage(
                 context,
-                MembersAdminScreen(controller: widget.controller),
+                AccountsAdminScreen(controller: widget.controller),
               ),
               icon: const Icon(Icons.manage_accounts_outlined),
             ),

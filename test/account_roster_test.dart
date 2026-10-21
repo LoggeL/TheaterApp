@@ -351,7 +351,6 @@ void main() {
           '7 Personen',
           '4 freigegeben',
           '2 ohne Konto',
-          '1 wartet',
           '1 unbestätigt',
           '1 Admin',
           // Kim's suspended right rests and is not counted.
@@ -363,15 +362,17 @@ void main() {
             reason: part,
           );
         }
-        expect(find.text('Zugänge (10)'), findsOneWidget);
-        expect(find.text('10 Einträge'), findsOneWidget);
-        // The own row with its admin rights and login details.
+        // The waiting registration stands on top, apart from the list.
+        expect(find.text('Wartet auf Zuordnung (1)'), findsOneWidget);
+        expect(find.text('9 Einträge'), findsOneWidget);
+        // The own row with its admin rights and login address; the further
+        // login details are in the person editor.
         final alex = find.byKey(const ValueKey('access-entry-1'));
         for (final text in [
           'Du',
           'Freigegeben',
           'Admin',
-          'Google · bestätigt · zuletzt aktiv 3.10.2026 · freigegeben 1.9.2026',
+          'alex@example.test',
         ]) {
           expect(
             find.descendant(of: alex, matching: find.text(text)),
@@ -396,13 +397,21 @@ void main() {
         expect(find.text('2 Einträge'), findsOneWidget);
         expect(find.text('Person inaktiv'), findsNWidgets(2));
         await chip('status-unassigned');
-        expect(find.text('3 Einträge'), findsOneWidget);
+        expect(find.text('2 Einträge'), findsOneWidget);
         await chip('status-rejected');
         expect(find.text('Verdacht: Bot-Falle'), findsOneWidget);
         expect(find.text('Erneut prüfen'), findsOneWidget);
         await chip('status-unverified');
         expect(find.text('Wartet auf E-Mail-Bestätigung'), findsOneWidget);
-        expect(find.text('Prüfen & verknüpfen'), findsNothing);
+        // Only the waiting registration on top can be approved.
+        expect(find.text('Prüfen & verknüpfen'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('access-entry-unverified')),
+            matching: find.text('Prüfen & verknüpfen'),
+          ),
+          findsNothing,
+        );
         await chip('status-all');
 
         await chip('right-events');
@@ -440,8 +449,12 @@ void main() {
           'neu@example.test · E-Mail unbestätigt',
         );
         expect(tester.widget<ListTile>(unconfirmed).enabled, isFalse);
-        expect(find.text('sam.real@example.test'), findsOneWidget);
-        await tester.tap(find.text('sam.real@example.test'));
+        final registration = find.widgetWithText(
+          ListTile,
+          'sam.real@example.test',
+        );
+        expect(registration, findsOneWidget);
+        await tester.tap(registration);
         await tester.pumpAndSettle();
         expect(find.byType(AccountApprovalScreen), findsOneWidget);
         final approval = tester.widget<AccountApprovalScreen>(
