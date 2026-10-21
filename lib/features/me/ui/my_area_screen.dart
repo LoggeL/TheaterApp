@@ -398,6 +398,14 @@ class _ProfileCard extends StatelessWidget {
                             'Administration',
                             color: StageTheme.violet,
                           ),
+                        )
+                      else if (user?.canManageEvents == true)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 8),
+                          child: StatePill(
+                            'Termine verwalten',
+                            color: StageTheme.green,
+                          ),
                         ),
                       const SizedBox(height: 10),
                       Text(

@@ -48,6 +48,54 @@ void main() {
     },
   );
 
+  test('implicit attendees get "Ok" and "Komme nicht"', () {
+    NotificationResponse response(String? action) => NotificationResponse(
+      notificationResponseType:
+          NotificationResponseType.selectedNotificationAction,
+      actionId: action,
+      payload: jsonEncode({
+        'eventId': 'e-1',
+        'recipientUid': 'member-a',
+        'attendanceActions': 'planned',
+        'intent': 'decline',
+      }),
+    );
+    expect(
+      AppTarget.fromNotificationResponse(response('no'))!.attendance,
+      'no',
+    );
+    // "Ok" confirms explicitly, so the person counts as zugesagt.
+    expect(
+      AppTarget.fromNotificationResponse(response('yes'))!.attendance,
+      'yes',
+    );
+    expect(
+      AppTarget.fromNotificationResponse(response(null))!.intent,
+      'decline',
+    );
+    expect(
+      AppTarget.fromData({'eventId': 'e-1', 'intent': 'other'})!.intent,
+      isNull,
+    );
+    // The Android card offers "Ok" (an explicit yes) and the decline.
+    List<(String, String)>? shown(Map<String, dynamic> data) =>
+        AndroidPushNotifications.attendanceActions(
+          data,
+        )?.map((a) => (a.id, a.title)).toList();
+    expect(shown({'eventId': 'e-1', 'attendanceActions': 'planned'}), [
+      ('yes', 'Ok'),
+      ('no', 'Komme nicht'),
+    ]);
+    // The unreleased decline-only value shows no buttons.
+    expect(shown({'eventId': 'e-1', 'attendanceActions': 'decline'}), isNull);
+    expect(shown({'eventId': 'e-1', 'attendanceActions': 'true'}), [
+      ('yes', 'Komme'),
+      ('no', 'Komme nicht'),
+    ]);
+    expect(shown({'eventId': 'e-1'}), isNull);
+    expect(shown({'pollId': 'p1', 'attendanceActions': 'planned'}), isNull);
+  });
+
   test('poll pushes and links open the poll', () {
     final fromData = AppTarget.fromData({'pollId': 'p1'})!;
     expect((fromData.kind, fromData.id), ('polls', 'p1'));

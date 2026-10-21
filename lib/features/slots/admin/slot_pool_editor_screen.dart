@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/account_permissions.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../shared/audience/audience_pickers.dart';
@@ -221,6 +222,7 @@ class _SlotPoolEditorScreenState extends State<SlotPoolEditorScreen> {
       dirty: _dirty,
       child: AdminPage(
         controller: widget.controller,
+        permission: eventsPermission,
         title: widget.pool == null
             ? 'Terminfinder anlegen'
             : 'Terminfinder bearbeiten',

@@ -370,7 +370,7 @@ void main() {
     final screen = tester.widget<AccountsAdminScreen>(
       find.byType(AccountsAdminScreen),
     );
-    expect([screen.initialView, screen.initialFilter], ['accounts', 'pending']);
+    expect(screen.initialStatus, 'waiting');
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/account_permissions.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../shared/navigation.dart';
@@ -96,7 +97,7 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     // The one way to create an event; in the calendar on the selected day.
-    floatingActionButton: widget.controller.user?.isAdmin == true
+    floatingActionButton: widget.controller.user?.canManageEvents == true
         ? FloatingActionButton.extended(
             onPressed: () => openPage(
               context,
@@ -115,6 +116,7 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
         : null,
     body: AdminPage(
       controller: widget.controller,
+      permission: eventsPermission,
       title: 'Termine verwalten',
       children: (context) {
         final day = widget.controller.events

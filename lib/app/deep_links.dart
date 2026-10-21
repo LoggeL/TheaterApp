@@ -50,15 +50,21 @@ class DeepLinkRouter {
     final (section, page) = switch (target.kind) {
       'events' => (
         AppSection.schedule,
-        EventDetailScreen(controller: controller, eventId: target.id),
+        EventDetailScreen(
+          controller: controller,
+          eventId: target.id,
+          // A quick answer from the notification needs no sheet.
+          openDecline: target.intent == 'decline' && target.attendance == null,
+        ),
       ),
       // New registrations: only admins can act on them.
       'accounts' when controller.user?.isAdmin == true => (
         AppSection.admin,
         AccountsAdminScreen(
           controller: controller,
-          initialView: 'accounts',
-          initialFilter: 'pending',
+          initialStatus: 'waiting',
+          // The registration from the push, highlighted in the list.
+          initialUid: target.id,
         ),
       ),
       'slots' => (

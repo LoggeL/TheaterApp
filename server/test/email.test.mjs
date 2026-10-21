@@ -151,3 +151,26 @@ test('opting out during a batch stops the pending recipient before their send', 
   await deliverEmail(theater, { configured: true, send: async value => { sent.push(value); store.put('reminders', account.personId, { emailEnabled: false }); return 'id'; } }, 'https://app.example.com');
   assert.deepEqual(sent.map(x => x.to), ['second@example.com']);
 });
+
+test('"Du bist eingeplant" mails open the decline and are rechecked before sending', async t => {
+  const { store, theater, account, email, sent } = setup(t);
+  store.put('events', 'e', { ...store.get('events', 'e'), autoAccept: true });
+  store.put('reminders', account.personId, { emailEnabled: true });
+  const content = eventEmail({ planned: true }, store.get('events', 'e'), 'https://app.example.com');
+  assert.equal(content.subject, 'Du bist eingeplant: <Probe>');
+  assert.match(content.text, /Kannst du nicht\? Bitte in der App absagen\./);
+  assert.equal(new URL(content.text.match(/https:\S+/)[0]).searchParams.get('target'), 'theaterapp://app/events/e?intent=decline');
+  const queue = () => theater.enqueueEmail({ title: 'Du bist eingeplant: <Probe>', data: { eventId: 'e', intent: 'decline' }, recipientPersonIds: [account.personId], planned: true, pushKind: 'eventPlanned' });
+  // An answer given meanwhile voids the mail, and so does the switched-off push kind.
+  queue(); store.put('responses', `e:${account.personId}`, { status: 'yes' });
+  await deliverEmail(theater, email, 'https://app.example.com');
+  assert.equal(sent.length, 0);
+  store.delete('responses', `e:${account.personId}`);
+  queue(); store.put('reminders', account.personId, { emailEnabled: true, eventPlanned: false });
+  await deliverEmail(theater, email, 'https://app.example.com');
+  assert.equal(sent.length, 0);
+  store.put('reminders', account.personId, { emailEnabled: true });
+  queue();
+  await deliverEmail(theater, email, 'https://app.example.com');
+  assert.deepEqual(sent.map(x => x.subject), ['Du bist eingeplant: <Probe>']);
+});

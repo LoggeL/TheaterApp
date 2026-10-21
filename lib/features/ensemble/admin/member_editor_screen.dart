@@ -6,6 +6,9 @@ import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/page_header.dart';
+import '../../accounts/data/accounts_api.dart';
+import '../../accounts/domain/account_roster.dart';
+import '../../accounts/ui/access_widgets.dart';
 import '../../accounts/ui/accounts_admin_screen.dart';
 import '../../casting/ui/person_productions.dart';
 import 'roles_admin_screen.dart';
@@ -37,9 +40,16 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
   late final bool _initialActive;
   late final Set<String> _initialRoles;
   bool _busy = false, _saved = false, _touched = false;
+
+  /// Status and rights of the person's app access, e.g. "Freigegeben ·
+  /// Admin"; null until loaded or when loading failed.
+  String? _access;
   @override
   void initState() {
     super.initState();
+    if (widget.member != null && widget.controller.user?.isAdmin == true) {
+      _loadAccess();
+    }
     _initialName = widget.member == null
         ? (widget.initialName ?? '').trim()
         : textValue(widget.member?['name']);
@@ -52,6 +62,30 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
       widget.member?['roleIds'],
     ).map((r) => r.toString()).toSet();
     _roles = {..._initialRoles};
+  }
+
+  Future<void> _loadAccess() async {
+    try {
+      final roster = await fetchRoster(widget.controller);
+      final entry = AccessEntry(
+        member: widget.member,
+        account: roster.accountFor(intValue(widget.member!['id'])),
+      );
+      final status = accessStatus(entry);
+      final rights = rightsSummary(roster.rights(entry));
+      if (!mounted) return;
+      // Like the overview row: the server denies an inactive person any
+      // access, whatever the account says.
+      setState(
+        () => _access = [
+          accessStatusLabel(status),
+          if (entry.inactive) accessStatusLabel('inactive'),
+          if (status != 'noAccount' && rights.isNotEmpty) rights,
+        ].join(' · '),
+      );
+    } catch (_) {
+      // The tile keeps its general description.
+    }
   }
 
   bool get _nameMissing => _name.text.trim().isEmpty;
@@ -131,9 +165,8 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
       // Without that list (offline) only deactivating is possible.
       List<JsonMap>? accounts;
       try {
-        final data = await widget.controller.remote('/admin/accounts');
-        accounts = jsonList(data['accounts'])
-            .map(jsonMap)
+        final roster = await fetchRoster(widget.controller);
+        accounts = roster.accounts
             .where((a) => intValue(a['personId'], -1) == personId)
             .toList();
       } catch (_) {
@@ -302,15 +335,18 @@ class _MemberEditorScreenState extends State<MemberEditorScreen> {
             key: const ValueKey('member-editor-account'),
             leading: const Icon(Icons.key_outlined),
             title: const Text('App-Zugang'),
-            subtitle: const Text('Konto, Freigabe und Zugang verwalten'),
+            subtitle: Text(_access ?? 'Konto, Freigabe und Rechte verwalten'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => openPage(
-              context,
-              AccountsAdminScreen(
-                controller: widget.controller,
-                initialQuery: textValue(widget.member!['name']),
-              ),
-            ),
+            onTap: () async {
+              await openPage(
+                context,
+                AccountsAdminScreen(
+                  controller: widget.controller,
+                  initialPersonId: intValue(widget.member!['id']),
+                ),
+              );
+              if (mounted) await _loadAccess();
+            },
           ),
         if (widget.member != null)
           WebsiteProfileLink(

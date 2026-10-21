@@ -105,7 +105,9 @@ void main() {
       await tester.tap(find.text('Endgültig löschen'));
       await tester.pumpAndSettle();
 
+      // The first request fills the "App-Zugang" tile.
       expect(calls, [
+        'GET /admin/accounts',
         'GET /admin/accounts',
         'DELETE /admin/accounts/linked-uid',
       ]);

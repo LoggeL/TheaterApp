@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/stage_theme.dart';
+import '../../../core/account_permissions.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../shared/feedback.dart';
@@ -11,6 +12,8 @@ import '../../../shared/widgets/state_pill.dart';
 import '../../auth/ui/sign_in_providers.dart';
 import '../../casting/domain/casting.dart';
 import '../../ensemble/admin/member_editor_screen.dart';
+import '../domain/account_roster.dart';
+import 'access_widgets.dart';
 
 /// Where an account's name comes from when the person did not supply one,
 /// e.g. "Google-Konto"; "Anmeldekonto" for unknown providers and e-mail.
@@ -49,14 +52,6 @@ TheaterMember? uniqueExactMatch(
   return exact.length == 1 ? exact.single : null;
 }
 
-/// Registrations without a valid bot check proof, e.g. from older apps;
-/// accounts from before the bot check have no value and are not marked.
-bool _withoutBotCheck(JsonMap a) =>
-    const ['missing', 'invalid'].contains(a['botCheck']);
-
-/// Registrations caught by the invisible bot trap of the sign-in forms.
-bool _caughtByBotTrap(JsonMap a) => a['botCheck'] == 'trap';
-
 /// What the bot trap noticed, for the approval notice.
 String _botTrapNotice(JsonMap a) =>
     '${a['botTrap'] == 'fast' ? 'Diese Registrierung wurde ungewöhnlich schnell abgeschickt.' : 'Bei dieser Registrierung wurde ein für Menschen unsichtbares Feld ausgefüllt.'} '
@@ -82,6 +77,10 @@ class AccountApprovalScreen extends StatefulWidget {
 class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
   int? _person;
   String _search = '', _role = 'member';
+
+  /// The right "Termine verwalten" for a member (servers with
+  /// `accountPermissions`); admins have it anyway.
+  bool _events = false;
   bool _busy = false;
 
   /// Set once the member list is current; the suggestion is chosen then.
@@ -164,6 +163,9 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
                 'version': widget.account['version'],
                 'personId': _person,
                 'role': _role,
+                if (_role == 'member' &&
+                    widget.controller.supports('accountPermissions'))
+                  'permissions': [if (_events) eventsPermission],
               }
             : {
                 'action': 'account.status',
@@ -254,18 +256,14 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
                           ? Icons.check
                           : Icons.info_outline,
                     ),
-                    const StatePill(
-                      'Ausstehend',
-                      color: StageTheme.amber,
-                      icon: Icons.schedule,
-                    ),
-                    if (_withoutBotCheck(a))
+                    AccessStatusPill(accountStatusKey(a)),
+                    if (withoutBotCheck(a))
                       const StatePill(
                         'Ohne Botschutz',
                         color: StageTheme.amber,
                         icon: Icons.shield_outlined,
                       ),
-                    if (_caughtByBotTrap(a))
+                    if (caughtByBotTrap(a))
                       const StatePill(
                         'Verdacht: Bot-Falle',
                         color: StageTheme.amber,
@@ -335,20 +333,30 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
         const SectionTitle('Zugriff'),
         DropdownButtonFormField<String>(
           initialValue: _role,
-          decoration: const InputDecoration(labelText: 'Berechtigung'),
+          decoration: const InputDecoration(labelText: 'Rechte'),
           items: const [
             DropdownMenuItem(value: 'member', child: Text('Mitglied')),
             DropdownMenuItem(value: 'admin', child: Text('Admin')),
           ],
           onChanged: (s) => setState(() => _role = s!),
         ),
+        if (_role == 'member' &&
+            widget.controller.supports('accountPermissions'))
+          SwitchListTile(
+            key: const ValueKey('approval-permission-events'),
+            contentPadding: EdgeInsets.zero,
+            value: _events,
+            onChanged: _busy ? null : (v) => setState(() => _events = v),
+            title: Text(accountPermissionLabels[eventsPermission]!.$1),
+            subtitle: Text(accountPermissionLabels[eventsPermission]!.$2),
+          ),
         const SizedBox(height: 28),
         if (a['identityReady'] != true)
           const Padding(
             padding: EdgeInsets.only(bottom: 16),
             child: Text('Die E-Mail-Adresse muss zuerst bestätigt werden.'),
           ),
-        if (_withoutBotCheck(a))
+        if (withoutBotCheck(a))
           const Padding(
             padding: EdgeInsets.only(bottom: 16),
             child: Text(
@@ -358,7 +366,7 @@ class _AccountApprovalScreenState extends State<AccountApprovalScreen> {
               'sorgfältig.',
             ),
           ),
-        if (_caughtByBotTrap(a))
+        if (caughtByBotTrap(a))
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
             child: Text(_botTrapNotice(a)),

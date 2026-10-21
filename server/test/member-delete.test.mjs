@@ -79,6 +79,11 @@ test('deleting a person is admin-only and protects the own person and linked acc
 test('deleting a person removes every reference and keeps the rest consistent', async t => {
   const ctx = setup(t), { store, app, action, sam, kim } = ctx;
   const ids = populate(ctx);
+  // Sam created or last changed these (as a holder of the events right would).
+  const adminId = store.account('admin').personId;
+  store.put('events', ids.everyone, { ...store.get('events', ids.everyone), createdBy: sam, updatedBy: adminId });
+  store.put('slotPools', ids.pool, { ...store.get('slotPools', ids.pool), createdBy: adminId, updatedBy: sam });
+  const versions = { event: store.get('events', ids.everyone).version, pool: store.get('slotPools', ids.pool).version };
   await app.deleteAccount('admin', 'sam', store.account('sam').version);
   action({ action: 'member.delete', id: sam });
 
@@ -112,6 +117,13 @@ test('deleting a person removes every reference and keeps the rest consistent', 
   assert.deepEqual(production.casting, { julia: kim });
   assert.deepEqual(production.directorMemberIds, [kim]);
   assert.deepEqual(production.memberIds, []);
+  assert.equal(store.get('events', ids.everyone).createdBy, null);
+  assert.equal(store.get('events', ids.everyone).updatedBy, adminId, 'other editors stay');
+  assert.equal(store.get('events', ids.everyone).version, versions.event, 'clearing the editor is no change for clients');
+  assert.equal(store.get('slotPools', ids.pool).createdBy, adminId);
+  assert.equal(store.get('slotPools', ids.pool).updatedBy, null);
+  assert.equal(store.get('slotPools', ids.pool).version, versions.pool);
+  assert.equal(store.all('events').concat(store.all('slotPools')).some(x => x.createdBy === sam || x.updatedBy === sam), false);
   for (const kind of ['events', 'polls', 'slotPools', 'messages', 'productions']) {
     const text = JSON.stringify(store.all(kind));
     assert.doesNotMatch(text, new RegExp(`"(personIds|recipientPersonIds|directorMemberIds|memberIds)":\\[[^\\]]*\\b${sam}\\b`), kind);

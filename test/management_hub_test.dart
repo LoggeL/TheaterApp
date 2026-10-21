@@ -4,6 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/data/demo_data.dart';
+import 'package:theater_app/features/accounts/accounts.dart';
 import 'package:theater_app/features/admin/admin.dart';
 
 import 'app_controller_test.dart' show TestServer, fixedNow, signIn;
@@ -88,6 +89,34 @@ void main() {
     expect(find.text('Galerien verwalten'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  for (final waiting in [0, 1]) {
+    testWidgets('the access tile with $waiting waiting registrations', (
+      tester,
+    ) async {
+      final server = TestServer();
+      server.data['pendingAccounts'] = [
+        if (waiting > 0)
+          {'uid': 'new', 'status': 'pending', 'identityReady': true},
+        // Unconfirmed registrations cannot be approved and do not count.
+        {'uid': 'unverified', 'status': 'pending', 'identityReady': false},
+      ];
+      await _pumpHub(tester, server);
+      expect(find.text('Zugänge & Rechte'), findsOneWidget);
+      expect(find.text('Konten & Verknüpfungen'), findsNothing);
+      final subtitle = waiting == 0
+          ? 'Freigaben, Verknüpfungen und Rechte'
+          : '1 neue Registrierung wartet auf Zuordnung';
+      expect(find.text(subtitle), findsOneWidget);
+      await tester.tap(find.text('Zugänge & Rechte'));
+      await tester.pumpAndSettle();
+      final screen = tester.widget<AccountsAdminScreen>(
+        find.byType(AccountsAdminScreen),
+      );
+      expect(screen.initialStatus, waiting == 0 ? 'all' : 'waiting');
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('scene planning is hidden without an upcoming rehearsal', (
     tester,

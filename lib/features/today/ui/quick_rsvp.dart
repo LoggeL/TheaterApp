@@ -268,7 +268,10 @@ Future<void> _restore(
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          before.response == 'open'
+          // Without an own answer an auto-accepted event is attended again.
+          before.implicitYes
+              ? 'Du bist wieder eingeplant.'
+              : before.response == 'open'
               ? 'Rückmeldung zurückgenommen'
               : 'Vorherige Rückmeldung wiederhergestellt',
         ),

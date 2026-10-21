@@ -489,6 +489,12 @@ test('every push kind is recognized, also for jobs queued by older servers', t =
   assert.ok(admin);
 });
 
+test('"Du bist eingeplant" reminders are their own switchable kind', () => {
+  assert.equal(pushKind({ title: 'Du bist eingeplant: Probe', data: { eventId: 'e', intent: 'decline' }, planned: true }), 'eventPlanned');
+  assert.ok(memberPushKinds.includes('eventPlanned'));
+  assert.equal(allOn.eventPlanned, true);
+});
+
 test('members switch off single push kinds; approval and test pushes always arrive', async t => {
   const { store, theater, act, admin, sam, kim } = lateSetup(t);
   for (const [uid, token] of [['admin', 'token-admin'], ['sam', 'token-sam'], ['kim', 'token-kim']]) store.put('devices', token, { id: token, uid, token, platform: 'web' });

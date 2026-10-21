@@ -28,6 +28,11 @@ class TheaterEvent {
     this.addressedToMe = true,
     this.lastRemindedAt,
     this.remindCount = 0,
+    this.autoAccept = false,
+    this.implicitYes = false,
+    this.implicitCount = 0,
+    this.createdBy,
+    this.updatedBy,
   });
   final String id,
       title,
@@ -73,8 +78,33 @@ class TheaterEvent {
   /// servers with `nudges` only).
   final DateTime? lastRemindedAt;
   final int remindCount;
+
+  /// "Alle gelten als zugesagt": invitees without an own yes, late or no
+  /// attend implicitly unless an absence covers the day (servers with
+  /// `autoAccept`). Nobody owes an answer, members only decline.
+  final bool autoAccept;
+
+  /// Whether the signed-in person attends implicitly; recomputed locally
+  /// after offline changes (see `_rebuild` in sync.dart).
+  final bool implicitYes;
+
+  /// How many invitees attend implicitly; included in [attendeeCount].
+  final int implicitCount;
+
+  /// Person ids of who created and last changed the event; only sent to
+  /// those who manage events (servers with `accountPermissions`).
+  final int? createdBy, updatedBy;
+  int? get lastEditedBy => updatedBy ?? createdBy;
   bool get needsResponse =>
-      response == 'open' && !locked && !fromSlotPool && addressedToMe;
+      response == 'open' &&
+      !locked &&
+      !fromSlotPool &&
+      addressedToMe &&
+      !autoAccept;
+
+  /// Whether the signed-in person plans to come: an own yes or late, or the
+  /// implicit yes of an auto-accepted event.
+  bool get attending => const {'yes', 'late'}.contains(response) || implicitYes;
   bool acceptsResponsesAt(DateTime now) =>
       !locked &&
       !fromSlotPool &&
@@ -117,6 +147,11 @@ class TheaterEvent {
     addressedToMe: json['addressedToMe'] != false,
     lastRemindedAt: dateValue(json['lastRemindedAt'])?.toLocal(),
     remindCount: intValue(json['remindCount']),
+    autoAccept: json['autoAccept'] == true,
+    implicitYes: json['implicitYes'] == true,
+    implicitCount: intValue(json['implicitPeople']),
+    createdBy: json['createdBy'] == null ? null : intValue(json['createdBy']),
+    updatedBy: json['updatedBy'] == null ? null : intValue(json['updatedBy']),
   );
   TheaterEvent copyWith({
     String? response,
@@ -124,6 +159,7 @@ class TheaterEvent {
     String? declineReason,
     DateTime? expectedArrivalAt,
     bool clearExpectedArrival = false,
+    bool? implicitYes,
   }) => TheaterEvent(
     id: id,
     title: title,
@@ -153,6 +189,11 @@ class TheaterEvent {
     addressedToMe: addressedToMe ?? this.addressedToMe,
     lastRemindedAt: lastRemindedAt,
     remindCount: remindCount,
+    autoAccept: autoAccept,
+    implicitYes: implicitYes ?? this.implicitYes,
+    implicitCount: implicitCount,
+    createdBy: createdBy,
+    updatedBy: updatedBy,
   );
   JsonMap toJson() => {
     'id': id,
@@ -182,5 +223,10 @@ class TheaterEvent {
     if (lastRemindedAt != null)
       'lastRemindedAt': lastRemindedAt!.toUtc().toIso8601String(),
     if (remindCount != 0) 'remindCount': remindCount,
+    if (autoAccept) 'autoAccept': true,
+    if (implicitYes) 'implicitYes': true,
+    if (implicitCount != 0) 'implicitPeople': implicitCount,
+    if (createdBy != null) 'createdBy': createdBy,
+    if (updatedBy != null) 'updatedBy': updatedBy,
   };
 }

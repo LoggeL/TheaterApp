@@ -10,6 +10,7 @@ class EventDetails {
     this.absentIds = const {},
     this.invitedIds,
     this.openIds,
+    this.implicitIds = const [],
     this.lastRemindedAt,
     this.remindCount = 0,
   });
@@ -23,6 +24,11 @@ class EventDetails {
   /// Active invitees and those of them without an answer; null from older
   /// servers, where the audience is computed on the device.
   final List<int>? invitedIds, openIds;
+
+  /// Invitees who attend an auto-accepted event implicitly (servers with
+  /// `autoAccept`); the screens take them from the snapshot, which is
+  /// refreshed more often (`implicitAttendanceByEvent`).
+  final List<int> implicitIds;
   final DateTime? lastRemindedAt;
   final int remindCount;
 
@@ -47,6 +53,7 @@ class EventDetails {
           },
       invitedIds: invited,
       openIds: ids(json['openIds']),
+      implicitIds: ids(json['implicitIds']) ?? const [],
       lastRemindedAt: dateValue(json['lastRemindedAt'])?.toLocal(),
       remindCount: intValue(json['remindCount']),
     );

@@ -16,6 +16,7 @@ class AppUser {
     this.avatarId,
     this.roleIds = const [],
     this.profileVersion = 0,
+    this.permissions = const [],
   });
   final String id, name, email, role;
   final bool mustChangePassword;
@@ -27,8 +28,18 @@ class AppUser {
   final String? avatarId;
   final List<String> roleIds;
   final int profileVersion;
+
+  /// Rights on top of the role, e.g. `events` ("Termine verwalten"); the
+  /// server lists all of them for admins. See core/account_permissions.dart.
+  final List<String> permissions;
   bool get isApproved => status == 'approved' && identityReady;
   bool get isAdmin => role == 'admin';
+
+  /// Admins hold every right.
+  bool can(String permission) => isAdmin || permissions.contains(permission);
+
+  /// Planning and running all events, series and Terminfinder.
+  bool get canManageEvents => can('events');
   String get firstName => name.trim().split(' ').first;
   String get initials => name
       .trim()
@@ -51,6 +62,9 @@ class AppUser {
     avatarId: json['avatarId'] as String?,
     roleIds: jsonList(json['roleIds']).map((e) => e.toString()).toList(),
     profileVersion: intValue(json['profileVersion']),
+    permissions: jsonList(
+      json['permissions'],
+    ).map((e) => e.toString()).toList(),
     mustChangePassword: json['mustChangePassword'] == true,
     directorProductionIds: jsonList(
       json['directorProductionIds'],
@@ -69,6 +83,7 @@ class AppUser {
     'avatarId': avatarId,
     'roleIds': roleIds,
     'profileVersion': profileVersion,
+    'permissions': permissions,
     'mustChangePassword': mustChangePassword,
     'directorProductionIds': directorProductionIds,
   };

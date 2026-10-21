@@ -4,6 +4,7 @@ import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/features/accounts/accounts.dart';
 import 'package:theater_app/features/ensemble/ensemble.dart';
+import 'package:theater_app/shared/widgets/state_pill.dart';
 
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
 
@@ -28,7 +29,7 @@ Future<void> _pump(
 }
 
 void main() {
-  testWidgets('the ensemble management shows each account status', (
+  testWidgets('the ensemble management shows each access status and right', (
     tester,
   ) async {
     final server = TestServer();
@@ -36,8 +37,18 @@ void main() {
         ? Future.value(
             jsonResponse({
               'accounts': [
-                {'uid': 'a', 'personId': 1, 'status': 'approved'},
-                {'uid': 'k', 'personId': 4, 'status': 'suspended'},
+                {
+                  'uid': 'a',
+                  'personId': 1,
+                  'status': 'approved',
+                  'role': 'admin',
+                },
+                {
+                  'uid': 'k',
+                  'personId': 4,
+                  'status': 'suspended',
+                  'permissions': ['events'],
+                },
               ],
             }),
           )
@@ -49,7 +60,20 @@ void main() {
     );
     expect(pillOf('Alex Bühnenfreund', 'Freigegeben'), findsOneWidget);
     expect(pillOf('Kim Kulisse', 'Gesperrt'), findsOneWidget);
-    expect(pillOf('Sam Vorhang', 'Kein Konto verknüpft'), findsOneWidget);
+    expect(pillOf('Sam Vorhang', 'Kein Konto'), findsOneWidget);
+    // The shared pills: the same labels and colours as in the overview.
+    expect(pillOf('Alex Bühnenfreund', 'Admin'), findsOneWidget);
+    expect(pillOf('Kim Kulisse', 'Termine verwalten · ruht'), findsOneWidget);
+    final scheme = Theme.of(
+      tester.element(find.byType(ListTile).first),
+    ).colorScheme;
+    StatePill pill(String label) =>
+        tester.widget<StatePill>(find.widgetWithText(StatePill, label).first);
+    expect(pill('Freigegeben').color, scheme.secondary);
+    expect(pill('Freigegeben').icon, Icons.check_circle);
+    expect(pill('Gesperrt').color, scheme.error);
+    expect(pill('Kein Konto').icon, Icons.link_off);
+    expect(pill('Admin').color, StageTheme.violet);
     expect(tester.takeException(), isNull);
   });
 
@@ -71,6 +95,8 @@ void main() {
                   'status': 'approved',
                   'name': 'Alex Bühnenfreund',
                   'email': 'alex@example.test',
+                  'role': 'member',
+                  'permissions': ['events'],
                 },
               ],
             }),
@@ -83,17 +109,79 @@ void main() {
     );
     await tester.tap(find.text('Alex Bühnenfreund'));
     await tester.pumpAndSettle();
+    // The tile shows the actual status and rights.
+    expect(find.text('Freigegeben · Termine verwalten'), findsOneWidget);
     await tester.ensureVisible(find.text('App-Zugang'));
     await tester.tap(find.text('App-Zugang'));
     await tester.pumpAndSettle();
-    expect(find.byType(AccountsAdminScreen), findsOneWidget);
-    // The search starts at this person.
-    expect(find.widgetWithText(TextField, 'Alex Bühnenfreund'), findsOneWidget);
-    expect(find.text('Sam Vorhang'), findsNothing);
+    final screen = tester.widget<AccountsAdminScreen>(
+      find.byType(AccountsAdminScreen),
+    );
+    expect(screen.initialPersonId, 1);
+    // The list opens complete, with this person's row highlighted.
+    expect(find.text('Sam Vorhang'), findsOneWidget);
+    final row = find.byKey(const ValueKey('access-entry-1'));
+    expect(
+      (tester.widget<Card>(row).shape! as RoundedRectangleBorder).side.width,
+      2,
+    );
 
-    await tester.tap(find.text('In Ensemble bearbeiten'));
+    await tester.tap(
+      find.descendant(of: row, matching: find.byTooltip('Zugang verwalten')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('account-person-edit-1')));
     await tester.pumpAndSettle();
     expect(find.text('Person bearbeiten'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the editor marks resting rights and an inactive person', (
+    tester,
+  ) async {
+    final server = TestServer();
+    server.override = (request) => request.url.path.contains('/admin/accounts')
+        ? Future.value(
+            jsonResponse({
+              'accounts': [
+                {
+                  'uid': 'k',
+                  'personId': 4,
+                  'status': 'suspended',
+                  'role': 'member',
+                  'permissions': ['events'],
+                },
+                {
+                  'uid': 'f',
+                  'personId': 7,
+                  'status': 'approved',
+                  'role': 'admin',
+                },
+              ],
+            }),
+          )
+        : null;
+    // Suspended: the right does not apply now.
+    await _pump(
+      tester,
+      server,
+      (c) => MemberEditorScreen(
+        controller: c,
+        member: const {'id': 4, 'name': 'Kim', 'active': true},
+      ),
+    );
+    expect(find.text('Gesperrt · Termine verwalten (ruht)'), findsOneWidget);
+    // Inactive: the server denies access although the account is approved.
+    await tester.pumpWidget(const SizedBox());
+    await _pump(
+      tester,
+      server,
+      (c) => MemberEditorScreen(
+        controller: c,
+        member: const {'id': 7, 'name': 'Fynn', 'active': false},
+      ),
+    );
+    expect(find.text('Freigegeben · Person inaktiv · Admin'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

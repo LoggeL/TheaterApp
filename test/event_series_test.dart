@@ -300,6 +300,45 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('a new series where everyone counts as attending says so', (
+    tester,
+  ) async {
+    final (server, controller) = await pump(
+      tester,
+      (c) =>
+          EventEditorScreen(controller: c, initialDay: DateTime(2026, 9, 15)),
+      prepare: (server) => server.data['capabilities'] = {
+        'pushConfigured': true,
+        'features': ['autoAccept'],
+      },
+    );
+    await tester.enterText(find.widgetWithText(TextField, 'Titel'), 'Probe');
+    await tester.tap(find.byKey(const ValueKey('event-repeat')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wöchentlich').last);
+    await tester.pumpAndSettle();
+    final toggle = find.byKey(const ValueKey('event-auto-accept'));
+    await scrollTo(tester, toggle);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Gilt für alle Termine der Serie.'),
+      findsOneWidget,
+    );
+    final save = find.text('Terminserie speichern');
+    await scrollTo(tester, save);
+    await tester.tap(save);
+    await tester.pump();
+    final body = server.actionBodies.lastWhere(
+      (b) => b['action'] == 'event.save',
+    );
+    expect(body['repeat'], isNotNull);
+    expect(body['autoAccept'], isTrue);
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
   test('the series id survives the event model', () {
     final event = TheaterEvent.fromJson({
       'id': 'a',

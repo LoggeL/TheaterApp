@@ -26,15 +26,24 @@ class RsvpPanel extends StatefulWidget {
 class _RsvpPanelState extends State<RsvpPanel> {
   bool _editingLate = false, _busy = false;
   DateTime? _arrival;
-  Future<void> _save(String status) async {
+
+  /// Saves [status]; [done] confirms it, or [queued] while it waits in the
+  /// outbox for a connection.
+  Future<void> _save(String status, {String? done, String? queued}) async {
     setState(() => _busy = true);
     try {
-      await widget.controller.respond(
+      final outcome = await widget.controller.respond(
         widget.event.id,
         status,
         expectedArrivalAt: status == 'late' ? _arrival : null,
       );
       if (mounted) setState(() => _editingLate = false);
+      if (done != null && mounted) {
+        showDone(
+          context,
+          outcomeText(outcome, done: done, queued: queued ?? done),
+        );
+      }
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
@@ -52,15 +61,33 @@ class _RsvpPanelState extends State<RsvpPanel> {
     setState(() => _arrival = picked.arrival);
   }
 
+  /// Withdraws the decline of an auto-accepted event. Without an own answer
+  /// the person attends again; after the decline cutoff, or when an own
+  /// absence covers the day, only an explicit yes brings that back.
+  void _withdrawDecline() {
+    final e = widget.event, start = e.startsAt;
+    final absent =
+        start != null &&
+        widget.controller.absences.any((a) => a.coversDay(start));
+    _save(
+      widget.controller.canDecline(e) && !absent ? 'open' : 'yes',
+      done: 'Du bist wieder eingeplant.',
+      queued: 'Rücknahme vorgemerkt – wird bei Verbindung gesendet',
+    );
+  }
+
   Widget _choice(
     String status,
     String label,
     IconData icon,
     VoidCallback action,
   ) {
+    // The implicit yes of an auto-accepted event shows as chosen.
+    final implicit =
+        !_editingLate && status == 'yes' && widget.event.implicitYes;
     final selected = _editingLate
         ? status == 'late'
-        : widget.event.response == status;
+        : widget.event.response == status || implicit;
     final enabled =
         !_busy &&
         (status == 'no'
@@ -90,7 +117,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
             ),
           ),
           icon: Icon(icon, size: 18),
-          label: Text(label),
+          label: Text(implicit ? '$label · automatisch' : label),
         ),
       );
     }
@@ -127,12 +154,22 @@ class _RsvpPanelState extends State<RsvpPanel> {
                   Icon(icon, color: color),
                   const SizedBox(width: 16),
                   Expanded(
-                    child: Text(
-                      label,
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (implicit)
+                          Text(
+                            'automatisch',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                      ],
                     ),
                   ),
                   Icon(
@@ -167,7 +204,13 @@ class _RsvpPanelState extends State<RsvpPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          canRespond ? 'Bist du dabei?' : 'Deine Rückmeldung',
+          !canRespond
+              ? 'Deine Rückmeldung'
+              // Planned in means attending: an absence without a decline
+              // row ends the implicit yes as well.
+              : e.autoAccept && e.attending
+              ? 'Du bist eingeplant'
+              : 'Bist du dabei?',
           style: Theme.of(context).textTheme.titleLarge,
         ),
         const SizedBox(height: 16),
@@ -231,7 +274,7 @@ class _RsvpPanelState extends State<RsvpPanel> {
           Align(
             alignment: Alignment.centerLeft,
             child: RsvpStatusBadge(
-              status: e.response,
+              status: displayResponse(e),
               expectedArrivalAt: e.expectedArrivalAt,
               locked: true,
             ),
@@ -341,7 +384,18 @@ class _RsvpPanelState extends State<RsvpPanel> {
               ],
             ),
           ),
-        ] else if (e.response != 'open')
+        ] else if (e.implicitYes && canRespond)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Text(
+              // A withdrawn decline waiting in the outbox is not saved yet.
+              pending
+                  ? 'Auf diesem Gerät vorgemerkt'
+                  : 'Alle gelten als zugesagt. Kannst du nicht? Bitte absagen.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          )
+        else if (e.response != 'open')
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Text(
@@ -351,7 +405,17 @@ class _RsvpPanelState extends State<RsvpPanel> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
-        if (!_editingLate && e.response != 'open' && canDecline)
+        // On auto-accepted events only a decline is withdrawn: an own yes
+        // and the implicit one mean the same.
+        if (!_editingLate && e.autoAccept && e.response == 'no' && canRespond)
+          TextButton(
+            onPressed: _busy ? null : _withdrawDecline,
+            child: const Text('Absage zurücknehmen'),
+          )
+        else if (!_editingLate &&
+            !e.autoAccept &&
+            e.response != 'open' &&
+            canDecline)
           TextButton(
             onPressed: _busy ? null : () => _save('open'),
             child: const Text('Rückmeldung zurücknehmen'),

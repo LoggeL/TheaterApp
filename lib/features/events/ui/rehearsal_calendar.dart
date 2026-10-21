@@ -143,13 +143,19 @@ class _RehearsalCalendarState extends State<RehearsalCalendar> {
                           : dayEvents
                                 .where((e) => isProminentKind(e.kind))
                                 .firstOrNull;
-                      // Marks show the own response; open ones stay hollow.
-                      Color dotColor(TheaterEvent event) => responseColor(
-                        event.response,
-                        dark: dark,
-                      ).withValues(alpha: past ? .5 : 1);
+                      // Marks show the own response; open ones stay hollow,
+                      // an implicit yes ("Eingeplant") is a lighter yes.
+                      Color dotColor(TheaterEvent event) =>
+                          responseColor(
+                            displayResponse(event),
+                            dark: dark,
+                          ).withValues(
+                            alpha:
+                                (past ? .5 : 1) * (event.implicitYes ? .6 : 1),
+                          );
                       BoxDecoration dot(TheaterEvent event) {
-                        final answered = hasResponse(event.response);
+                        final answered =
+                            hasResponse(event.response) || event.implicitYes;
                         return BoxDecoration(
                           color: answered ? dotColor(event) : null,
                           shape: BoxShape.circle,
@@ -298,7 +304,7 @@ class _RehearsalCalendarState extends State<RehearsalCalendar> {
           alignment: WrapAlignment.spaceBetween,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            const _ResponseLegend(),
+            _ResponseLegend(planned: widget.events.any((e) => e.autoAccept)),
             TextButton(
               onPressed: () => _select(now),
               child: const Text('Heute'),
@@ -312,7 +318,11 @@ class _RehearsalCalendarState extends State<RehearsalCalendar> {
 
 /// Explains the response colours of the calendar marks.
 class _ResponseLegend extends StatelessWidget {
-  const _ResponseLegend();
+  const _ResponseLegend({this.planned = false});
+
+  /// Whether events where everyone counts as attending are shown, and with
+  /// them the "Eingeplant" mark.
+  final bool planned;
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
@@ -320,8 +330,9 @@ class _ResponseLegend extends StatelessWidget {
       spacing: 12,
       runSpacing: 4,
       children: [
-        for (final (status, label) in const [
+        for (final (status, label) in [
           ('yes', 'Zugesagt'),
+          if (planned) ('auto', 'Eingeplant'),
           ('late', 'Später'),
           ('no', 'Abgesagt'),
           ('open', 'Offen'),
@@ -333,11 +344,13 @@ class _ResponseLegend extends StatelessWidget {
                 width: 8,
                 height: 8,
                 decoration: BoxDecoration(
-                  color: hasResponse(status)
+                  color: status == 'auto'
+                      ? responseColor(status, dark: dark).withValues(alpha: .6)
+                      : hasResponse(status)
                       ? responseColor(status, dark: dark)
                       : null,
                   shape: BoxShape.circle,
-                  border: hasResponse(status)
+                  border: hasResponse(status) || status == 'auto'
                       ? null
                       : Border.all(color: responseColor(status, dark: dark)),
                 ),

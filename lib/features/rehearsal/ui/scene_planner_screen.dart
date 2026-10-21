@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../app/theme/stage_theme.dart';
+import '../../../core/account_permissions.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../data/api_client.dart';
@@ -13,6 +14,7 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/one_line_segmented_button.dart';
 import '../../../shared/widgets/state_pill.dart';
 import '../../scripts/ui/script_reader_screen.dart';
+import '../domain/implicit_attendance.dart';
 import '../domain/scene_planning.dart';
 
 class ScenePlannerScreen extends StatefulWidget {
@@ -182,14 +184,15 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final admin = widget.controller.user?.isAdmin == true;
+    final manager = widget.controller.user?.canManageEvents == true;
     final page = Scaffold(
       body: AdminPage(
         controller: widget.controller,
+        permission: eventsPermission,
         title: 'Szenen planen',
         children: _content,
       ),
-      bottomNavigationBar: admin
+      bottomNavigationBar: manager
           ? _SaveBar(
               count: _selected.length,
               onSave: _saving || _loading || _conflict || _production == null
@@ -198,7 +201,7 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
             )
           : null,
     );
-    return DiscardGuard(dirty: admin && _dirty, child: page);
+    return DiscardGuard(dirty: manager && _dirty, child: page);
   }
 
   List<Widget> _content(BuildContext context) {
@@ -221,8 +224,10 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
             checkins: jsonMap(
               widget.controller.checkinsByEvent[widget.event.id],
             ),
-            responses: jsonMap(
-              widget.controller.memberAttendanceByEvent[widget.event.id],
+            // Implicit attendees of an auto-accepted event are planned in.
+            responses: plannedResponses(
+              widget.controller,
+              currentEvent ?? widget.event,
             ),
             arrivals: jsonMap(
               widget.controller.arrivalsByEvent[widget.event.id],

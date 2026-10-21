@@ -9,6 +9,13 @@ class Absence {
   });
   final String id, reason;
   final DateTime from, to;
+
+  /// Whether the absence covers the calendar [day] (from and to inclusive).
+  bool coversDay(DateTime day) {
+    final d = dateOnly(day);
+    return d.compareTo(dateOnly(from)) >= 0 && d.compareTo(dateOnly(to)) <= 0;
+  }
+
   factory Absence.fromJson(JsonMap json) => Absence(
     id: textValue(json['id']),
     from: DateTime.parse(textValue(json['from'])),

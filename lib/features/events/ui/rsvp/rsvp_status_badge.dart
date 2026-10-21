@@ -20,6 +20,8 @@ class RsvpStatusBadge extends StatelessWidget {
     this.showLabel = false,
   });
 
+  /// A response, or 'auto' for the implicit yes of an auto-accepted event
+  /// (see [displayResponse]).
   final String status;
   final DateTime? expectedArrivalAt;
   final bool locked, onDark;
@@ -38,13 +40,19 @@ class RsvpStatusBadge extends StatelessWidget {
         : null;
     final short =
         arrival ??
+        (showLabel && status == 'auto' ? 'Eingeplant' : null) ??
         (showLabel && status == 'open'
             ? locked
                   ? 'Geschlossen'
                   : 'Offen'
             : null);
+    final implicit = status == 'auto';
     final label = [
-      status == 'open' ? 'Rückmeldung offen' : statusText(status),
+      status == 'open'
+          ? 'Rückmeldung offen'
+          : implicit
+          ? 'Eingeplant'
+          : statusText(status),
       if (status == 'late') arrival ?? 'Uhrzeit offen',
       if (locked) 'Rückmeldung geschlossen',
     ].join(' · ');
@@ -53,6 +61,7 @@ class RsvpStatusBadge extends StatelessWidget {
       'yes' => Icons.thumb_up_alt,
       'no' => Icons.thumb_down_alt,
       'late' => Icons.schedule,
+      'auto' => Icons.event_available_outlined,
       _ when pending => Icons.mark_email_unread_outlined,
       _ => Icons.help_outline,
     };
@@ -78,7 +87,8 @@ class RsvpStatusBadge extends StatelessWidget {
           decoration: BoxDecoration(
             color: color.withValues(alpha: pending ? .16 : .12),
             borderRadius: BorderRadius.circular(16),
-            border: pending
+            // The implicit yes is outlined: planned, but not said by oneself.
+            border: pending || implicit
                 ? Border.all(color: color.withValues(alpha: .55))
                 : null,
           ),

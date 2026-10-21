@@ -143,7 +143,7 @@ class EventCard extends StatelessWidget {
                   const NotInvitedPill()
                 else
                   RsvpStatusBadge(
-                    status: event.response,
+                    status: displayResponse(event),
                     expectedArrivalAt: event.expectedArrivalAt,
                     locked: responsesClosed(controller, event),
                     emphasizeOpen: !past && !event.fromSlotPool,

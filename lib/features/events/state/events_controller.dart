@@ -111,9 +111,9 @@ extension EventsController on AppController {
     List<String> sceneIds, {
     int? expectedVersion,
   }) async {
-    if (_user?.isAdmin != true) {
+    if (_user?.canManageEvents != true) {
       throw const ApiException(
-        'Für die Zuordnung ist eine Adminrolle erforderlich.',
+        'Für die Zuordnung ist das Recht „Termine verwalten“ nötig.',
         statusCode: 403,
       );
     }

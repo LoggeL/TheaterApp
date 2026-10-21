@@ -93,6 +93,105 @@ void main() {
     );
   }
 
+  testWidgets('an event where everyone counts as attending asks nothing', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final start = fixedNow.add(const Duration(days: 2));
+    final server = TestServer();
+    server.data['events'] = [
+      {
+        'id': 'next',
+        'title': 'Bühnenbau',
+        'startsAt': start.toUtc().toIso8601String(),
+        'endsAt': start.add(const Duration(hours: 2)).toUtc().toIso8601String(),
+        'place': 'Kolpingheim',
+        'autoAccept': true,
+        'implicitYes': true,
+      },
+    ];
+    server.data['attendanceByEvent'] = <String, dynamic>{};
+    final controller = server.controller();
+    await signIn(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StageTheme.build(Brightness.light),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (_, _) => TodayScreen(
+              controller: controller,
+              onPlan: () {},
+              onScripts: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Bist du dabei?'), findsNothing);
+    expect(find.byKey(const ValueKey('today-next-compact')), findsOneWidget);
+    expect(find.text('Du bist eingeplant'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('undoing a quick decline of an implicit yes plans in again', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final start = fixedNow.add(const Duration(days: 2));
+    final server = TestServer();
+    server.data['events'] = [
+      {
+        'id': 'next',
+        'title': 'Bühnenbau',
+        'startsAt': start.toUtc().toIso8601String(),
+        'endsAt': start.add(const Duration(hours: 2)).toUtc().toIso8601String(),
+        'place': 'Kolpingheim',
+        'autoAccept': true,
+        'implicitYes': true,
+      },
+    ];
+    server.data['attendanceByEvent'] = <String, dynamic>{};
+    final controller = server.controller();
+    await signIn(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StageTheme.build(Brightness.light),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (_, _) => QuickRsvp(
+              event: controller.events.single,
+              controller: controller,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Kann nicht'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Absagen'));
+    await tester.pumpAndSettle();
+    expect(server.actionBodies.last['status'], 'no');
+    expect(find.text('Absage gespeichert'), findsOneWidget);
+    await tester.tap(find.text('Rückgängig'));
+    await tester.pumpAndSettle();
+    expect(server.actionBodies.last['status'], 'open');
+    expect(find.text('Du bist wieder eingeplant.'), findsOneWidget);
+    expect(find.text('Rückmeldung zurückgenommen'), findsNothing);
+    expect(controller.events.single.implicitYes, isTrue);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
   testWidgets('late without an end time is saved with the time open', (
     tester,
   ) async {

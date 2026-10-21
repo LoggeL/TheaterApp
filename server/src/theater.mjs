@@ -28,10 +28,24 @@ export const participationWindowDays = 183;
 const voluntaryEventTypes = ['social'];
 // Admin reminders (nudges) per message, event, poll or slot pool are rate-limited.
 export const remindCooldownMs = 10 * 60 * 1000;
-// Declines this close to the start are pushed to admins and the production's directors.
+// Declines this close to the start are pushed to admins, holders of the events right and the production's directors.
 export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
+// "Du bist eingeplant" reminders for auto-accepted events go out two days ahead (so a decline
+// arrives before the late-decline window) and no longer once the start is two hours away.
+export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
+export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions']);
+// Rights an admin can give single member accounts on top of their role; admins have all of them.
+// `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
+export const accountPermissions = Object.freeze(['events']);
+export const can = (a, permission) => a?.role === 'admin' || list(a?.permissions).includes(permission);
+const permissionSet = value => {
+  if (!Array.isArray(value)) fail(400, 'Unbekanntes Recht.');
+  const p = [...new Set(value.map(String))];
+  if (p.some(x => !accountPermissions.includes(x))) fail(400, 'Unbekanntes Recht.');
+  return p.sort();
+};
 // A short self-written "Über mich" text on the ensemble profile.
 export const aboutMaxLength = 600;
 // Feedback from members to the admins as support tickets (see feedback-tickets.mjs).
@@ -49,10 +63,10 @@ export const runnerMaxMeters = seconds => {
 };
 /** Highest plausible score for a run the server measured as `ms` long. */
 export const runnerMaxScore = ms => Math.ceil(runnerMaxMeters(ms / 1000 + stageRunner.slackSeconds) * (1 + stageRunner.pickupPointsPerMeter) * stageRunner.tolerance + stageRunner.slackPoints);
-const seriesFields = ['title', 'description', 'place', 'type', 'locked', 'roleIds', 'personIds', 'productionIds', 'productionId'];
+const seriesFields = ['title', 'description', 'place', 'type', 'locked', 'autoAccept', 'roleIds', 'personIds', 'productionIds', 'productionId'];
 // Legacy records may lack fields; compare them as event.save would store them.
 const sameValue = (field, x, y) => {
-  const norm = v => field.endsWith('Ids') ? list(v) : field === 'locked' ? v === true : field === 'type' ? v ?? 'rehearsal' : field === 'productionId' ? v || null : v ?? '';
+  const norm = v => field.endsWith('Ids') ? list(v) : field === 'locked' || field === 'autoAccept' ? v === true : field === 'type' ? v ?? 'rehearsal' : field === 'productionId' ? v || null : v ?? '';
   return JSON.stringify(norm(x)) === JSON.stringify(norm(y));
 };
 // Target audiences are person roles; an empty list addresses everyone.
@@ -72,6 +86,17 @@ export const inAudience = (member, item, store) => {
   if (!roleIds.length && !personIds.length && !productionIds.length) return true;
   return (roleIds.length > 0 && inRoles(member, roleIds)) || personIds.includes(member?.id)
     || (member?.id != null && productionIds.some(id => productionEnsemble(store?.get('productions', id)).includes(member.id)));
+};
+/**
+ * Auto-accept ("Alle gelten als zugesagt"): invited active people without an own yes, late or no
+ * attend implicitly, unless an absence covers the event day. A withdrawn answer (`open`) counts
+ * as none. `status` is the person's stored response status (null without one); `absences` may be
+ * preloaded (all of them or the person's own). Mirrored by the app's `implicitYes` (sync.dart).
+ */
+export const implicitYes = (store, event, member, status, absences = null) => {
+  if (event?.autoAccept !== true || event.slotPoolId || member == null || member.active === false || ['yes', 'late', 'no'].includes(status) || !inAudience(member, event, store)) return false;
+  const d = day(event.startsAt);
+  return !(absences ?? store.all('absences')).some(x => x.personId === member.id && x.from <= d && x.to >= d);
 };
 export const eventTypes = ['rehearsal', 'readthrough', 'technical', 'costume', 'dress', 'performance', 'meeting', 'workshop', 'setup', 'teardown', 'social', 'other'];
 const initialRoles = ['Schauspiel', 'Regie', 'Technik', 'Kostüm', 'Maske', 'Bühnenbau', 'Organisation'];
@@ -172,7 +197,7 @@ export class Theater {
   }
   profile(a) {
     const m = a.personId == null ? null : this.store.get('members', a.personId);
-    return { userId: a.uid, displayName: m?.name ?? a.name, email: a.email, needsRegistrationName: a.status === 'pending' && a.nameProvided === false, avatarId: m?.avatarId ?? null, roleIds: list(m?.roleIds), profileVersion: m?.profileVersion ?? 0, role: a.role, personId: a.personId, status: a.status, emailVerified: a.emailVerified, identityReady: a.identityReady, provider: a.provider, mustChangePassword: false, directorProductionIds: this.store.all('productions').filter(p => list(p.directorMemberIds).includes(a.personId)).map(p => p.id) };
+    return { userId: a.uid, displayName: m?.name ?? a.name, email: a.email, needsRegistrationName: a.status === 'pending' && a.nameProvided === false, avatarId: m?.avatarId ?? null, roleIds: list(m?.roleIds), profileVersion: m?.profileVersion ?? 0, role: a.role, permissions: a.role === 'admin' ? [...accountPermissions] : list(a.permissions).filter(p => accountPermissions.includes(p)), personId: a.personId, status: a.status, emailVerified: a.emailVerified, identityReady: a.identityReady, provider: a.provider, mustChangePassword: false, directorProductionIds: this.store.all('productions').filter(p => list(p.directorMemberIds).includes(a.personId)).map(p => p.id) };
   }
   account(uid, admin = false) {
     const a = this.store.account(uid);
@@ -180,15 +205,28 @@ export class Theater {
     if (admin && a.role !== 'admin') fail(403, 'Hierfür ist ein Admin-Zugang erforderlich.');
     return a;
   }
+  /** The caller's account if it holds `permission` (admins hold all); only `events` exists so far. */
+  permitted(uid, permission) {
+    const a = this.account(uid);
+    if (!can(a, permission)) fail(403, 'Hierfür fehlt das Recht „Termine verwalten“.');
+    return a;
+  }
   // Ids of deleted people are never handed out again (see forgetMember).
   nextPersonId() { return Math.max(0, this.store.get('settings', 'lastPersonId')?.id ?? 0, ...this.store.all('members').map(m => m.id)) + 1; }
   snapshot(uid) {
-    const a = this.account(uid); const admin = a.role === 'admin', member = this.store.get('members', a.personId), nudges = admin ? this.nudges() : null;
+    const a = this.account(uid); const admin = a.role === 'admin', events = can(a, 'events'), member = this.store.get('members', a.personId), nudges = events ? this.nudges() : null;
     const responses = this.store.all('responses');
-    const events = this.store.all('events').filter(e => this.canSee(a, e)).map(e => ({ ...e, eventDate: day(e.startsAt), people: responses.filter(r => r.eventId === e.id && ['yes', 'late'].includes(r.status)).length, addressedToMe: inAudience(member, e, this.store), ...(admin ? this.reminded(nudges, 'event', e.id) : {}) }));
+    const statusOf = new Map(responses.map(r => [`${r.eventId}:${r.personId}`, r.status])), absences = this.store.all('absences'), members = this.store.all('members');
+    // Implicit attendance of auto-accepted events stays out of memberAttendanceByEvent: older apps only know real answers there.
+    const implicitAttendanceByEvent = {};
+    const visibleEvents = this.store.all('events').filter(e => this.canSee(a, e, 'events')).map(e => {
+      const implicit = this.implicitIds(e, statusOf, absences, members);
+      if (events && implicit.length) implicitAttendanceByEvent[e.id] = implicit;
+      return { ...this.editors(e, events), eventDate: day(e.startsAt), people: responses.filter(r => r.eventId === e.id && ['yes', 'late'].includes(r.status)).length + implicit.length, ...(e.autoAccept === true ? { implicitPeople: implicit.length, implicitYes: implicit.includes(a.personId) } : {}), addressedToMe: inAudience(member, e, this.store), ...(events ? this.reminded(nudges, 'event', e.id) : {}) };
+    });
     const own = responses.filter(r => r.personId === a.personId);
     const checkinsByEvent = {}, memberAttendanceByEvent = {}, arrivalsByEvent = {};
-    if (admin) {
+    if (events) {
       for (const c of this.store.all('checkins')) (checkinsByEvent[c.eventId] ??= {})[c.personId] = c.present;
       for (const r of responses) {
         (memberAttendanceByEvent[r.eventId] ??= {})[r.personId] = r.status;
@@ -196,14 +234,14 @@ export class Theater {
       }
     }
     const receipts = this.store.all('receipts').filter(r => r.personId === a.personId);
-    return { apiVersion: 1, user: this.profile(a), events, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a, nudges), slotPools: this.slotPools(a, nudges), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, memberAttendanceByEvent, arrivalsByEvent, checkinVersions: admin ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) || m.authorId === a.personId, addressedToMe: this.messageAddresses(member, m), ...(admin ? { ...this.messageReach(m), ...this.reminded(nudges, 'message', m.id) } : {}) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true, features: [...apiFeatures] }, serverTime: now() };
+    return { apiVersion: 1, user: this.profile(a), events: visibleEvents, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a, admin ? nudges : null), slotPools: this.slotPools(a, nudges), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, memberAttendanceByEvent, implicitAttendanceByEvent, arrivalsByEvent, checkinVersions: events ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) || m.authorId === a.personId, addressedToMe: this.messageAddresses(member, m), ...(admin ? { ...this.messageReach(m), ...this.reminded(nudges, 'message', m.id) } : {}) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true, features: [...apiFeatures] }, serverTime: now() };
   }
   /** Slot pools ("Terminfinder"): invited people book one time slot each. */
-  slotPools(a, nudges = a.role === 'admin' ? this.nudges() : null) {
-    const bookings = this.store.all('slotBookings'), member = this.store.get('members', a.personId);
-    return this.store.all('slotPools').filter(p => this.canSee(a, p)).map(p => {
+  slotPools(a, nudges = can(a, 'events') ? this.nudges() : null) {
+    const bookings = this.store.all('slotBookings'), member = this.store.get('members', a.personId), manager = can(a, 'events');
+    return this.store.all('slotPools').filter(p => this.canSee(a, p, 'events')).map(p => {
       const own = bookings.find(b => b.poolId === p.id && b.personId === a.personId);
-      return { ...p, addressedToMe: inAudience(member, p, this.store), ...(nudges ? this.reminded(nudges, 'slotPool', p.id) : {}), myBooking: own?.slotId ?? null, slots: p.slots.map(slot => {
+      return { ...this.editors(p, manager), addressedToMe: inAudience(member, p, this.store), ...(nudges ? this.reminded(nudges, 'slotPool', p.id) : {}), myBooking: own?.slotId ?? null, slots: p.slots.map(slot => {
         const people = bookings.filter(b => b.poolId === p.id && b.slotId === slot.id).map(b => ({ personId: b.personId, name: this.store.get('members', b.personId)?.name ?? 'Ehemaliges Mitglied' })).sort((x, y) => x.name.localeCompare(y.name, 'de'));
         return { ...slot, booked: people.length, people };
       }) };
@@ -243,7 +281,14 @@ export class Theater {
       }) };
     }).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
   }
-  canSee(a, item) { return a.role === 'admin' || inAudience(this.store.get('members', a.personId), item, this.store); }
+  /** Admins see everything; with `permission` its holders do too (e.g. `events` for events and slot pools). */
+  canSee(a, item, permission = null) { return a.role === 'admin' || (permission != null && can(a, permission)) || inAudience(this.store.get('members', a.personId), item, this.store); }
+  /** Who created and last changed an event or slot pool (person ids) is only for those who manage them. */
+  editors(item, manager) {
+    if (manager) return item;
+    const { createdBy, updatedBy, ...rest } = item;
+    return rest;
+  }
   // Roles are resolved when reading, so later role members see the message too.
   canReadMessage(a, m) { return a.role === 'admin' || this.messageAddresses(this.store.get('members', a.personId), m); }
   /** Whether a message is addressed to the member, without the admin bypass. */
@@ -253,6 +298,16 @@ export class Theater {
   }
   /** Active members an event, poll or slot pool is addressed to. */
   audienceIds(item) { return this.store.all('members').filter(m => m.active !== false && inAudience(m, item, this.store)).map(m => m.id); }
+  /**
+   * People who attend an auto-accepted event implicitly (see `implicitYes`); empty for other events.
+   * `statusOf` maps `eventId:personId` to the response status; both arguments may be preloaded.
+   */
+  implicitIds(e, statusOf = null, absences = null, members = null) {
+    if (e?.autoAccept !== true || e.slotPoolId) return [];
+    const s = this.store, all = absences ?? s.all('absences');
+    const status = personId => (statusOf ? statusOf.get(`${e.id}:${personId}`) : s.get('responses', `${e.id}:${personId}`)?.status) ?? null;
+    return (members ?? s.all('members')).filter(m => implicitYes(s, e, m, status(m.id), all)).map(m => m.id);
+  }
   pollClosed(p) { return p.closed || (!!p.closesAt && Date.parse(p.closesAt) <= +this.clock()); }
   /** Last admin reminders, keyed `<kind>:<targetId>` (kind: message, event, poll, slotPool). */
   nudges() { return new Map(this.store.db.prepare("SELECT id, data FROM entities WHERE kind = 'nudges'").all().map(r => [r.id, JSON.parse(r.data)])); }
@@ -316,12 +371,15 @@ export class Theater {
   }
   adminData(uid) { this.account(uid, true); return { accounts: this.store.accounts(), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst) }; }
   eventDetails(uid, eventId) {
-    this.account(uid, true);
+    this.permitted(uid, 'events');
     const e = this.store.get('events', eventId);
     if (!e) fail(404, 'Termin nicht gefunden.');
-    const d = day(e.startsAt), responses = this.store.all('responses').filter(r => r.eventId === eventId), absences = this.store.all('absences').filter(x => x.from <= d && x.to >= d);
-    const invitedIds = this.audienceIds(e), answered = new Set(responses.filter(r => ['yes', 'late', 'no'].includes(r.status)).map(r => r.personId)), absent = new Set(absences.map(x => x.personId));
-    return { responses, checkins: this.store.all('checkins').filter(r => r.eventId === eventId), absences, invitedIds, openIds: invitedIds.filter(x => !answered.has(x)), absentIds: invitedIds.filter(x => absent.has(x)), ...this.reminded(this.nudges(), 'event', eventId) };
+    const d = day(e.startsAt), responses = this.store.all('responses').filter(r => r.eventId === eventId), invitedIds = this.audienceIds(e);
+    // Only absences of invited people: absence reasons of the rest of the ensemble are none of the event's business.
+    const absences = this.store.all('absences').filter(x => x.from <= d && x.to >= d && invitedIds.includes(x.personId));
+    const answered = new Set(responses.filter(r => ['yes', 'late', 'no'].includes(r.status)).map(r => r.personId)), absent = new Set(absences.map(x => x.personId));
+    const implicitIds = this.implicitIds(e, new Map(responses.map(r => [`${r.eventId}:${r.personId}`, r.status])), absences), implicit = new Set(implicitIds);
+    return { responses, checkins: this.store.all('checkins').filter(r => r.eventId === eventId), absences, invitedIds, openIds: invitedIds.filter(x => !answered.has(x) && !implicit.has(x)), absentIds: invitedIds.filter(x => absent.has(x)), implicitIds, ...this.reminded(this.nudges(), 'event', eventId) };
   }
   // Feedback tickets live in feedback-tickets.mjs; these keep the existing entry points.
   submitFeedback(uid, b) { return submitFeedback(this, uid, b); }
@@ -397,19 +455,23 @@ export class Theater {
     const responses = new Map(this.store.all('responses').map(r => [`${r.eventId}:${r.personId}`, r.status]));
     const checkins = new Map(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.present]));
     const linkedSince = new Map(this.store.accounts().filter(x => x.status === 'approved' && x.personId != null).map(x => [x.personId, Date.parse(x.approvedAt ?? x.createdAt)]));
+    const absences = this.store.all('absences');
     const summary = member => {
       const counts = { events: 0, answerable: 0, answered: 0, recorded: 0, attended: 0, missedAfterCommitment: 0, missedUnannounced: 0 };
+      const ownAbsences = absences.filter(x => x.personId === member.id);
       for (const e of events.filter(e => inAudience(member, e, this.store))) {
         const key = `${e.id}:${member.id}`, status = responses.get(key), present = checkins.get(key);
         // Only people with an app account at that time could respond in the app.
         const answerable = Date.parse(e.startsAt) > (linkedSince.get(member.id) ?? Infinity);
+        // Not declining an auto-accepted event is an answer and a commitment ("Du bist eingeplant").
+        const implicit = answerable && implicitYes(this.store, e, member, status ?? null, ownAbsences);
         counts.events++;
-        if (answerable) { counts.answerable++; if (['yes', 'late', 'no'].includes(status)) counts.answered++; }
+        if (answerable) { counts.answerable++; if (['yes', 'late', 'no'].includes(status) || implicit) counts.answered++; }
         if (typeof present !== 'boolean') continue;
         // A timely decline is reliable behaviour and never counts as missing.
         counts.recorded++;
         if (present) counts.attended++;
-        else if (['yes', 'late'].includes(status)) counts.missedAfterCommitment++;
+        else if (['yes', 'late'].includes(status) || implicit) counts.missedAfterCommitment++;
         else if (status !== 'no' && answerable) counts.missedUnannounced++;
       }
       return counts;
@@ -433,7 +495,7 @@ export class Theater {
     });
   }
   apply(a, b) {
-    const s = this.store, admin = () => this.account(a.uid, true);
+    const s = this.store, admin = () => this.account(a.uid, true), events = () => this.permitted(a.uid, 'events');
     switch (b.action) {
       case 'attendance': {
         const e = s.get('events', b.eventId);
@@ -458,8 +520,16 @@ export class Theater {
         // A decline that already exists stays the member's own (with its own reason).
         const declinedEventIds = [];
         for (const e of s.all('events')) {
-          if (e.locked || e.slotPoolId || !inAudience(s.get('members', a.personId), e, s) || Date.parse(e.startsAt) - declineCutoffMs <= +this.clock() || day(e.startsAt) < b.from || day(e.startsAt) > b.to) continue;
-          if (s.get('responses', `${e.id}:${a.personId}`)?.status === 'no') continue;
+          if (e.slotPoolId || !inAudience(s.get('members', a.personId), e, s) || day(e.startsAt) < b.from || day(e.startsAt) > b.to) continue;
+          const status = s.get('responses', `${e.id}:${a.personId}`)?.status;
+          if (e.locked || Date.parse(e.startsAt) - declineCutoffMs <= +this.clock()) {
+            // Too late to decline, but on an auto-accepted event the absence still ends the implicit yes.
+            // Record that as a decline, so it outlives the absence (retention deletes absences long before
+            // participation stops looking back). Own answers and the declined list stay untouched.
+            if (e.autoAccept === true && !['yes', 'late', 'no'].includes(status)) s.put('responses', `${e.id}:${a.personId}`, { eventId: e.id, personId: a.personId, status: 'no', reason: entry.reason, expectedArrivalAt: null, absenceId: entry.id, updatedAt: now() });
+            continue;
+          }
+          if (status === 'no') continue;
           s.put('responses', `${e.id}:${a.personId}`, { eventId: e.id, personId: a.personId, status: 'no', reason: entry.reason, expectedArrivalAt: null, absenceId: entry.id, updatedAt: now() });
           declinedEventIds.push(e.id);
           this.notifyLateDecline(e, a.personId);
@@ -502,7 +572,9 @@ export class Theater {
         if (!member?.active) fail(400, 'Bitte eine aktive Person auswählen.');
         if (s.accounts().some(x => x.personId === member.id && x.uid !== target.uid)) fail(409, 'Diese Person ist bereits mit einem Konto verknüpft.');
         if (!['member', 'admin'].includes(b.role)) fail(400, 'Ungültige Berechtigung.');
-        s.saveAccount({ ...target, personId: member.id, status: 'approved', role: b.role, approvedBy: a.uid, approvedAt: now(), version: target.version + 1 });
+        // Rights on top of the member role; admins have all of them anyway. Older apps send none.
+        const permissions = b.role === 'member' && b.permissions !== undefined ? permissionSet(b.permissions) : [];
+        s.saveAccount({ ...target, personId: member.id, status: 'approved', role: b.role, permissions, approvedBy: a.uid, approvedAt: now(), version: target.version + 1 });
         // Reaches devices registered while the account was still waiting.
         this.enqueuePush({ title: 'Zugang freigegeben', body: 'Dein Theaterzugang ist jetzt freigeschaltet.', data: {}, recipientPersonIds: [member.id] }); return {};
       }
@@ -513,7 +585,8 @@ export class Theater {
         if (!['rejected', 'suspended', 'approved'].includes(b.status)) fail(400, 'Ungültiger Kontostatus.');
         if (b.status === 'approved' && (!target.personId || !target.identityReady)) fail(409, 'Das Konto benötigt erst eine bestätigte Identität und Personenzuordnung.');
         if (target.role === 'admin' && target.status === 'approved' && s.accounts().filter(x => x.status === 'approved' && x.role === 'admin').length <= 1) fail(409, 'Der letzte Admin muss erhalten bleiben.');
-        s.saveAccount({ ...target, status: b.status, statusChangedAt: now(), version: target.version + 1 }); return {};
+        // A suspended account keeps its rights for a later return (they are shown as resting); a rejected one loses them.
+        s.saveAccount({ ...target, status: b.status, ...(b.status === 'rejected' ? { permissions: [] } : {}), statusChangedAt: now(), version: target.version + 1 }); return {};
       }
       case 'account.role': {
         // Admin rights of a linked account after its approval; the role is read on every request,
@@ -523,13 +596,31 @@ export class Theater {
         if (!['member', 'admin'].includes(b.role)) fail(400, 'Ungültige Berechtigung.');
         if (target.status !== 'approved' || !target.personId) fail(409, 'Admin-Rechte gibt es nur für freigegebene Konten.');
         if (target.role === b.role) return {};
+        // Admins have every right; a demoted admin keeps only the rights sent along (older apps send none).
+        const permissions = b.role === 'admin' || b.permissions === undefined ? [] : permissionSet(b.permissions);
         if (target.role === 'admin' && s.accounts().filter(x => x.status === 'approved' && x.role === 'admin').length <= 1) fail(409, 'Der letzte Admin muss erhalten bleiben.');
         // Like suspending or deleting: only another admin takes away one's own rights.
         if (target.uid === a.uid) fail(409, 'Die eigenen Admin-Rechte kann nur ein anderer Admin entziehen.');
-        s.saveAccount({ ...target, role: b.role, roleChangedBy: a.uid, roleChangedAt: now(), version: target.version + 1 });
+        s.saveAccount({ ...target, role: b.role, permissions, roleChangedBy: a.uid, roleChangedAt: now(), version: target.version + 1 });
         this.enqueuePush(b.role === 'admin'
           ? { title: 'Admin-Rechte erhalten', body: 'Du kannst jetzt die Verwaltung der Theater-App nutzen.', data: {}, recipientPersonIds: [target.personId] }
-          : { title: 'Admin-Rechte entzogen', body: 'Dein Zugang gilt jetzt als Mitglied.', data: {}, recipientPersonIds: [target.personId] });
+          : { title: 'Admin-Rechte entzogen', body: permissions.includes('events') ? 'Dein Zugang gilt jetzt als Mitglied mit dem Recht „Termine verwalten“.' : 'Dein Zugang gilt jetzt als Mitglied.', data: {}, recipientPersonIds: [target.personId] });
+        return {};
+      }
+      case 'account.permissions': {
+        // Rights of a linked member account. Suspended accounts keep theirs (they return with the
+        // account), so they can be changed there too. Applies with the next request, like the role.
+        admin(); const target = s.account(b.uid);
+        if (!target || target.version !== b.version) fail(409, 'Das Konto hat sich geändert.', 'version_conflict');
+        const permissions = permissionSet(b.permissions);
+        if (!['approved', 'suspended'].includes(target.status) || !target.personId) fail(409, 'Rechte gibt es nur für freigegebene, verknüpfte Konten.');
+        if (target.role === 'admin') fail(409, 'Admins haben bereits alle Rechte.', 'admin_has_all');
+        const before = list(target.permissions);
+        if (JSON.stringify([...before].sort()) === JSON.stringify(permissions)) return {};
+        s.saveAccount({ ...target, permissions, permissionsChangedBy: a.uid, permissionsChangedAt: now(), version: target.version + 1 });
+        const gained = permissions.includes('events') && !before.includes('events'), lost = !permissions.includes('events') && before.includes('events');
+        if (target.status === 'approved' && gained) this.enqueuePush({ title: 'Termine verwalten freigeschaltet', body: 'Du kannst jetzt Termine anlegen, ändern und Rückmeldungen einsehen.', data: {}, recipientPersonIds: [target.personId] });
+        if (target.status === 'approved' && lost) this.enqueuePush({ title: 'Termine-Recht entzogen', body: 'Du kannst keine Termine mehr verwalten.', data: {}, recipientPersonIds: [target.personId] });
         return {};
       }
       case 'account.reconsider': {
@@ -537,7 +628,7 @@ export class Theater {
         if (!target || target.version !== b.version) fail(409, 'Das Konto hat sich geändert.', 'version_conflict');
         if (target.status !== 'rejected') fail(409, 'Nur abgelehnte Konten können erneut geprüft werden.');
         const { approvedAt, approvedBy, ...pending } = target;
-        s.saveAccount({ ...pending, status: 'pending', personId: null, role: 'member', version: target.version + 1 }); return {};
+        s.saveAccount({ ...pending, status: 'pending', personId: null, role: 'member', permissions: [], version: target.version + 1 }); return {};
       }
       case 'profile.save': {
         const m = s.get('members', a.personId);
@@ -649,7 +740,7 @@ export class Theater {
         return { queued: true, recipients: open.length, lastRemindedAt: this.recordNudge(a, 'poll', p.id, open.length) };
       }
       case 'event.save': {
-        admin(); const eventId = b.id || id(), old = s.get('events', eventId);
+        events(); const eventId = b.id || id(), old = s.get('events', eventId);
         if (b.id && !old) fail(404, 'Termin nicht gefunden.');
         if (old?.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.', 'closed');
         if (old && (old.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.', 'version_conflict');
@@ -659,13 +750,18 @@ export class Theater {
         const sceneIds = [...new Set(list(b.sceneIds).map(String))];
         if (b.productionId && sceneIds.some(x => !s.get('scripts', b.productionId)?.scenes.some(scene => scene.id === x))) fail(400, 'Eine ausgewählte Szene gehört nicht zur Produktion.');
         if (b.type != null && !eventTypes.includes(b.type)) fail(400, 'Unbekannte Terminart.');
+        if (b.autoAccept !== undefined && typeof b.autoAccept !== 'boolean') fail(400, 'Ungültige Angabe für „Alle gelten als zugesagt“.');
         const roleIds = b.roleIds === undefined ? list(old?.roleIds) : this.audience(b.roleIds);
         const personIds = b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds);
         const productionIds = b.productionIds === undefined ? list(old?.productionIds) : this.productionAudience(b.productionIds);
         if (b.repeat != null && old) fail(400, 'Eine Wiederholung lässt sich nur beim Anlegen eines Termins festlegen.');
         if (b.series !== undefined && b.series !== 'following') fail(400, 'Unbekannte Auswahl für die Terminserie.');
         if (b.series === 'following' && !old?.seriesId) fail(400, 'Dieser Termin gehört zu keiner Terminserie.');
-        const e = { id: eventId, title: required(b.title, 'Titel'), description: text(b.description ?? old?.description, 5000), startsAt, endsAt, place: text(b.place), type: eventTypes.includes(b.type) ? b.type : 'rehearsal', locked: b.locked === true, productionId: b.productionId || null, sceneIds: b.productionId ? sceneIds : [], roleIds, personIds, productionIds, ...(old?.seriesId ? { seriesId: old.seriesId } : {}), version: (old?.version ?? 0) + 1 };
+        const e = { id: eventId, title: required(b.title, 'Titel'), description: text(b.description ?? old?.description, 5000), startsAt, endsAt, place: text(b.place), type: eventTypes.includes(b.type) ? b.type : 'rehearsal', locked: b.locked === true,
+          // Older apps do not send the switch; the event keeps its stored value then.
+          autoAccept: b.autoAccept === undefined ? old?.autoAccept === true : b.autoAccept, productionId: b.productionId || null, sceneIds: b.productionId ? sceneIds : [], roleIds, personIds, productionIds, ...(old?.seriesId ? { seriesId: old.seriesId } : {}),
+          // Who planned the event (person ids), shown to everyone who manages events; older events have no creator.
+          createdBy: old ? old.createdBy ?? null : a.personId, updatedBy: a.personId, version: (old?.version ?? 0) + 1 };
         if (b.repeat != null) {
           // A series is a set of independent events sharing a seriesId; each is
           // edited on its own later. Every occurrence gets the usual absence
@@ -676,11 +772,16 @@ export class Theater {
           const events = occurrences.map((o, i) => this.storeEvent({ ...e, id: i ? id() : eventId, ...o, seriesId }));
           const series = { id: seriesId, count: events.length, every: b.repeat.every, until: b.repeat.until };
           const notice = { title: `Neue Terminserie: ${e.title}`, body: seriesSummary(occurrences, b.repeat.every), data: { eventId }, roleIds, personIds, productionIds, newEvent: true, series };
+          // A series push keeps its summary without "Du bist eingeplant" or the decline action,
+          // so the planned reminders of near occurrences still go out (no markPlannedReminders here).
           if (b.push === true) this.enqueuePush({ ...notice, announce: 'new' });
           else this.enqueueEmail(notice);
           return { id: eventId, ids: events.map(x => x.id), pushQueued: b.push === true && this.pushEnabled, pushSkipped: b.push === true && !this.pushEnabled ? 'disabled' : null };
         }
         this.storeEvent(e);
+        // Switching auto-accept on is silent, also within two days of the start (see markPlannedReminders).
+        const switchedOn = (before, after) => before.autoAccept !== true && after.autoAccept === true;
+        if (old && switchedOn(old, e)) this.markPlannedReminders([e]);
         // Only a new date, time or place is worth a notification; typo fixes, locking and the like stay quiet.
         // Such a change is pushed only with the push switch on and otherwise just mailed (email is opt-in).
         const moved = (x, y) => ['startsAt', 'endsAt', 'place'].some(f => !sameValue(f, x[f], y[f]));
@@ -690,6 +791,7 @@ export class Theater {
           // "This and all following": later occurrences take over only the fields changed
           // here, so their own edits survive; times move by the Berlin wall-clock delta.
           const followers = this.seriesFollowers(old, e);
+          this.markPlannedReminders(followers.filter(x => switchedOn(x.before, x.after)).map(x => x.after));
           if (followers.length) {
             const touched = [old.startsAt, startsAt, ...followers.flatMap(x => [x.before.startsAt, x.after.startsAt])];
             // Moving a near event far away still concerns those who expect it soon.
@@ -697,6 +799,7 @@ export class Theater {
             const notice = { title: `Terminserie geändert: ${e.title}`, body: `Gilt für ${followers.length + 1} Termine ab ${eventNotificationBody(e)}`, data: { eventId }, roleIds, personIds, productionIds, change: true, soon, series: { id: old.seriesId, count: followers.length + 1 } };
             if (relevant && b.push === true) this.enqueuePush({ ...notice, announce: 'changed' });
             else if (relevant) this.enqueueEmail(notice);
+            // Like a new series, the summary push replaces no planned reminder.
             return { id: eventId, ids: [eventId, ...followers.map(x => x.after.id)], pushQueued: b.push === true && this.pushEnabled && soon && relevant, pushSkipped: pushSkipped(soon, relevant) };
           }
         }
@@ -705,10 +808,11 @@ export class Theater {
         const kind = old ? { change: true, soon } : { newEvent: true }, relevant = !old || moved(old, e);
         if (relevant && b.push === true) this.enqueuePush({ title: `${old ? 'Termin geändert' : 'Neuer Termin'}: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, ...kind, announce: old ? 'changed' : 'new' });
         else if (relevant) this.enqueueEmail({ data: { eventId }, roleIds, personIds, productionIds, ...kind });
+        if (relevant && b.push === true && this.pushEnabled && soon) this.markPlannedReminders([e], old ? 'changes' : 'eventAnnouncements');
         return { id: eventId, ...(b.series === 'following' ? { ids: [eventId] } : {}), pushQueued: b.push === true && this.pushEnabled && soon && relevant, pushSkipped: pushSkipped(soon, relevant) };
       }
       case 'event.delete': {
-        admin(); const e = s.get('events', b.id); if (!e) fail(404, 'Termin nicht gefunden.');
+        events(); const e = s.get('events', b.id); if (!e) fail(404, 'Termin nicht gefunden.');
         if (e.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.', 'closed');
         if ((e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.', 'version_conflict');
         if (b.series !== undefined && b.series !== 'following') fail(400, 'Unbekannte Auswahl für die Terminserie.');
@@ -737,7 +841,7 @@ export class Theater {
         return { ids: doomed.map(x => x.id) };
       }
       case 'checkin.save': {
-        admin(); if (!s.get('events', b.eventId)) fail(404, 'Termin nicht gefunden.');
+        events(); if (!s.get('events', b.eventId)) fail(404, 'Termin nicht gefunden.');
         for (const c of list(b.members)) {
           const memberId = Number(c.id), key = `${b.eventId}:${memberId}`, old = s.get('checkins', key);
           if (!s.get('members', memberId)?.active) fail(400, 'Person nicht verfügbar.');
@@ -748,14 +852,14 @@ export class Theater {
         return {};
       }
       case 'event.script': {
-        admin(); const e = s.get('events', b.eventId); if (!e) fail(404, 'Termin nicht gefunden.');
+        events(); const e = s.get('events', b.eventId); if (!e) fail(404, 'Termin nicht gefunden.');
         // Installed older clients do not yet send an event version.
         if (b.version !== undefined && (e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.', 'version_conflict');
         const doc = b.productionId ? s.get('scripts', b.productionId) : null;
         if (b.productionId && !doc) fail(400, 'Drehbuch nicht gefunden.');
         const sceneIds = [...new Set(list(b.sceneIds).map(String))];
         if (doc && sceneIds.some(x => !doc.scenes.some(scene => scene.id === x))) fail(400, 'Szene nicht gefunden.');
-        s.put('events', e.id, { ...e, productionId: b.productionId || null, sceneIds: doc ? sceneIds : [], version: (e.version ?? 1) + 1, updatedAt: now() }); return {};
+        s.put('events', e.id, { ...e, productionId: b.productionId || null, sceneIds: doc ? sceneIds : [], updatedBy: a.personId, version: (e.version ?? 1) + 1, updatedAt: now() }); return {};
       }
       case 'production.archive': {
         admin(); const p = s.get('productions', b.id);
@@ -879,9 +983,11 @@ export class Theater {
       }
       case 'event.remindOpen': {
         // Nudges only the invited people who have not answered the event yet.
-        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.', 'push_unavailable');
+        events(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.', 'push_unavailable');
         const e = s.get('events', b.eventId); if (!e) fail(404, 'Termin nicht gefunden.');
         if (e.locked || e.slotPoolId || Date.parse(e.endsAt ?? e.startsAt) < +this.clock()) fail(409, 'Für diesen Termin sind keine Rückmeldungen mehr möglich.', 'closed');
+        // Nobody owes an answer here; the invitees are reminded automatically two days ahead.
+        if (e.autoAccept === true) fail(409, 'Bei diesem Termin gelten alle Eingeladenen automatisch als zugesagt.', 'nothing_open');
         this.checkCooldown('event', e.id);
         const open = this.audienceIds(e).filter(x => !['yes', 'late', 'no'].includes(s.get('responses', `${e.id}:${x}`)?.status));
         if (!open.length) fail(409, 'Alle Eingeladenen haben sich schon zurückgemeldet.', 'nothing_open');
@@ -914,7 +1020,7 @@ export class Theater {
       }
       case 'comment.delete': { const comment = s.get('comments', b.id); if (!comment || (comment.authorId !== a.personId && a.role !== 'admin')) fail(403, 'Diesen Kommentar kannst du nicht entfernen.'); s.delete('comments', b.id); return {}; }
       case 'slotPool.save': {
-        admin(); const poolId = b.id || id(), old = s.get('slotPools', poolId);
+        events(); const poolId = b.id || id(), old = s.get('slotPools', poolId);
         if (b.id && !old) fail(404, 'Terminfinder nicht gefunden.');
         if (old && old.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.', 'version_conflict');
         const input = list(b.slots);
@@ -934,7 +1040,7 @@ export class Theater {
         const roleIds = b.roleIds === undefined ? list(old?.roleIds) : this.audience(b.roleIds);
         const personIds = b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds);
         const productionIds = b.productionIds === undefined ? list(old?.productionIds) : this.productionAudience(b.productionIds);
-        const pool = { id: poolId, title: required(b.title, 'Titel'), description: text(b.description, 3000), place: text(b.place), type: b.type ?? old?.type ?? 'other', roleIds, personIds, productionIds, slots, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 };
+        const pool = { id: poolId, title: required(b.title, 'Titel'), description: text(b.description, 3000), place: text(b.place), type: b.type ?? old?.type ?? 'other', roleIds, personIds, productionIds, slots, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), createdBy: old ? old.createdBy ?? null : a.personId, updatedBy: a.personId, version: (old?.version ?? 0) + 1 };
         s.put('slotPools', poolId, pool);
         for (const slot of slots) this.syncSlotEvent(pool, slot);
         if (!old) this.enqueuePush({ title: `Terminfinder: ${pool.title}`, body: 'Bitte wähle dein Zeitfenster.', data: { slotPoolId: poolId }, roleIds, personIds, productionIds });
@@ -946,13 +1052,13 @@ export class Theater {
         return { id: poolId };
       }
       case 'slotPool.close': {
-        admin(); const pool = s.get('slotPools', b.id);
+        events(); const pool = s.get('slotPools', b.id);
         if (!pool) fail(404, 'Terminfinder nicht gefunden.');
         if (pool.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.', 'version_conflict');
-        s.put('slotPools', pool.id, { ...pool, closed: b.closed !== false, version: pool.version + 1 }); return {};
+        s.put('slotPools', pool.id, { ...pool, closed: b.closed !== false, updatedBy: a.personId, version: pool.version + 1 }); return {};
       }
       case 'slotPool.delete': {
-        admin(); const pool = s.get('slotPools', b.id);
+        events(); const pool = s.get('slotPools', b.id);
         if (!pool) fail(404, 'Terminfinder nicht gefunden.');
         if (pool.version !== b.version) fail(409, 'Der Terminfinder wurde inzwischen geändert.', 'version_conflict');
         const bookings = s.all('slotBookings').filter(x => x.poolId === pool.id);
@@ -967,7 +1073,7 @@ export class Theater {
       }
       case 'slotPool.remindOpen': {
         // Nudges invitees without a booking while a future slot is still free.
-        admin(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.', 'push_unavailable');
+        events(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.', 'push_unavailable');
         const pool = s.get('slotPools', b.id); if (!pool) fail(404, 'Terminfinder nicht gefunden.');
         const bookings = s.all('slotBookings').filter(x => x.poolId === pool.id);
         if (pool.closed || !pool.slots.some(x => Date.parse(x.startsAt) > +this.clock() && bookings.filter(y => y.slotId === x.id).length < x.capacity)) fail(409, 'In diesem Terminfinder ist kein freies Zeitfenster mehr buchbar.', 'closed');
@@ -986,7 +1092,7 @@ export class Theater {
         this.bookSlot(pool, a.personId, b.action === 'slot.book' ? required(b.slotId, 'Zeitfenster') : null); return {};
       }
       case 'slot.assign': {
-        admin(); const pool = s.get('slotPools', b.poolId), personId = Number(b.personId);
+        events(); const pool = s.get('slotPools', b.poolId), personId = Number(b.personId);
         if (!pool) fail(404, 'Terminfinder nicht gefunden.');
         if (!s.get('members', personId)?.active && b.slotId !== null) fail(400, 'Person nicht verfügbar.');
         const before = s.get('slotBookings', `${pool.id}:${personId}`)?.slotId ?? null, beforeSlot = pool.slots.find(x => x.id === before);
@@ -1057,8 +1163,27 @@ export class Theater {
     e = { ...e, updatedAt: now() };
     s.put('events', eventId, e);
     for (const r of s.all('responses').filter(r => r.eventId === eventId && r.expectedArrivalAt && (r.expectedArrivalAt <= e.startsAt || r.expectedArrivalAt >= e.endsAt))) s.put('responses', `${eventId}:${r.personId}`, { ...r, expectedArrivalAt: null });
-    for (const absence of s.all('absences')) if (inAudience(s.get('members', absence.personId), e, s) && absence.from <= day(e.startsAt) && absence.to >= day(e.startsAt) && !s.get('responses', `${eventId}:${absence.personId}`)) s.put('responses', `${eventId}:${absence.personId}`, { eventId, personId: absence.personId, status: 'no', expectedArrivalAt: null, reason: absence.reason, absenceId: absence.id, updatedAt: now() });
+    // On auto-accepted events a withdrawn answer (`open`) means "attending", so a covering absence declines it as well.
+    const unanswered = r => !r || (e.autoAccept === true && r.status === 'open');
+    for (const absence of s.all('absences')) if (inAudience(s.get('members', absence.personId), e, s) && absence.from <= day(e.startsAt) && absence.to >= day(e.startsAt) && unanswered(s.get('responses', `${eventId}:${absence.personId}`))) s.put('responses', `${eventId}:${absence.personId}`, { eventId, personId: absence.personId, status: 'no', expectedArrivalAt: null, reason: absence.reason, absenceId: absence.id, updatedAt: now() });
     return e;
+  }
+  /**
+   * Marks the "Du bist eingeplant" reminder (see push.mjs) as sent for the implicit attendees of those
+   * auto-accepted events that start within its lead time. After a single-event announcement push (`kind`
+   * is its push kind) only people who get that push are marked: it already says "Du bist eingeplant" and
+   * offers the decline. Series pushes only carry their summary and mark nothing. Without `kind` (auto-accept switched on) everyone is marked, so the switch stays silent.
+   */
+  markPlannedReminders(events, kind = null) {
+    const s = this.store, at = +this.clock(), absences = s.all('absences');
+    for (const e of events) {
+      const until = Date.parse(e.startsAt) - at;
+      if (e.autoAccept !== true || e.locked || until <= 0 || until > plannedReminderLeadMs) continue;
+      for (const personId of this.implicitIds(e, null, absences)) {
+        if (kind && s.get('reminders', personId)?.[kind] === false) continue;
+        s.put('reminderSent', `${e.id}:${e.startsAt}:${personId}:planned`, { at: now(), by: kind ? 'announce' : 'autoAccept' });
+      }
+    }
   }
   /**
    * Later, not yet ended occurrences of the series take over the fields changed from `old` to `e`.
@@ -1077,7 +1202,7 @@ export class Theater {
     if (!changed.length && !retime) return [];
     return s.all('events').filter(x => x.seriesId === old.seriesId && x.id !== e.id && !x.slotPoolId && Date.parse(x.startsAt) > Date.parse(old.startsAt) && Date.parse(x.endsAt) > at)
       .sort((x, y) => x.startsAt.localeCompare(y.startsAt)).map(before => {
-        const next = { ...before, version: (before.version ?? 1) + 1 };
+        const next = { ...before, updatedBy: e.updatedBy ?? before.updatedBy ?? null, version: (before.version ?? 1) + 1 };
         for (const f of changed) next[f] = e[f];
         if (changed.includes('productionId')) next.sceneIds = [];
         if (retime) {
@@ -1087,14 +1212,14 @@ export class Theater {
         return { before, after: this.storeEvent(next) };
       });
   }
-  /** Tells admins and the production's directors when someone cancels within a day of the start; once per person and start time. */
+  /** Tells admins, holders of the events right and the production's directors when someone cancels within a day of the start; once per person and start time. */
   notifyLateDecline(e, personId) {
     const s = this.store, until = Date.parse(e.startsAt) - +this.clock();
     if (!this.pushEnabled || until <= 0 || until > lateDeclineWindowMs) return;
     const key = `${e.id}:${e.startsAt}:${personId}:lateDecline`;
     if (s.get('reminderSent', key)) return;
     const directors = list(s.get('productions', e.productionId)?.directorMemberIds).map(Number);
-    const recipients = [...new Set([...s.accounts().filter(x => x.status === 'approved' && x.role === 'admin' && x.personId != null).map(x => x.personId), ...directors])]
+    const recipients = [...new Set([...s.accounts().filter(x => x.status === 'approved' && x.personId != null && can(x, 'events')).map(x => x.personId), ...directors])]
       .filter(x => x !== personId && s.get('reminders', x)?.lateDeclines !== false);
     if (!recipients.length) return;
     // Never the reason: it may be health information on a lock screen.
@@ -1170,6 +1295,10 @@ export class Theater {
     for (const { id: key } of s.db.prepare("SELECT id FROM entities WHERE kind = 'reminderSent'").all()) if (key.split(':').at(-2) === String(personId)) s.delete('reminderSent', key);
     s.delete('reminders', personId);
     for (const { id: key, data } of s.db.prepare("SELECT id, data FROM entities WHERE kind = 'nudges'").all()) { const n = JSON.parse(data); if (n.by === personId) s.put('nudges', key, { ...n, by: null }); }
+    // Who created or last changed an event or pool is cleared without a version bump, like the nudges' `by`.
+    for (const kind of ['events', 'slotPools']) for (const x of s.all(kind).filter(x => x.createdBy === personId || x.updatedBy === personId)) {
+      s.put(kind, x.id, { ...x, ...(x.createdBy === personId ? { createdBy: null } : {}), ...(x.updatedBy === personId ? { updatedBy: null } : {}) });
+    }
     // An orphaned profile image is purged by the retention job (it also removes the file).
     for (const m of s.all('media').filter(m => m.ownerPersonId === personId)) s.put('media', m.id, { ...m, ownerPersonId: null });
     s.delete('members', personId);

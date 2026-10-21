@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/account_permissions.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../shared/feedback.dart';
@@ -7,6 +8,7 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/member_avatar.dart';
 import '../../events/domain/event_format.dart';
+import '../domain/implicit_attendance.dart';
 import 'responses_screen.dart';
 import 'scene_planner_screen.dart';
 
@@ -108,10 +110,12 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
     dirty: _changes.isNotEmpty,
     child: AdminPage(
       controller: widget.controller,
+      permission: eventsPermission,
       title: 'Anwesenheit',
       children: (context) {
         final controller = widget.controller, event = widget.event;
-        final responses = jsonMap(controller.memberAttendanceByEvent[event.id]);
+        // Implicit attendees of an auto-accepted event count as confirmed.
+        final responses = plannedResponses(controller, event);
         int unrecordedFirst(TheaterMember a, TheaterMember b) {
           final open = (_saved(a.id) == null ? 0 : 1).compareTo(
             _saved(b.id) == null ? 0 : 1,
@@ -229,7 +233,7 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
               child: _AttendanceRow(
                 controller: controller,
                 member: m,
-                response: memberResponseLabel(controller, event.id, m.id),
+                response: memberResponseLabel(controller, event, m.id),
                 present: present(m.id),
                 changed: _changes.containsKey(m.id),
                 onChanged: _busy

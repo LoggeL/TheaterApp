@@ -38,6 +38,37 @@ Als Ausgangsregel hat jede Person höchstens ein aktiv zugeordnetes Konto, das m
 
 Ablehnen setzt `rejected`; eine spätere Sperrung setzt `suspended`. Erneute Registrierung mit derselben UID hebt beides nicht auf. Eine Wiederfreigabe erfolgt ausdrücklich durch einen berechtigten Admin. Der erste Admin wird im vertrauenswürdigen Einrichtungsprozess angelegt; es gibt keine öffentliche Selbstvergabe dieser Rolle.
 
+## Berechtigungen
+
+Die Rolle (`role`: `member` oder `admin`) bleibt die Grundlage. Zusätzlich kann ein Admin einzelnen Mitgliedskonten Rechte geben, gespeichert als `permissions` im Konto (bisher nur `events`, „Termine verwalten“; Feature-Flag `accountPermissions`). Admins haben alle Rechte; `permissions` bleibt bei ihnen leer, das Profil meldet ihnen trotzdem alle Rechte. Unbekannte gespeicherte Werte meldet das Profil nicht.
+
+Das Recht `events` gilt für alle Termine, nicht nur für eingeladene:
+
+- `event.save` und `event.delete` (auch Serien), `event.remindOpen`, `event.script`, `checkin.save`
+- Terminfinder: `slotPool.save`, `slotPool.close`, `slotPool.delete`, `slotPool.remindOpen`, `slot.assign`
+- `GET /admin/events/:id` (Rückmeldungen mit Absagegründen, Anwesenheit und die Abwesenheiten der Eingeladenen am Termintag; Abwesenheiten anderer Personen liefert der Server auch Admins hier nicht mehr)
+- im Snapshot alle Termine und Terminfinder (nicht eingeladene mit „nicht eingeladen“), `memberAttendanceByEvent`, `arrivalsByEvent`, `checkinsByEvent`, `checkinVersions`, `implicitAttendanceByEvent` und die Erinnerungszeitpunkte an Terminen und Terminfindern
+- Push „Kurzfristige Absage“ (abschaltbar)
+
+Admin-only bleiben Konten (`account.*`, `/admin/accounts`, Kontolöschung), Personen, Rollen, Produktionen einschließlich `production.scopeEvents`, Drehbuchimport, Mitteilungen, eigene Pushes, Abstimmungen, Feedback, Galerien, Website-Profile, offene Registrierungen, die Teilnahmeübersicht aller Personen sowie die Push-Arten „Neue Registrierungen“ und „Feedback“. Der Admin-Bereich der App bleibt Admins vorbehalten; Inhaber des Rechts erreichen die Terminverwaltung über den Reiter „Termine“.
+
+Vergabe und Rücksetzung:
+
+- `account.permissions` (`{ uid, version, permissions }`, nur Admins): für verknüpfte Konten im Status `approved` oder `suspended`; Admin-Konten lehnt der Server mit `admin_has_all` ab. Die Person erhält bei freigegebenem Konto einen Push beim Erhalten oder Verlieren des Rechts.
+- `account.approve` übernimmt optional `permissions`, nur für die Rolle `member`.
+- `account.role` zu `admin` leert `permissions`; zu `member` gilt das mitgesendete `permissions` (ältere Apps senden keins, dann bleibt kein Recht).
+- `account.status` auf `suspended` behält die Rechte (sie ruhen und gelten nach erneuter Freigabe wieder), auf `rejected` werden sie gelöscht; `account.reconsider` leert sie ebenfalls.
+
+Der Server prüft Rolle und Rechte bei jeder Anfrage aus der eigenen Datenbank; eine Änderung gilt sofort mit der nächsten Anfrage. Vorgemerkte Offline-Änderungen nach einem Entzug scheitern mit `forbidden` und bleiben als fehlgeschlagen sichtbar. Inhaber des Rechts können wie Admins Termine samt Push („Neuer Termin“, Änderungen, Absagen, Terminfinder) an die Eingeladenen auslösen. Deshalb speichert der Server an Terminen und Terminfindern `createdBy` und `updatedBy` (Personen-ID). Die App zeigt allen mit dem Recht unter „Probenleitung“ „Zuletzt geändert von …“; anderen Mitgliedern liefert der Server diese Felder nicht. Zusätzlich hält das Änderungsprotokoll jede Aktion mit ausführendem Konto fest.
+
+## Übersicht „Zugänge & Rechte“
+
+Admins sehen unter „Admin → Zugänge & Rechte“ jede Person mit ihrem Konto (oder „Kein Konto“) und danach die Konten ohne Person. Der Status kommt allein aus dem Konto: „Freigegeben“, „Wartet auf Freigabe“ (`pending` mit bestätigter Identität), „E-Mail unbestätigt“, „Gesperrt“, „Abgelehnt“ oder „Kein Konto“. Unabhängig davon stehen „Person inaktiv“ (der Server verweigert dann den Zugang) und „Konto ohne Person“ (`personId` leer, gleich welcher Status). „Wartet“ zählt wie Hub, Heute und die Registrierungs-Push nur Konten, die sich freigeben lassen.
+
+Die Rechte einer Zeile erscheinen als Pillen: „Admin“, „Termine verwalten“, „Regie: <Stück>“ für nicht archivierte Produktionen (aus `directorMemberIds`, nur Anzeige) oder „Mitglied“. Rolle und Rechte gesperrter Konten sind gedämpft mit „ruht“ markiert, weil sie mit „Wieder freigeben“ wieder gelten. Abgelehnte Konten zeigen keine Rechte: Sie kommen nur über „Erneut prüfen“ als neue Registrierung zurück, die Rolle und Rechte zurücksetzt. Die Zusammenfassung zählt Admins und Rechte nur, wo sie gerade gelten (nicht bei gesperrten Konten oder inaktiven Personen); die Rechte-Filter finden gesperrte Inhaber weiterhin. Filter gibt es nach Status, Rechten und Rollen; die Zusammenfassung oben springt in den passenden Filter.
+
+„Rechte bearbeiten…“ öffnet ein Blatt mit dem Schalter „Admin“ und je einem Kästchen pro Recht. Speichern fragt einmal nach und sendet `account.role` (beim Entziehen mit den behaltenen Rechten), sonst `account.permissions`. Rechteänderungen brauchen eine Verbindung: ohne Verbindung wird nichts vorgemerkt, damit eine zweite Änderung nicht an einer veralteten Version scheitert. Bei gesperrten Konten lassen sich nur die ruhenden Rechte ändern. Die eigene Zeile bietet nur „In Ensemble bearbeiten“. Die Übersicht liest `/admin/accounts` und braucht keine Serveränderung.
+
 ## Server, lokale Daten und Migration
 
 Der Client übergibt sein Firebase-ID-Token über HTTPS. Das Backend prüft es mit dem Firebase Admin SDK einschließlich Widerrufsprüfung und liest anschließend den aktuellen Freigabe-, Personen- und Berechtigungsstand aus der eigenen Datenbank. Eine vom Client gesendete Personen-ID oder Rolle ist keine Berechtigung. [Firebase: Verify ID tokens](https://firebase.google.com/docs/auth/admin/verify-id-tokens)

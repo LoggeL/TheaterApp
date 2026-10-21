@@ -56,6 +56,14 @@ class PendingAction {
     'settings.reminders' => 'Erinnerungseinstellungen',
     'checkin.save' => 'Anwesenheits-Check-in',
     'event.script' => 'Drehbuchzuordnung',
+    'event.save' || 'event.delete' => 'Termin',
+    'slotPool.save' ||
+    'slotPool.close' ||
+    'slotPool.delete' ||
+    'slotPool.remindOpen' ||
+    'slot.assign' => 'Terminfinder',
+    'account.permissions' => 'Rechte',
+    'account.role' => 'Admin-Rechte',
     _ => 'Änderung',
   };
   PendingAction withStatus(

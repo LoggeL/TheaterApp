@@ -105,12 +105,7 @@ class TodayDigest {
     if (event.response == 'no') return false;
     final start = event.startsAt;
     if (event.response != 'open' || start == null) return true;
-    final day = dateOnly(start);
-    return !absences.any(
-      (a) =>
-          day.compareTo(dateOnly(a.from)) >= 0 &&
-          day.compareTo(dateOnly(a.to)) <= 0,
-    );
+    return !absences.any((a) => a.coversDay(start));
   }
 
   /// Ids of the events a queued, not yet confirmed `event.delete` removes;

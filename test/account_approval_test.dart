@@ -251,4 +251,87 @@ void main() {
       );
     }
   });
+
+  testWidgets('the right "Termine verwalten" can be given with the approval', (
+    tester,
+  ) async {
+    final server = TestServer();
+    server.data['capabilities'] = {
+      'features': ['accountPermissions'],
+    };
+    await _pumpApproval(tester, server, _account('Sam Vorhang'));
+    final toggle = find.byKey(const ValueKey('approval-permission-events'));
+    expect(toggle, findsOneWidget);
+    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+    await tester.ensureVisible(toggle);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    final button = find.widgetWithText(FilledButton, 'Verknüpfen & freigeben');
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(server.actionBodies.last, {
+      'action': 'account.approve',
+      'uid': 'new',
+      'version': 1,
+      'personId': 5,
+      'role': 'member',
+      'permissions': ['events'],
+    });
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the access level is called "Rechte" next to the status', (
+    tester,
+  ) async {
+    await _pumpApproval(tester, TestServer(), _account('Sam Vorhang'));
+    expect(
+      find.widgetWithText(DropdownButtonFormField<String>, 'Rechte'),
+      findsOneWidget,
+    );
+    expect(find.text('Berechtigung'), findsNothing);
+    expect(find.text('Wartet auf Freigabe'), findsOneWidget);
+    expect(find.text('Ausstehend'), findsNothing);
+  });
+
+  testWidgets('admins and older servers get no rights switch', (tester) async {
+    await _pumpApproval(tester, TestServer(), _account('Sam Vorhang'));
+    expect(
+      find.byKey(const ValueKey('approval-permission-events')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('choosing Admin hides the rights switch and sends no rights', (
+    tester,
+  ) async {
+    final server = TestServer();
+    server.data['capabilities'] = {
+      'features': ['accountPermissions'],
+    };
+    await _pumpApproval(tester, server, _account('Sam Vorhang'));
+    final toggle = find.byKey(const ValueKey('approval-permission-events'));
+    await tester.ensureVisible(toggle);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    final role = find.byType(DropdownButtonFormField<String>);
+    await tester.ensureVisible(role);
+    await tester.tap(role);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Admin').last);
+    await tester.pumpAndSettle();
+    expect(toggle, findsNothing);
+    final button = find.widgetWithText(FilledButton, 'Verknüpfen & freigeben');
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(server.actionBodies.last, {
+      'action': 'account.approve',
+      'uid': 'new',
+      'version': 1,
+      'personId': 5,
+      'role': 'admin',
+    });
+    expect(tester.takeException(), isNull);
+  });
 }

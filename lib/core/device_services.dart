@@ -14,9 +14,22 @@ import 'identity.dart';
 
 /// Validated navigation targets; push payloads never execute external URLs.
 class AppTarget {
-  const AppTarget(this.kind, this.id, {this.attendance, this.recipientUid});
+  const AppTarget(
+    this.kind,
+    this.id, {
+    this.attendance,
+    this.recipientUid,
+    this.intent,
+  });
   final String kind, id;
   final String? attendance, recipientUid;
+
+  /// 'decline' opens the decline sheet of the event (the "Du bist eingeplant"
+  /// reminder); null otherwise.
+  final String? intent;
+
+  static String? _intent(Object? value) =>
+      value == 'decline' ? 'decline' : null;
 
   static AppTarget? fromNotificationResponse(NotificationResponse response) {
     try {
@@ -27,11 +40,16 @@ class AppTarget {
       if (target == null) return null;
       final uid = data['recipientUid'];
       final action = response.actionId;
+      // 'planned' (implicit attendance) offers "Ok", an explicit yes, and
+      // "Komme nicht".
+      final actions = switch (data['attendanceActions']) {
+        'true' || 'planned' => const {'yes', 'no'},
+        _ => const <String>{},
+      };
       if (target.kind == 'events' &&
-          data['attendanceActions'] == 'true' &&
           uid is String &&
           uid.isNotEmpty &&
-          const {'yes', 'no'}.contains(action)) {
+          actions.contains(action)) {
         return AppTarget(
           'events',
           target.id,
@@ -68,7 +86,13 @@ class AppTarget {
           path[1].length > 200) {
         return null;
       }
-      return AppTarget(path[0], path[1]);
+      return AppTarget(
+        path[0],
+        path[1],
+        intent: path[0] == 'events'
+            ? _intent(uri.queryParameters['intent'])
+            : null,
+      );
     } on FormatException {
       // A syntactically valid URI can still contain invalid UTF-8 segments.
       return null;
@@ -92,7 +116,7 @@ class AppTarget {
     if (link is String) return fromUri(Uri.tryParse(link) ?? Uri());
     final event = data['eventId'];
     if (event is String && event.isNotEmpty && event.length <= 200) {
-      return AppTarget('events', event);
+      return AppTarget('events', event, intent: _intent(data['intent']));
     }
     final production = data['productionId'];
     if (production is String &&
@@ -163,9 +187,6 @@ abstract final class AndroidPushNotifications {
     final title = data['title'];
     final body = data['body'];
     if (title is! String || body is! String) return;
-    final actions =
-        data['attendanceActions'] == 'true' &&
-        AppTarget.fromData(data)?.kind == 'events';
     // Stable across isolates, so duplicate deliveries replace the same card.
     final key = '${data['notificationId']}';
     final id = key.codeUnits.fold(
@@ -184,23 +205,35 @@ abstract final class AndroidPushNotifications {
           importance: Importance.high,
           priority: Priority.high,
           styleInformation: BigTextStyleInformation(body),
-          actions: actions
-              ? const [
-                  AndroidNotificationAction(
-                    'yes',
-                    'Komme',
-                    showsUserInterface: true,
-                  ),
-                  AndroidNotificationAction(
-                    'no',
-                    'Komme nicht',
-                    showsUserInterface: true,
-                  ),
-                ]
-              : null,
+          actions: attendanceActions(data),
         ),
       ),
     );
+  }
+
+  /// The quick answers on an event notification: "Komme" and "Komme nicht"
+  /// for open invitations; "Ok" and "Komme nicht" for implicit attendees
+  /// (everyone counts as attending), where "Ok" sends an explicit yes.
+  static List<AndroidNotificationAction>? attendanceActions(
+    Map<String, dynamic> data,
+  ) {
+    if (AppTarget.fromData(data)?.kind != 'events') return null;
+    const yes = AndroidNotificationAction(
+      'yes',
+      'Komme',
+      showsUserInterface: true,
+    );
+    const ok = AndroidNotificationAction('yes', 'Ok', showsUserInterface: true);
+    const no = AndroidNotificationAction(
+      'no',
+      'Komme nicht',
+      showsUserInterface: true,
+    );
+    return switch (data['attendanceActions']) {
+      'true' => const [yes, no],
+      'planned' => const [ok, no],
+      _ => null,
+    };
   }
 }
 

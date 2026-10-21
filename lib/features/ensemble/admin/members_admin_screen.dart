@@ -6,8 +6,9 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/member_avatar.dart';
 import '../../../shared/widgets/page_header.dart';
-import '../../../shared/widgets/state_pill.dart';
+import '../../accounts/data/accounts_api.dart';
 import '../../accounts/domain/account_roster.dart';
+import '../../accounts/ui/access_widgets.dart';
 import 'member_editor_screen.dart';
 
 class MembersAdminScreen extends StatefulWidget {
@@ -20,9 +21,9 @@ class MembersAdminScreen extends StatefulWidget {
 class _MembersAdminScreenState extends State<MembersAdminScreen> {
   String _search = '';
 
-  /// App accounts by person id; null until loaded or when offline, which
-  /// hides the account pills.
-  Map<int, JsonMap>? _accounts;
+  /// People, accounts and productions of the account list; null until
+  /// loaded or when offline, which hides the access pills.
+  AccountRoster? _roster;
 
   @override
   void initState() {
@@ -32,14 +33,8 @@ class _MembersAdminScreenState extends State<MembersAdminScreen> {
 
   Future<void> _loadAccounts() async {
     try {
-      final data = await widget.controller.remote('/admin/accounts');
-      if (!mounted) return;
-      setState(
-        () => _accounts = {
-          for (final a in jsonList(data['accounts']).map(jsonMap))
-            if (a['personId'] != null) intValue(a['personId']): a,
-        },
-      );
+      final roster = await fetchRoster(widget.controller);
+      if (mounted) setState(() => _roster = roster);
     } catch (_) {
       // The list works without account details.
     }
@@ -53,22 +48,19 @@ class _MembersAdminScreenState extends State<MembersAdminScreen> {
     if (mounted) await _loadAccounts();
   }
 
-  Widget _accountPill(BuildContext context, JsonMap m) {
-    final scheme = Theme.of(context).colorScheme;
-    final a = _accounts![intValue(m['id'])];
-    return StatePill(
-      accountStatus(a),
-      color: switch (a?['status']) {
-        'approved' => scheme.secondary,
-        null => scheme.onSurfaceVariant,
-        'pending' => scheme.primary,
-        _ => scheme.error,
-      },
-      icon: switch (a?['status']) {
-        'approved' => Icons.check,
-        null => Icons.link_off,
-        _ => Icons.info_outline,
-      },
+  /// The shared status pill and, compact, the account's role and rights.
+  Widget _access(AccountRoster roster, JsonMap m) {
+    final entry = AccessEntry(
+      member: m,
+      account: roster.accountFor(intValue(m['id'])),
+    );
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        AccessStatusPill(accessStatus(entry)),
+        RightsPills(roster.rights(entry), compact: true),
+      ],
     );
   }
 
@@ -129,9 +121,9 @@ class _MembersAdminScreenState extends State<MembersAdminScreen> {
                   jsonList(m['roleIds']).map((r) => r.toString()),
                 ),
               ),
-              if (_accounts != null) ...[
+              if (_roster case final roster?) ...[
                 const SizedBox(height: 6),
-                _accountPill(context, m),
+                _access(roster, m),
               ],
             ],
           ),

@@ -128,3 +128,15 @@ test('setting the role an account already has changes nothing', t => {
   assert.equal(store.account('sam').version, version);
   assert.deepEqual(store.all('pushJobs'), []);
 });
+
+test('promoting clears the extra rights; demoting keeps only the rights sent along', t => {
+  const { store, app, action, person, setRole } = setup(t);
+  person('sam', 'Sam');
+  action({ action: 'account.permissions', uid: 'sam', permissions: ['events'], version: store.account('sam').version });
+  setRole('sam', 'admin');
+  assert.deepEqual(store.account('sam').permissions, []);
+  assert.deepEqual(app.snapshot('sam').user.permissions, ['events']);
+  action({ action: 'account.role', uid: 'sam', role: 'member', permissions: ['events'], version: store.account('sam').version });
+  assert.deepEqual(app.snapshot('sam').user.permissions, ['events']);
+  assert.throws(() => action({ action: 'account.role', uid: 'sam', role: 'admin', permissions: ['foo'], version: store.account('sam').version }, 'sam'), { status: 403 });
+});

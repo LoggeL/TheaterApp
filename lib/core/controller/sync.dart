@@ -16,6 +16,14 @@ extension SyncController on AppController {
     return _resultOf(id);
   }
 
+  /// Sends [body] straight to the server and never through the outbox, for
+  /// admin changes that must not wait offline and apply later (account
+  /// rights). Throws when the server refused it or could not be reached;
+  /// after an [ApiException.retryable] error it is open whether the change
+  /// arrived.
+  Future<JsonMap> performActionOnline(JsonMap body) =>
+      remote('/actions', method: 'POST', body: body, idempotencyKey: _uuid());
+
   /// The result of the outbox entry [id] right after it was handed over:
   /// throws its rejection, else reports whether it is still queued.
   ActionResult _resultOf(String id) {
@@ -447,11 +455,17 @@ extension SyncController on AppController {
       view['members'],
     ).map((e) => TheaterMember.fromJson(jsonMap(e))).toList();
     final me = _audienceMember();
+    // Before the events: own absences decide implicit attendance below.
+    _absences =
+        jsonList(
+            view['absences'],
+          ).map((e) => Absence.fromJson(jsonMap(e))).toList()
+          ..sort((a, b) => a.from.compareTo(b.from));
     _events =
         jsonList(view['events']).map((e) {
           final json = jsonMap(e);
           final event = TheaterEvent.fromJson(json);
-          return event.copyWith(
+          final projected = event.copyWith(
             // Older servers send no `addressedToMe`; admins receive every
             // event there, so the event's audience decides for them.
             addressedToMe: json.containsKey('addressedToMe') || me == null
@@ -467,16 +481,22 @@ extension SyncController on AppController {
             clearExpectedArrival:
                 arrivals.containsKey(event.id) && arrivals[event.id] == null,
           );
+          // Mirrors the server's `implicitYes` (theater.mjs): queued answers
+          // and absences change it offline, so the local rule decides.
+          final start = projected.startsAt;
+          return projected.copyWith(
+            implicitYes:
+                projected.autoAccept &&
+                !projected.fromSlotPool &&
+                projected.addressedToMe &&
+                !const {'yes', 'late', 'no'}.contains(projected.response) &&
+                !(start != null && _absences.any((a) => a.coversDay(start))),
+          );
         }).toList()..sort(
           (a, b) => (a.startsAt ?? DateTime(9999)).compareTo(
             b.startsAt ?? DateTime(9999),
           ),
         );
-    _absences =
-        jsonList(
-            view['absences'],
-          ).map((e) => Absence.fromJson(jsonMap(e))).toList()
-          ..sort((a, b) => a.from.compareTo(b.from));
     _polls = jsonList(
       view['polls'],
     ).map((e) => Poll.fromJson(jsonMap(e))).toList();

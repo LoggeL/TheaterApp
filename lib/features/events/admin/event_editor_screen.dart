@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/account_permissions.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../shared/audience/audience_pickers.dart';
@@ -57,6 +58,10 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
   late final TextEditingController _title, _place, _description;
   late DateTime _start, _end;
   late bool _locked;
+
+  /// "Alle gelten als zugesagt": invitees only decline (servers with
+  /// `autoAccept`).
+  late bool _autoAccept;
   late String _kind;
   String? _production;
 
@@ -117,6 +122,17 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     return near(old) || near(_start);
   }
 
+  /// Explains the auto-accept switch; switching it off on a saved event warns
+  /// that the implicit answers end. Switching it is silent (server).
+  String get _autoAcceptHint {
+    if (widget.event?.autoAccept == true && !_autoAccept) {
+      return 'Wer nicht ausdrücklich zugesagt hat, gilt danach wieder als '
+          'offen.';
+    }
+    return 'Eingeladene sagen nur ab, wenn sie nicht können. Sie werden zwei '
+        'Tage vorher erinnert.${_series != null ? ' Gilt für alle Termine der Serie.' : ''}';
+  }
+
   bool get _titleMissing => _title.text.trim().isEmpty;
   bool get _endBeforeStart => !_end.isAfter(_start);
 
@@ -137,6 +153,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     _start,
     _end,
     _locked,
+    _autoAccept,
     _kind,
     _push,
     _repeat,
@@ -165,6 +182,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     // Eight weeks; calendar arithmetic, as a Duration would shift at DST.
     _until = DateTime(_start.year, _start.month, _start.day + 56);
     _locked = e?.locked ?? false;
+    _autoAccept = e?.autoAccept ?? false;
     _kind = e?.kind ?? 'rehearsal';
     _production = e?.productionId;
     _initialState = _state;
@@ -288,6 +306,8 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
         'endsAt': _end.toUtc().toIso8601String(),
         'place': _place.text,
         'locked': _locked,
+        // Older servers do not know the field; edits there keep it unset.
+        if (widget.controller.supports('autoAccept')) 'autoAccept': _autoAccept,
         'type': _kind,
         'productionId': _linkedProduction,
         'roleIds': _roleIds.toList(),
@@ -438,6 +458,7 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
       dirty: _dirty && !_busy,
       child: AdminPage(
         controller: widget.controller,
+        permission: eventsPermission,
         title: widget.event == null ? 'Termin anlegen' : 'Termin bearbeiten',
         children: (context) => [
           if (widget.event?.inSeries == true)
@@ -626,6 +647,14 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
             onChanged: (v) => setState(() => _locked = v),
             title: const Text('Rückmeldungen geschlossen'),
           ),
+          if (widget.controller.supports('autoAccept'))
+            SwitchListTile(
+              key: const ValueKey('event-auto-accept'),
+              value: _autoAccept,
+              onChanged: (v) => setState(() => _autoAccept = v),
+              title: const Text('Alle gelten als zugesagt'),
+              subtitle: Text(_autoAcceptHint),
+            ),
           SwitchListTile(
             key: const ValueKey('event-push'),
             value: _push && widget.controller.pushConfigured && _changeIsNear,
@@ -651,6 +680,10 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
                         ? 'Datum, Uhrzeit und Ort sind unverändert, daher geht '
                               'kein Push raus. Änderungen an Titel oder '
                               'Beschreibung werden nie gepusht.'
+                        : _autoAccept
+                        ? 'Geht an alle Eingeladenen, die nicht abgesagt '
+                              'haben ($audience). Ausgeschaltet geht kein Push '
+                              'raus.'
                         : 'Geht an alle, die zugesagt haben ($audience). '
                               'Ausgeschaltet geht kein Push raus.'
                   : 'Push ist noch nicht eingerichtet.',

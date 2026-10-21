@@ -20,21 +20,58 @@ import '../domain/event_dates.dart';
 import '../domain/event_format.dart';
 import 'event_place.dart';
 import 'event_style.dart';
+import 'rsvp/rsvp_actions.dart';
 import 'rsvp/rsvp_panel.dart';
 
-class EventDetailScreen extends StatelessWidget {
+class EventDetailScreen extends StatefulWidget {
   const EventDetailScreen({
     super.key,
     required this.controller,
     required this.eventId,
+    this.openDecline = false,
   });
   final AppController controller;
   final String eventId;
+
+  /// Opens the decline sheet once the event is there, e.g. from the
+  /// "Du bist eingeplant" reminder (`?intent=decline`).
+  final bool openDecline;
+  @override
+  State<EventDetailScreen> createState() => _EventDetailScreenState();
+}
+
+class _EventDetailScreenState extends State<EventDetailScreen> {
+  /// The decline sheet opens at most once, also across rebuilds.
+  late bool _declinePending = widget.openDecline;
+
+  AppController get controller => widget.controller;
+
+  /// A deep link can arrive before the first refresh: this waits until the
+  /// event is loaded.
+  void _offerDecline(TheaterEvent event) {
+    _declinePending = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || event.response == 'no' || !event.addressedToMe) return;
+      if (!controller.canDecline(event)) {
+        showDone(
+          context,
+          controller.canRespondTo(event)
+              ? 'Ab einer Stunde vor Beginn ist keine Absage mehr möglich. '
+                    'Bitte melde dich direkt bei der Probenleitung.'
+              : 'Für diesen Termin sind keine Rückmeldungen mehr möglich.',
+        );
+        return;
+      }
+      declineEvent(context, controller, event);
+    });
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) {
-      final matches = controller.events.where((e) => e.id == eventId);
+      final matches = controller.events.where((e) => e.id == widget.eventId);
+      if (_declinePending && matches.isNotEmpty) _offerDecline(matches.first);
       if (matches.isEmpty) {
         return DesktopRouteFrame(
           controller: controller,
@@ -58,7 +95,7 @@ class EventDetailScreen extends StatelessWidget {
           appBar: AppBar(
             title: const Text('Termin'),
             actions: [
-              if (controller.user?.isAdmin == true)
+              if (controller.user?.canManageEvents == true)
                 IconButton(
                   tooltip: event.fromSlotPool
                       ? 'Im Terminfinder öffnen'
@@ -123,7 +160,14 @@ class EventDetailContent extends StatelessWidget {
       final now = controller.now;
       final marker = eventMarker(event, now);
       final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-      final admin = controller.user?.isAdmin == true;
+      final user = controller.user;
+      final manager = user?.canManageEvents == true;
+      final editor = event.lastEditedBy == null
+          ? null
+          : controller.members
+                .where((m) => m.id == event.lastEditedBy)
+                .firstOrNull
+                ?.name;
       final gap = SizedBox(height: embedded ? 10 : 17);
       return ListView(
         primary: false,
@@ -153,6 +197,12 @@ class EventDetailContent extends StatelessWidget {
               if (eventIsPast(event, now))
                 StatePill('Vorbei', color: muted, icon: Icons.history),
               if (!event.addressedToMe) const NotInvitedPill(),
+              if (event.autoAccept && !event.fromSlotPool)
+                StatePill(
+                  'Alle gelten als zugesagt',
+                  color: muted,
+                  icon: Icons.how_to_reg_outlined,
+                ),
             ],
           ),
           SizedBox(height: embedded ? 16 : 24),
@@ -176,12 +226,14 @@ class EventDetailContent extends StatelessWidget {
           if (event.fromSlotPool)
             SlotEventNotice(controller: controller, event: event)
           else if (!event.addressedToMe)
-            const Card(
+            Card(
               child: ListTile(
-                leading: Icon(Icons.person_off_outlined),
-                title: Text('Du bist nicht eingeladen'),
+                leading: const Icon(Icons.person_off_outlined),
+                title: const Text('Du bist nicht eingeladen'),
                 subtitle: Text(
-                  'Der Termin richtet sich an andere. Du siehst ihn, weil du Admin bist.',
+                  user?.isAdmin == true
+                      ? 'Der Termin richtet sich an andere. Du siehst ihn, weil du Admin bist.'
+                      : 'Der Termin richtet sich an andere. Du siehst ihn, weil du Termine verwaltest.',
                 ),
               ),
             )
@@ -225,8 +277,17 @@ class EventDetailContent extends StatelessWidget {
               ),
             ),
           ],
-          if (admin) ...[
+          if (manager) ...[
             const SectionTitle('Probenleitung'),
+            // Several people may plan events; who changed it last helps to ask.
+            if (editor != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Zuletzt geändert von $editor',
+                  style: TextStyle(color: muted),
+                ),
+              ),
             // The route offers editing in its app bar; inline it heads here.
             if (embedded) ...[
               FilledButton.tonalIcon(

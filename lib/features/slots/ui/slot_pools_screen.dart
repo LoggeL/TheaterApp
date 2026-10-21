@@ -22,7 +22,7 @@ class SlotPoolsScreen extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) {
-      final admin = controller.user?.isAdmin == true;
+      final manager = controller.user?.canManageEvents == true;
       final now = controller.now;
       final pools = slotPoolsOf(controller);
       bool done(SlotPool p) => p.closed || p.finishedAt(now);
@@ -30,7 +30,7 @@ class SlotPoolsScreen extends StatelessWidget {
         appBar: AppBar(
           title: const Text('Terminfinder'),
           actions: [
-            if (admin && !controller.isDemo)
+            if (manager && !controller.isDemo)
               IconButton(
                 tooltip: 'Terminfinder anlegen',
                 icon: const Icon(Icons.add),
@@ -51,7 +51,7 @@ class SlotPoolsScreen extends StatelessWidget {
                 EmptyState(
                   icon: Icons.edit_calendar_outlined,
                   title: 'Noch kein Terminfinder',
-                  message: admin
+                  message: manager
                       ? 'Lege Zeitfenster an, z. B. für Fototermine, und lass das Ensemble selbst buchen.'
                       : 'Wenn du Zeitfenster buchen kannst, z. B. für Fototermine, erscheinen sie hier.',
                 ),
@@ -64,7 +64,7 @@ class SlotPoolsScreen extends StatelessWidget {
                     child: _PoolCard(controller: controller, pool: p),
                   ),
               ],
-              if (admin && !controller.isDemo) ...[
+              if (manager && !controller.isDemo) ...[
                 const SizedBox(height: 8),
                 FilledButton.icon(
                   onPressed: () => openPage(
@@ -140,7 +140,7 @@ class _PoolCard extends StatelessWidget {
                       ].join(' · '),
                       style: theme.textTheme.bodySmall,
                     ),
-                    if (controller.user?.isAdmin == true) ...[
+                    if (controller.user?.canManageEvents == true) ...[
                       const SizedBox(height: 4),
                       Text(
                         '$booked von $capacity Plätzen gebucht',

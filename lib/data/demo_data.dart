@@ -67,6 +67,21 @@ class DemoData {
         productionId: mainProductionId,
         sceneIds: const ['1', '2', '3', '4'],
       ),
+      // Everyone counts as attending; members only decline.
+      TheaterEvent(
+        id: 'demo-build',
+        title: 'Bühnenbau · Alle packen an',
+        startsAt: _at(11, 10),
+        endsAt: _at(11, 14),
+        time: '10:00–14:00',
+        place: 'Kolpingheim · Bühne',
+        kind: 'setup',
+        attendeeCount: 5,
+        implicitCount: 4,
+        autoAccept: true,
+        implicitYes: true,
+        productionId: mainProductionId,
+      ),
       TheaterEvent(
         id: 'demo-premiere',
         title: 'Premiere · Wenn das Licht angeht',
@@ -135,7 +150,12 @@ class DemoData {
         ),
       ].map((e) => e.toJson()).toList(),
       'checkinsByEvent': <String, dynamic>{},
-      'memberAttendanceByEvent': <String, dynamic>{},
+      'memberAttendanceByEvent': <String, dynamic>{
+        'demo-build': {'4': 'yes'},
+      },
+      'implicitAttendanceByEvent': <String, dynamic>{
+        'demo-build': [1, 2, 3, 5],
+      },
       'reminders': {
         'emailEnabled': false,
         'dayBefore': false,

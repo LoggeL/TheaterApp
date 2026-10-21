@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:theater_app/app/deep_links.dart';
+import 'package:theater_app/app/shell/app_navigation.dart';
+import 'package:theater_app/app/shell/app_section.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/core/models.dart';
@@ -43,27 +46,107 @@ void main() {
         'nameProvided': false,
       },
     ];
+    // The list gets the same registrations as the snapshot.
+    final data = jsonMap(jsonDecode(jsonEncode(fixture())));
+    (data['accounts'] as List).addAll([
+      {
+        'uid': 'unverified',
+        'name': 'Neu',
+        'personId': null,
+        'status': 'pending',
+        'identityReady': false,
+        'version': 1,
+      },
+      {
+        'uid': 'nameless',
+        'email': 'nameless@example.test',
+        'personId': null,
+        'status': 'pending',
+        'identityReady': true,
+        'nameProvided': false,
+        'version': 1,
+      },
+    ]);
     server.override = (request) => request.url.path.contains('/admin/accounts')
-        ? Future.value(jsonResponse(fixture()))
+        ? Future.value(jsonResponse(data))
         : null;
     final controller = server.controller();
     await signIn(controller);
     // Registrations without a self-supplied name are linkable too.
     expect(controller.openRegistrationCount, 2);
+    expect(AccountRoster(data).waitingCount, controller.openRegistrationCount);
     await tester.pumpWidget(
       MaterialApp(
         theme: StageTheme.build(Brightness.light),
         home: ManagementScreen(controller: controller),
       ),
     );
+    expect(find.text('Zugänge & Rechte'), findsOneWidget);
     await tester.tap(find.text('2 neue Registrierungen warten auf Zuordnung'));
     await tester.pumpAndSettle();
     expect(find.byType(AccountsAdminScreen), findsOneWidget);
-    expect(find.text('1 Konto'), findsOneWidget);
-    expect(find.text('Prüfen & verknüpfen'), findsOneWidget);
+    // The waiting filter, counted like the hub: confirmed registrations.
+    final status = tester.widget<FilterChip>(
+      find.byKey(const ValueKey('status-waiting')),
+    );
+    expect(status.selected, isTrue);
+    expect(find.text('Wartet (2)'), findsOneWidget);
+    expect(find.text('2 Einträge'), findsOneWidget);
+    expect(find.text('Prüfen & verknüpfen'), findsNWidgets(2));
+    // The unconfirmed registration is counted apart.
+    expect(find.text('Unbestätigt (1)'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
+  });
+
+  testWidgets('a registration push opens the waiting list at its account', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final server = TestServer();
+    server.override = (request) => request.url.path.contains('/admin/accounts')
+        ? Future.value(jsonResponse(fixture()))
+        : null;
+    final controller = server.controller();
+    addTearDown(controller.dispose);
+    await signIn(controller);
+    final navigator = GlobalKey<NavigatorState>();
+    final messenger = GlobalKey<ScaffoldMessengerState>();
+    final selection = ValueNotifier(AppSection.today.index);
+    addTearDown(selection.dispose);
+    await tester.pumpWidget(
+      AppNavigationScope(
+        selection: selection,
+        controller: controller,
+        child: MaterialApp(
+          theme: StageTheme.build(Brightness.light),
+          navigatorKey: navigator,
+          scaffoldMessengerKey: messenger,
+          home: const Scaffold(body: Text('Start')),
+        ),
+      ),
+    );
+    DeepLinkRouter(
+      controller: controller,
+      navigator: navigator,
+      messenger: messenger,
+      isMounted: () => true,
+    ).handle(AppTarget.fromData({'accountUid': 'new'})!);
+    await tester.pumpAndSettle();
+    final screen = tester.widget<AccountsAdminScreen>(
+      find.byType(AccountsAdminScreen),
+    );
+    expect((screen.initialStatus, screen.initialUid), ('waiting', 'new'));
+    expect(selection.value, AppSection.admin.index);
+    final card = tester.widget<Card>(
+      find.byKey(const ValueKey('access-entry-new')),
+    );
+    expect((card.shape! as RoundedRectangleBorder).side.width, 2);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('rejecting an account requires explicit confirmation', (
@@ -185,9 +268,9 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Konten (3)'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(FilterChip, 'Abgelehnt'));
+        final rejected = find.byKey(const ValueKey('status-rejected'));
+        await tester.ensureVisible(rejected);
+        await tester.tap(rejected);
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.text('Erneut prüfen'));
         await tester.tap(find.text('Erneut prüfen'));

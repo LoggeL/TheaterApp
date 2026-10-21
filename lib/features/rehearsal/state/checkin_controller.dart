@@ -3,9 +3,9 @@ part of '../../../core/app_controller.dart';
 /// Attendance check-in for a rehearsal.
 extension CheckinController on AppController {
   Future<void> checkIn(String eventId, List<int> memberIds) async {
-    if (_user?.isAdmin != true) {
+    if (_user?.canManageEvents != true) {
       throw const ApiException(
-        'Für den Check-in ist eine Adminrolle erforderlich.',
+        'Für den Check-in ist das Recht „Termine verwalten“ nötig.',
         statusCode: 403,
       );
     }

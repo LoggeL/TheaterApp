@@ -1,8 +1,9 @@
 // Push kinds a person can switch off for themselves. Each key is also the preference in `reminders`;
 // a missing preference means on. `changes` predates this list and is switched under "Erinnere mich";
 // it covers changed dates, times and places and cancelled (deleted) events.
-export const memberPushKinds = Object.freeze(['eventAnnouncements', 'eventRequests', 'slots', 'messages', 'polls', 'direct', 'feedbackReplies']);
-// Only for admins (and, for `lateDeclines`, the production's directors).
+// `eventPlanned` is the "Du bist eingeplant" reminder of events where everyone counts as attending.
+export const memberPushKinds = Object.freeze(['eventAnnouncements', 'eventRequests', 'eventPlanned', 'slots', 'messages', 'polls', 'direct', 'feedbackReplies']);
+// Only for the leadership: admins (and, for `lateDeclines`, holders of the events right and the production's directors).
 export const leadPushKinds = Object.freeze(['lateDeclines', 'adminRegistrations', 'adminFeedback']);
 export const switchablePushKinds = Object.freeze(['changes', ...memberPushKinds, ...leadPushKinds]);
 
@@ -24,6 +25,7 @@ export function pushKind(job) {
   if (d.messageId) return 'messages';
   if (!d.eventId) return null;
   if (job.fixedText) return job.title?.startsWith('Kurzfristige Absage') ? 'lateDeclines' : 'eventAnnouncements';
+  if (job.planned) return 'eventPlanned';
   if (job.remindOpen) return 'eventRequests';
   if (job.newEvent || job.announce === 'new') return 'eventAnnouncements';
   // Changes of date, time or place, also announced ones (`announce: 'changed'`) queued before they counted as changes.

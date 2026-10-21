@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/account_permissions.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../shared/feedback.dart';
@@ -17,20 +18,52 @@ import '../../events/domain/event_format.dart';
 import '../../events/domain/rsvp_status.dart';
 import '../../events/ui/event_style.dart';
 import '../data/event_details_api.dart';
+import '../domain/implicit_attendance.dart';
 import 'attendance_screen.dart';
 import 'scene_planner_screen.dart';
 
-String memberResponseLabel(AppController c, String eventId, int memberId) {
+String memberResponseLabel(AppController c, TheaterEvent event, int memberId) {
+  final eventId = event.id;
   final status = textValue(
     jsonMap(c.memberAttendanceByEvent[eventId])[memberId.toString()],
     'open',
   );
+  // Auto-accepted events: nobody owes an answer. Without an own one the
+  // person attends implicitly, or counts as declined because an absence
+  // covers the day (as in effectiveResponses).
+  if (event.autoAccept && !hasResponse(status)) {
+    return implicitAttendees(c, event).contains(memberId)
+        ? 'Eingeplant'
+        : RsvpStatus.fromWire('no').label;
+  }
   final arrival = dateValue(
     jsonMap(c.arrivalsByEvent[eventId])[memberId.toString()],
   );
   return status == 'late'
       ? 'Später · ${arrival == null ? 'Uhrzeit offen' : DateFormat.Hm('de').format(arrival.toLocal())}'
       : RsvpStatus.fromWire(status).label;
+}
+
+/// How the implicit attendees of an auto-accepted [event] are reminded: the
+/// server pushes "Du bist eingeplant" two days ahead, or right away for
+/// events created or moved later, but never below two hours before the start.
+/// Null when no such push goes out (other events, locked, no push set up).
+String? plannedReminderNote(AppController c, TheaterEvent event) {
+  final start = event.startsAt;
+  if (!event.autoAccept ||
+      event.locked ||
+      start == null ||
+      !c.pushConfigured ||
+      !c.canRespondTo(event)) {
+    return null;
+  }
+  final until = start.difference(c.now);
+  if (until > const Duration(hours: 48)) {
+    return 'Eingeplante werden zwei Tage vorher automatisch erinnert.';
+  }
+  return until > const Duration(hours: 2)
+      ? 'Eingeplante wurden automatisch erinnert.'
+      : null;
 }
 
 /// Who is coming to an event, who is not and who still has to answer.
@@ -145,6 +178,7 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
   @override
   Widget build(BuildContext context) => AdminPage(
     controller: widget.controller,
+    permission: eventsPermission,
     title: 'Rückmeldungen',
     onRefresh: _refresh,
     children: (context) {
@@ -154,6 +188,9 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
       final arrivals = jsonMap(controller.arrivalsByEvent[event.id]);
       final groups = {for (final s in _responseOrder) s: <TheaterMember>[]};
       final invited = details?.invitedIds;
+      // Auto-accepted events: who has not answered attends implicitly, unless
+      // an absence covers the day (then they count as declined).
+      final implicit = implicitAttendees(controller, event), autoIds = <int>{};
       for (final m in controller.members.where(
         (m) =>
             m.active &&
@@ -167,7 +204,16 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
         // The snapshot stays the source of the statuses: it is refreshed far
         // more often than the details, which could show a stale answer.
         final status = textValue(responses[m.id.toString()], 'open');
-        groups[hasResponse(status) ? status : 'open']!.add(m);
+        if (hasResponse(status)) {
+          groups[status]!.add(m);
+        } else if (!event.autoAccept) {
+          groups['open']!.add(m);
+        } else if (implicit.contains(m.id)) {
+          groups['yes']!.add(m);
+          autoIds.add(m.id);
+        } else {
+          groups['no']!.add(m);
+        }
       }
       final now = controller.now;
       final lastReminded = details?.lastRemindedAt ?? event.lastRemindedAt;
@@ -192,8 +238,12 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
       });
       final counts = {for (final e in groups.entries) e.key: e.value.length};
       final open = counts['open']!;
+      // Nobody owes an answer on auto-accepted events: no "open" group.
+      final order = event.autoAccept
+          ? _responseOrder.where((s) => s != 'open').toList()
+          : _responseOrder;
       final visible = _filter == null
-          ? _responseOrder.where((s) => s == 'open' || counts[s]! > 0)
+          ? order.where((s) => s == 'open' || counts[s]! > 0)
           : [_filter!];
       final theme = Theme.of(context);
       return [
@@ -208,17 +258,21 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
         const SizedBox(height: 20),
         _ResponseSummary(
           counts: counts,
+          order: order,
+          implicit: event.autoAccept ? autoIds.length : null,
           filter: _filter,
           onFilter: (status) => setState(() {
             _filter = _filter == status ? null : status;
             _collapsed.remove(status);
           }),
           remindable:
-              open > 0 &&
+              !event.autoAccept &&
+                  open > 0 &&
                   controller.pushConfigured &&
                   controller.canRespondTo(event)
               ? open
               : 0,
+          autoReminder: plannedReminderNote(controller, event),
           busy:
               _busy ||
               (controller.supports('nudges') &&
@@ -270,6 +324,7 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
                   : null,
               reason: status == 'no' ? (m) => details?.reasons[m.id] : null,
               absent: details?.absentIds ?? const {},
+              automatic: autoIds,
             ),
           ],
         const SectionTitle('Weiter planen'),
@@ -305,9 +360,22 @@ class _ResponseSummary extends StatelessWidget {
     required this.remindable,
     required this.busy,
     required this.onRemind,
+    this.order = _responseOrder,
+    this.implicit,
+    this.autoReminder,
     this.lastReminded,
   });
   final Map<String, int> counts;
+
+  /// The response groups shown; auto-accepted events have no open group.
+  final List<String> order;
+
+  /// On auto-accepted events, how many of the yes count attend implicitly;
+  /// null for other events.
+  final int? implicit;
+
+  /// The note on the automatic "Du bist eingeplant" reminder, if any.
+  final String? autoReminder;
   final String? filter;
   final ValueChanged<String> onFilter;
 
@@ -324,6 +392,17 @@ class _ResponseSummary extends StatelessWidget {
     final dark = theme.brightness == Brightness.dark;
     final total = counts.values.fold(0, (sum, n) => sum + n);
     final answered = total - counts['open']!;
+    final automatic = implicit ?? 0;
+    // The implicit share of the yes bar is drawn lighter.
+    final bar = [
+      for (final status in order)
+        if (status == 'yes') ...[
+          ('yes', counts['yes']! - automatic),
+          ('auto', automatic),
+        ] else
+          (status, counts[status]!),
+    ].where((x) => x.$2 > 0);
+    final attending = counts['yes']! + counts['late']!;
     final scale = MediaQuery.textScalerOf(context).scale(1);
     return Card(
       child: Padding(
@@ -343,7 +422,7 @@ class _ResponseSummary extends StatelessWidget {
                   spacing: 10,
                   runSpacing: 10,
                   children: [
-                    for (final status in _responseOrder)
+                    for (final status in order)
                       SizedBox(
                         width: width,
                         child: _ResponseCount(
@@ -361,8 +440,9 @@ class _ResponseSummary extends StatelessWidget {
             const SizedBox(height: 18),
             Semantics(
               label: [
-                for (final status in _responseOrder)
+                for (final status in order)
                   '${counts[status]} ${_responseCountLabel(status)}',
+                if (automatic > 0) 'davon $automatic automatisch',
               ].join(', '),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
@@ -374,18 +454,20 @@ class _ResponseSummary extends StatelessWidget {
                         )
                       : Row(
                           children: [
-                            for (final status in _responseOrder.where(
-                              (s) => counts[s]! > 0,
-                            ))
+                            for (final (status, count) in bar)
                               Expanded(
-                                flex: counts[status]!,
+                                flex: count,
                                 child: Container(
                                   margin: const EdgeInsetsDirectional.only(
                                     end: 2,
                                   ),
                                   color: responseColor(status, dark: dark)
                                       .withValues(
-                                        alpha: status == 'open' ? .35 : 1,
+                                        alpha: switch (status) {
+                                          'open' => .35,
+                                          'auto' => .6,
+                                          _ => 1,
+                                        },
                                       ),
                                 ),
                               ),
@@ -398,9 +480,18 @@ class _ResponseSummary extends StatelessWidget {
             Text(
               total == 0
                   ? 'Noch niemand eingeladen'
+                  : implicit != null
+                  ? [
+                      '$attending dabei${automatic > 0 ? ', davon $automatic automatisch' : ''}',
+                      if (counts['no']! > 0) '${counts['no']} abgesagt',
+                    ].join(' · ')
                   : '$answered von $total haben sich zurückgemeldet',
               style: theme.textTheme.bodyMedium,
             ),
+            if (autoReminder != null && total > 0) ...[
+              const SizedBox(height: 16),
+              Text(autoReminder!, style: theme.textTheme.bodySmall),
+            ],
             if (remindable > 0) ...[
               const SizedBox(height: 16),
               Text(
@@ -520,10 +611,14 @@ class _ResponseSection extends StatelessWidget {
     this.detail,
     this.reason,
     this.absent = const {},
+    this.automatic = const {},
   });
   final AppController controller;
   final String status;
   final List<TheaterMember> people;
+
+  /// People who attend implicitly (auto-accepted events).
+  final Set<int> automatic;
   final bool expanded;
   final VoidCallback onToggle;
   final String? Function(TheaterMember)? detail;
@@ -604,6 +699,7 @@ class _ResponseSection extends StatelessWidget {
                                   detail: detail?.call(m),
                                   reason: reason?.call(m),
                                   absent: absent.contains(m.id),
+                                  automatic: automatic.contains(m.id),
                                   color: color,
                                 ),
                               ),
@@ -626,12 +722,13 @@ class _ResponsePerson extends StatelessWidget {
     this.detail,
     this.reason,
     this.absent = false,
+    this.automatic = false,
   });
   final AppController controller;
   final TheaterMember member;
   final Color color;
   final String? detail, reason;
-  final bool absent;
+  final bool absent, automatic;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -657,6 +754,14 @@ class _ResponsePerson extends StatelessWidget {
                 if (detail != null) ...[
                   const SizedBox(height: 6),
                   StatePill(detail!, color: color, icon: Icons.schedule),
+                ],
+                if (automatic) ...[
+                  const SizedBox(height: 6),
+                  StatePill(
+                    'automatisch',
+                    color: color,
+                    icon: Icons.event_available_outlined,
+                  ),
                 ],
                 if (reason != null) ...[
                   const SizedBox(height: 4),

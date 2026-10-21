@@ -86,14 +86,13 @@ class ManagementScreen extends StatelessWidget {
             tiles: [
               tile(
                 Icons.person_add_alt,
-                'Konten & Verknüpfungen',
+                'Zugänge & Rechte',
                 AccountsAdminScreen(
                   controller: controller,
-                  initialView: registrations > 0 ? 'accounts' : 'people',
-                  initialFilter: registrations > 0 ? 'pending' : 'all',
+                  initialStatus: registrations > 0 ? 'waiting' : 'all',
                 ),
                 registrations == 0
-                    ? 'Personen, Rollen und E-Mail-Adressen'
+                    ? 'Freigaben, Verknüpfungen und Rechte'
                     : registrations == 1
                     ? '1 neue Registrierung wartet auf Zuordnung'
                     : '$registrations neue Registrierungen warten auf Zuordnung',
@@ -274,7 +273,8 @@ class _NextEventCard extends StatelessWidget {
               if (event.attendeeCount > 0)
                 _Fact(
                   Icons.how_to_reg_outlined,
-                  '${event.attendeeCount} dabei',
+                  '${event.attendeeCount} dabei'
+                  '${event.implicitCount > 0 ? ', davon ${event.implicitCount} automatisch' : ''}',
                 ),
             ],
           ),

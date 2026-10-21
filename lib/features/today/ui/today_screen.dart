@@ -338,8 +338,7 @@ class _TodayScreenState extends State<TodayScreen> {
             context,
             AccountsAdminScreen(
               controller: controller,
-              initialView: 'accounts',
-              initialFilter: 'pending',
+              initialStatus: 'waiting',
             ),
           ),
         ),
@@ -771,6 +770,7 @@ class _NextCompact extends StatelessWidget {
   final DateTime now;
 
   String get _summary => switch (event.response) {
+    _ when event.implicitYes => 'Du bist eingeplant',
     'yes' => 'Du bist dabei',
     'late' => 'Du kommst später',
     'no' => 'Du bist nicht dabei',
@@ -855,7 +855,7 @@ class _NextCompact extends StatelessWidget {
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         RsvpStatusBadge(
-                          status: event.response,
+                          status: displayResponse(event),
                           expectedArrivalAt: event.expectedArrivalAt,
                           locked: responsesClosed(controller, event),
                           onDark: true,

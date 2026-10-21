@@ -5,6 +5,8 @@ part of '../../../core/app_controller.dart';
 const memberPushKeys = [
   'eventAnnouncements',
   'eventRequests',
+  // "Du bist eingeplant" before events where everyone counts as attending.
+  'eventPlanned',
   'slots',
   'messages',
   'polls',

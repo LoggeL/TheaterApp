@@ -12,6 +12,7 @@ import '../../absences/ui/absences_screen.dart';
 import '../../slots/domain/slot_pool.dart';
 import '../../slots/ui/slot_pools_screen.dart';
 import '../admin/event_editor_screen.dart';
+import '../admin/events_admin_screen.dart';
 import '../domain/event_dates.dart';
 import '../domain/event_format.dart';
 import '../domain/event_types.dart';
@@ -42,7 +43,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     listenable: widget.controller,
     builder: (context, _) => Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: widget.controller.user?.isAdmin == true
+      floatingActionButton: widget.controller.user?.canManageEvents == true
           ? FloatingActionButton.extended(
               // Other tabs of the shell have buttons of their own.
               heroTag: 'schedule-create-event',
@@ -92,12 +93,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   bool _matches(TheaterEvent e, int filter, DateTime now) {
     final future = e.startsAt == null || (e.endsAt ?? e.startsAt!).isAfter(now);
     return switch (filter) {
+      // Auto-accepted events owe no answer; their implicit yes is a yes.
       1 =>
         future &&
             e.response == 'open' &&
             e.addressedToMe &&
+            !e.autoAccept &&
             widget.controller.canRespondTo(e),
-      2 => future && const {'yes', 'late'}.contains(e.response),
+      2 => future && e.attending,
       3 => !future,
       _ => future,
     };
@@ -182,25 +185,33 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     onSelectionChanged: (value) => setState(() => _calendar = value.first),
   );
 
-  /// Scheduling tasks beside the plan itself.
+  /// Scheduling tasks beside the plan itself; managing all events is the
+  /// entry for admins and holders of the right "Termine verwalten".
   Widget _moreMenu() => PopupMenuButton<String>(
     tooltip: 'Weitere Optionen',
     icon: const Icon(Icons.more_vert),
-    onSelected: (choice) => openPage(
-      context,
-      choice == 'slots'
-          ? SlotPoolsScreen(controller: widget.controller)
-          : AddAbsenceScreen(controller: widget.controller),
-    ),
-    itemBuilder: (context) => const [
-      PopupMenuItem(
+    onSelected: (choice) => openPage(context, switch (choice) {
+      'manage' => EventsAdminScreen(controller: widget.controller),
+      'slots' => SlotPoolsScreen(controller: widget.controller),
+      _ => AddAbsenceScreen(controller: widget.controller),
+    }),
+    itemBuilder: (context) => [
+      if (widget.controller.user?.canManageEvents == true)
+        const PopupMenuItem(
+          value: 'manage',
+          child: ListTile(
+            leading: Icon(Icons.edit_calendar_outlined),
+            title: Text('Termine verwalten'),
+          ),
+        ),
+      const PopupMenuItem(
         value: 'slots',
         child: ListTile(
           leading: Icon(Icons.event_available_outlined),
           title: Text('Terminfinder'),
         ),
       ),
-      PopupMenuItem(
+      const PopupMenuItem(
         value: 'absence',
         child: ListTile(
           leading: Icon(Icons.beach_access_outlined),
@@ -296,7 +307,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         ?.id;
     if (desktop) return _desktop(context, events, nextId);
     final banner = _slotBanner(context);
-    final admin = widget.controller.user?.isAdmin == true;
+    final manager = widget.controller.user?.canManageEvents == true;
     return RefreshIndicator(
       onRefresh: () => refreshWithFeedback(context, widget.controller),
       child: CustomScrollView(
@@ -377,7 +388,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               ),
             ),
           // Room for the create button below the last card.
-          SliverToBoxAdapter(child: SizedBox(height: admin ? 88 : 26)),
+          SliverToBoxAdapter(child: SizedBox(height: manager ? 88 : 26)),
         ],
       ),
     );
@@ -537,6 +548,7 @@ class _AgendaTile extends StatelessWidget {
         !past &&
         event.response == 'open' &&
         event.addressedToMe &&
+        !event.autoAccept &&
         controller.canRespondTo(event);
     final tile = Material(
       color: selected

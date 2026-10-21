@@ -348,7 +348,8 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
       final json = _controller.slotPools
           .where((p) => p['id'] == widget.poolId)
           .firstOrNull;
-      final admin = _controller.user?.isAdmin == true;
+      // Admins and holders of the right "Termine verwalten" run the pool.
+      final admin = _controller.user?.canManageEvents == true;
       if (json == null) {
         return Scaffold(
           appBar: AppBar(title: const Text('Terminfinder')),
@@ -566,9 +567,11 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
         Icons.info_outline,
         Theme.of(context).colorScheme.onSurfaceVariant,
         'Du bist nicht eingeladen',
-        admin
+        !admin
+            ? 'Du kannst hier kein Zeitfenster buchen.'
+            : _controller.user?.isAdmin == true
             ? 'Als Admin kannst du Personen über „Person zuweisen“ eintragen.'
-            : 'Du kannst hier kein Zeitfenster buchen.',
+            : 'Weil du Termine verwaltest, kannst du Personen über „Person zuweisen“ eintragen.',
       ),
     };
     final tone = StageTheme.accentText(color, Theme.of(context).brightness);

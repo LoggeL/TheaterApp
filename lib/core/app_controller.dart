@@ -67,6 +67,12 @@ class AppController extends ChangeNotifier {
       .length;
   JsonMap get memberAttendanceByEvent =>
       jsonMap(_baseSnapshot['memberAttendanceByEvent']);
+
+  /// Leaders only: per auto-accepted event the people who attend implicitly
+  /// (no own yes, late or no and no covering absence). Kept apart from
+  /// [memberAttendanceByEvent], which only holds real answers.
+  JsonMap get implicitAttendanceByEvent =>
+      jsonMap(_baseSnapshot['implicitAttendanceByEvent']);
   JsonMap get arrivalsByEvent => jsonMap(_baseSnapshot['arrivalsByEvent']);
   JsonMap get checkinVersions => cloneJson(_checkinVersions);
   JsonMap _checkinVersions = {};
@@ -265,6 +271,7 @@ class AppController extends ChangeNotifier {
     String path, {
     String method = 'GET',
     JsonMap? body,
+    String? idempotencyKey,
   }) async {
     if (_isDemo) {
       throw const ApiException(
@@ -286,6 +293,7 @@ class AppController extends ChangeNotifier {
         path,
         token: _token,
         body: body,
+        idempotencyKey: idempotencyKey,
       );
     } on ApiException catch (error) {
       // An expired session signs out here just like during a refresh.

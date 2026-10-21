@@ -102,7 +102,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final user = controller.user;
       final lateDeclines =
           controller.supports('lateDeclines') &&
-          (user?.isAdmin == true ||
+          (user?.canManageEvents == true ||
               user?.directorProductionIds.isNotEmpty == true);
       final pushKinds = controller.supports('pushSettings');
       final adminPush = pushKinds && user?.isAdmin == true;
@@ -257,19 +257,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             if (pushKinds) ...[
               const SectionTitle('Push-Nachrichten'),
-              _switchCard(const [
-                (
-                  'eventAnnouncements',
-                  Icons.event_available_outlined,
-                  'Neue Termine',
-                  'Wenn die Leitung Termine ankündigt oder neu einteilt',
-                ),
-                (
-                  'eventRequests',
-                  Icons.pending_actions_outlined,
-                  'Fehlende Rückmeldung',
-                  'Nachfrage, wenn deine Zu- oder Absage fehlt',
-                ),
+              _switchCard([
+                ...const [
+                  (
+                    'eventAnnouncements',
+                    Icons.event_available_outlined,
+                    'Neue Termine',
+                    'Wenn die Leitung Termine ankündigt oder neu einteilt',
+                  ),
+                  (
+                    'eventRequests',
+                    Icons.pending_actions_outlined,
+                    'Fehlende Rückmeldung',
+                    'Nachfrage, wenn deine Zu- oder Absage fehlt',
+                  ),
+                ],
+                if (controller.supports('autoAccept'))
+                  (
+                    'eventPlanned',
+                    Icons.how_to_reg_outlined,
+                    'Eingeplant-Erinnerung',
+                    'Zwei Tage vor Terminen, bei denen alle als zugesagt '
+                        'gelten, mit Absage-Möglichkeit',
+                  ),
                 (
                   'slots',
                   Icons.event_note_outlined,

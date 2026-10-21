@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
+import '../../core/account_permissions.dart';
 import '../../core/app_controller.dart';
 import '../feedback.dart';
 
@@ -15,6 +16,7 @@ class AdminPage extends StatelessWidget {
     this.cacheExtent,
     this.floatingActionButton,
     this.onRefresh,
+    this.permission,
   });
   final AppController controller;
   final String title;
@@ -25,21 +27,35 @@ class AdminPage extends StatelessWidget {
   /// Builds children beyond the viewport, e.g. to scroll to one on open.
   final ScrollCacheExtent? cacheExtent;
 
-  /// The page's create action, shown to admins only.
+  /// The page's create action, shown only to those allowed to open the page.
   final Widget? floatingActionButton;
+
+  /// The right that opens the page (e.g. `events`); admins only when not set.
+  final String? permission;
 
   /// Pull to refresh; refreshes the snapshot when not set.
   final Future<void> Function()? onRefresh;
+  bool get _allowed {
+    final user = controller.user;
+    return permission == null
+        ? user?.isAdmin == true
+        : user?.can(permission!) == true;
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) => Scaffold(
       appBar: AppBar(title: Text(title), actions: actions),
-      floatingActionButton: controller.user?.isAdmin == true
-          ? floatingActionButton
-          : null,
-      body: controller.user?.isAdmin != true
-          ? const Center(child: Text('Admin-Zugang erforderlich.'))
+      floatingActionButton: _allowed ? floatingActionButton : null,
+      body: !_allowed
+          ? Center(
+              child: Text(
+                permission == null
+                    ? 'Admin-Zugang erforderlich.'
+                    : missingPermissionText(permission!),
+              ),
+            )
           : Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 840),

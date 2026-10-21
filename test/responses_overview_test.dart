@@ -174,7 +174,11 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Admin-Zugang erforderlich.'), findsOneWidget);
+    expect(memberController.user?.canManageEvents, isFalse);
+    expect(
+      find.text('Dafür ist das Recht „Termine verwalten“ nötig.'),
+      findsOneWidget,
+    );
     expect(find.text('Kim Kulisse'), findsNothing);
     expect(find.text('Noch keine Rückmeldung'), findsNothing);
     expect(find.text('Offene erinnern'), findsNothing);

@@ -94,9 +94,15 @@ class NotInvitedPill extends StatelessWidget {
   );
 }
 
-/// Colour of an own response: yes, late, no; anything else counts as open.
+/// The own response for colours and icons: 'auto' for the implicit yes of an
+/// auto-accepted event, else the response. Not a wire value: [hasResponse]
+/// and the response groups keep using [TheaterEvent.response].
+String displayResponse(TheaterEvent e) => e.implicitYes ? 'auto' : e.response;
+
+/// Colour of an own response: yes (also 'auto'), late, no; anything else
+/// counts as open.
 Color responseColor(String status, {bool dark = false}) => switch (status) {
-  'yes' => StageTheme.greenTone,
+  'yes' || 'auto' => StageTheme.greenTone,
   'late' => StageTheme.amberTone,
   'no' => StageTheme.redTone,
   _ => StageTheme.neutralTone,

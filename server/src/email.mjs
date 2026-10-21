@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
 import { eventNotificationBody } from './event-notification.mjs';
-import { inAudience } from './theater.mjs';
+import { implicitYes, inAudience } from './theater.mjs';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const maxAgeMs = 23 * 3600000; // Resend retains idempotency keys for 24 hours.
@@ -36,17 +36,22 @@ export function emailFromEnvironment(env = process.env) {
 export function eventEmail(job, event, appOrigin) {
   const link = new URL('/', appOrigin);
   if (link.protocol !== 'https:' || link.username || link.password) throw new Error('HTTPS app origin required');
-  const subject = (job.test ? 'Theater-App: Test-E-Mail' : `${job.cancelled ? job.seriesCount ? 'Termine abgesagt' : 'Termin abgesagt' : job.series && job.change ? 'Terminserie geändert' : job.series ? 'Neue Terminserie' : job.newEvent ? 'Neuer Termin' : job.change ? 'Termin aktualisiert' : job.remindOpen ? 'Rückmeldung fehlt' : 'Erinnerung'}: ${event.title}`).replace(/[\r\n]/g, ' ').slice(0, 200);
-  if (event) link.searchParams.set('target', `theaterapp://app/events/${encodeURIComponent(event.id)}`);
+  const subject = (job.test ? 'Theater-App: Test-E-Mail' : `${job.cancelled ? job.seriesCount ? 'Termine abgesagt' : 'Termin abgesagt' : job.series && job.change ? 'Terminserie geändert' : job.series ? 'Neue Terminserie' : job.newEvent ? 'Neuer Termin' : job.change ? 'Termin aktualisiert' : job.remindOpen ? 'Rückmeldung fehlt' : job.planned ? 'Du bist eingeplant' : 'Erinnerung'}: ${event.title}`).replace(/[\r\n]/g, ' ').slice(0, 200);
+  // The "Du bist eingeplant" reminder opens the decline right away (older apps just open the event).
+  if (event) link.searchParams.set('target', `theaterapp://app/events/${encodeURIComponent(event.id)}${job.planned ? '?intent=decline' : ''}`);
   // A series is announced (or cancelled) by a single email about its next occurrence.
   const body = job.test ? 'Deine Test-E-Mail ist da.'
     : job.cancelled && job.seriesCount ? `${job.seriesCount} Termine der Serie entfallen, ab ${eventNotificationBody(event)}.`
       : job.series && job.change ? `${job.body}.` // "Gilt für n Termine ab <first changed occurrence>"
-        : job.series && !job.cancelled ? `${job.body} Erster Termin: ${eventNotificationBody(event)}` : eventNotificationBody(event);
+        : job.series && !job.cancelled ? `${job.body} Erster Termin: ${eventNotificationBody(event)}`
+          : job.planned ? `${eventNotificationBody(event)}. Kannst du nicht? Bitte in der App absagen.` : eventNotificationBody(event);
   const footer = 'Termin-E-Mails kannst du in der App unter Darstellung & Erinnerungen ausschalten.';
   return { subject, text: `${subject}\n\n${body}\n\nTheater-App öffnen: ${link.href}\n\n${footer}`,
     html: `<!doctype html><html lang="de"><body><h1>${escapeHtml(subject)}</h1><p>${escapeHtml(body)}</p><p><a href="${escapeHtml(link.href)}">Theater-App öffnen</a></p><p>${escapeHtml(footer)}</p></body></html>` };
 }
+
+// Auto-accepted events: people without an own answer attend (see implicitYes).
+const attendsImplicitly = (s, event, personId) => implicitYes(s, event, s.get('members', personId), s.get('responses', `${event.id}:${personId}`)?.status ?? null);
 
 function eligibleRecipient(s, a, job, event) {
   return a?.status === 'approved' && a.personId && a.emailVerified === true && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.email ?? '') && !/\.(?:test|invalid)$/i.test(a.email) && s.get('members', a.personId)?.active
@@ -54,7 +59,9 @@ function eligibleRecipient(s, a, job, event) {
     && (job.test || (event && s.get('reminders', a.personId)?.emailEnabled === true && inAudience(s.get('members', a.personId), job, s) && inAudience(s.get('members', a.personId), event, s)
       && ((!job.change && !job.cancelled) || (s.get('reminders', a.personId)?.changes ?? true))
       && (job.change || job.newEvent || job.cancelled || s.get('responses', `${event.id}:${a.personId}`)?.status !== 'no')
-      && (!job.remindOpen || !['yes', 'late', 'no'].includes(s.get('responses', `${event.id}:${a.personId}`)?.status))));
+      && (!job.remindOpen || (!['yes', 'late', 'no'].includes(s.get('responses', `${event.id}:${a.personId}`)?.status) && !attendsImplicitly(s, event, a.personId)))
+      // "Du bist eingeplant" follows its push switch and is void once the person answered or is absent.
+      && (!job.planned || (s.get('reminders', a.personId)?.eventPlanned !== false && attendsImplicitly(s, event, a.personId)))));
 }
 
 /** Every recipient is rechecked before sending. Accepted recipients are never retried. */
