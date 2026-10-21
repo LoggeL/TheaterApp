@@ -27,6 +27,25 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.10.0',
+    date: '21. Oktober 2026',
+    items: [
+      'Neu: Bei manchen Proben bist du automatisch eingeplant und sagst nur '
+          'ab, wenn du nicht kannst. Zwei Tage vorher erinnert dich die App '
+          'mit „Ok“ und „Komme nicht“.',
+      'Hast du das Recht „Termine verwalten“, legst du Termine selbst an, '
+          'änderst sie und siehst die Rückmeldungen – alles im Reiter '
+          '„Termine“.',
+      'Für die Theaterleitung: „Personen & Zugänge“ zeigt alle Personen mit '
+          'Zugang und Rechten an einem Ort; neue Registrierungen stehen ganz '
+          'oben.',
+      'Terminserien bearbeitest du jetzt als Ganzes: Im Termin-Editor wählst '
+          'du „Nur dieser Termin“ oder „Ganze Serie“ und kannst die Serie über '
+          '„Wiederholen bis“ verlängern oder früher beenden.',
+      'Kleine Verbesserungen und Feinschliff.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.9.1',
     date: '19. Oktober 2026',
     items: [
