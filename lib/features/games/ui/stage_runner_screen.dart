@@ -641,14 +641,24 @@ Color _pickupColor(PickupKind kind) => switch (kind) {
   PickupKind.star => _starColor,
 };
 
-/// Laid-out text, reused across frames as long as the size stays the same.
-class _Glyphs {
-  double _size = 0;
+/// Laid-out text by content and size, reused across frames until the stage
+/// size changes. Popups, banners and the sandbag label share one frame, so
+/// different sizes must not push each other out.
+@visibleForTesting
+class RunnerGlyphs {
+  double _stage = 0;
   final Map<Object, TextPainter> _cache = {};
 
+  /// Called once per paint with the stage size; a new size drops the cache.
+  void stage(double s) {
+    if (s == _stage) return;
+    _clear();
+    _stage = s;
+  }
+
   TextPainter icon(PickupKind kind, double size) {
-    _reset(size);
-    return _cache[kind] ??= _layout(
+    _bound();
+    return _cache[(kind, size)] ??= _layout(
       String.fromCharCode(_pickupIcon(kind).codePoint),
       TextStyle(
         fontFamily: _pickupIcon(kind).fontFamily,
@@ -660,8 +670,8 @@ class _Glyphs {
   }
 
   TextPainter kg(double size) {
-    _reset(size);
-    return _cache['kg'] ??= _layout(
+    _bound();
+    return _cache[('kg', size)] ??= _layout(
       'kg',
       TextStyle(
         color: const Color(0xFFF3E6CF),
@@ -673,8 +683,8 @@ class _Glyphs {
 
   /// A popup or banner line; [shadow] is the dark copy drawn behind it.
   TextPainter label(String text, double size, {bool shadow = false}) {
-    _reset(size);
-    return _cache[(text, shadow)] ??= _layout(
+    _bound();
+    return _cache[(text, size, shadow)] ??= _layout(
       text,
       TextStyle(
         color: shadow ? const Color(0xE6000000) : const Color(0xFFFFE7A3),
@@ -685,13 +695,16 @@ class _Glyphs {
     );
   }
 
-  void _reset(double size) {
-    if (size == _size) return;
+  /// A safety net: sizes that keep changing must not grow the cache forever.
+  void _bound() {
+    if (_cache.length > 64) _clear();
+  }
+
+  void _clear() {
     for (final p in _cache.values) {
       p.dispose();
     }
     _cache.clear();
-    _size = size;
   }
 
   static TextPainter _layout(String text, TextStyle style) => TextPainter(
@@ -720,9 +733,10 @@ class _LegendPainter extends CustomPainter {
   _LegendPainter(this.kind, this.art);
   final PickupKind? kind;
   final RunnerArt? art;
-  final _glyphs = _Glyphs();
+  final _glyphs = RunnerGlyphs();
   @override
   void paint(Canvas canvas, Size size) {
+    _glyphs.stage(size.width);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Offset.zero & size,
@@ -796,7 +810,7 @@ class _StagePainter extends CustomPainter {
     _fill(const Color(0xFFFFF4C2)),
     _fill(const Color(0xFFBFA88A)),
   ];
-  final _glyphs = _Glyphs();
+  final _glyphs = RunnerGlyphs();
   final _path = Path();
 
   @override
@@ -805,6 +819,7 @@ class _StagePainter extends CustomPainter {
     // One stage height in pixels; the course is viewWidth heights wide.
     final s = size.height, w = size.width;
     final floorY = s * StageRunner.floor;
+    _glyphs.stage(s);
 
     canvas.drawRect((Offset.zero & size).inflate(s * .05), _bg);
     final (dx, dy) = f.shake(g);

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,6 +20,8 @@ import 'package:theater_app/features/games/domain/stage_runner.dart';
 import 'package:theater_app/features/games/games.dart';
 import 'package:theater_app/features/games/ui/stage_runner_art.dart';
 import 'package:theater_app/features/games/ui/stage_runner_fx.dart';
+import 'package:theater_app/features/games/ui/stage_runner_screen.dart'
+    show RunnerGlyphs;
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
 import 'package:theater_app/features/me/me.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -57,6 +60,60 @@ class _FakeSound implements RunnerSound {
   void stopMusic() => music = false;
   @override
   void dispose() => _enabled.dispose();
+}
+
+/// Logs the calls on a player instead of touching the platform; any other
+/// call throws.
+class _RecordingPlayer extends Fake implements AudioPlayer {
+  _RecordingPlayer(this.log);
+  final List<(_RecordingPlayer, String)> log;
+  String? asset;
+  @override
+  PlayerState state = PlayerState.stopped;
+
+  void _log(String call) => log.add((this, call));
+
+  @override
+  set positionUpdater(PositionUpdater? updater) =>
+      _log('positionUpdater=${updater ?? 'null'}');
+  @override
+  Future<void> setPlayerMode(PlayerMode mode) async => _log('setPlayerMode');
+  @override
+  Future<void> setReleaseMode(ReleaseMode mode) async =>
+      _log('setReleaseMode ${mode.name}');
+  @override
+  Future<void> setSource(Source source) async {
+    asset = (source as AssetSource).path;
+    _log('setSource $asset');
+  }
+
+  @override
+  Future<void> setVolume(double volume) async => _log('setVolume $volume');
+
+  /// The length the platform reports for the loaded effect.
+  Duration length = const Duration(milliseconds: 400);
+  @override
+  Future<Duration?> getDuration() async {
+    _log('getDuration');
+    return length;
+  }
+
+  @override
+  Future<void> resume() async {
+    state = PlayerState.playing;
+    _log('resume');
+  }
+
+  @override
+  Future<void> stop() async {
+    state = PlayerState.stopped;
+    _log('stop');
+  }
+
+  @override
+  Future<void> pause() async => _log('pause');
+  @override
+  Future<void> dispose() async => _log('dispose');
 }
 
 String _path(http.Request request) =>
@@ -845,6 +902,139 @@ void main() {
       expect(next.enabled.value, isFalse);
       next.dispose();
     });
+
+    test(
+      'every effect has its own loaded player; a pickup only plays',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        final log = <(_RecordingPlayer, String)>[];
+        final players = <_RecordingPlayer>[];
+        final sound = PluginRunnerSound(
+          newPlayer: () {
+            final player = _RecordingPlayer(log);
+            players.add(player);
+            return player;
+          },
+        );
+        await pumpEventQueue();
+        sound.prepare();
+        sound.startMusic();
+        await pumpEventQueue();
+        expect(players, hasLength(RunnerSfx.values.length + 1));
+        // No player polls its position once per frame.
+        for (final p in players) {
+          expect(
+            log.where((e) => e.$1 == p && e.$2.startsWith('positionUpdater')),
+            [(p, 'positionUpdater=null')],
+          );
+        }
+        final bySfx = {
+          for (final sfx in RunnerSfx.values)
+            sfx: players.singleWhere((p) => p.asset == sfx.asset),
+        };
+        for (final sfx in RunnerSfx.values) {
+          expect(
+            log.where(
+              (e) => e.$1 == bySfx[sfx] && e.$2.startsWith('setSource'),
+            ),
+            [(bySfx[sfx], 'setSource ${sfx.asset}')],
+          );
+          expect(log, contains((bySfx[sfx], 'setVolume ${sfx.volume}')));
+        }
+
+        for (final p in players) {
+          p.state = PlayerState.completed;
+        }
+        log.clear();
+        const series = [
+          RunnerSfx.rose,
+          RunnerSfx.mask,
+          RunnerSfx.star,
+          RunnerSfx.rose,
+          RunnerSfx.bravo,
+          RunnerSfx.record,
+        ];
+        for (final sfx in series) {
+          sound.play(sfx);
+          await pumpEventQueue();
+          // The effect has sounded out before the next pickup.
+          bySfx[sfx]!.state = PlayerState.completed;
+        }
+        expect(log, [for (final sfx in series) (bySfx[sfx], 'resume')]);
+
+        // An effect that still sounds starts over.
+        log.clear();
+        bySfx[RunnerSfx.rose]!.state = PlayerState.playing;
+        sound.play(RunnerSfx.rose);
+        await pumpEventQueue();
+        expect(log, [
+          (bySfx[RunnerSfx.rose], 'stop'),
+          (bySfx[RunnerSfx.rose], 'resume'),
+        ]);
+        sound.dispose();
+      },
+    );
+
+    test('on iOS an effect is stopped before it ends by itself', () async {
+      // audioplayers_darwin runs a synchronous AVAudioSession.setActive on
+      // the main (= UI) thread whenever an effect plays to its end.
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      SharedPreferences.setMockInitialValues({});
+      final log = <(_RecordingPlayer, String)>[];
+      final players = <_RecordingPlayer>[];
+      final sound = PluginRunnerSound(
+        newPlayer: () {
+          final player = _RecordingPlayer(log)
+            ..length =
+                PluginRunnerSound.earlyEnd + const Duration(milliseconds: 40);
+          players.add(player);
+          return player;
+        },
+      );
+      await pumpEventQueue();
+      sound.prepare();
+      await pumpEventQueue();
+      final rose = players.singleWhere((p) => p.asset == RunnerSfx.rose.asset);
+      expect(log, contains((rose, 'getDuration')));
+
+      log.clear();
+      sound.play(RunnerSfx.rose);
+      await pumpEventQueue();
+      expect(log, [(rose, 'resume')]);
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(log, [(rose, 'resume'), (rose, 'stop')]);
+      expect(rose.state, PlayerState.stopped);
+
+      // A new play before the end restarts the effect and moves its end; the
+      // end of the first play does not cut the second.
+      log.clear();
+      sound.play(RunnerSfx.rose);
+      await pumpEventQueue();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      sound.play(RunnerSfx.rose);
+      await pumpEventQueue();
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      expect(log, [(rose, 'resume'), (rose, 'stop'), (rose, 'resume')]);
+      expect(rose.state, PlayerState.playing);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(log, [
+        (rose, 'resume'),
+        (rose, 'stop'),
+        (rose, 'resume'),
+        (rose, 'stop'),
+      ]);
+
+      // An effect that has already ended is not stopped again.
+      log.clear();
+      sound.play(RunnerSfx.star);
+      await pumpEventQueue();
+      final star = players.singleWhere((p) => p.asset == RunnerSfx.star.asset);
+      star.state = PlayerState.completed;
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(log, [(star, 'resume')]);
+      sound.dispose();
+    });
   });
 
   group('art', () {
@@ -1019,6 +1209,25 @@ void main() {
   });
 
   group('effects', () {
+    test('texts of different sizes share a frame without new layouts', () {
+      final g = RunnerGlyphs()..stage(400);
+      final popup = g.label('+5', 18, shadow: true);
+      final banner = g.label('Kombo ×5 – Bravo!', 22);
+      final kg = g.kg(36);
+      final icon = g.icon(PickupKind.rose, 30);
+      expect(identical(g.label('+5', 18, shadow: true), popup), isTrue);
+      expect(identical(g.label('Kombo ×5 – Bravo!', 22), banner), isTrue);
+      expect(identical(g.kg(36), kg), isTrue);
+      expect(identical(g.icon(PickupKind.rose, 30), icon), isTrue);
+      expect(identical(g.label('+5', 18), popup), isFalse);
+      expect(g.label('+5', 24).height, greaterThan(popup.height));
+      g.stage(400);
+      expect(identical(g.label('+5', 18, shadow: true), popup), isTrue);
+      // A new stage size (rotation) lays everything out again.
+      g.stage(500);
+      expect(identical(g.label('+5', 18, shadow: true), popup), isFalse);
+    });
+
     test('pickups sparkle and sound by kind; the score stays the same', () {
       final played = <RunnerSfx>[];
       final game = StageRunner(random: Random(5))..invincible = true;
