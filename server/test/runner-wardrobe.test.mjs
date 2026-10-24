@@ -383,8 +383,10 @@ test('the bundled pictures have the sizes the app accepts', () => {
   assert.deepEqual(readdirSync(folder).filter(f => !named.has(f) && !parked.includes(f)), []);
   const bytes = [...c.files.values()].filter(f => f.mime.startsWith('image/')).reduce((sum, f) => sum + f.bytes.length, 0);
   // 0.11.2: 159 pictures in use (42 characters, 34 role variants, 7 backdrops) were about 16 MB;
-  // with role figures the same pictures plus Raphael's Hades.
-  assert.ok(bytes < 20e6, `${bytes} bytes of pictures`);
+  // with role figures the same pictures plus Raphael's Hades; with Nexus (24 figures) about 19.4 MB.
+  // 40 MB leaves room for further plays: the app loads only the pictures a player needs, one by one
+  // when it shows or wears them, never the whole folder; the limits per file above stay.
+  assert.ok(bytes < 40e6, `${bytes} bytes of pictures`);
 });
 
 test('every backdrop brings its own music, as light AAC in M4A', () => {

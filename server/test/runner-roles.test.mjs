@@ -33,7 +33,8 @@ test('every actor figure of the bundled catalog has role, play and year; technic
   assert.equal(crew.length, 8, 'one figure per technician');
   // A person without a single active figure (new members without a picture yet: Lucia and the
   // technicians Daniel, Elea, Emilia and Julian) is not in the catalog at all, not even disabled;
-  // waiting roles of people who already have an active figure stay (Nexus, Romeo und Julia).
+  // waiting roles of people who already have an active figure stay (Romeo und Julia; in Nexus the KI
+  // of Logge and Fynn's ensemble role, both without a costume photo).
   const active = new Set(people.filter(x => x.disabled !== true).map(x => x.personId));
   assert.deepEqual(people.filter(x => !active.has(x.personId)).map(x => x.id), [], 'people without an active figure');
   for (const id of ['lucia', 'daniel', 'elea', 'emilia', 'julian-technik']) assert.ok(!raw.some(x => x.id === `character.${id}` || x.id.startsWith(`character.${id}--`)), id);
@@ -50,13 +51,21 @@ test('every actor figure of the bundled catalog has role, play and year; technic
   assert.deepEqual([at('character.jonas').role, at('character.jonas').departments], ['Vetter Viktor', ['licht']]);
   assert.deepEqual(['role', 'play', 'year', 'name'].map(k => at('character.raphael--schicksal')[k]), ['Hades', 'Schicksalsfäden', 2025, 'Raphael']);
   // Figures with a picture take part; the others wait for it (Romeo und Julia, earlier plays).
+  // Nexus (2024) came in with 24 figures: 10 light blue, 2 blue, 3 pink, 6 legacy, 2 red, 1 gold.
   const count = id => c.collectible.filter(x => x.kind === 'character' && x.rarity === id).length;
-  assert.deepEqual(['hellblau', 'blau', 'technik', 'pink', 'legacy', 'rot', 'gold'].map(count), [21, 13, 8, 12, 9, 9, 6]);
+  assert.deepEqual(['hellblau', 'blau', 'technik', 'pink', 'legacy', 'rot', 'gold'].map(count), [31, 15, 8, 15, 15, 11, 7]);
   assert.ok(raw.filter(x => x.id.endsWith('--romeo-julia')).every(x => x.disabled === true));
-  assert.ok(raw.filter(x => x.id.endsWith('--nexus')).length >= 20 && raw.filter(x => x.id.endsWith('--nexus')).every(x => x.disabled === true));
+  const nexus = raw.filter(x => x.id.endsWith('--nexus'));
+  assert.equal(nexus.length, 26);
+  assert.deepEqual(nexus.filter(x => x.disabled === true).map(x => x.id), ['character.logge--nexus', 'character.fynn--nexus']);
+  assert.ok(nexus.every(x => x.play === 'Nexus' && x.year === 2024));
+  assert.ok(nexus.filter(x => !x.disabled).every(x => c.collectible.includes(at(x.id)) && at(x.id).harness && at(x.id).portrait), 'active Nexus figures can be drawn');
+  // Former members stay legacy in Nexus as well, whatever their roles weigh (Raven, Hunter …).
+  assert.deepEqual(nexus.filter(x => x.rarity === 'legacy').map(x => x.name), ['Lea', 'Anton', 'Maria', 'Leon', 'Magdalena', 'Theo']);
+  assert.deepEqual(['louis', 'sebastian', 'theresa', 'vanessa'].map(id => at(`character.${id}--nexus`).rarity), ['gold', 'rot', 'rot', 'hellblau']);
   // The 34 former role variants are figures of their own, still shown as variants to older apps,
-  // like Raphael in Anno 1146 on his Hades.
-  assert.equal(c.baseOf.size, 35);
+  // like Raphael in Anno 1146 on his Hades, and so are the 24 Nexus roles.
+  assert.equal(c.baseOf.size, 59);
   assert.equal(c.baseOf.get('character.raphael--anno'), 'character.raphael--schicksal');
 });
 

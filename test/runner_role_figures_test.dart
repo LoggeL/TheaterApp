@@ -78,8 +78,8 @@ JsonMap _default(String id, String kind) => {
 
 final _rarities = [
   for (final (id, name, color, weight) in [
-    ('hellblau', 'Hellblau', '#5E98D9', 41),
-    ('blau', 'Blau', '#4B69FF', 25),
+    ('hellblau', 'Hellblau', '#5E98D9', 45),
+    ('blau', 'Blau', '#4B69FF', 21),
     ('technik', 'Technik', '#2FBF71', 11),
     ('pink', 'Pink', '#D32CE6', 12),
     ('legacy', 'Legacy', '#A47A4B', 6),

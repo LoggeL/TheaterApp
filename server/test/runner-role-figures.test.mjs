@@ -97,7 +97,7 @@ test('Legacy open under the old rule stays open; otherwise it opens from 10 ligh
 test('Legacy opens with the 10th light blue figure, and once open it stays open', t => {
   const c = bundledCatalog();
   const light = c.collectible.filter(x => x.kind === 'character' && x.rarity === 'hellblau').map(x => x.id);
-  assert.equal(light.length, 21);
+  assert.equal(light.length, 31);
   const base = Object.values(c.defaults);
   assert.ok(!openRarities(c, new Set([...base, ...light.slice(0, 9)])).has('legacy'));
   assert.ok(openRarities(c, new Set([...base, ...light.slice(0, 10)])).has('legacy'));
@@ -105,7 +105,7 @@ test('Legacy opens with the 10th light blue figure, and once open it stays open'
   // In the game: the 10th light blue figure from a crate opens Legacy; a catalog without most of
   // them later (pictures withdrawn, rarities moved) does not close it again.
   const rarities = [
-    { id: 'hellblau', name: 'Hellblau', color: '#5E98D9', weight: 41, gage: 10 },
+    { id: 'hellblau', name: 'Hellblau', color: '#5E98D9', weight: 45, gage: 10 },
     { id: 'legacy', name: 'Legacy', color: '#A47A4B', weight: 6, gage: 50, requires: { rarity: 'hellblau', kind: 'character', count: 10 } },
   ];
   const defaults = ['character', 'backdrop', 'obstacles', 'fx'].map(kind => ({ id: `${kind}.0`, kind, name: kind, rarity: 'hellblau', default: true }));
@@ -129,7 +129,7 @@ test('a crate draws the rarity by the new weights (seeded, 30 000 draws)', () =>
   // Mulberry32: the same numbers every run.
   let seed = 20261024;
   const random = () => { seed = (seed + 0x6D2B79F5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
-  assert.deepEqual(c.rarities.map(r => [r.id, r.weight]), [['hellblau', 41], ['blau', 25], ['technik', 11], ['pink', 12], ['legacy', 6], ['rot', 3.5], ['gold', 1.5]]);
+  assert.deepEqual(c.rarities.map(r => [r.id, r.weight]), [['hellblau', 45], ['blau', 21], ['technik', 11], ['pink', 12], ['legacy', 6], ['rot', 3.5], ['gold', 1.5]]);
   const owned = new Set(Object.values(c.defaults));
   const count = (open, n = 30000) => {
     const seen = {};
@@ -222,7 +222,7 @@ test('servers announce role figures; the HTTP API gives them with ?roles=1 and v
   assert.ok(roles.catalog.items.some(x => x.id === 'character.elena--anno'));
   assert.ok(roles.owned.includes('character.elena--anno'));
   assert.ok(!older.catalog.items.some(x => x.id === 'character.elena--anno'));
-  assert.deepEqual(older.catalog.items.find(x => x.id === 'character.elena').variants.map(v => v.id), ['character.elena--anno', 'character.elena--schicksal']);
+  assert.deepEqual(older.catalog.items.find(x => x.id === 'character.elena').variants.map(v => v.id), ['character.elena--anno', 'character.elena--schicksal', 'character.elena--nexus']);
   assert.ok(older.variants.includes('character.elena--anno'));
   // Raphael has no figure from before: older apps see Hades as a figure of its own.
   assert.equal(older.catalog.items.find(x => x.id === 'character.raphael--schicksal')?.role, 'Hades');
