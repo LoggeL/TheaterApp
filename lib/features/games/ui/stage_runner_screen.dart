@@ -835,9 +835,12 @@ class _StagePainter extends CustomPainter {
     canvas.save();
     canvas.translate(dx * s, dy * s);
 
-    _backdrop(canvas, g, a, s, w, floorY);
-    _spotlights(canvas, g, s, w, floorY);
-    _wings(canvas, g, s);
+    // The set stands still like on a real stage: only the floor, the course
+    // and the front row move, all exactly at the running pace. Layers at
+    // their own pace (parallax) made players feel sick.
+    _backdrop(canvas, a, s, w, floorY);
+    _spotlights(canvas, s, w, floorY);
+    _wings(canvas, s);
     _floor(canvas, g, s, w, floorY);
 
     for (final o in g.obstacles) {
@@ -869,10 +872,10 @@ class _StagePainter extends CustomPainter {
     if (g.over) _curtain(canvas, g, s, w);
   }
 
-  /// The painted backdrop drifts slowly; mirrored copies keep it seamless.
+  /// The painted backdrop stands still; a mirrored copy fills wide stages
+  /// without a seam.
   void _backdrop(
     Canvas canvas,
-    StageRunner g,
     RunnerArt? a,
     double s,
     double w,
@@ -890,7 +893,7 @@ class _StagePainter extends CustomPainter {
       image.width.toDouble(),
       image.height.toDouble(),
     );
-    for (var x = -((g.distance * .12 * s) % (2 * tile)); x < w; x += 2 * tile) {
+    for (var x = 0.0; x < w; x += 2 * tile) {
       canvas.drawImageRect(
         image,
         src,
@@ -906,16 +909,10 @@ class _StagePainter extends CustomPainter {
     }
   }
 
-  /// Two softly swaying light cones: flat translucent shapes, no blur.
-  void _spotlights(
-    Canvas canvas,
-    StageRunner g,
-    double s,
-    double w,
-    double floorY,
-  ) {
+  /// Two fixed light cones: flat translucent shapes, no blur.
+  void _spotlights(Canvas canvas, double s, double w, double floorY) {
     for (var i = 0; i < 2; i++) {
-      final x = w * (.3 + .45 * i) + sin(g.time * .5 + i * 2.1) * s * .15;
+      final x = w * (.3 + .45 * i);
       _path
         ..reset()
         ..moveTo(x - s * .02, 0)
@@ -935,14 +932,14 @@ class _StagePainter extends CustomPainter {
     }
   }
 
-  /// Velvet wings at half speed (parallax).
-  void _wings(Canvas canvas, StageRunner g, double s) {
-    const spacing = .55;
-    final offset = (g.distance * .5) % spacing;
-    for (var x = -offset; x < StageRunner.viewWidth + spacing; x += spacing) {
-      final left = x * s, top = s * .05, bottom = s * StageRunner.floor;
+  /// Four fixed velvet wings, evenly spread from edge to edge.
+  void _wings(Canvas canvas, double s) {
+    const width = .07, spacing = (StageRunner.viewWidth - width) / 3;
+    for (var i = 0; i < 4; i++) {
+      final left = i * spacing * s, top = s * .05;
+      final bottom = s * StageRunner.floor;
       canvas.drawRect(
-        Rect.fromLTRB(left, top, left + s * .07, bottom),
+        Rect.fromLTRB(left, top, left + s * width, bottom),
         _velvetPaint,
       );
       for (final fold in const [.012, .042]) {
@@ -1318,11 +1315,11 @@ class _StagePainter extends CustomPainter {
     }
   }
 
-  /// Heads in the front row, faster than the stage (parallax); they bounce
+  /// Heads in the front row, passing at the pace of the floor; they bounce
   /// while a banner celebrates.
   void _audience(Canvas canvas, StageRunner g, RunnerFx f, double s) {
     const spacing = .11;
-    final travel = g.distance * 1.25;
+    final travel = g.distance;
     final first = (travel / spacing).floor();
     final cheering = f.showsBanner && !g.over;
     for (

@@ -199,7 +199,7 @@ class RunnerFx {
   /// Screen offset of the crash shake, in stage heights.
   (double, double) shake(StageRunner game) {
     if (!game.over || game.sinceOver >= shakeTime) return (0, 0);
-    final strength = .018 * (1 - game.sinceOver / shakeTime);
+    final strength = .008 * (1 - game.sinceOver / shakeTime);
     final t = game.sinceOver * 70;
     return (sin(t) * strength, cos(t * 1.3) * strength * .7);
   }

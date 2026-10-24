@@ -1477,4 +1477,95 @@ void main() {
       }
     });
   });
+
+  // Layers that drift at their own pace made players feel sick: the set
+  // stands still and everything that moves keeps the running pace.
+  group('motion', () {
+    testWidgets('the set stands still, floor and front row keep pace', (
+      tester,
+    ) async {
+      late StageRunner game;
+      await _pump(
+        tester,
+        StageRunnerScreen(
+          controller: await _demo(),
+          onRun: (g) => game = g,
+          sound: _FakeSound(),
+        ),
+      );
+      // The screen decodes the pictures in real time.
+      for (var i = 0; i < 100 && RunnerArt.loaded == null; i++) {
+        await tester.runAsync(() => Future<void>.delayed(Durations.short1));
+        await tester.pump();
+      }
+      expect(RunnerArt.loaded, isNotNull);
+      await tester.tap(find.text('Vorhang auf'));
+      await tester.pump();
+      final painter = tester
+          .widget<CustomPaint>(find.byKey(const ValueKey('runner-stage')))
+          .painter!;
+
+      const s = 400, w = 640;
+      Future<Uint8List> shot(double distance, double time) async {
+        game
+          ..distance = distance
+          ..time = time;
+        final bytes = await tester.runAsync(() async {
+          final recorder = ui.PictureRecorder();
+          painter.paint(Canvas(recorder), const Size(640, 400));
+          final image = await recorder.endRecording().toImage(w, s);
+          final data = await image.toByteData(
+            format: ui.ImageByteFormat.rawRgba,
+          );
+          image.dispose();
+          return data!.buffer.asUint8List();
+        });
+        return bytes!;
+      }
+
+      // 0.1 stage heights of running are exactly 40 pixels.
+      final a = await shot(.02, .5), b = await shot(.12, 1.7);
+      // Mean difference per channel between [b] and [a] moved left by
+      // [shift] pixels, in the rows from [top] to [bottom] (stage heights),
+      // left and right of the runner (no course is in view yet).
+      double difference(int shift, double top, double bottom) {
+        var sum = 0, count = 0;
+        for (var y = (top * s).ceil(); y < bottom * s; y++) {
+          for (var x = 60; x < 560; x++) {
+            if (x > .3 * s && x < .6 * s) continue;
+            for (var c = 0; c < 3; c++) {
+              sum += (b[(y * w + x) * 4 + c] - a[(y * w + x + shift) * 4 + c])
+                  .abs();
+              count++;
+            }
+          }
+        }
+        return sum / count;
+      }
+
+      // Backdrop, wings and lights between the valance and the floor.
+      expect(difference(0, .08, StageRunner.floor - .01), lessThan(.5));
+      // Floor and audience moved exactly as far as the runner ran.
+      final pace = difference(40, StageRunner.floor + .01, 1);
+      expect(pace, lessThan(1));
+      expect(difference(0, StageRunner.floor + .01, 1), greaterThan(pace + 5));
+    });
+
+    test('the crash only nudges the stage, briefly', () {
+      final game = StageRunner(random: Random(4));
+      final fx = RunnerFx();
+      while (!game.over) {
+        game.update(1 / 60);
+      }
+      var largest = 0.0;
+      for (var i = 0; i < 60; i++) {
+        game.update(1 / 60);
+        final (dx, dy) = fx.shake(game);
+        largest = max(largest, max(dx.abs(), dy.abs()));
+        if (game.sinceOver > RunnerFx.shakeTime) expect((dx, dy), (0.0, 0.0));
+      }
+      expect(largest, greaterThan(0));
+      expect(largest, lessThanOrEqualTo(.01));
+    });
+  });
 }
