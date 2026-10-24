@@ -26,6 +26,24 @@ import 'stage_runner_perf.dart';
 import 'stage_runner_sound.dart';
 import 'wardrobe_screen.dart';
 
+/// Android draws the app behind its navigation bar (edge-to-edge, enforced
+/// from Android 15); the three-button bar, at the left or right edge in
+/// landscape, lays a translucent veil over it. During a run the stage passes
+/// right to the screen's edge, so the veil would half hide whatever runs
+/// out there: the bar stays clear while running, only its light buttons
+/// lie on the dark stage. Elsewhere the system's veil keeps the buttons
+/// readable. Light buttons are what the app bar asks for anyway.
+@visibleForTesting
+const runnerBarsPlaying = SystemUiOverlayStyle(
+  systemNavigationBarContrastEnforced: false,
+  systemNavigationBarIconBrightness: Brightness.light,
+);
+@visibleForTesting
+const runnerBarsDefault = SystemUiOverlayStyle(
+  systemNavigationBarContrastEnforced: true,
+  systemNavigationBarIconBrightness: Brightness.light,
+);
+
 /// Opens the stage runner.
 Future<void> openStageRunner(BuildContext context, AppController controller) =>
     openPage<void>(context, StageRunnerScreen(controller: controller));
@@ -211,7 +229,11 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   @override
   void dispose() {
-    if (_phase == _Phase.playing) _perf?.finish(_wardrobe, end: 'quit');
+    // Left during a run: the rest of the app gets the usual bar back.
+    if (_phase == _Phase.playing) {
+      _perf?.finish(_wardrobe, end: 'quit');
+      SystemChrome.setSystemUIOverlayStyle(runnerBarsDefault);
+    }
     _lifecycle.dispose();
     _sound.stopMusic();
     if (widget.sound == null) _sound.dispose();
@@ -407,25 +429,31 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         const SizedBox(width: 8),
       ],
     ),
-    body: switch (_phase) {
-      _Phase.playing => Focus(
-        autofocus: true,
-        onKeyEvent: _key,
-        child: _stage(context),
-      ),
-      _ => ListView(
-        padding: pagePadding(context, maxWidth: 640),
-        children: [
-          if (_phase == _Phase.intro) ..._intro(context) else _result(context),
-          if (_phase != _Phase.intro && _missionsOn && _missions != null) ...[
+    body: AnnotatedRegion(
+      value: _phase == _Phase.playing ? runnerBarsPlaying : runnerBarsDefault,
+      child: switch (_phase) {
+        _Phase.playing => Focus(
+          autofocus: true,
+          onKeyEvent: _key,
+          child: _stage(context),
+        ),
+        _ => ListView(
+          padding: pagePadding(context, maxWidth: 640),
+          children: [
+            if (_phase == _Phase.intro)
+              ..._intro(context)
+            else
+              _result(context),
+            if (_phase != _Phase.intro && _missionsOn && _missions != null) ...[
+              const SizedBox(height: 20),
+              _missionsCard(),
+            ],
             const SizedBox(height: 20),
-            _missionsCard(),
+            _leaderboard(context),
           ],
-          const SizedBox(height: 20),
-          _leaderboard(context),
-        ],
-      ),
-    },
+        ),
+      },
+    ),
   );
 
   List<Widget> _intro(BuildContext context) {

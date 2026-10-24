@@ -1860,6 +1860,167 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    test('things leave the course only once they are out of the picture', () {
+      for (final MapEntry(key: shape, value: (w, h)) in shapes.entries) {
+        final game = StageRunner(random: Random(9))
+          ..invincible = true
+          ..view = stageLayout(Size(w.toDouble(), h.toDouble())).view;
+        var gone = 0;
+        var last = <Obstacle, double>{};
+        var lastPickups = <Pickup, double>{};
+        for (var i = 0; i < 60 * 90; i++) {
+          game.holding = sin(i / 40) > .2;
+          final before = game.distance;
+          game.update(1 / 60);
+          final now = Map<Obstacle, double>.identity()
+            ..addEntries(game.obstacles.map((o) => MapEntry(o, o.right)));
+          // An obstacle (with the beam or frame its picture may add) is
+          // dropped only once its right edge has passed the picture's left
+          // edge, the course at [distance], with room to spare.
+          // Objects are reused: one that turns up far ahead is a new one.
+          for (final MapEntry(key: o, value: right) in last.entries) {
+            final still = now[o];
+            if (still != null && (still - right).abs() < .5) continue;
+            gone++;
+            expect(right, lessThan(before - .1), reason: shape);
+          }
+          for (final MapEntry(key: p, value: x) in lastPickups.entries) {
+            if (p.taken) continue;
+            if (game.pickups.any((q) => identical(q, p)) && p.x == x) continue;
+            expect(x, lessThan(before - .1), reason: shape);
+          }
+          last = now;
+          lastPickups = Map<Pickup, double>.identity()
+            ..addEntries(
+              game.pickups.where((p) => !p.taken).map((p) => MapEntry(p, p.x)),
+            );
+        }
+        expect(gone, greaterThan(50), reason: shape);
+      }
+    });
+
+    testWidgets('the left edge cuts the picture, nothing else', (tester) async {
+      final art = await decodeArt(tester);
+      // Every kind of obstacle and a rose straddle the left edge. The same
+      // stage 100 pixels further on shows them whole; the left edge must be
+      // a plain cut through it: no thing missing, faded or half drawn.
+      for (final MapEntry(key: shape, value: (w, h)) in shapes.entries) {
+        final (:s, :top, :view) = stageLayout(Size(w.toDouble(), h.toDouble()));
+        const shift = 100;
+        // Where the picture cut by the left edge starts on the course.
+        final edge = (8 + shift) / s;
+        Future<Uint8List> shot(double px) {
+          final d = px / s;
+          final game = StageRunner(random: Random(1))
+            ..distance = d
+            ..time = 1
+            ..view = view;
+          game
+            ..obstacles.clear()
+            ..pickups.clear();
+          for (final (kind, width, top, bottom) in [
+            (ObstacleKind.crate, .12, StageRunner.floor - .15, StageRunner.floor),
+            (ObstacleKind.truss, .3, 0.0, .3),
+            (ObstacleKind.flat, .07, .5, StageRunner.floor),
+            (ObstacleKind.lamp, .1, 0.0, .35),
+            (ObstacleKind.border, .09, 0.0, .2),
+            (ObstacleKind.sandbag, .09, .4, .5),
+            (ObstacleKind.drum, .12, StageRunner.floor - .12, StageRunner.floor),
+          ]) {
+            // Each one half out of the picture.
+            final x = edge - width / 2;
+            game.obstacles.add(
+              Obstacle()
+                ..kind = kind
+                ..left = x
+                ..width = width
+                ..top = top
+                ..bottom = bottom
+                ..anchor = x,
+            );
+          }
+          game.pickups.add(
+            Pickup()
+              ..kind = PickupKind.rose
+              ..x = edge + .01
+              ..y = .6,
+          );
+          return render(tester, game, art, w, h);
+        }
+
+        final cut = await shot(8.0 + shift), whole = await shot(8);
+        final runner = (.3 * s, .6 * s);
+        bool near(int x) => x > runner.$1 && x < runner.$2;
+        // Round shapes cut by an edge are smoothed a little differently in
+        // its outermost pixels, by up to a tenth of the colour range; a
+        // missing, faded or half drawn thing differs by far more.
+        var differ = 0, covered = 0;
+        for (var y = 0; y < h; y++) {
+          for (var x = 0; x + shift < w - 8; x++) {
+            if (near(x) || near(x + shift)) continue;
+            final i = (y * w + x) * 4, j = (y * w + x + shift) * 4;
+            final shades = x < 8 ? 40 : 6;
+            covered++;
+            if ((cut[i] - whole[j]).abs() > shades ||
+                (cut[i + 1] - whole[j + 1]).abs() > shades ||
+                (cut[i + 2] - whole[j + 2]).abs() > shades) {
+              differ++;
+            }
+          }
+        }
+        expect(covered, greaterThan(w * h / 3), reason: shape);
+        expect(differ, 0, reason: '$shape (stage top at $top)');
+      }
+    });
+
+    testWidgets('on Android the navigation bar lays no veil over a run', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      tester.view.physicalSize = const Size(845, 390);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final controller = TestServer().controller();
+      addTearDown(controller.dispose);
+      final navigator = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: navigator,
+          theme: StageTheme.build(Brightness.light),
+          home: const Scaffold(body: Text('Start')),
+        ),
+      );
+      navigator.currentState!
+          .push(
+            MaterialPageRoute<void>(
+              builder: (_) => StageRunnerScreen(
+                controller: controller,
+                random: Random(3),
+                onRun: (g) => g.invincible = true,
+                sound: _FakeSound(),
+              ),
+            ),
+          )
+          .ignore();
+      await tester.pumpAndSettle();
+      bool? veil() => SystemChrome.latestStyle?.systemNavigationBarContrastEnforced;
+      expect(veil(), isTrue);
+      await tester.scrollUntilVisible(find.text('Vorhang auf'), 200);
+      await tester.tap(find.text('Vorhang auf'));
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      // Clear while running, to the screen's edge ...
+      expect(veil(), isFalse);
+      // ... and back as usual for the rest of the app, also when the run
+      // is left halfway.
+      navigator.currentState!.pop();
+      await tester.pumpAndSettle();
+      expect(find.text('Start'), findsOneWidget);
+      expect(veil(), isTrue);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
     testWidgets('the shine stays on the figure, no light on the stage', (
       tester,
     ) async {
