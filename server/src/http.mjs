@@ -144,6 +144,16 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (route === '/games/runner/leaderboard' && req.method === 'GET') return json(res, 200, theater.runnerLeaderboard(identity.uid));
       if (route === '/games/runner/rounds' && req.method === 'POST') return json(res, 200, theater.runnerStart(identity.uid));
       if (route === '/games/runner/scores' && req.method === 'POST') return json(res, 200, theater.runnerScore(identity.uid, body));
+      if (route === '/games/runner/wardrobe' && req.method === 'GET') return json(res, 200, theater.runnerWardrobe(identity.uid));
+      if (route === '/games/runner/crates' && req.method === 'POST') return json(res, 200, theater.runnerOpenCrate(identity.uid, req.headers['idempotency-key']));
+      if (route === '/games/runner/outfit' && req.method === 'PUT') return json(res, 200, theater.runnerOutfit(identity.uid, body));
+      const skin = route.match(/^\/games\/runner\/skins\/([^/]+)$/);
+      if (skin && req.method === 'GET') {
+        const file = theater.runnerSkin(identity.uid, skin[1]);
+        // The catalog links each picture with its content hash (`?v=`), so a matching link never changes.
+        const cache = requestUrl.searchParams.get('v') === file.hash ? 'private, max-age=31536000, immutable' : 'private, no-cache';
+        res.writeHead(200, { 'Content-Type': file.mime, 'Content-Length': file.bytes.length, 'Cache-Control': cache, Vary: 'Authorization, Origin' }); res.end(file.bytes); return;
+      }
       if (route === '/admin/accounts' && req.method === 'GET') return json(res, 200, theater.adminData(identity.uid));
       if (route === '/admin/email' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.emailEnabled, jobs: theater.store.all('emailJobs').slice(-50).map(({ acceptedRecipientIds, failedRecipientIds, ...job }) => job) }); }
       if (route === '/admin/push' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.pushEnabled, devices: theater.store.all('devices').map(({ token, ...d }) => d), jobs: theater.store.all('pushJobs').slice(-50).map(({ acceptedDeviceIds, ...j }) => j) }); }

@@ -4,6 +4,7 @@ import { compareProductionsNewestFirst } from './production-order.mjs';
 import { leadPushKinds, memberPushKinds } from './push-kinds.mjs';
 import { migrateSharedSpeakers, sharedSpeakersMigrationId, splitSharedSpeakers } from './shared-speakers.mjs';
 import { feedbackList, feedbackTicketsMigrationId, forgetFeedbackAccount, forgetFeedbackPerson, migrateFeedbackTickets, setFeedbackStatus, submitFeedback } from './feedback-tickets.mjs';
+import { bundledCatalog, openCrate, recordRun, runMeters, secureRandom, selectOutfit, skinFile, wardrobe } from './runner-wardrobe.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 
 // Machine-readable reasons next to the German message; clients branch on `code`, never on the text.
@@ -35,7 +36,7 @@ export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
 export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -53,7 +54,8 @@ export { feedbackMaxLength, feedbackPerHour } from './feedback-tickets.mjs';
 // "Bühnenlauf", an endless runner: one best score per person, shared with all members.
 // The run gets faster until failing is unavoidable. Points are metres plus pickups; the client
 // places at most `pickupPointsPerMeter` per metre. A score needs a run the server started and may
-// not exceed what the measured run time allows (see `runnerMaxScore`).
+// not exceed what the measured run time allows (see `runnerMaxScore`). Metres count towards
+// costume crates (`runnerUnlocks`, see runner-wardrobe.mjs).
 export const stageRunner = Object.freeze({ startSpeed: 0.55, acceleration: 0.01, maxSpeed: 2.4, metersPerUnit: 10, pickupPointsPerMeter: 6, tolerance: 1.15, slackSeconds: 5, slackPoints: 60, roundTtlMs: 30 * 60000, roundsPerHour: 60, leaderboardSize: 10 });
 /** Metres a run can cover in `seconds`: the speed (stage heights per second) grows linearly up to its maximum. */
 export const runnerMaxMeters = seconds => {
@@ -136,8 +138,11 @@ const cancelledEvent = e => ({ id: e.id, title: e.title, startsAt: e.startsAt, e
 const initials = name => name.split(/\s+/).filter(Boolean).slice(0, 2).map(n => n[0]).join('').toUpperCase();
 
 export class Theater {
-  constructor(store, { bootstrapEmail = '', pushEnabled = false, emailEnabled = false, clock = () => new Date() } = {}) {
+  // `runnerCatalog` (see runner-wardrobe.mjs `loadCatalog`) and `random` replace the bundled
+  // wardrobe and the secure random numbers of crate openings in tests.
+  constructor(store, { bootstrapEmail = '', pushEnabled = false, emailEnabled = false, clock = () => new Date(), runnerCatalog = null, random = secureRandom } = {}) {
     this.store = store; this.bootstrapEmail = bootstrapEmail.trim().toLowerCase(); this.pushEnabled = pushEnabled; this.emailEnabled = emailEnabled; this.clock = clock;
+    this.runnerCatalog = runnerCatalog ?? bundledCatalog(); this.random = random;
     if (!store.get('settings', 'personRolesInitialized')) store.transaction(() => {
       for (const [i, name] of initialRoles.entries()) store.put('personRoles', `role-${i + 1}`, { id: `role-${i + 1}`, name, version: 1 });
       store.put('settings', 'personRolesInitialized', { at: now() });
@@ -419,15 +424,23 @@ export class Theater {
       const elapsed = at - Date.parse(round.startedAt);
       if (elapsed > stageRunner.roundTtlMs) fail(409, 'Der Lauf ist abgelaufen.', 'round_expired');
       if (b.score > runnerMaxScore(elapsed)) fail(400, 'So viele Punkte sind in dieser Zeit nicht möglich.', 'implausible');
+      const meters = runMeters(b, elapsed, runnerMaxMeters, stageRunner);
       // Each run counts once; the start history stays for the hourly limit.
       this.store.put('runnerRounds', a.personId, { ...round, roundId: null });
+      // Before the round is counted: a first progress record credits only the earlier runs.
+      const progress = recordRun(this, a.personId, meters, b.hitBy);
       const old = this.store.get('runnerScores', a.personId), improved = b.score > (old?.best ?? 0);
       const when = new Date(at).toISOString();
       this.store.put('runnerScores', a.personId, { personId: a.personId, best: improved ? b.score : old?.best ?? 0, bestAt: improved ? when : old?.bestAt ?? null, rounds: (old?.rounds ?? 0) + 1, lastPlayedAt: when });
-      return { score: b.score, improved, leaderboard: this.runnerBoard(a) };
+      return { score: b.score, improved, leaderboard: this.runnerBoard(a), progress };
     });
   }
   runnerLeaderboard(uid) { return this.runnerBoard(this.account(uid)); }
+  // The wardrobe (costume crates) lives in runner-wardrobe.mjs.
+  runnerWardrobe(uid) { return wardrobe(this, uid); }
+  runnerOpenCrate(uid, requestId) { return openCrate(this, uid, requestId); }
+  runnerOutfit(uid, b) { return selectOutfit(this, uid, b); }
+  runnerSkin(uid, name) { return skinFile(this, uid, name); }
   /** Top list of active people with a score above zero; equal scores share a rank, the earlier best comes first. */
   runnerBoard(a) {
     const members = new Map(this.store.all('members').filter(m => m.active === true).map(m => [m.id, m]));
@@ -1368,7 +1381,7 @@ export class Theater {
     // Feedback is personal data of its author and goes with the person (deleting only the login keeps it).
     // Their answers in other people's tickets stay, without their name.
     forgetFeedbackPerson(s, personId);
-    s.delete('runnerScores', personId); s.delete('runnerRounds', personId);
+    s.delete('runnerScores', personId); s.delete('runnerRounds', personId); s.delete('runnerProgress', personId);
     // Reminder keys are `${eventId}:${startsAt}:${personId}:${kind}`; startsAt contains colons itself.
     for (const { id: key } of s.db.prepare("SELECT id FROM entities WHERE kind = 'reminderSent'").all()) if (key.split(':').at(-2) === String(personId)) s.delete('reminderSent', key);
     s.delete('reminders', personId);
