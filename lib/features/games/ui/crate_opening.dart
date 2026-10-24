@@ -10,6 +10,7 @@ import '../../../core/app_controller.dart';
 import '../../../shared/feedback.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/crate_reel.dart';
+import 'crate_animation.dart';
 import 'event_crates_card.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_look.dart';
@@ -28,6 +29,8 @@ Future<Wardrobe?> showCrateOpening(
   bool mission = false,
   bool event = false,
   EventCrate? eventCrate,
+  CrateTarget? target,
+  Future<CrateTarget?> Function(Wardrobe wardrobe)? chooseTarget,
 }) => Navigator.of(context).push<Wardrobe>(
   PageRouteBuilder(
     opaque: false,
@@ -41,13 +44,15 @@ Future<Wardrobe?> showCrateOpening(
       mission: mission,
       event: event,
       eventCrate: eventCrate,
+      target: target,
+      chooseTarget: chooseTarget,
     ),
     transitionsBuilder: (context, animation, _, child) =>
         FadeTransition(opacity: animation, child: child),
   ),
 );
 
-enum _Phase { opening, spinning, revealed, failed }
+enum _Phase { opening, unboxing, spinning, revealed, failed }
 
 /// The unboxing: a short shake of the crate while the server draws, then the
 /// reel runs fast and brakes long, ticking at every card, and stops on the
@@ -65,8 +70,18 @@ class CrateOpeningPage extends StatefulWidget {
     this.mission = false,
     this.event = false,
     this.eventCrate,
+    this.target,
+    this.chooseTarget,
   });
   final AppController controller;
+
+  /// A crate of the own runs aimed at a play or the Technik-Kiste, or the
+  /// Zufallskiste (`runnerCrateTargets`): it opens with its own animation.
+  /// Null: the plain crate of older servers and the other crate kinds.
+  final CrateTarget? target;
+
+  /// Asks for the target of the next crate ("Nächste Kiste").
+  final Future<CrateTarget?> Function(Wardrobe wardrobe)? chooseTarget;
   final Wardrobe wardrobe;
   final RunnerSound sound;
   final RunnerArt? art;
@@ -117,6 +132,14 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   /// The Termin-Kiste to open; after the first one "Nächste Kiste" takes the
   /// earliest waiting.
   late EventCrate? _eventCrate = widget.eventCrate;
+
+  /// The target of the crate opening now; "Nächste Kiste" may choose another.
+  late CrateTarget? _target = _own ? widget.target : null;
+
+  /// An opening that waits for its crate's animation before the reel.
+  CrateOpening? _pending;
+
+  bool get _own => !widget.ensemble && !widget.mission && !widget.event;
   bool _changed = false, _wearing = false;
   String? _error;
   int _card = 0;
@@ -158,6 +181,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                 mission: widget.mission,
                 event: widget.event,
                 eventId: _eventCrate?.eventId,
+                target: _target?.id,
               ))();
       // The cards' portraits, so the reel never shows an empty card; a slow
       // connection waits a moment at most.
@@ -173,25 +197,19 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
             }),
       ]).timeout(const Duration(milliseconds: 1500), onTimeout: () => []);
       if (!mounted) return;
-      final quick = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
       _wardrobe = opening.wardrobe;
       _changed = true;
       _eventCrate = null;
-      setState(() {
-        _result = opening;
-        _reel = CrateReel(
-          winner: opening.winnerIndex,
-          duration: quick ? 2.2 : 6.4,
-          random: widget.random,
-        );
-        _phase = _Phase.spinning;
-        _card = 0;
-        _skipTo = -1;
-      });
-      _lastTick = Duration.zero;
-      _ticker
-        ..stop()
-        ..start();
+      if (_target != null) {
+        // The crate opens its own way first, then the reel runs.
+        widget.sound.play(RunnerSfx.whoosh);
+        setState(() {
+          _pending = opening;
+          _phase = _Phase.unboxing;
+        });
+        return;
+      }
+      _spin(opening);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -200,6 +218,41 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         });
       }
     }
+  }
+
+  /// The reel of [opening], after its crate opened (or at once).
+  void _spin(CrateOpening opening) {
+    if (!mounted || _phase == _Phase.spinning || _phase == _Phase.revealed) {
+      return;
+    }
+    _pending = null;
+    final quick = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    setState(() {
+      _result = opening;
+      _reel = CrateReel(
+        winner: opening.winnerIndex,
+        duration: quick ? 2.2 : 6.4,
+        random: widget.random,
+      );
+      _phase = _Phase.spinning;
+      _card = 0;
+      _skipTo = -1;
+    });
+    _lastTick = Duration.zero;
+    _ticker
+      ..stop()
+      ..start();
+  }
+
+  /// "Nächste Kiste": with a choice the target is asked again.
+  Future<void> _next() async {
+    final choose = widget.chooseTarget;
+    if (_own && _target != null && choose != null) {
+      final next = await choose(_wardrobe);
+      if (next == null || !mounted) return;
+      _target = next;
+    }
+    await _start();
   }
 
   void _tick(Duration elapsed) {
@@ -245,6 +298,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   }
 
   void _skip() {
+    if (_phase == _Phase.unboxing && _pending != null) _spin(_pending!);
     if (_phase == _Phase.spinning) _skipTo = _reel!.duration;
   }
 
@@ -264,7 +318,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
 
   @override
   Widget build(BuildContext context) => PopScope(
-    canPop: _phase != _Phase.spinning,
+    canPop: _phase != _Phase.spinning && _phase != _Phase.unboxing,
     onPopInvokedWithResult: (didPop, _) {
       if (!didPop) _skip();
     },
@@ -275,6 +329,8 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
           behavior: HitTestBehavior.opaque,
           onTap: _skip,
           child: switch (_phase) {
+            _Phase.opening when _target != null => _unboxing(context, false),
+            _Phase.unboxing => _unboxing(context, true),
             _Phase.opening => _opening(context),
             _Phase.failed => _failed(context),
             _ => _stage(context),
@@ -303,6 +359,42 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
       ],
     ),
   );
+
+  /// A crate of the own runs in its own look: wobbling while the server
+  /// draws, then [opening] it its own way (see [CrateMotion]).
+  Widget _unboxing(BuildContext context, bool opening) {
+    final target = _target!;
+    final quick = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final size = min(220.0, MediaQuery.sizeOf(context).shortestSide * .5);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CrateUnboxing(
+            key: ValueKey('crate-unboxing-${target.id}'),
+            target: target,
+            controller: widget.controller,
+            art: widget.art,
+            opening: opening,
+            quick: quick,
+            size: size,
+            onOpened: () {
+              if (_pending case final pending?) _spin(pending);
+            },
+          ),
+          Text(
+            '${_crateName(target)} geht auf …',
+            style: const TextStyle(color: Colors.white70, fontSize: 16),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// "Die Zufallskiste", "Die Technik-Kiste", "Die Kiste „Creepshow“".
+  static String _crateName(CrateTarget t) => t.kind == CrateTargetKind.play
+      ? 'Die Kiste „${t.name}“'
+      : 'Die ${t.name}';
 
   Widget _failed(BuildContext context) => Center(
     child: Padding(
@@ -357,7 +449,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                       ? 'Missionskiste'
                       : widget.ensemble
                       ? 'Ensemble-Kiste'
-                      : 'Kostümkiste',
+                      : _target?.title ?? 'Kostümkiste',
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 15,
@@ -619,7 +711,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                     ),
                   if (more)
                     FilledButton.tonalIcon(
-                      onPressed: _start,
+                      onPressed: _next,
                       icon: const Icon(Icons.inventory_2_outlined),
                       label: Text('Nächste Kiste ($left)'),
                     ),

@@ -1,5 +1,5 @@
 import 'dart:math';
-import 'dart:ui' show Color;
+import 'dart:ui' show Color, Rect;
 
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
@@ -45,6 +45,17 @@ bool roleFiguresAvailable(AppController controller) =>
 bool uniqueFiguresAvailable(AppController controller) =>
     roleFiguresAvailable(controller) &&
     controller.supports('runnerUniqueFigures');
+
+/// Crate points (`runnerCratePoints`): the own crates count the runs'
+/// points, not their metres. The app reads the unit from each progress
+/// (`unit: points`), so this only says whether the server announced it.
+bool cratePointsAvailable(AppController controller) =>
+    wardrobeAvailable(controller) && controller.supports('runnerCratePoints');
+
+/// Crate targets (`runnerCrateTargets`): a crate of the own runs opens as
+/// the Zufallskiste or aimed at a play or the Technik-Kiste.
+bool crateTargetsAvailable(AppController controller) =>
+    dupesAvailable(controller) && controller.supports('runnerCrateTargets');
 
 /// What the app tells the server it knows, for every wardrobe request.
 Map<String, Object> _wardrobeFlags(AppController controller) => {
@@ -679,7 +690,20 @@ class RunnerProgress {
     this.missionBonus = 0,
     this.missions,
     this.eventCrates = 0,
+    this.points,
+    this.gainedPoints,
   }) : runMeters = runMeters ?? meters;
+
+  /// The crate points and where they come from (`runnerCratePoints`); null
+  /// for older servers, whose [meters], [previousAt] and [nextAt] are metres.
+  /// With them those three are points.
+  final CratePoints? points;
+
+  /// Only in the reply to a run: the crate points it brought.
+  final GainedPoints? gainedPoints;
+
+  /// Whether the crates count points ([points]) rather than metres.
+  bool get inPoints => points != null;
 
   /// Termin-Kisten waiting (`runnerEventCrates`).
   final int eventCrates;
@@ -763,7 +787,158 @@ class RunnerProgress {
         ? DailyMissions.fromJson(jsonMap(json['missions']))
         : null,
     eventCrates: intValue(json['eventCrates']),
+    points: json['unit'] == 'points' && json['points'] is Map
+        ? CratePoints.fromJson(jsonMap(json['points']))
+        : null,
+    gainedPoints: json['gainedPoints'] is Map
+        ? GainedPoints.fromJson(jsonMap(json['gainedPoints']))
+        : null,
   );
+}
+
+/// The crate points of the own runs: [total] = [base] (moved over from the
+/// crate metres of before) + [runs] + [bonus] (Tagesbonus) + [missions].
+class CratePoints {
+  const CratePoints({
+    this.total = 0,
+    this.base = 0,
+    this.runs = 0,
+    this.bonus = 0,
+    this.missions = 0,
+  });
+  final int total, base, runs, bonus, missions;
+
+  factory CratePoints.fromJson(JsonMap json) => CratePoints(
+    total: intValue(json['total']),
+    base: intValue(json['base']),
+    runs: intValue(json['runs']),
+    bonus: intValue(json['bonus']),
+    missions: intValue(json['missions']),
+  );
+}
+
+/// What one run brought in crate points: its own, the Tagesbonus and its
+/// missions.
+class GainedPoints {
+  const GainedPoints({this.run = 0, this.bonus = 0, this.missions = 0});
+  final int run, bonus, missions;
+
+  factory GainedPoints.fromJson(JsonMap json) => GainedPoints(
+    run: intValue(json['run']),
+    bonus: intValue(json['bonus']),
+    missions: intValue(json['missions']),
+  );
+}
+
+/// What a crate of the own runs can be opened as (`runnerCrateTargets`).
+enum CrateTargetKind { random, tech, play }
+
+/// A crate of the own runs as the Zufallskiste, the Technik-Kiste or aimed at
+/// one play: its pool's progress ([owned] of [total], [locked] of them not to
+/// be drawn yet), the chances within it and its pictures and animation.
+class CrateTarget {
+  const CrateTarget({
+    required this.id,
+    required this.kind,
+    required this.name,
+    this.play,
+    this.year,
+    this.animation = 'generic',
+    this.image,
+    this.imageBox,
+    this.openImage,
+    this.fxImage,
+    this.owned = 0,
+    this.total = 0,
+    this.locked = 0,
+    this.complete = false,
+    this.available = true,
+    this.shinyChance = .03,
+    this.odds = const [],
+  });
+
+  /// The Zufallskiste as older servers have it: all items, nothing aimed.
+  static const random = CrateTarget(
+    id: 'random',
+    kind: CrateTargetKind.random,
+    name: 'Zufallskiste',
+  );
+
+  final String id, name;
+  final CrateTargetKind kind;
+  final String? play;
+  final int? year;
+
+  /// How it opens: `burst`, `flightcase`, `maw`, `glitch`, `heavy`,
+  /// `threads`, or `generic` (also for any the app does not know).
+  final String animation;
+
+  /// Closed, open (the same frame) and its particles; null until there.
+  final String? image, openImage, fxImage;
+
+  /// Where the crate stands in [image] (pixels): the canvas leaves room
+  /// above it for the open lid, the choice's cards show just this part.
+  final Rect? imageBox;
+  final int owned, total, locked;
+
+  /// All of its items owned: it still opens, with duplicates (shine, gage).
+  final bool complete;
+
+  /// Whether something can be drawn from it now (not all locked).
+  final bool available;
+  final double shinyChance;
+
+  /// The chance of each rarity within it.
+  final List<(String, double)> odds;
+
+  bool get isRandom => kind == CrateTargetKind.random;
+
+  /// "Creepshow 2026", "Technik-Kiste", "Zufallskiste"; a play with a
+  /// number in its name keeps it alone ("Anno 1146", not "Anno 1146 2025").
+  String get title =>
+      kind == CrateTargetKind.play && !RegExp(r'\d{4}').hasMatch(name)
+      ? [name, ?year].join(' ')
+      : name;
+
+  factory CrateTarget.fromJson(JsonMap json) => CrateTarget(
+    id: textValue(json['id'], 'random'),
+    kind:
+        CrateTargetKind.values
+            .where((k) => k.name == json['kind'])
+            .firstOrNull ??
+        CrateTargetKind.play,
+    name: textValue(json['name']),
+    play: json['play'] is String ? json['play'] as String : null,
+    year: json['year'] is num ? intValue(json['year']) : null,
+    animation: textValue(json['animation'], 'generic'),
+    image: json['image'] is String ? json['image'] as String : null,
+    imageBox: _box(json['imageBox']),
+    openImage: json['openImage'] is String ? json['openImage'] as String : null,
+    fxImage: json['fxImage'] is String ? json['fxImage'] as String : null,
+    owned: intValue(json['owned']),
+    total: intValue(json['total']),
+    locked: intValue(json['locked']),
+    complete: json['complete'] == true,
+    available: json['available'] != false,
+    shinyChance: _double(json['shinyChance'], .03),
+    odds: [
+      for (final o in jsonList(json['odds']))
+        (textValue(jsonMap(o)['rarity']), _double(jsonMap(o)['chance'], 0)),
+    ],
+  );
+}
+
+/// `[x0, y0, x1, y1]` as a rect; null unless that is what it is.
+Rect? _box(Object? value) {
+  final v = value is List ? value : const [];
+  if (v.length != 4 || !v.every((x) => x is num)) return null;
+  final box = Rect.fromLTRB(
+    (v[0] as num).toDouble(),
+    (v[1] as num).toDouble(),
+    (v[2] as num).toDouble(),
+    (v[3] as num).toDouble(),
+  );
+  return box.isEmpty ? null : box;
 }
 
 /// What a milestone not reached yet is called while its reward is a surprise.
@@ -933,8 +1108,17 @@ class RunnerStats {
     this.deaths = const [],
     this.unknown = 0,
     this.untracked = 0,
+    this.points = 0,
+    this.bonusPoints = 0,
+    this.missionPoints = 0,
+    this.basePoints = 0,
+    this.crateMeters = 0,
   });
   final int rounds, best, meters;
+
+  /// Crate points (`runnerCratePoints`): of all runs since, Tagesbonus,
+  /// missions, and the base moved over from the [crateMeters] of before.
+  final int points, bonusPoints, missionPoints, basePoints, crateMeters;
 
   /// Part of [meters] credited once for runs before metres were counted.
   final int creditedMeters;
@@ -973,6 +1157,11 @@ class RunnerStats {
     ]..sort((a, b) => b.$2.compareTo(a.$2)),
     unknown: intValue(json['unknown']),
     untracked: intValue(json['untracked']),
+    points: intValue(json['points']),
+    bonusPoints: intValue(json['bonusPoints']),
+    missionPoints: intValue(json['missionPoints']),
+    basePoints: intValue(json['basePoints']),
+    crateMeters: intValue(json['crateMeters']),
   );
 }
 
@@ -1094,8 +1283,17 @@ class Wardrobe {
     this.ensemble,
     this.eventCrates = const [],
     this.uniqueFigures,
+    this.crateTargets = const [],
   });
   final WardrobeCatalog catalog;
+
+  /// What a crate of the own runs can be opened as (`runnerCrateTargets`):
+  /// the Zufallskiste first; empty for older servers.
+  final List<CrateTarget> crateTargets;
+
+  /// The target [id], if the server offers it.
+  CrateTarget? crateTarget(String? id) =>
+      crateTargets.where((t) => t.id == id).firstOrNull;
 
   /// The way to each play's unique figure; null for older servers.
   final UniqueFigures? uniqueFigures;
@@ -1215,6 +1413,10 @@ class Wardrobe {
         for (final e in jsonList(json['eventCrates']))
           if (e is Map) EventCrate.fromJson(jsonMap(e)),
       ],
+      crateTargets: [
+        for (final t in jsonList(json['crateTargets']))
+          if (t is Map) CrateTarget.fromJson(jsonMap(t)),
+      ],
       catalog: catalog,
       owned: owned,
       lockedRarities: {
@@ -1282,7 +1484,12 @@ class CrateOutcome {
     this.variantId,
     this.variantRole,
     this.event,
+    this.target,
   });
+
+  /// A crate of the own runs: what it was opened as (`random`, `tech`,
+  /// `play:<slug>`); null from older servers and for other crates.
+  final String? target;
 
   /// From a Termin-Kiste: the event it came from.
   final EventCrate? event;
@@ -1338,6 +1545,7 @@ class CrateOutcome {
     event: json['crate'] == 'event' && json['event'] is Map
         ? EventCrate.fromJson(jsonMap(json['event']))
         : null,
+    target: json['target'] is String ? json['target'] as String : null,
   );
 }
 
@@ -1385,6 +1593,8 @@ String crateKey([Random? random]) {
 /// Opens a crate of the own metres, or an Ensemble-Kiste with [ensemble].
 /// With [dupes] (`runnerDupes`) the server may answer with a duplicate.
 /// [event] opens a Termin-Kiste: the one of [eventId], else the earliest.
+/// [target] aims a crate of the own runs (`runnerCrateTargets`); without it
+/// (or `random`) it is the Zufallskiste, as for older apps.
 Future<CrateOpening> openCrate(
   AppController controller, {
   String? key,
@@ -1393,6 +1603,7 @@ Future<CrateOpening> openCrate(
   bool mission = false,
   bool event = false,
   String? eventId,
+  String? target,
 }) async => CrateOpening.fromJson(
   await controller.remote(
     '/games/runner/crates',
@@ -1403,6 +1614,7 @@ Future<CrateOpening> openCrate(
       if (mission) 'crate': 'mission',
       if (event) 'crate': 'event',
       if (event && eventId != null) 'eventId': eventId,
+      if (target != null && !ensemble && !mission && !event) 'target': target,
       ..._wardrobeFlags(controller),
     },
     idempotencyKey: key ?? crateKey(),

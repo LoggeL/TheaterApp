@@ -77,6 +77,7 @@ class DailyMission {
     this.progress = 0,
     this.done = false,
     this.reward = 0,
+    this.rewardInPoints = false,
     this.unit = '',
     this.perRun = true,
     this.justDone = false,
@@ -101,6 +102,10 @@ class DailyMission {
   final String? kind;
   final String text, unit;
   final int target, progress, reward;
+
+  /// Whether [reward] is crate points (`runnerCratePoints`); before, crate
+  /// metres.
+  final bool rewardInPoints;
 
   /// The metres each run of a `runs` mission needs.
   final int min;
@@ -177,6 +182,7 @@ class DailyMission {
     progress: intValue(json['progress']),
     done: json['done'] == true,
     reward: intValue(json['reward']),
+    rewardInPoints: json['rewardUnit'] == 'points',
     perRun: json['scope'] != 'day',
     justDone: json['justDone'] == true,
     rerolled: json['rerolled'] == true,

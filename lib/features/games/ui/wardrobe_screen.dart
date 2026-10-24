@@ -9,6 +9,7 @@ import '../../../shared/navigation.dart';
 import '../data/missions_api.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
+import 'crate_choice.dart';
 import 'crate_opening.dart';
 import 'event_crates_card.dart';
 import 'ensemble_card.dart';
@@ -42,29 +43,63 @@ final _number = NumberFormat.decimalPattern('de');
 /// "1.234 m".
 String metersText(int meters) => '${_number.format(meters)} m';
 
-/// "noch 1.234 m bis zur nächsten Kiste". With duplicates a complete
+/// "1.234 Punkte", "1 Punkt".
+String pointsText(int points) =>
+    '${_number.format(points)} ${points == 1 ? 'Punkt' : 'Punkte'}';
+
+/// [value] in the unit the crates of [p] count: points
+/// (`runnerCratePoints`), else metres (older servers).
+String crateUnitText(RunnerProgress p, int value) =>
+    p.inPoints ? pointsText(value) : metersText(value);
+
+/// "noch 1.234 Punkte bis zur nächsten Kiste". With duplicates a complete
 /// collection still gets crates.
 String nextCrateText(RunnerProgress p) => p.complete && !p.dupes
     ? 'Fundus komplett – neue Kostüme kommen bald.'
-    : 'noch ${metersText(p.remaining)} bis zur nächsten Kiste';
+    : 'noch ${crateUnitText(p, p.remaining)} bis zur nächsten Kiste';
 
 /// Before a run while today's Tagesbonus is open (`runnerDailyBonus`).
 const dailyBonusHint =
     'Tagesbonus: Dein erster Lauf heute zählt doppelt für die nächste Kiste.';
 
-/// "+812 m · Tagesbonus +812 m · noch 376 m bis zur nächsten Kiste", after a
-/// run; the bonus only with [showBonus] (`runnerDailyBonus`).
-String runProgressText(RunnerProgress p, {bool showBonus = false}) => [
-  '+${metersText(p.gained)}',
-  if (showBonus && p.bonus > 0) 'Tagesbonus +${metersText(p.bonus)}',
-  // Only servers with `runnerMissions` send it.
-  if (p.missionBonus > 0) 'Missionen +${metersText(p.missionBonus)}',
-  nextCrateText(p),
-].join(' · ');
+/// "+1.240 Punkte · Tagesbonus +1.240 · noch 376 Punkte bis zur nächsten
+/// Kiste", after a run; the bonus only with [showBonus] (`runnerDailyBonus`).
+/// Older servers count metres: "+812 m · Tagesbonus +812 m · …".
+String runProgressText(RunnerProgress p, {bool showBonus = false}) {
+  final g = p.gainedPoints;
+  if (p.inPoints && g != null) {
+    return [
+      '+${pointsText(g.run)}',
+      if (showBonus && g.bonus > 0) 'Tagesbonus +${_number.format(g.bonus)}',
+      if (g.missions > 0) 'Missionen +${_number.format(g.missions)}',
+      nextCrateText(p),
+    ].join(' · ');
+  }
+  return [
+    '+${metersText(p.gained)}',
+    if (showBonus && p.bonus > 0) 'Tagesbonus +${metersText(p.bonus)}',
+    // Only servers with `runnerMissions` send it.
+    if (p.missionBonus > 0) 'Missionen +${metersText(p.missionBonus)}',
+    nextCrateText(p),
+  ].join(' · ');
+}
 
-/// "2.888 m gelaufen + 812 m Tagesbonus · noch …": the Kistenstrecke of
-/// [p], with its Tagesbonus part when [showBonus] and there is one.
+/// "12.400 Punkte erspielt + 1.240 Tagesbonus + 2.850 Missionen · noch …":
+/// the crate points of [p] and where they come from, the Tagesbonus part
+/// when [showBonus] and there is one. Older servers: the Kistenstrecke,
+/// "2.888 m gelaufen + 812 m Tagesbonus · noch …".
 String crateDistanceText(RunnerProgress p, {bool showBonus = false}) {
+  if (p.points case final points?) {
+    final bonus = showBonus ? points.bonus : 0;
+    // What is not listed apart counts as played: the parts add up to the total.
+    final played = points.total - bonus - points.missions;
+    final parts = [
+      '${pointsText(played)} erspielt',
+      if (bonus > 0) '${_number.format(bonus)} Tagesbonus',
+      if (points.missions > 0) '${_number.format(points.missions)} Missionen',
+    ];
+    return '${parts.join(' + ')} · ${nextCrateText(p)}';
+  }
   final extra = [
     if (showBonus && p.bonusMeters > 0)
       '${metersText(p.bonusMeters)} Tagesbonus',
@@ -133,6 +168,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   bool get _missions => missionsAvailable(controller);
   bool get _eventCrates => eventCratesAvailable(controller);
   bool get _unique => uniqueFiguresAvailable(controller);
+  bool get _targets => crateTargetsAvailable(controller);
 
   @override
   void initState() {
@@ -184,6 +220,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     bool ensemble = false,
     bool mission = false,
     EventCrate? event,
+    CrateTarget? target,
   }) async {
     final w = _wardrobe;
     if (w == null) return;
@@ -197,6 +234,16 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       mission: mission,
       event: event != null,
       eventCrate: event,
+      target: target,
+      // The next crate of the own runs is chosen again.
+      chooseTarget: target == null
+          ? null
+          : (w) => chooseCrateTarget(
+              context,
+              controller: controller,
+              wardrobe: w,
+              art: _base,
+            ),
     );
     if (next != null && mounted) {
       _update(next);
@@ -765,6 +812,21 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     );
   }
 
+  /// A crate of the own runs: with crate targets first the choice
+  /// (Zufallskiste, a play or the Technik-Kiste), else the Zufallskiste.
+  Future<void> _openOwn() async {
+    final w = _wardrobe;
+    if (w == null) return;
+    if (!_targets || w.crateTargets.isEmpty) return _open();
+    final target = await chooseCrateTarget(
+      context,
+      controller: controller,
+      wardrobe: w,
+      art: _base,
+    );
+    if (target != null && mounted) await _open(target: target);
+  }
+
   Widget _crates(BuildContext context, Wardrobe w) {
     final theme = Theme.of(context);
     final p = w.progress;
@@ -850,9 +912,18 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 ),
               ),
             const SizedBox(height: 16),
+            if (_targets && w.crateTargets.length > 1)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Beim Öffnen wählst du: Zufallskiste mit allem und mehr Glanz, oder gezielt ein Stück bzw. die Technik.',
+                  key: const ValueKey('wardrobe-targets-hint'),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
             FilledButton.icon(
               key: const ValueKey('wardrobe-open'),
-              onPressed: ready ? _open : null,
+              onPressed: ready ? _openOwn : null,
               icon: const Icon(Icons.inventory_2),
               label: const Text('Kiste öffnen'),
             ),
@@ -1271,9 +1342,39 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               style: theme.textTheme.bodySmall,
             ),
           ),
+        // Crate points (`runnerCratePoints`): what the crates count, apart
+        // from the metres of the Gesamtstrecke.
+        if (_wardrobe!.progress.points case final points?) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+            child: Text(
+              [
+                'Kistenpunkte gesamt: ${pointsText(points.total)}',
+                'aus Läufen ${_number.format(points.runs)}',
+                if (points.bonus > 0)
+                  'Tagesbonus ${_number.format(points.bonus)}',
+                if (points.missions > 0)
+                  'Missionen ${_number.format(points.missions)}',
+              ].join(' · '),
+              key: const ValueKey('wardrobe-points-total'),
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          if (points.base > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
+              child: Text(
+                s.crateMeters > 0
+                    ? 'Davon ${pointsText(points.base)} aus deiner früheren Kistenstrecke (${metersText(s.crateMeters)}): gleich viele Kisten, gleicher Stand bis zur nächsten.'
+                    : 'Davon ${pointsText(points.base)} aus deiner früheren Kistenstrecke.',
+                key: const ValueKey('wardrobe-points-base'),
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+        ]
         // The Tagesbonus is not in the Gesamtstrecke: it counts only for
         // the crates (the Kistenstrecke).
-        if (_bonus)
+        else if (_bonus)
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
             child: Text(
@@ -1282,7 +1383,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               style: theme.textTheme.bodySmall,
             ),
           ),
-        if (_missions)
+        if (_missions && !_wardrobe!.progress.inPoints)
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
             child: Text(

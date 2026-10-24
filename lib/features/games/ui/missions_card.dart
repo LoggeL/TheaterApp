@@ -17,9 +17,9 @@ String missionProgressText(
     '${_number.format(m.progress)}/${_number.format(m.target)} ${m.unitFor(names)}'
         .trim();
 
-/// "+600 m für die Kisten".
+/// "+900 Punkte für die Kisten" (older servers: "+600 m für die Kisten").
 String missionRewardText(DailyMission m) =>
-    '+${_number.format(m.reward)} m für die Kisten';
+    '+${_number.format(m.reward)} ${m.rewardInPoints ? 'Punkte' : 'm'} für die Kisten';
 
 /// "Tagesmissionen": the day's three missions with progress, reward and a
 /// free reroll. Loads them itself when [missions] is not given.
