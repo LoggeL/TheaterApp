@@ -422,7 +422,7 @@ class WardrobeCard extends StatelessWidget {
     final roleLine = playing == null
         ? null
         : item.unique
-        ? uniqueRoleLine(playing)
+        ? uniqueRoleLine(playing, uniqueProgressOf(wardrobe, item))
         : playing.line;
     return Semantics(
       button: onTap != null,
@@ -634,21 +634,31 @@ String? rewardHint(Wardrobe wardrobe, WardrobeItem item) {
       : 'Ensemble-Ziel ${kmText(m.meters)}';
 }
 
+/// The way to the unique figure [item]: by its id once unlocked, by its play
+/// for the hidden stand-in; null for other items.
+UniqueFigureProgress? uniqueProgressOf(Wardrobe wardrobe, WardrobeItem item) {
+  if (!item.unique) return null;
+  final plays = wardrobe.uniqueFigures?.plays ?? const [];
+  return plays.where((p) => p.itemId == item.id).firstOrNull ??
+      plays.where((p) => !p.unlocked && p.play == item.role?.play).firstOrNull;
+}
+
 /// What a unique figure not unlocked yet waits for: "9/14 Rollen aus
-/// Creepshow"; null for other items and unlocked ones.
+/// Creepshow", "23/52 Rollen aus Creepshow und Nexus"; null for other items
+/// and unlocked ones.
 String? uniqueHint(Wardrobe wardrobe, WardrobeItem item) {
   if (!item.unique || wardrobe.owns(item)) return null;
-  final play = item.role?.play;
-  final p = wardrobe.uniqueFigures?.plays
-      .where((p) => p.play == play && !p.unlocked)
-      .firstOrNull;
-  return p?.line ?? 'Unique-Figur';
+  final p = uniqueProgressOf(wardrobe, item);
+  return p != null && !p.unlocked ? p.line : 'Unique-Figur';
 }
 
 /// The line under a unique figure's name: "Unique · Creepshow 2026" (the
-/// role is the character itself, so not "als Captain Kuschel").
-String uniqueRoleLine(WardrobeRole role) =>
-    ['Unique', ?role.production].join(' · ');
+/// role is the character itself, so not "als Captain Kuschel"); across
+/// plays ([progress]) "Unique · Creepshow und Nexus".
+String uniqueRoleLine(WardrobeRole role, [UniqueFigureProgress? progress]) =>
+    progress != null && progress.several
+    ? 'Unique · ${progress.play}'
+    : ['Unique', ?role.production].join(' · ');
 
 /// A stand-in card for the unique figure of [p] while it is a secret: no
 /// id, name or picture of its own (the server sends none), only its play.

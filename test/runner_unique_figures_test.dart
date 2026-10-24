@@ -11,6 +11,7 @@ import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/games/data/wardrobe_api.dart';
 import 'package:theater_app/features/games/ui/stage_runner_look.dart';
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
+import 'package:theater_app/features/games/ui/unique_figures.dart';
 import 'package:theater_app/features/games/ui/wardrobe_cards.dart';
 import 'package:theater_app/features/games/ui/wardrobe_screen.dart';
 
@@ -193,6 +194,43 @@ JsonMap _json({
   },
 };
 
+/// The figure across plays (from 0.11.5) as the server sends it: one entry
+/// for Creepshow and Nexus, hidden with 23 of 40 role figures, or unlocked.
+JsonMap _across({bool unlocked = false}) => {
+  'play': 'Creepshow und Nexus',
+  'plays': [
+    {
+      'play': 'Creepshow',
+      'year': 2026,
+      'have': unlocked ? 22 : 15,
+      'total': 22,
+    },
+    {'play': 'Nexus', 'year': 2024, 'have': unlocked ? 18 : 8, 'total': 18},
+  ],
+  'have': unlocked ? 40 : 23,
+  'total': 40,
+  'unlocked': unlocked,
+  if (unlocked) ...{
+    'itemId': 'character.unique-captain-kuschel',
+    'name': 'Captain Kuschel',
+  } else ...{
+    'hidden': true,
+    'name': '???',
+  },
+};
+
+/// [json] with the figure across plays added after the play's own one.
+JsonMap _withAcross(JsonMap json, {bool unlocked = false}) {
+  final figures = jsonMap(json['uniqueFigures']);
+  return {
+    ...json,
+    'uniqueFigures': {
+      ...figures,
+      'plays': [...jsonList(figures['plays']), _across(unlocked: unlocked)],
+    },
+  };
+}
+
 String _path(http.Request request) =>
     request.url.path.replaceFirst(RegExp(r'/$'), '');
 
@@ -265,6 +303,58 @@ void main() {
     final standIn = uniqueStandIn(w.catalog, p);
     expect(w.owns(standIn), isFalse);
     expect(uniqueHint(w, standIn), '2/3 Rollen aus Creepshow');
+  });
+
+  test('across plays: one entry, the plays named together, per play too', () {
+    final w = Wardrobe.fromJson(_withAcross(_json()));
+    final [own, across] = w.uniqueFigures!.plays;
+    // A single play as before: no parts.
+    expect(
+      [own.several, own.parts, own.line],
+      [false, isEmpty, '2/3 Rollen aus Creepshow'],
+    );
+    expect(across.several, isTrue);
+    expect([across.unlocked, across.itemId, across.name], [false, null, '???']);
+    expect(across.year, isNull);
+    expect(across.production, 'Creepshow und Nexus');
+    expect(across.line, '23/40 Rollen aus Creepshow und Nexus');
+    expect(across.parts.map((p) => p.line), [
+      'Creepshow 2026: 15/22',
+      'Nexus 2024: 8/18',
+    ]);
+    // Two hidden cards, each with its own way.
+    final cards = uniqueCards(w);
+    expect(cards.map((c) => c.id), [
+      'unique-hidden:Creepshow 2026',
+      'unique-hidden:Creepshow und Nexus',
+    ]);
+    expect(cards.map((c) => uniqueHint(w, c)), [
+      '2/3 Rollen aus Creepshow',
+      '23/40 Rollen aus Creepshow und Nexus',
+    ]);
+    expect(cards.every((c) => c.name == '???' && !w.owns(c)), isTrue);
+    // Unlocked: its line names both plays, not only its own.
+    final json = _withAcross(_json(), unlocked: true);
+    final catalog = jsonMap(json['catalog']);
+    json['catalog'] = {
+      ...catalog,
+      'uniques': [
+        {
+          ..._kuschel,
+          'unlock': {
+            'plays': ['Creepshow', 'Nexus'],
+          },
+        },
+      ],
+    };
+    json['owned'] = [...jsonList(json['owned']), _kuschel['id']];
+    final unlocked = Wardrobe.fromJson(json);
+    final kuschel = unlocked.catalog.item('character.unique-captain-kuschel')!;
+    final p = uniqueProgressOf(unlocked, kuschel)!;
+    expect([p.unlocked, p.several], [true, true]);
+    expect(uniqueHint(unlocked, kuschel), isNull);
+    expect(uniqueRoleLine(kuschel.role!, p), 'Unique · Creepshow und Nexus');
+    expect(uniqueRoleLine(kuschel.role!), 'Unique · Creepshow 2026');
   });
 
   test('older servers: no unique figures, nothing breaks', () {
@@ -398,6 +488,40 @@ void main() {
       await tester.tap(card);
       await _settle(tester);
       expect(find.textContaining('nicht aus Kisten'), findsOneWidget);
+      expect(find.byKey(const ValueKey('wardrobe-buy')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('across plays: "???" with the progress of both plays', (
+      tester,
+    ) async {
+      await open(tester, () => _withAcross(_json()));
+      const across = ValueKey('wardrobe-unique-hidden:Creepshow und Nexus');
+      final card = find.byKey(across);
+      expect(card, findsOneWidget);
+      expect(
+        find.descendant(
+          of: card,
+          matching: find.text('23/40 Rollen aus Creepshow und Nexus'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('???')),
+        findsWidgets,
+      );
+      expect(find.byKey(hidden), findsOneWidget);
+      expect(find.text('Captain Kuschel'), findsNothing);
+      expect(find.textContaining('Unique · Creepshow'), findsNothing);
+      // The details: both plays, each with its progress.
+      await tester.tap(card);
+      await _settle(tester);
+      expect(find.textContaining('alle Rollen dieser Stücke'), findsOneWidget);
+      expect(
+        find.text('Creepshow 2026: 15/22 · Nexus 2024: 8/18'),
+        findsOneWidget,
+      );
+      expect(find.text('Captain Kuschel'), findsNothing);
       expect(find.byKey(const ValueKey('wardrobe-buy')), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });

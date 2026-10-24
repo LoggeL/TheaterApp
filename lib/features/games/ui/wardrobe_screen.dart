@@ -291,6 +291,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final shiny = owned && w.isShiny(item);
     final cost = _dupes ? w.buyCost(item) : null;
     final milestone = item.reward ? w.ensemble?.rewardOf(item) : null;
+    final unique = uniqueProgressOf(w, item);
     showModalBottomSheet<void>(
       isScrollControlled: true,
       context: context,
@@ -336,7 +337,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                           if (w.roleOf(item) case final playing?)
                             Text(
                               item.unique
-                                  ? uniqueRoleLine(playing)
+                                  ? uniqueRoleLine(playing, unique)
                                   : playing.line,
                               key: const ValueKey('wardrobe-role'),
                               style: Theme.of(context).textTheme.titleSmall,
@@ -402,7 +403,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
-                              'Freigeschaltet: alle Rollen aus ${item.role?.play ?? 'dem Stück'} gesammelt.',
+                              'Freigeschaltet: alle Rollen aus ${unique?.play ?? item.role?.play ?? 'dem Stück'} gesammelt.',
                             ),
                           ),
                         if (hint != null)
@@ -412,7 +413,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                               item.reward && milestone?.reached != true
                                   ? '$hint: für alle, sobald das Ensemble so weit gelaufen ist.'
                                   : item.unique
-                                  ? '$hint. Wer alle Rollen des Stücks hat, bekommt die Unique-Figur dazu – nicht aus Kisten.'
+                                  ? '$hint. Wer alle Rollen ${unique?.several == true ? 'dieser Stücke' : 'des Stücks'} hat, bekommt die Unique-Figur dazu – nicht aus Kisten.'
                                   : hint,
                             ),
                           )
@@ -421,6 +422,16 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                             padding: EdgeInsets.only(top: 6),
                             child: Text(
                               'Kommt vielleicht aus der nächsten Kostümkiste.',
+                            ),
+                          ),
+                        // Across plays: how far each of them is.
+                        if (!owned && unique != null && unique.several)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              unique.parts.map((p) => p.line).join(' · '),
+                              key: const ValueKey('wardrobe-unique-parts'),
+                              style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ),
                         if (!owned &&

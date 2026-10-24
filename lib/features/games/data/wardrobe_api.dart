@@ -976,9 +976,39 @@ class RunnerStats {
   );
 }
 
+/// One play on the way to a unique figure across plays: [have] of its
+/// [total] active role figures owned.
+class UniqueFigurePart {
+  const UniqueFigurePart({
+    required this.play,
+    this.year,
+    this.have = 0,
+    this.total = 0,
+  });
+  final String play;
+  final int? year;
+  final int have, total;
+
+  /// "Creepshow 2026: 15/28".
+  String get line => '${[play, ?year?.toString()].join(' ')}: $have/$total';
+
+  static UniqueFigurePart? fromJson(JsonMap json) {
+    final play = textValue(json['play']).trim();
+    if (play.isEmpty) return null;
+    return UniqueFigurePart(
+      play: play,
+      year: json['year'] is num ? intValue(json['year']) : null,
+      have: intValue(json['have']),
+      total: intValue(json['total']),
+    );
+  }
+}
+
 /// A play's way to its unique figure: [have] of its [total] active role
 /// figures owned. Until it is [unlocked] the server sends neither its id nor
-/// its name ([name] is "???").
+/// its name ([name] is "???"). A figure across plays (Captain Kuschel, from
+/// 0.11.5) is one entry: [play] names them all ("Creepshow und Nexus"),
+/// without [year], [have]/[total] summed up and [parts] per play.
 class UniqueFigureProgress {
   const UniqueFigureProgress({
     required this.play,
@@ -988,6 +1018,7 @@ class UniqueFigureProgress {
     this.unlocked = false,
     this.itemId,
     this.name = '???',
+    this.parts = const [],
   });
   final String play, name;
   final int? year;
@@ -995,10 +1026,16 @@ class UniqueFigureProgress {
   final bool unlocked;
   final String? itemId;
 
-  /// "Creepshow 2026".
+  /// Per play of a figure across plays; empty for a single play.
+  final List<UniqueFigurePart> parts;
+
+  /// Whether it needs the role figures of several plays.
+  bool get several => parts.length > 1;
+
+  /// "Creepshow 2026", or "Creepshow und Nexus" across plays.
   String get production => [play, ?year?.toString()].join(' ');
 
-  /// "9/14 Rollen aus Creepshow".
+  /// "9/14 Rollen aus Creepshow", "23/52 Rollen aus Creepshow und Nexus".
   String get line => '$have/$total Rollen aus $play';
 
   static UniqueFigureProgress? fromJson(JsonMap json) {
@@ -1014,6 +1051,10 @@ class UniqueFigureProgress {
       unlocked: unlocked && id.isNotEmpty,
       itemId: unlocked && id.isNotEmpty ? id : null,
       name: unlocked ? textValue(json['name'], '???') : '???',
+      parts: [
+        for (final p in jsonList(json['plays']))
+          if (p is Map) ?UniqueFigurePart.fromJson(jsonMap(p)),
+      ],
     );
   }
 }
