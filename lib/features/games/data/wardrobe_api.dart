@@ -39,6 +39,19 @@ bool eventCratesAvailable(AppController controller) =>
 bool roleFiguresAvailable(AppController controller) =>
     wardrobeAvailable(controller) && controller.supports('runnerRoleFigures');
 
+/// Unique figures (`runnerUniqueFigures`): one non-human character per play,
+/// unlocked by owning all of its role figures. The app asks for them with
+/// `unique`; without it the server leaves them out entirely.
+bool uniqueFiguresAvailable(AppController controller) =>
+    roleFiguresAvailable(controller) &&
+    controller.supports('runnerUniqueFigures');
+
+/// What the app tells the server it knows, for every wardrobe request.
+Map<String, Object> _wardrobeFlags(AppController controller) => {
+  if (roleFiguresAvailable(controller)) 'roles': true,
+  if (uniqueFiguresAvailable(controller)) 'unique': true,
+};
+
 /// A Termin-Kiste waiting in the wardrobe: the event it came from, as it was
 /// when the crate came (it stays when the event changes later).
 class EventCrate {
@@ -121,6 +134,9 @@ class WardrobeRarity {
 
   bool get antique => style == 'antique';
 
+  /// The unique figures' look: a holographic shimmer (`holo`).
+  bool get holo => style == 'holo';
+
   static const unknown = WardrobeRarity(
     id: '',
     name: '',
@@ -178,6 +194,7 @@ class WardrobeItem {
     this.tint,
     this.effect,
     this.reward = false,
+    this.unique = false,
     this.variants = const [],
     this.role,
     this.obstacles,
@@ -202,6 +219,10 @@ class WardrobeItem {
 
   /// An ensemble reward: everybody's once its milestone is reached.
   final bool reward;
+
+  /// A unique figure: the non-human character of a play, unlocked by all
+  /// of the play's role figures; never from a crate (`runnerUniqueFigures`).
+  final bool unique;
 
   /// Role variants with their pictures (only available ones).
   final List<WardrobeVariant> variants;
@@ -271,6 +292,7 @@ class WardrobeItem {
           tint: tint,
           effect: effect,
           reward: reward,
+          unique: unique,
           variants: variants,
           role: variant.role,
           obstacles: obstacles,
@@ -288,6 +310,7 @@ class WardrobeItem {
     return WardrobeItem(
       role: WardrobeRole.fromJson(json),
       reward: json['reward'] == true,
+      unique: json['unique'] == true,
       variants: [
         for (final v in jsonList(json['variants']))
           ?WardrobeVariant.fromJson(jsonMap(v)),
@@ -494,10 +517,12 @@ class WardrobeCatalog {
     required this.items,
     this.dupes = const DupeRules(),
     this.ensembleRarity,
+    this.uniqueRarity,
   }) : _items = {for (final i in items) i.id: i},
        _rarities = {
          for (final r in rarities) r.id: r,
          ?ensembleRarity?.id: ?ensembleRarity,
+         ?uniqueRarity?.id: ?uniqueRarity,
        };
 
   /// The rarities of the draw, common to rare; the ensemble's look of its
@@ -509,6 +534,9 @@ class WardrobeCatalog {
   final List<WardrobeItem> items;
   final DupeRules dupes;
   final WardrobeRarity? ensembleRarity;
+
+  /// The look of the unique figures (holographic), apart from the draw.
+  final WardrobeRarity? uniqueRarity;
   final Map<String, WardrobeItem> _items;
   final Map<String, WardrobeRarity> _rarities;
 
@@ -530,10 +558,24 @@ class WardrobeCatalog {
   WardrobeDepartment? department(String id) =>
       departments.where((d) => d.id == id).firstOrNull;
 
-  /// Items that can come from a crate (all but the default outfit and the
-  /// ensemble rewards).
+  /// The catalog with only the items [keep] lets through.
+  WardrobeCatalog where(bool Function(WardrobeItem item) keep) =>
+      WardrobeCatalog(
+        rarities: rarities,
+        departments: departments,
+        items: [...items.where(keep)],
+        dupes: dupes,
+        ensembleRarity: ensembleRarity,
+        uniqueRarity: uniqueRarity,
+      );
+
+  /// Items that can come from a crate (all but the default outfit, the
+  /// ensemble rewards and the unique figures).
   Iterable<WardrobeItem> get collectible =>
-      items.where((i) => !i.isDefault && !i.reward);
+      items.where((i) => !i.isDefault && !i.reward && !i.unique);
+
+  /// The unique figures the person has unlocked (the server sends no other).
+  Iterable<WardrobeItem> get uniques => items.where((i) => i.unique);
 
   /// The rarity right above [rarity], or null for the rarest.
   WardrobeRarity? above(WardrobeRarity rarity) =>
@@ -579,6 +621,18 @@ class WardrobeCatalog {
             rank: -1,
           )
         : null,
+    uniqueRarity: json['uniqueRarity'] is Map
+        ? WardrobeRarity(
+            id: textValue(jsonMap(json['uniqueRarity'])['id'], 'unique'),
+            name: textValue(jsonMap(json['uniqueRarity'])['name'], 'Unique'),
+            color: _color(
+              jsonMap(json['uniqueRarity'])['color'],
+              const Color(0xFFB388FF),
+            ),
+            style: textValue(jsonMap(json['uniqueRarity'])['style'], 'holo'),
+            rank: -1,
+          )
+        : null,
     departments: [
       for (final d in jsonList(json['departments']))
         WardrobeDepartment(
@@ -587,11 +641,13 @@ class WardrobeCatalog {
           icon: jsonMap(d)['icon'] as String?,
         ),
     ],
-    // Rewards come apart from the items, so older apps leave them out.
+    // Rewards and unique figures come apart from the items, so older apps
+    // leave them out.
     items: [
       for (final i in [
         ...jsonList(json['items']),
         ...jsonList(json['rewards']),
+        ...jsonList(json['uniques']),
       ])
         ?WardrobeItem.fromJson(jsonMap(i)),
     ],
@@ -710,6 +766,9 @@ class RunnerProgress {
   );
 }
 
+/// What a milestone not reached yet is called while its reward is a surprise.
+const ensembleSurpriseName = '???';
+
 /// A milestone of the Ensemble-Strecke and what it unlocks.
 class EnsembleMilestone {
   const EnsembleMilestone({
@@ -717,32 +776,52 @@ class EnsembleMilestone {
     required this.name,
     this.note,
     this.rewardId,
+    this.rewardKind,
     this.ready = false,
     this.reached = false,
+    this.hidden = false,
   });
   final num km;
+
+  /// [ensembleSurpriseName] while [hidden].
   final String name;
   final String? note;
 
-  /// The reward item, if the milestone has one (else only the crate).
+  /// The reward item, if the milestone has one (else only the crate); null
+  /// while [hidden].
   final String? rewardId;
+
+  /// What kind of item it unlocks ("Bühnenbild"); null while [hidden] and
+  /// from older servers.
+  final WardrobeKind? rewardKind;
 
   /// Whether the reward has its picture already.
   final bool ready;
   final bool reached;
 
+  /// Not reached yet, and what it unlocks is a surprise: only [km] and the
+  /// Ensemble-Kiste are known, no name, picture or kind.
+  final bool hidden;
+
   int get meters => (km * 1000).round();
 
-  factory EnsembleMilestone.fromJson(JsonMap json) => EnsembleMilestone(
-    km: json['km'] is num ? json['km'] as num : 0,
-    name: textValue(json['name']),
-    note: json['note'] is String ? json['note'] as String : null,
-    rewardId: json['reward'] is Map
-        ? textValue(jsonMap(json['reward'])['itemId'])
-        : null,
-    ready: json['reward'] is Map && jsonMap(json['reward'])['ready'] == true,
-    reached: json['reached'] == true,
-  );
+  factory EnsembleMilestone.fromJson(JsonMap json) {
+    final reached = json['reached'] == true;
+    final reward = json['reward'] is Map ? jsonMap(json['reward']) : null;
+    // The server keeps a reward a surprise until it is reached
+    // (`hidden`); one from before names it, the app does not show it.
+    final hidden = !reached && (json['hidden'] == true || reward != null);
+    return EnsembleMilestone(
+      km: json['km'] is num ? json['km'] as num : 0,
+      name: hidden ? ensembleSurpriseName : textValue(json['name']),
+      note: !hidden && json['note'] is String ? json['note'] as String : null,
+      rewardId: hidden || reward == null ? null : textValue(reward['itemId']),
+      rewardKind: hidden ? null : WardrobeKind.parse(reward?['kind']),
+      ready: !hidden && reward?['ready'] == true,
+      reached: reached,
+      hidden: hidden,
+    );
+  }
 }
 
 /// The shared distance of all players and the way to the next milestone.
@@ -897,6 +976,64 @@ class RunnerStats {
   );
 }
 
+/// A play's way to its unique figure: [have] of its [total] active role
+/// figures owned. Until it is [unlocked] the server sends neither its id nor
+/// its name ([name] is "???").
+class UniqueFigureProgress {
+  const UniqueFigureProgress({
+    required this.play,
+    this.year,
+    this.have = 0,
+    this.total = 0,
+    this.unlocked = false,
+    this.itemId,
+    this.name = '???',
+  });
+  final String play, name;
+  final int? year;
+  final int have, total;
+  final bool unlocked;
+  final String? itemId;
+
+  /// "Creepshow 2026".
+  String get production => [play, ?year?.toString()].join(' ');
+
+  /// "9/14 Rollen aus Creepshow".
+  String get line => '$have/$total Rollen aus $play';
+
+  static UniqueFigureProgress? fromJson(JsonMap json) {
+    final play = textValue(json['play']).trim();
+    if (play.isEmpty) return null;
+    final unlocked = json['unlocked'] == true;
+    final id = textValue(json['itemId']);
+    return UniqueFigureProgress(
+      play: play,
+      year: json['year'] is num ? intValue(json['year']) : null,
+      have: intValue(json['have']),
+      total: intValue(json['total']),
+      unlocked: unlocked && id.isNotEmpty,
+      itemId: unlocked && id.isNotEmpty ? id : null,
+      name: unlocked ? textValue(json['name'], '???') : '???',
+    );
+  }
+}
+
+/// The unique figures of all plays (`runnerUniqueFigures`): the progress per
+/// play and the unlocked ones not celebrated yet.
+class UniqueFigures {
+  const UniqueFigures({this.plays = const [], this.unseen = const []});
+  final List<UniqueFigureProgress> plays;
+  final List<String> unseen;
+
+  factory UniqueFigures.fromJson(JsonMap json) => UniqueFigures(
+    plays: [
+      for (final p in jsonList(json['plays']))
+        if (p is Map) ?UniqueFigureProgress.fromJson(jsonMap(p)),
+    ],
+    unseen: [for (final id in jsonList(json['unseen'])) '$id'],
+  );
+}
+
 /// The person's wardrobe: catalog, what they own and wear, progress and
 /// statistics.
 class Wardrobe {
@@ -915,8 +1052,12 @@ class Wardrobe {
     this.trades = const [],
     this.ensemble,
     this.eventCrates = const [],
+    this.uniqueFigures,
   });
   final WardrobeCatalog catalog;
+
+  /// The way to each play's unique figure; null for older servers.
+  final UniqueFigures? uniqueFigures;
 
   /// Termin-Kisten waiting, the earliest event first (`runnerEventCrates`).
   final List<EventCrate> eventCrates;
@@ -951,13 +1092,15 @@ class Wardrobe {
   /// game's intro; [fallback] without a wardrobe.
   String wornCharacterName([String fallback = 'Engel Logge']) {
     final item = worn(WardrobeKind.character);
-    return item == null ? fallback : nameInRole(item.name, roleOf(item));
+    if (item == null) return fallback;
+    // A unique figure is the character itself ("Captain Kuschel").
+    return item.unique ? item.name : nameInRole(item.name, roleOf(item));
   }
 
   /// What one chosen missing [item] costs; null if it cannot be bought
   /// (owned, a reward, gold).
   int? buyCost(WardrobeItem item) {
-    if (owns(item) || item.reward || item.isDefault) return null;
+    if (owns(item) || item.reward || item.unique || item.isDefault) return null;
     final rarity = catalog.rarityOf(item);
     if (!rarity.buyable || rarity.gage <= 0) return null;
     return catalog.dupes.buyDupes * rarity.gage;
@@ -992,6 +1135,18 @@ class Wardrobe {
   factory Wardrobe.fromJson(JsonMap json) {
     final selected = jsonMap(json['selected']);
     final gage = jsonMap(json['gage']);
+    final owned = {for (final id in jsonList(json['owned'])) '$id'};
+    final ensemble = json['ensemble'] is Map
+        ? EnsembleProgress.fromJson(jsonMap(json['ensemble']))
+        : null;
+    // A reward is shown once its milestone is reached; the server leaves
+    // the others out, the app does too if one from before sends them.
+    final catalog = WardrobeCatalog.fromJson(jsonMap(json['catalog'])).where(
+      (i) =>
+          !i.reward ||
+          owned.contains(i.id) ||
+          ensemble?.rewardOf(i)?.reached == true,
+    );
     return Wardrobe(
       shiny: {for (final id in jsonList(json['shiny'])) '$id'},
       variants: {for (final id in jsonList(json['variants'])) '$id'},
@@ -1011,15 +1166,16 @@ class Wardrobe {
             cost: intValue(jsonMap(t)['cost']),
           ),
       ],
-      ensemble: json['ensemble'] is Map
-          ? EnsembleProgress.fromJson(jsonMap(json['ensemble']))
+      ensemble: ensemble,
+      uniqueFigures: json['uniqueFigures'] is Map
+          ? UniqueFigures.fromJson(jsonMap(json['uniqueFigures']))
           : null,
       eventCrates: [
         for (final e in jsonList(json['eventCrates']))
           if (e is Map) EventCrate.fromJson(jsonMap(e)),
       ],
-      catalog: WardrobeCatalog.fromJson(jsonMap(json['catalog'])),
-      owned: {for (final id in jsonList(json['owned'])) '$id'},
+      catalog: catalog,
+      owned: owned,
       lockedRarities: {
         for (final id in jsonList(json['lockedRarities'])) '$id',
       },
@@ -1167,7 +1323,9 @@ class GageDeal {
 Future<Wardrobe> loadWardrobe(AppController controller) async =>
     Wardrobe.fromJson(
       await controller.remote(
-        roleFiguresAvailable(controller)
+        uniqueFiguresAvailable(controller)
+            ? '/games/runner/wardrobe?roles=1&unique=1'
+            : roleFiguresAvailable(controller)
             ? '/games/runner/wardrobe?roles=1'
             : '/games/runner/wardrobe',
       ),
@@ -1204,7 +1362,7 @@ Future<CrateOpening> openCrate(
       if (mission) 'crate': 'mission',
       if (event) 'crate': 'event',
       if (event && eventId != null) 'eventId': eventId,
-      if (roleFiguresAvailable(controller)) 'roles': true,
+      ..._wardrobeFlags(controller),
     },
     idempotencyKey: key ?? crateKey(),
   ),
@@ -1224,7 +1382,7 @@ Future<Wardrobe> wearItem(
     body: {
       'kind': item.kind.name,
       'itemId': item.id,
-      if (roleFiguresAvailable(controller)) 'roles': true,
+      ..._wardrobeFlags(controller),
       if (variant != null)
         'variant': variant.id
       else if (plainLook)
@@ -1242,7 +1400,7 @@ Future<GageDeal> tradeGage(
   await controller.remote(
     '/games/runner/trade',
     method: 'POST',
-    body: {'rarity': from, if (roleFiguresAvailable(controller)) 'roles': true},
+    body: {'rarity': from, ..._wardrobeFlags(controller)},
     idempotencyKey: key ?? crateKey(),
   ),
 );
@@ -1256,10 +1414,7 @@ Future<GageDeal> buyItem(
   await controller.remote(
     '/games/runner/buy',
     method: 'POST',
-    body: {
-      'itemId': item.id,
-      if (roleFiguresAvailable(controller)) 'roles': true,
-    },
+    body: {'itemId': item.id, ..._wardrobeFlags(controller)},
     idempotencyKey: key ?? crateKey(),
   ),
 );
@@ -1270,6 +1425,18 @@ Future<Wardrobe> markEnsembleSeen(AppController controller, num km) async =>
       await controller.remote(
         '/games/runner/ensemble/seen',
         method: 'PUT',
-        body: {'km': km, if (roleFiguresAvailable(controller)) 'roles': true},
+        body: {'km': km, ..._wardrobeFlags(controller)},
       ),
     );
+
+/// The celebration of the unique figures [itemIds] was shown.
+Future<Wardrobe> markUniqueSeen(
+  AppController controller,
+  List<String> itemIds,
+) async => Wardrobe.fromJson(
+  await controller.remote(
+    '/games/runner/unique/seen',
+    method: 'PUT',
+    body: {'itemIds': itemIds, ..._wardrobeFlags(controller)},
+  ),
+);

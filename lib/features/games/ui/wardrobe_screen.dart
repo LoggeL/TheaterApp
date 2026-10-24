@@ -17,6 +17,7 @@ import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart' show obstacleName;
 import 'stage_runner_look.dart';
 import 'stage_runner_sound.dart';
+import 'unique_figures.dart';
 import 'wardrobe_cards.dart';
 
 /// Opens the wardrobe; [onChanged] gets every new state of it.
@@ -74,9 +75,23 @@ String crateDistanceText(RunnerProgress p, {bool showBonus = false}) {
       : '${[metersText(p.runMeters), ...extra].join(' + ').replaceFirst(' + ', ' gelaufen + ')} · ${nextCrateText(p)}';
 }
 
-/// "+1,2 km fürs Ensemble · noch 18 km bis Anno 1146", after a run.
+/// "+1,2 km fürs Ensemble · noch 18 km bis zur nächsten Überraschung", after
+/// a run; a milestone with only the crate by its name.
 String ensembleRunText(EnsembleRun e) =>
-    '+${kmText(e.gained)} fürs Ensemble · noch ${kmText(e.remaining)} bis ${e.next.name}';
+    '+${kmText(e.gained)} fürs Ensemble · noch ${kmText(e.remaining)} bis ${e.next.hidden ? 'zur nächsten Überraschung' : e.next.name}';
+
+/// "Ensemble-Ziel erreicht – freigeschaltet: Bühnenbild „Anno 1146“!": the
+/// moment a reward stops being a surprise.
+String ensembleReachedText(EnsembleMilestone m) {
+  final what = m.rewardId == null
+      ? m.name
+      : m.rewardKind == null
+      ? '„${m.name}“'
+      : '${m.rewardKind!.singular} „${m.name}“';
+  return m.rewardId == null
+      ? 'Ensemble-Ziel erreicht: $what! Eine Ensemble-Kiste wartet in der Garderobe.'
+      : 'Ensemble-Ziel erreicht – freigeschaltet: $what! Eine Ensemble-Kiste wartet in der Garderobe.';
+}
 
 /// "Gage" with a figure, "1 Gage".
 String gageText(int gage) => '${_number.format(gage)} Gage';
@@ -106,7 +121,10 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   late Wardrobe? _wardrobe = widget.initial;
   RunnerArt? _base = RunnerArt.loaded, _dressed;
   String? _error;
-  bool _loading = false, _busy = false, _celebrating = false;
+  bool _loading = false,
+      _busy = false,
+      _celebrating = false,
+      _celebratingUnique = false;
 
   AppController get controller => widget.controller;
   bool get _dupes => dupesAvailable(controller);
@@ -114,6 +132,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   bool get _bonus => dailyBonusAvailable(controller);
   bool get _missions => missionsAvailable(controller);
   bool get _eventCrates => eventCratesAvailable(controller);
+  bool get _unique => uniqueFiguresAvailable(controller);
 
   @override
   void initState() {
@@ -179,11 +198,51 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       event: event != null,
       eventCrate: event,
     );
-    if (next != null && mounted) _update(next);
+    if (next != null && mounted) {
+      _update(next);
+      await _celebrateUnique(next);
+    }
   }
 
-  /// A reached milestone not celebrated yet: once, when the wardrobe opens.
+  /// A reached milestone not celebrated yet: once, when the wardrobe opens;
+  /// then the unique figures unlocked meanwhile.
   Future<void> _celebrate(Wardrobe w) async {
+    await _celebrateEnsemble(w);
+    final now = _wardrobe;
+    if (mounted && now != null) await _celebrateUnique(now);
+  }
+
+  /// A unique figure unlocked and not celebrated yet: once, like an
+  /// ensemble goal, right when it comes (from a crate, trade or purchase)
+  /// or when the wardrobe opens.
+  Future<void> _celebrateUnique(Wardrobe w) async {
+    final unseen = w.uniqueFigures?.unseen ?? const <String>[];
+    if (!_unique || unseen.isEmpty || _celebratingUnique || !mounted) return;
+    final items = [for (final id in unseen) ?w.catalog.item(id)];
+    if (items.isEmpty) return;
+    _celebratingUnique = true;
+    widget.sound.play(RunnerSfx.jackpot);
+    final wear = await showDialog<bool>(
+      context: context,
+      builder: (context) => UniqueCelebration(
+        items: items,
+        wardrobe: w,
+        controller: controller,
+        art: _base,
+      ),
+    );
+    try {
+      final next = await markUniqueSeen(controller, unseen);
+      if (mounted) _update(next);
+    } catch (_) {
+      // Shown again next time.
+    } finally {
+      _celebratingUnique = false;
+    }
+    if (wear == true && mounted) await _wear(items.last);
+  }
+
+  Future<void> _celebrateEnsemble(Wardrobe w) async {
     final e = w.ensemble;
     if (!_ensemble || e == null || e.unseen.isEmpty || _celebrating) return;
     _celebrating = true;
@@ -226,7 +285,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final catalog = w.catalog;
     final owned = w.owns(item);
     final worn = w.worn(item.kind)?.id == item.id;
-    final hint = w.lockHint(item) ?? rewardHint(w, item);
+    final hint = w.lockHint(item) ?? rewardHint(w, item) ?? uniqueHint(w, item);
     final rarities = catalog.raritiesOf(item);
     final label = catalog.labelOf(item);
     final shiny = owned && w.isShiny(item);
@@ -266,14 +325,19 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                         Text(
                           owned || item.reward
                               ? item.name
+                              : item.unique
+                              ? '???'
                               : 'Noch nicht gefunden',
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
-                        // "als Lucy · Creepshow 2026": the worn role.
+                        // "als Lucy · Creepshow 2026": the worn role; a
+                        // unique figure is the character itself.
                         if (owned)
                           if (w.roleOf(item) case final playing?)
                             Text(
-                              playing.line,
+                              item.unique
+                                  ? uniqueRoleLine(playing)
+                                  : playing.line,
                               key: const ValueKey('wardrobe-role'),
                               style: Theme.of(context).textTheme.titleSmall,
                             ),
@@ -334,12 +398,21 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                               'Ensemble-Belohnung für ${kmText(milestone.meters)} gemeinsam.',
                             ),
                           ),
+                        if (owned && item.unique)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              'Freigeschaltet: alle Rollen aus ${item.role?.play ?? 'dem Stück'} gesammelt.',
+                            ),
+                          ),
                         if (hint != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
                               item.reward && milestone?.reached != true
                                   ? '$hint: für alle, sobald das Ensemble so weit gelaufen ist.'
+                                  : item.unique
+                                  ? '$hint. Wer alle Rollen des Stücks hat, bekommt die Unique-Figur dazu – nicht aus Kisten.'
                                   : hint,
                             ),
                           )
@@ -354,7 +427,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                             hint == null &&
                             _dupes &&
                             cost == null &&
-                            !item.reward)
+                            !item.reward &&
+                            !item.unique)
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
@@ -577,6 +651,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
           ],
         ),
       );
+      if (mounted) await _celebrateUnique(deal.wardrobe);
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
@@ -645,8 +720,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 controller: controller,
                 crates: w.progress.missionCrates,
                 collectibleNames:
-                    w.worn(WardrobeKind.backdrop)?.collectibleNames ??
-                    const {},
+                    w.worn(WardrobeKind.backdrop)?.collectibleNames ?? const {},
                 onOpenCrate: _busy ? null : () => _open(mission: true),
               ),
             ),
@@ -929,7 +1003,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     ];
     final collectible = [
       for (final i in all)
-        if (!i.isDefault) i,
+        if (!i.isDefault && !i.unique) i,
     ];
     final years = <String, int>{
       for (final i in collectible) ?i.role?.production: i.role?.year ?? 0,
@@ -962,6 +1036,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       if (play == null && person == null)
         for (final i in all)
           if (i.isDefault) i,
+    ];
+    // The unique figures, one per play (unlocked or hidden), on top.
+    final uniques = [
+      if (_unique && person == null)
+        for (final i in uniqueCards(w))
+          if (play == null || i.role?.production == play) i,
     ];
     final groups = [
       for (final r in catalog.rarities.reversed)
@@ -1038,6 +1118,38 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
           ),
         ),
       if (defaults.isNotEmpty) _grid(defaults, w, worn, padding, top: 8),
+      if (uniques.isNotEmpty) ...[
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(padding.left, 14, padding.right, 6),
+          sliver: SliverToBoxAdapter(
+            child: Row(
+              key: const ValueKey('wardrobe-group-unique'),
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: SweepGradient(colors: holoColors),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${catalog.uniqueRarity?.name ?? 'Unique'} · alle Rollen eines Stücks',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                Text(
+                  '${uniques.where(w.owns).length}/${uniques.length}',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ),
+        _grid(uniques, w, worn, padding),
+      ],
       for (final (rarity, items) in groups) ...[
         SliverPadding(
           padding: EdgeInsets.fromLTRB(padding.left, 14, padding.right, 6),
@@ -1279,7 +1391,7 @@ class EnsembleRunNote extends StatelessWidget {
         for (final m in run.reached) ...[
           const SizedBox(height: 6),
           Text(
-            'Ensemble-Ziel erreicht: ${m.name}! Eine Ensemble-Kiste wartet in der Garderobe.',
+            ensembleReachedText(m),
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: StageTheme.orange,

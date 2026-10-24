@@ -91,7 +91,9 @@ class EnsembleCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'noch ${kmText(e.remaining)} bis ${next.name}',
+              next.hidden
+                  ? 'noch ${kmText(e.remaining)} bis zur nächsten Überraschung'
+                  : 'noch ${kmText(e.remaining)} bis ${next.name}',
               key: const ValueKey('ensemble-next'),
               style: theme.textTheme.bodyLarge?.copyWith(
                 fontWeight: FontWeight.w700,
@@ -101,7 +103,9 @@ class EnsembleCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (reward != null)
+                if (next.hidden)
+                  const EnsembleSurprise(width: 72, height: 92)
+                else if (reward != null)
                   SizedBox(
                     width: 72,
                     height: 92,
@@ -133,10 +137,18 @@ class EnsembleCard extends StatelessWidget {
                         style: theme.textTheme.labelLarge,
                       ),
                       Text(
-                        reward == null
+                        next.hidden
+                            ? 'Eine Überraschung + 1 Ensemble-Kiste für jede:n'
+                            : reward == null
                             ? '1 Ensemble-Kiste für jede:n'
                             : '${reward.kind.singular} „${reward.name}“ + 1 Ensemble-Kiste für jede:n',
+                        key: const ValueKey('ensemble-next-reward'),
                       ),
+                      if (next.hidden)
+                        Text(
+                          'Was es ist, zeigt sich erst, wenn ihr dort seid.',
+                          style: theme.textTheme.bodySmall,
+                        ),
                       if (next.note != null)
                         Text(
                           next.note!,
@@ -192,18 +204,21 @@ class EnsembleCard extends StatelessWidget {
                 children: [
                   for (final m in e.milestones)
                     ListTile(
+                      key: ValueKey('ensemble-goal-${m.km}'),
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       leading: Icon(
-                        m.reached ? Icons.check_circle : Icons.flag_outlined,
+                        m.reached
+                            ? Icons.check_circle
+                            : m.hidden
+                            ? Icons.help_outline
+                            : Icons.flag_outlined,
                         color: m.reached ? StageTheme.green : null,
                       ),
                       title: Text('${kmText(m.meters)} · ${m.name}'),
-                      subtitle: m.note != null
-                          ? Text(m.note!)
-                          : m.reached && m.rewardId != null && !m.ready
-                          ? const Text('Belohnung wird vorbereitet')
-                          : null,
+                      subtitle: _goalNote(m) == null
+                          ? null
+                          : Text(_goalNote(m)!),
                     ),
                 ],
               ),
@@ -216,6 +231,114 @@ class EnsembleCard extends StatelessWidget {
 
   static String _players(int n) =>
       n == 1 ? '1 Mitspieler:in' : '$n Mitspielende';
+
+  /// The line under a goal: a surprise, what it unlocked, or its note.
+  String? _goalNote(EnsembleMilestone m) {
+    if (m.hidden) return 'Überraschung + Ensemble-Kiste';
+    final unlocked = m.rewardId == null
+        ? null
+        : wardrobe.catalog.item(m.rewardId!);
+    final kind = unlocked?.kind ?? m.rewardKind;
+    return [
+      ?m.note,
+      if (m.reached && m.rewardId != null)
+        m.ready
+            ? kind == null
+                  ? 'Für alle freigeschaltet'
+                  : '${kind.singular} · für alle freigeschaltet'
+            : 'Belohnung wird vorbereitet',
+    ].join(' · ').nullIfEmpty;
+  }
+}
+
+extension on String {
+  String? get nullIfEmpty => isEmpty ? null : this;
+}
+
+/// A reward that is still a surprise: a closed curtain with a question
+/// mark, never its name or picture.
+class EnsembleSurprise extends StatelessWidget {
+  const EnsembleSurprise({super.key, this.width = 72, this.height = 92});
+  final double width, height;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: 'Überraschung, noch verborgen',
+    child: SizedBox(
+      key: const ValueKey('ensemble-surprise'),
+      width: width,
+      height: height,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: CustomPaint(
+          painter: const CurtainPainter(),
+          child: Center(
+            child: Text(
+              '?',
+              style: TextStyle(
+                color: const Color(0xFFFFE7A3),
+                fontSize: height * .38,
+                fontWeight: FontWeight.w900,
+                shadows: const [Shadow(blurRadius: 6, color: Colors.black54)],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// A stage curtain in folds; [open] from 0 (closed) to 1 pulls both halves
+/// aside, for the reveal.
+class CurtainPainter extends CustomPainter {
+  const CurtainPainter({this.open = 0});
+  final double open;
+
+  static const _deep = Color(0xFF5A0F18), _light = Color(0xFFB3263A);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (open >= 1) return;
+    final half = size.width / 2, shift = half * open;
+    for (final (left, from) in [(true, -shift), (false, half + shift)]) {
+      final rect = Rect.fromLTWH(from, 0, half, size.height);
+      canvas.save();
+      canvas.clipRect(rect);
+      // Folds: light and dark stripes across each half.
+      const folds = 3;
+      final fold = half / folds;
+      for (var i = 0; i < folds; i++) {
+        final r = Rect.fromLTWH(from + i * fold, 0, fold, size.height);
+        canvas.drawRect(
+          r,
+          Paint()
+            ..shader = const LinearGradient(
+              colors: [_deep, _light, _deep],
+            ).createShader(r),
+        );
+      }
+      // Darker towards the middle, where the halves meet.
+      canvas.drawRect(
+        rect,
+        Paint()
+          ..shader = LinearGradient(
+            begin: left ? Alignment.centerLeft : Alignment.centerRight,
+            end: left ? Alignment.centerRight : Alignment.centerLeft,
+            colors: const [Color(0x00000000), Color(0x55000000)],
+          ).createShader(rect),
+      );
+      canvas.restore();
+    }
+    // The gold fringe on top.
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height * .07),
+      Paint()..color = const Color(0xFFE4AE39),
+    );
+  }
+
+  @override
+  bool shouldRepaint(CurtainPainter old) => old.open != open;
 }
 
 /// The celebration of reached milestones, shown once when the wardrobe opens
@@ -306,26 +429,63 @@ class _EnsembleCelebrationState extends State<EnsembleCelebration>
                     alignment: WrapAlignment.center,
                     children: [
                       for (final (m, item) in rewards)
-                        Column(
-                          children: [
-                            SizedBox(
-                              width: 96,
-                              height: 120,
-                              child: WardrobeCard(
-                                item: item,
-                                wardrobe: widget.wardrobe,
-                                controller: widget.controller,
-                                art: widget.art,
+                        SizedBox(
+                          width: 200,
+                          child: Column(
+                            children: [
+                              SizedBox(
+                                width: 96,
+                                height: 120,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      WardrobeCard(
+                                        item: item,
+                                        wardrobe: widget.wardrobe,
+                                        controller: widget.controller,
+                                        art: widget.art,
+                                      ),
+                                      // The curtain opens on what was a
+                                      // surprise until now.
+                                      IgnorePointer(
+                                        child: AnimatedBuilder(
+                                          animation: _burst,
+                                          builder: (context, _) => CustomPaint(
+                                            painter: CurtainPainter(
+                                              open: Curves.easeInOut.transform(
+                                                (_burst.value / .6).clamp(
+                                                  0.0,
+                                                  1.0,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              m.ready
-                                  ? 'Für alle freigeschaltet'
-                                  : 'Belohnung wird vorbereitet',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
+                              const SizedBox(height: 6),
+                              Text(
+                                'Freigeschaltet: ${item.kind.singular} „${item.name}“',
+                                key: ValueKey('ensemble-unlocked-${m.km}'),
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                m.ready
+                                    ? 'Für alle in der Garderobe'
+                                    : 'Belohnung wird vorbereitet',
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
                         ),
                     ],
                   ),

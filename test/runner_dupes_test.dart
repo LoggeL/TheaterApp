@@ -13,6 +13,7 @@ import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/games/data/wardrobe_api.dart';
 import 'package:theater_app/features/games/domain/stage_runner.dart';
 import 'package:theater_app/features/games/ui/crate_opening.dart';
+import 'package:theater_app/features/games/ui/ensemble_card.dart';
 import 'package:theater_app/features/games/ui/stage_runner_art.dart';
 import 'package:theater_app/features/games/ui/stage_runner_look.dart';
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
@@ -64,7 +65,26 @@ JsonMap _item(
   ...extra,
 };
 
-/// A wardrobe as a server with duplicates and the ensemble sends it.
+/// What the server sends of a milestone not reached yet: a surprise.
+JsonMap _hiddenGoal(num km) => {
+  'km': km,
+  'name': '???',
+  'hidden': true,
+  'reward': null,
+  'reached': false,
+};
+
+/// The 25 km goal (Anno 1146) once reached.
+JsonMap _anno({bool ready = true}) => {
+  'km': 25,
+  'name': 'Anno 1146',
+  'reward': {'itemId': 'bd.anno', 'ready': ready, 'kind': 'backdrop'},
+  'reached': true,
+};
+
+/// A wardrobe as a server with duplicates and the ensemble sends it: the
+/// rewards are a surprise until their milestone is reached; [legacyServer]
+/// names them anyway, as servers before 0.11.4 did.
 JsonMap _json({
   List<String> owned = const ['h1'],
   List<String> shiny = const [],
@@ -76,146 +96,177 @@ JsonMap _json({
   List<num> unseen = const [],
   int ensembleCrates = 0,
   bool complete = false,
-}) => {
-  'progress': {
-    'meters': 2900,
-    'earned': 1,
-    'opened': 0,
-    'crates': 1,
-    'previousAt': 2000,
-    'nextAt': 4100,
-    'poolSize': 2,
-    'complete': complete,
-    'ensembleCrates': ensembleCrates,
-    'dupes': true,
-  },
-  'catalog': {
-    'kinds': ['character', 'backdrop', 'obstacles', 'fx'],
-    'rarities': [
-      {
-        'id': 'hellblau',
-        'name': 'Hellblau',
-        'color': '#5E98D9',
-        'weight': 60,
-        'gage': 10,
-        'buyable': true,
-      },
-      {
-        'id': 'pink',
-        'name': 'Pink',
-        'color': '#D32CE6',
-        'weight': 30,
-        'gage': 40,
-        'buyable': true,
-      },
-      {
-        'id': 'gold',
-        'name': 'Gold',
-        'color': '#E4AE39',
-        'weight': 10,
-        'gage': 200,
-        'buyable': false,
-      },
-    ],
-    'departments': [],
-    'dupes': {
-      'shinyChance': {'costume': .03, 'ensemble': .03},
-      'tradeDupes': 5,
-      'buyDupes': 10,
+  bool annoReady = true,
+  bool legacyServer = false,
+}) {
+  final reached = ensembleMeters >= 25000;
+  final legacyAnno = {
+    'km': 25,
+    'name': 'Anno 1146',
+    'reward': {'itemId': 'bd.anno', 'ready': true},
+    'reached': false,
+  };
+  return {
+    'progress': {
+      'meters': 2900,
+      'earned': 1,
+      'opened': 0,
+      'crates': 1,
+      'previousAt': 2000,
+      'nextAt': 4100,
+      'poolSize': 2,
+      'complete': complete,
+      'ensembleCrates': ensembleCrates,
+      'dupes': true,
     },
-    'ensembleRarity': {
-      'id': 'ensemble',
-      'name': 'Ensemble',
-      'color': '#F28C28',
-    },
-    'items': [
-      _item('c0', 'character', 'Engel Logge', 'hellblau', isDefault: true),
-      _item('b0', 'backdrop', 'Bühnenwand', 'hellblau', isDefault: true),
-      _item('o0', 'obstacles', 'Requisitenlager', 'hellblau', isDefault: true),
-      _item('f0', 'fx', 'Ohne Effekt', 'hellblau', isDefault: true),
-      _item(
-        'h1',
-        'character',
-        'Elena',
-        'hellblau',
-        extra: {
-          'variants': [
-            {
-              'id': 'h1.julia',
-              'name': 'Julia (Romeo und Julia, 2026)',
-              'image': '/games/runner/skins/julia.webp?v=1',
-              'harness': {
-                'fly': [90, 30],
-              },
-            },
-            {
-              'id': 'h1.amme',
-              'name': 'Amme (Romeo und Julia, 2026)',
-              'image': '/games/runner/skins/amme.webp?v=1',
-            },
-          ],
+    'catalog': {
+      'kinds': ['character', 'backdrop', 'obstacles', 'fx'],
+      'rarities': [
+        {
+          'id': 'hellblau',
+          'name': 'Hellblau',
+          'color': '#5E98D9',
+          'weight': 60,
+          'gage': 10,
+          'buyable': true,
         },
-      ),
-      _item('p1', 'character', 'Nela', 'pink'),
-      _item('g1', 'character', 'Theresa', 'gold'),
-    ],
-    'rewards': [
-      _item(
-        'bd.anno',
-        'backdrop',
-        'Anno 1146',
-        'ensemble',
-        extra: {'reward': true},
-      ),
-    ],
-  },
-  'lockedRarities': [],
-  'owned': ['c0', 'b0', 'o0', 'f0', ...owned],
-  'selected': {
-    'character': 'c0',
-    'backdrop': 'b0',
-    'obstacles': 'o0',
-    'fx': 'f0',
-    ...selected,
-  },
-  'stats': {'rounds': 3, 'best': 100, 'meters': 2900},
-  'shiny': shiny,
-  'variants': variants,
-  'selectedVariants': selectedVariants,
-  'gage': {'balance': gage, 'earned': gage},
-  'trades': [
-    {'from': 'hellblau', 'to': 'pink', 'cost': 50},
-    {'from': 'pink', 'to': 'gold', 'cost': 200},
-  ],
-  'ensemble': {
-    'meters': ensembleMeters,
-    'previousKm': 0,
-    'next': {
-      'km': 25,
-      'name': 'Anno 1146',
-      'reward': {'itemId': 'bd.anno', 'ready': true},
-      'reached': false,
+        {
+          'id': 'pink',
+          'name': 'Pink',
+          'color': '#D32CE6',
+          'weight': 30,
+          'gage': 40,
+          'buyable': true,
+        },
+        {
+          'id': 'gold',
+          'name': 'Gold',
+          'color': '#E4AE39',
+          'weight': 10,
+          'gage': 200,
+          'buyable': false,
+        },
+      ],
+      'departments': [],
+      'dupes': {
+        'shinyChance': {'costume': .03, 'ensemble': .03},
+        'tradeDupes': 5,
+        'buyDupes': 10,
+      },
+      'ensembleRarity': {
+        'id': 'ensemble',
+        'name': 'Ensemble',
+        'color': '#F28C28',
+      },
+      'items': [
+        _item('c0', 'character', 'Engel Logge', 'hellblau', isDefault: true),
+        _item('b0', 'backdrop', 'Bühnenwand', 'hellblau', isDefault: true),
+        _item(
+          'o0',
+          'obstacles',
+          'Requisitenlager',
+          'hellblau',
+          isDefault: true,
+        ),
+        _item('f0', 'fx', 'Ohne Effekt', 'hellblau', isDefault: true),
+        _item(
+          'h1',
+          'character',
+          'Elena',
+          'hellblau',
+          extra: {
+            'variants': [
+              {
+                'id': 'h1.julia',
+                'name': 'Julia (Romeo und Julia, 2026)',
+                'image': '/games/runner/skins/julia.webp?v=1',
+                'harness': {
+                  'fly': [90, 30],
+                },
+              },
+              {
+                'id': 'h1.amme',
+                'name': 'Amme (Romeo und Julia, 2026)',
+                'image': '/games/runner/skins/amme.webp?v=1',
+              },
+            ],
+          },
+        ),
+        _item('p1', 'character', 'Nela', 'pink'),
+        _item('g1', 'character', 'Theresa', 'gold'),
+      ],
+      'rewards': [
+        if (reached || legacyServer)
+          _item(
+            'bd.anno',
+            'backdrop',
+            'Anno 1146',
+            'ensemble',
+            extra: {'reward': true},
+          ),
+      ],
     },
-    'milestones': [
-      {
-        'km': 25,
-        'name': 'Anno 1146',
-        'reward': {'itemId': 'bd.anno', 'ready': true},
-        'reached': ensembleMeters >= 25000,
-      },
-      {
-        'km': 1000,
-        'name': 'Romeo und Julia',
-        'note': 'Premiere am 27.12.2026',
-        'reward': null,
-        'reached': false,
-      },
+    'lockedRarities': [],
+    'owned': [
+      'c0',
+      'b0',
+      'o0',
+      'f0',
+      ...owned,
+      if (reached && annoReady) 'bd.anno',
     ],
-    'crates': ensembleCrates,
-    'unseen': unseen,
-    'section': {'from': 0, 'own': 3400, 'players': 7},
-  },
-};
+    'selected': {
+      'character': 'c0',
+      'backdrop': 'b0',
+      'obstacles': 'o0',
+      'fx': 'f0',
+      ...selected,
+    },
+    'stats': {'rounds': 3, 'best': 100, 'meters': 2900},
+    'shiny': shiny,
+    'variants': variants,
+    'selectedVariants': selectedVariants,
+    'gage': {'balance': gage, 'earned': gage},
+    'trades': [
+      {'from': 'hellblau', 'to': 'pink', 'cost': 50},
+      {'from': 'pink', 'to': 'gold', 'cost': 200},
+    ],
+    'ensemble': {
+      'meters': ensembleMeters,
+      'previousKm': reached ? 25 : 0,
+      'next': reached
+          ? _hiddenGoal(1000)
+          : legacyServer
+          ? legacyAnno
+          : _hiddenGoal(25),
+      'milestones': [
+        reached
+            ? _anno(ready: annoReady)
+            : legacyServer
+            ? legacyAnno
+            : _hiddenGoal(25),
+        legacyServer
+            ? {
+                'km': 1000,
+                'name': 'Romeo und Julia',
+                'note': 'Premiere am 27.12.2026',
+                'reward': {'itemId': 'backdrop.romeo-julia', 'ready': true},
+                'reached': false,
+              }
+            : _hiddenGoal(1000),
+        {
+          'km': 1250,
+          'name': 'Ensemble-Kiste',
+          'reward': null,
+          'reached': false,
+        },
+      ],
+      'crates': ensembleCrates,
+      'unseen': unseen,
+      'section': {'from': 0, 'own': 3400, 'players': 7},
+    },
+  };
+}
 
 String _path(http.Request request) =>
     request.url.path.replaceFirst(RegExp(r'/$'), '');
@@ -261,6 +312,8 @@ void main() {
           shiny: ['h1'],
           variants: ['h1.julia'],
           selectedVariants: {'h1': 'h1.julia'},
+          ensembleMeters: 26000,
+          annoReady: false,
         ),
       );
       final elena = w.catalog.item('h1')!;
@@ -288,7 +341,7 @@ void main() {
         w.catalog.chance(w.catalog.rarities.last),
         closeTo(10 / 100, 1e-9),
       );
-      expect(rewardHint(w, anno), 'Ensemble-Ziel 25 km');
+      expect(rewardHint(w, anno), 'Belohnung wird vorbereitet');
       expect(w.progress.waiting, 1);
       expect(w.progress.canOpen, isTrue);
     });
@@ -311,18 +364,30 @@ void main() {
       expect(e.remaining, 18200);
       expect(e.fraction, closeTo(6800 / 25000, 1e-9));
       expect(e.sectionOwn, 3400);
-      expect(e.milestone(1000)?.note, 'Premiere am 27.12.2026');
+      expect(e.next.hidden, isTrue);
+      expect(e.milestone(1000)?.note, isNull);
       expect(kmText(1234), '1,2 km');
       expect(kmText(25000), '25 km');
       final run = EnsembleRun.fromJson({
         'gained': 1200,
         'meters': 6800,
-        'next': {'km': 25, 'name': 'Anno 1146'},
+        'next': _hiddenGoal(25),
         'reached': [],
       });
       expect(
         ensembleRunText(run),
-        '+1,2 km fürs Ensemble · noch 18,2 km bis Anno 1146',
+        '+1,2 km fürs Ensemble · noch 18,2 km bis zur nächsten Überraschung',
+      );
+      // A goal with only the crate keeps its name.
+      final crate = EnsembleRun.fromJson({
+        'gained': 1200,
+        'meters': 1240000,
+        'next': {'km': 1250, 'name': 'Ensemble-Kiste', 'reached': false},
+        'reached': [],
+      });
+      expect(
+        ensembleRunText(crate),
+        '+1,2 km fürs Ensemble · noch 10 km bis Ensemble-Kiste',
       );
     });
 
@@ -485,15 +550,20 @@ void main() {
       await _settle(tester);
       expect(find.byKey(const ValueKey('ensemble-card')), findsOneWidget);
       expect(find.text('6,8 km'), findsOneWidget);
-      expect(find.text('noch 18,2 km bis Anno 1146'), findsOneWidget);
+      expect(
+        find.text('noch 18,2 km bis zur nächsten Überraschung'),
+        findsOneWidget,
+      );
       expect(
         find.text('Dein Beitrag in diesem Abschnitt: 3,4 km · 7 Mitspielende'),
         findsOneWidget,
       );
       expect(find.text('420 Gage'), findsOneWidget);
       expect(find.text('Glanz: 3,0 %'), findsOneWidget);
-      // The ensemble's reward shows with its name and milestone.
-      expect(find.text('Ensemble-Ziel 25 km'), findsWidgets);
+      // The ensemble's reward is a surprise: no card, name or milestone.
+      expect(find.byKey(const ValueKey('ensemble-surprise')), findsOneWidget);
+      expect(find.byKey(const ValueKey('wardrobe-bd.anno')), findsNothing);
+      expect(find.textContaining('Anno'), findsNothing);
       expect(
         find.bySemanticsLabel(RegExp('Elena, Hellblau, Glanz')),
         findsOneWidget,
@@ -599,6 +669,11 @@ void main() {
       await _settle(tester);
       expect(find.text('Ensemble-Ziel erreicht!'), findsOneWidget);
       expect(find.text('Gemeinsam 25 km gelaufen'), findsOneWidget);
+      // The surprise is revealed: the curtain opens on what it unlocked.
+      expect(
+        find.text('Freigeschaltet: Bühnenbild „Anno 1146“'),
+        findsOneWidget,
+      );
       expect(find.text('Für dich wartet 1 Ensemble-Kiste.'), findsOneWidget);
       expect(sound.played, contains(RunnerSfx.jackpot));
       await tester.tap(find.text('Weiter'));
@@ -665,7 +740,7 @@ void main() {
       await _settle(tester);
       await tester.tap(find.text('Alle Ziele'));
       await _settle(tester);
-      expect(find.text('1.000 km · Romeo und Julia'), findsOneWidget);
+      expect(find.text('1.000 km · ???'), findsOneWidget);
       await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
       await _settle(tester);
       final scrolled = tester.getTopLeft(find.text('Alle Ziele')).dy;
@@ -677,7 +752,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byType(ErrorWidget), findsNothing);
       expect(find.byKey(const ValueKey('ensemble-card')), findsOneWidget);
-      expect(find.text('1.000 km · Romeo und Julia'), findsOneWidget);
+      expect(find.text('1.000 km · ???'), findsOneWidget);
       expect(tester.getTopLeft(find.text('Alle Ziele')).dy, scrolled);
       await tester.pumpWidget(const SizedBox());
     });
@@ -768,24 +843,113 @@ void main() {
             EnsembleRun.fromJson({
               'gained': 1200,
               'meters': 25400,
-              'next': {'km': 50, 'name': 'Goldregen'},
-              'reached': [
-                {'km': 25, 'name': 'Anno 1146'},
-              ],
+              'next': _hiddenGoal(50),
+              'reached': [_anno()],
             }),
           ),
         ),
       );
       expect(
-        find.text('+1,2 km fürs Ensemble · noch 24,6 km bis Goldregen'),
+        find.text(
+          '+1,2 km fürs Ensemble · noch 24,6 km bis zur nächsten Überraschung',
+        ),
         findsOneWidget,
       );
       expect(
         find.text(
-          'Ensemble-Ziel erreicht: Anno 1146! Eine Ensemble-Kiste wartet in der Garderobe.',
+          'Ensemble-Ziel erreicht – freigeschaltet: Bühnenbild „Anno 1146“! Eine Ensemble-Kiste wartet in der Garderobe.',
         ),
         findsOneWidget,
       );
+      expect(find.textContaining('Goldregen'), findsNothing);
+    });
+  });
+
+  group('ensemble rewards stay a surprise until reached', () {
+    test('a hidden goal has only its distance', () {
+      final w = Wardrobe.fromJson(_json());
+      final next = w.ensemble!.next;
+      expect(
+        (next.km, next.name, next.hidden, next.rewardId, next.note),
+        (25, '???', true, null, null),
+      );
+      expect(w.catalog.item('bd.anno'), isNull);
+      expect(w.catalog.items.where((i) => i.reward), isEmpty);
+      // A goal with only the crate is no secret.
+      final crate = w.ensemble!.milestone(1250)!;
+      expect((crate.name, crate.hidden), ('Ensemble-Kiste', false));
+    });
+
+    test('the boundary is the milestone: 24.999 m hide it, 25.000 m not', () {
+      final before = Wardrobe.fromJson(_json(ensembleMeters: 24999));
+      expect(before.ensemble!.milestone(25)!.hidden, isTrue);
+      expect(before.catalog.item('bd.anno'), isNull);
+      final at = Wardrobe.fromJson(_json(ensembleMeters: 25000));
+      final anno = at.ensemble!.milestone(25)!;
+      expect(
+        (anno.name, anno.hidden, anno.rewardId, anno.rewardKind),
+        ('Anno 1146', false, 'bd.anno', WardrobeKind.backdrop),
+      );
+      expect(at.catalog.item('bd.anno')?.name, 'Anno 1146');
+      expect(at.owns(at.catalog.item('bd.anno')!), isTrue);
+    });
+
+    test('a server from before names the rewards: the app hides them', () {
+      final w = Wardrobe.fromJson(_json(legacyServer: true));
+      final next = w.ensemble!.next;
+      expect((next.name, next.hidden, next.rewardId), ('???', true, null));
+      final romeo = w.ensemble!.milestone(1000)!;
+      expect((romeo.name, romeo.note, romeo.hidden), ('???', null, true));
+      expect(w.catalog.item('bd.anno'), isNull, reason: 'not in the grid');
+      expect(w.catalog.item('h1'), isNotNull);
+    });
+
+    testWidgets('the card shows a curtain, then what was unlocked', (
+      tester,
+    ) async {
+      final controller = await _signedIn((_) => null);
+      Future<void> card(JsonMap json) async {
+        await tester.pumpWidget(const SizedBox());
+        await _pump(
+          tester,
+          Scaffold(
+            body: SingleChildScrollView(
+              child: EnsembleCard(
+                wardrobe: Wardrobe.fromJson(json),
+                controller: controller,
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Alle Ziele'));
+        await _settle(tester);
+      }
+
+      await card(_json());
+      expect(find.byKey(const ValueKey('ensemble-surprise')), findsOneWidget);
+      expect(
+        find.text('noch 18,2 km bis zur nächsten Überraschung'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Eine Überraschung + 1 Ensemble-Kiste für jede:n'),
+        findsOneWidget,
+      );
+      expect(find.text('25 km · ???'), findsOneWidget);
+      expect(find.text('1.000 km · ???'), findsOneWidget);
+      expect(find.text('Überraschung + Ensemble-Kiste'), findsNWidgets(2));
+      expect(find.text('1.250 km · Ensemble-Kiste'), findsOneWidget);
+      for (final secret in ['Anno', 'Romeo', 'Bühnenbild', 'Premiere']) {
+        expect(find.textContaining(secret), findsNothing, reason: secret);
+      }
+
+      await card(_json(ensembleMeters: 26000));
+      expect(find.text('25 km · Anno 1146'), findsOneWidget);
+      expect(find.text('Bühnenbild · für alle freigeschaltet'), findsOneWidget);
+      // The next one is the next surprise.
+      expect(find.byKey(const ValueKey('ensemble-surprise')), findsOneWidget);
+      expect(find.text('1.000 km · ???'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
     });
   });
 }

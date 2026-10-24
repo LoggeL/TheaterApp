@@ -400,22 +400,44 @@ class WardrobeCard extends StatelessWidget {
         : role != null
         ? role!.role
         : wardrobe.roleOf(item);
-    final hint = wardrobe.lockHint(item) ?? rewardHint(wardrobe, item);
+    final hint =
+        wardrobe.lockHint(item) ??
+        rewardHint(wardrobe, item) ??
+        uniqueHint(wardrobe, item);
     final label = catalog.labelOf(item);
     final department = item.departments.isEmpty
         ? null
         : catalog.department(item.departments.first);
     final antique = rarity.antique;
-    // Rewards are no secret: the ensemble runs for them.
-    final name = owned || item.reward ? item.name : '?';
+    // Unique figures shimmer like a hologram, unlocked or not.
+    final holo = item.unique || rarity.holo;
+    // A reward the wardrobe shows is no secret any more: only those of
+    // reached milestones come (until then they are a surprise). A unique
+    // figure not unlocked is "???".
+    final name = owned || item.reward
+        ? item.name
+        : item.unique
+        ? '???'
+        : '?';
+    final roleLine = playing == null
+        ? null
+        : item.unique
+        ? uniqueRoleLine(playing)
+        : playing.line;
     return Semantics(
       button: onTap != null,
       selected: worn,
       label: owned
-          ? '${item.name}${playing == null ? '' : ' ${playing.line}'}, ${rarity.name}${shiny ? ', Glanz' : ''}${worn ? ', angelegt' : ''}'
+          ? '${item.name}${roleLine == null ? '' : ' $roleLine'}, ${rarity.name}${shiny ? ', Glanz' : ''}${worn ? ', angelegt' : ''}'
+          : item.unique
+          ? 'Unique-Figur, noch verborgen${hint == null ? '' : ', $hint'}'
           : 'Noch nicht gefunden, ${rarity.name}',
       child: Material(
-        color: antique ? const Color(0xFF2A2117) : wardrobeInk,
+        color: antique
+            ? const Color(0xFF2A2117)
+            : holo
+            ? holoInk
+            : wardrobeInk,
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
@@ -424,8 +446,10 @@ class WardrobeCard extends StatelessWidget {
                 ? const Color(0xFFFFE7A3)
                 : shiny
                 ? const Color(0xCCFFE7A3)
+                : holo
+                ? const Color(0xCCE6DAFF)
                 : colors.first.withValues(alpha: .35),
-            width: worn ? 2.5 : (shiny ? 1.5 : 1),
+            width: worn ? 2.5 : (shiny || holo ? 1.5 : 1),
           ),
         ),
         child: InkWell(
@@ -464,18 +488,34 @@ class WardrobeCard extends StatelessWidget {
                               child: ShineOverlay(animate: animateShine),
                             ),
                           ),
+                        if (holo)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: HoloOverlay(
+                                key: const ValueKey('holo-overlay'),
+                                animate: animateShine,
+                                strength: owned ? 1 : .55,
+                              ),
+                            ),
+                          ),
                         if (!owned)
                           Center(
                             child: Text(
-                              hint != null ? '' : '?',
+                              hint != null && !item.unique
+                                  ? ''
+                                  : item.unique
+                                  ? '???'
+                                  : '?',
                               style: TextStyle(
-                                color: colors.first,
+                                color: item.unique
+                                    ? const Color(0xFFF1EAFF)
+                                    : colors.first,
                                 fontSize: 30,
                                 fontWeight: FontWeight.w900,
                               ),
                             ),
                           ),
-                        if (hint != null)
+                        if (hint != null && !item.unique)
                           Center(
                             child: Icon(
                               item.reward
@@ -545,9 +585,9 @@ class WardrobeCard extends StatelessWidget {
                           fontSize: 13,
                         ),
                       ),
-                      if (showRole && playing != null)
+                      if (showRole && roleLine != null)
                         Text(
-                          playing.line,
+                          roleLine,
                           key: const ValueKey('card-role'),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -570,7 +610,9 @@ class WardrobeCard extends StatelessWidget {
                 ),
                 Container(
                   height: 5,
-                  decoration: BoxDecoration(gradient: rarityGradient(colors)),
+                  decoration: BoxDecoration(
+                    gradient: holo ? holoGradient : rarityGradient(colors),
+                  ),
                 ),
               ],
             ),
@@ -590,6 +632,152 @@ String? rewardHint(Wardrobe wardrobe, WardrobeItem item) {
   return m.reached
       ? 'Belohnung wird vorbereitet'
       : 'Ensemble-Ziel ${kmText(m.meters)}';
+}
+
+/// What a unique figure not unlocked yet waits for: "9/14 Rollen aus
+/// Creepshow"; null for other items and unlocked ones.
+String? uniqueHint(Wardrobe wardrobe, WardrobeItem item) {
+  if (!item.unique || wardrobe.owns(item)) return null;
+  final play = item.role?.play;
+  final p = wardrobe.uniqueFigures?.plays
+      .where((p) => p.play == play && !p.unlocked)
+      .firstOrNull;
+  return p?.line ?? 'Unique-Figur';
+}
+
+/// The line under a unique figure's name: "Unique · Creepshow 2026" (the
+/// role is the character itself, so not "als Captain Kuschel").
+String uniqueRoleLine(WardrobeRole role) =>
+    ['Unique', ?role.production].join(' · ');
+
+/// A stand-in card for the unique figure of [p] while it is a secret: no
+/// id, name or picture of its own (the server sends none), only its play.
+WardrobeItem uniqueStandIn(WardrobeCatalog catalog, UniqueFigureProgress p) =>
+    WardrobeItem(
+      id: 'unique-hidden:${p.production}',
+      kind: WardrobeKind.character,
+      name: '???',
+      rarity: catalog.uniqueRarity?.id ?? 'unique',
+      rarities: [catalog.uniqueRarity?.id ?? 'unique'],
+      unique: true,
+      role: WardrobeRole('???', play: p.play, year: p.year),
+    );
+
+/// The ground of a unique figure's card: deep violet, not the stage black.
+const holoInk = Color(0xFF1A1630);
+
+/// The holographic colours: a rainbow foil, deliberately unlike gold.
+const holoColors = [
+  Color(0xFFFF7AD9),
+  Color(0xFFFFD36E),
+  Color(0xFF8CFFC1),
+  Color(0xFF7AD7FF),
+  Color(0xFFB388FF),
+  Color(0xFFFF7AD9),
+];
+
+/// The rarity bar of a unique figure: the whole rainbow.
+const holoGradient = LinearGradient(colors: holoColors);
+
+/// The shimmer of a unique figure's card: a rainbow foil across it with
+/// fine diffraction lines and a light band; with [animate] the foil drifts.
+/// [strength] dims it for a figure still hidden.
+class HoloOverlay extends StatefulWidget {
+  const HoloOverlay({super.key, this.animate = false, this.strength = 1});
+  final bool animate;
+  final double strength;
+
+  @override
+  State<HoloOverlay> createState() => _HoloOverlayState();
+}
+
+class _HoloOverlayState extends State<HoloOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _drift = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 4200),
+    value: .3,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animate) _drift.repeat();
+  }
+
+  @override
+  void dispose() {
+    _drift.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: CustomPaint(
+      size: Size.infinite,
+      painter: _HoloPainter(_drift, widget.strength),
+    ),
+  );
+}
+
+class _HoloPainter extends CustomPainter {
+  _HoloPainter(this.t, this.strength) : super(repaint: t);
+  final Animation<double> t;
+  final double strength;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size, u = t.value;
+    final alpha = (.22 * strength).clamp(0.0, 1.0);
+    // The rainbow foil, drifting diagonally.
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..blendMode = BlendMode.plus
+        ..shader = LinearGradient(
+          begin: Alignment(-1 + u * 2, -1),
+          end: Alignment(1 + u * 2, 1),
+          colors: [for (final c in holoColors) c.withValues(alpha: alpha)],
+          tileMode: TileMode.mirror,
+        ).createShader(rect),
+    );
+    // Fine diffraction lines.
+    final lines = Paint()
+      ..color = Colors.white.withValues(alpha: .05 * strength)
+      ..strokeWidth = 1;
+    for (var x = -size.height; x < size.width; x += 6) {
+      canvas.drawLine(
+        Offset(x, size.height),
+        Offset(x + size.height, 0),
+        lines,
+      );
+    }
+    // A light band crossing the other way.
+    final at = 1.3 - u * 1.6;
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..blendMode = BlendMode.plus
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0x00FFFFFF),
+            Colors.white.withValues(alpha: .28 * strength),
+            const Color(0x00FFFFFF),
+          ],
+          stops: [
+            (at - .15).clamp(0, 1),
+            at.clamp(0, 1),
+            (at + .15).clamp(0, 1),
+          ],
+        ).createShader(rect),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_HoloPainter old) =>
+      old.t != t || old.strength != strength;
 }
 
 final _km = NumberFormat('#,##0.#', 'de');
