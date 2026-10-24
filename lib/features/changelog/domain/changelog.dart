@@ -27,6 +27,11 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.11.5',
+    date: '24. Oktober 2026',
+    items: ['Kleine Verbesserungen und mehr Stabilität.'],
+  ),
+  ChangelogEntry(
     version: '0.11.4',
     date: '24. Oktober 2026',
     items: ['Kleine Verbesserungen und Fehlerbehebungen.'],
