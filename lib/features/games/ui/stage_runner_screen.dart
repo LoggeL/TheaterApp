@@ -379,7 +379,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         const SizedBox(height: 12),
         Center(
           child: WardrobeButton(
-            crates: _wardrobe?.progress.crates ?? 0,
+            crates: _wardrobe?.progress.waiting ?? 0,
             onPressed: _openWardrobe,
           ),
         ),
@@ -420,6 +420,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
             ),
           ),
         ],
+        if (p.ensemble case final e? when ensembleAvailable(controller))
+          EnsembleRunNote(e),
       ],
     );
   }
@@ -509,7 +511,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                 if (_dressable)
                   WardrobeButton(
                     crates:
-                        _progress?.crates ?? _wardrobe?.progress.crates ?? 0,
+                        _progress?.waiting ?? _wardrobe?.progress.waiting ?? 0,
                     onPressed: _openWardrobe,
                   ),
                 OutlinedButton(

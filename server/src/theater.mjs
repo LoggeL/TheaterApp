@@ -4,7 +4,7 @@ import { compareProductionsNewestFirst } from './production-order.mjs';
 import { leadPushKinds, memberPushKinds } from './push-kinds.mjs';
 import { migrateSharedSpeakers, sharedSpeakersMigrationId, splitSharedSpeakers } from './shared-speakers.mjs';
 import { feedbackList, feedbackTicketsMigrationId, forgetFeedbackAccount, forgetFeedbackPerson, migrateFeedbackTickets, setFeedbackStatus, submitFeedback } from './feedback-tickets.mjs';
-import { bundledCatalog, openCrate, recordRun, runMeters, secureRandom, selectOutfit, skinFile, wardrobe } from './runner-wardrobe.mjs';
+import { buyItem, bundledCatalog, ensembleSeen, openCrate, recordRun, runMeters, secureRandom, selectOutfit, skinFile, tradeGage, wardrobe } from './runner-wardrobe.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 
 // Machine-readable reasons next to the German message; clients branch on `code`, never on the text.
@@ -36,7 +36,7 @@ export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
 export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'runnerDupes', 'runnerEnsemble']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -438,7 +438,10 @@ export class Theater {
   runnerLeaderboard(uid) { return this.runnerBoard(this.account(uid)); }
   // The wardrobe (costume crates) lives in runner-wardrobe.mjs.
   runnerWardrobe(uid) { return wardrobe(this, uid); }
-  runnerOpenCrate(uid, requestId) { return openCrate(this, uid, requestId); }
+  runnerOpenCrate(uid, requestId, b = {}) { return openCrate(this, uid, requestId, b); }
+  runnerTrade(uid, requestId, b) { return tradeGage(this, uid, requestId, b); }
+  runnerBuy(uid, requestId, b) { return buyItem(this, uid, requestId, b); }
+  runnerEnsembleSeen(uid, b) { return ensembleSeen(this, uid, b); }
   runnerOutfit(uid, b) { return selectOutfit(this, uid, b); }
   runnerSkin(uid, name) { return skinFile(this, uid, name); }
   /** Top list of active people with a score above zero; equal scores share a rank, the earlier best comes first. */

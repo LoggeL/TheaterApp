@@ -62,7 +62,7 @@ test('crates come at linearly growing distances', () => {
 test('runs add their metres; the reply tells how far the next crate is', t => {
   const { app, play } = setup(t);
   const first = play({ score: 1500, meters: 1200 });
-  assert.deepEqual(first.progress, { meters: 1200, earned: 0, opened: 0, crates: 0, previousAt: 0, nextAt: 2000, poolSize: 3, complete: false, gained: 1200, newCrates: 0 });
+  assert.deepEqual(first.progress, { meters: 1200, earned: 0, opened: 0, crates: 0, previousAt: 0, nextAt: 2000, poolSize: 3, complete: false, ensembleCrates: 0, dupes: true, gained: 1200, newCrates: 0 });
   const second = play({ score: 1200, meters: 900 });
   assert.equal(second.progress.meters, 2100);
   assert.equal(second.progress.newCrates, 1);

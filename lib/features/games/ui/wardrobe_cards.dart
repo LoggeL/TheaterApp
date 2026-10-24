@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../../../core/app_controller.dart';
 import '../data/wardrobe_api.dart';
@@ -294,6 +295,7 @@ class WardrobeCard extends StatelessWidget {
     this.art,
     this.worn = false,
     this.onTap,
+    this.animateShine = false,
   });
   final WardrobeItem item;
   final Wardrobe wardrobe;
@@ -302,24 +304,32 @@ class WardrobeCard extends StatelessWidget {
   final bool worn;
   final VoidCallback? onTap;
 
+  /// Lets the shine of a shiny card sweep (in the reveal and the details);
+  /// in the grid it stands still.
+  final bool animateShine;
+
   @override
   Widget build(BuildContext context) {
     final catalog = wardrobe.catalog;
     final rarity = catalog.rarityOf(item);
     final colors = rarityColors(catalog, item);
     final owned = wardrobe.owns(item);
-    final hint = wardrobe.lockHint(item);
+    final shiny = owned && wardrobe.isShiny(item);
+    // The worn role's pictures, if one is chosen.
+    final look = owned ? item.inRole(wardrobe.variantOf(item)) : item;
+    final hint = wardrobe.lockHint(item) ?? rewardHint(wardrobe, item);
     final label = catalog.labelOf(item);
     final department = item.departments.isEmpty
         ? null
         : catalog.department(item.departments.first);
     final antique = rarity.antique;
-    final name = owned ? item.name : '?';
+    // Rewards are no secret: the ensemble runs for them.
+    final name = owned || item.reward ? item.name : '?';
     return Semantics(
       button: onTap != null,
       selected: worn,
       label: owned
-          ? '${item.name}, ${rarity.name}${worn ? ', angelegt' : ''}'
+          ? '${item.name}, ${rarity.name}${shiny ? ', Glanz' : ''}${worn ? ', angelegt' : ''}'
           : 'Noch nicht gefunden, ${rarity.name}',
       child: Material(
         color: antique ? const Color(0xFF2A2117) : wardrobeInk,
@@ -329,8 +339,10 @@ class WardrobeCard extends StatelessWidget {
           side: BorderSide(
             color: worn
                 ? const Color(0xFFFFE7A3)
+                : shiny
+                ? const Color(0xCCFFE7A3)
                 : colors.first.withValues(alpha: .35),
-            width: worn ? 2.5 : 1,
+            width: worn ? 2.5 : (shiny ? 1.5 : 1),
           ),
         ),
         child: InkWell(
@@ -356,13 +368,19 @@ class WardrobeCard extends StatelessWidget {
                         Padding(
                           padding: const EdgeInsets.all(6),
                           child: WardrobeItemArt(
-                            item: item,
+                            item: look,
                             controller: controller,
                             art: art,
-                            hidden: !owned,
+                            hidden: !owned && !item.reward,
                             antique: antique,
                           ),
                         ),
+                        if (shiny)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: ShineOverlay(animate: animateShine),
+                            ),
+                          ),
                         if (!owned)
                           Center(
                             child: Text(
@@ -375,10 +393,22 @@ class WardrobeCard extends StatelessWidget {
                             ),
                           ),
                         if (hint != null)
-                          const Center(
+                          Center(
                             child: Icon(
-                              Icons.lock_outline,
-                              color: Color(0xFFD8C3A0),
+                              item.reward
+                                  ? Icons.groups_outlined
+                                  : Icons.lock_outline,
+                              color: const Color(0xFFD8C3A0),
+                            ),
+                          ),
+                        if (shiny)
+                          const Positioned(
+                            right: 6,
+                            bottom: 4,
+                            child: Icon(
+                              Icons.auto_awesome,
+                              size: 16,
+                              color: Color(0xFFFFE7A3),
                             ),
                           ),
                         if (department != null)
@@ -455,6 +485,107 @@ class WardrobeCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// What a reward not owned yet waits for: its milestone, or its picture
+/// once the milestone is reached; null for other items.
+String? rewardHint(Wardrobe wardrobe, WardrobeItem item) {
+  if (!item.reward || wardrobe.owns(item)) return null;
+  final m = wardrobe.ensemble?.rewardOf(item);
+  if (m == null) return 'Ensemble-Belohnung';
+  return m.reached
+      ? 'Belohnung wird vorbereitet'
+      : 'Ensemble-Ziel ${kmText(m.meters)}';
+}
+
+final _km = NumberFormat('#,##0.#', 'de');
+
+/// "1,2 km", "25 km".
+String kmText(int meters) => '${_km.format(meters / 1000)} km';
+
+/// The shine of a shiny card: a bright band across it and glints, in code;
+/// with [animate] the band sweeps over the card again and again.
+class ShineOverlay extends StatefulWidget {
+  const ShineOverlay({super.key, this.animate = false});
+  final bool animate;
+
+  @override
+  State<ShineOverlay> createState() => _ShineOverlayState();
+}
+
+class _ShineOverlayState extends State<ShineOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _sweep = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2600),
+    value: .35,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animate) _sweep.repeat();
+  }
+
+  @override
+  void dispose() {
+    _sweep.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: CustomPaint(size: Size.infinite, painter: _ShinePainter(_sweep)),
+  );
+}
+
+class _ShinePainter extends CustomPainter {
+  _ShinePainter(this.t) : super(repaint: t);
+  final Animation<double> t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size, u = t.value;
+    // The band runs from the lower left to the upper right corner.
+    final at = -.4 + u * 1.8;
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..blendMode = BlendMode.plus
+        ..shader = LinearGradient(
+          begin: Alignment.bottomLeft,
+          end: Alignment.topRight,
+          colors: const [
+            Color(0x00FFFFFF),
+            Color(0x40FFF4C2),
+            Color(0x30B8F1FF),
+            Color(0x00FFFFFF),
+          ],
+          stops: [
+            (at - .18).clamp(0, 1),
+            at.clamp(0, 1),
+            (at + .08).clamp(0, 1),
+            (at + .22).clamp(0, 1),
+          ],
+        ).createShader(rect),
+    );
+    final random = Random(11);
+    final paint = Paint();
+    for (var i = 0; i < 9; i++) {
+      final p = Offset(
+        size.width * (.08 + random.nextDouble() * .84),
+        size.height * (.06 + random.nextDouble() * .7),
+      );
+      final twinkle = (sin(u * 2 * pi * 2 + i * 1.3) + 1) / 2;
+      paint.color = shineColors[i % shineColors.length].withValues(
+        alpha: .35 + .65 * twinkle,
+      );
+      paintGlint(canvas, p, size.shortestSide * (.025 + .04 * twinkle), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ShinePainter old) => old.t != t;
 }
 
 /// The picture of an obstacle in the worn obstacle set, e.g. for the

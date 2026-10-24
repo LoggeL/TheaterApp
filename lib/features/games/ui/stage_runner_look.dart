@@ -132,7 +132,10 @@ Future<RunnerArt> dressArt(
     return item == null || item.isDefault ? null : item;
   }
 
-  final character = worn(WardrobeKind.character);
+  // The worn role of the character, if one is chosen.
+  final plain = worn(WardrobeKind.character);
+  final character = plain?.inRole(wardrobe.variantOf(plain));
+  final shiny = plain != null && wardrobe.isShiny(plain);
   final obstacles = worn(WardrobeKind.obstacles);
   final backdrop = worn(WardrobeKind.backdrop);
   final fx = worn(WardrobeKind.fx);
@@ -163,9 +166,13 @@ Future<RunnerArt> dressArt(
         if (character?.harness[sprite.name] case (final x, final y))
           sprite: ui.Offset(x, y),
     },
-    effect: effect == null
+    effect: effect == null && !shiny
         ? null
-        : RunnerEffectStyle(effect.trail, effect.colors),
+        : RunnerEffectStyle(
+            effect?.trail ?? '',
+            effect?.colors ?? const [],
+            shine: shiny,
+          ),
   );
 }
 
@@ -194,8 +201,15 @@ class RunnerTrail {
     _ => (40, .45),
   };
 
+  /// Where the runner was at the last update, for the shine; and the time
+  /// the glints twinkle by.
+  double _runnerY = StageRunner.floor - StageRunner.runnerHeight / 2;
+  double _time = 0;
+
   void update(double dt, StageRunner game, RunnerEffectStyle? style) {
     dt = dt.clamp(0, .05).toDouble();
+    _runnerY = game.y;
+    _time += dt;
     // The trail stays where it was left: the stage moves on under it.
     final drift = game.over ? 0.0 : game.speed * dt;
     for (var i = 0; i < size; i++) {
@@ -205,7 +219,7 @@ class RunnerTrail {
       y[i] += vy[i] * dt;
       spin[i] += dt * 6;
     }
-    if (style == null || game.over) return;
+    if (style == null || style.trail.isEmpty || game.over) return;
     final (rate, lifetime) = _rate(style.trail);
     _carry += dt * rate;
     while (_carry >= 1) {
@@ -236,6 +250,8 @@ class RunnerTrail {
 
   void paint(Canvas canvas, double s, RunnerEffectStyle? style) {
     if (style == null) return;
+    if (style.shine) paintShine(canvas, s, _runnerY, _time);
+    if (style.trail.isEmpty) return;
     if (!identical(style, _style)) {
       _style = style;
       final colors = style.colors.isEmpty
@@ -284,5 +300,84 @@ class RunnerTrail {
           canvas.drawCircle(c, radius[i] * s * fade, paint);
       }
     }
+  }
+}
+
+final _cone = Paint(), _halo = Paint(), _glint = Paint();
+final _glintPath = Path();
+
+/// Gold, white and a touch of colour: the glints of a shiny character.
+const shineColors = [
+  Color(0xFFFFF4C2),
+  Color(0xFFFFFFFF),
+  Color(0xFFFFD86B),
+  Color(0xFFB8F1FF),
+  Color(0xFFFFC2F0),
+];
+
+/// A four-pointed glint of [radius] at [c].
+void paintGlint(Canvas canvas, Offset c, double radius, Paint paint) {
+  final r = radius, w = radius * .22;
+  _glintPath
+    ..reset()
+    ..moveTo(c.dx, c.dy - r)
+    ..lineTo(c.dx + w, c.dy - w)
+    ..lineTo(c.dx + r, c.dy)
+    ..lineTo(c.dx + w, c.dy + w)
+    ..lineTo(c.dx, c.dy + r)
+    ..lineTo(c.dx - w, c.dy + w)
+    ..lineTo(c.dx - r, c.dy)
+    ..lineTo(c.dx - w, c.dy - w)
+    ..close();
+  canvas.drawPath(_glintPath, paint);
+}
+
+/// The shine of a shiny character on stage: a spotlight from the fly
+/// gallery onto the runner at height [y] (in stage heights), a soft halo and
+/// glints twinkling around it, behind the figure. [s] is the stage height in
+/// pixels, [time] seconds.
+void paintShine(Canvas canvas, double s, double y, double time) {
+  final cx = StageRunner.runnerX * s, cy = y * s;
+  final r = StageRunner.runnerHeight * s;
+  final pulse = .75 + .25 * sin(time * 2.4);
+  final bottom = cy + r * .6;
+  _cone.shader = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [
+      const Color(0x00FFF4C2),
+      Color.fromRGBO(255, 244, 194, .26 * pulse),
+    ],
+  ).createShader(Rect.fromLTRB(cx - r, 0, cx + r, bottom));
+  canvas.drawPath(
+    Path()
+      ..moveTo(cx - r * .12, 0)
+      ..lineTo(cx + r * .12, 0)
+      ..lineTo(cx + r * 1.1, bottom)
+      ..lineTo(cx - r * 1.1, bottom)
+      ..close(),
+    _cone,
+  );
+  _halo.shader = RadialGradient(
+    colors: [
+      Color.fromRGBO(255, 236, 170, .55 * pulse),
+      const Color(0x00FFECAA),
+    ],
+  ).createShader(Rect.fromCircle(center: Offset(cx, cy), radius: r * 1.1));
+  canvas.drawCircle(Offset(cx, cy), r * 1.1, _halo);
+  for (var i = 0; i < 10; i++) {
+    final twinkle = sin(time * 4.2 + i * 1.9);
+    if (twinkle <= -.3) continue;
+    final a = i * 2 * pi / 10 + time * .9;
+    final d = r * (.58 + .16 * sin(time * 2.7 + i));
+    _glint.color = shineColors[i % shineColors.length].withValues(
+      alpha: (.4 + .6 * twinkle).clamp(0, 1).toDouble(),
+    );
+    paintGlint(
+      canvas,
+      Offset(cx + cos(a) * d, cy + sin(a) * d * .9),
+      r * (.11 + .09 * twinkle),
+      _glint,
+    );
   }
 }

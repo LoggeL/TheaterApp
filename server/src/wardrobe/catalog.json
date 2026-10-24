@@ -1,13 +1,13 @@
 {
   "note": "Wardrobe of the stage runner (see docs/operations.md, „Bühnenlauf: Garderobe“). PROVISIONAL: rarities and their assignment to people are a proposal awaiting confirmation. Actors carry their score (takes in Creepshow and appearances, see rarityReason); the rarest rarity whose minScore it reaches is theirs, so moving a limit is a one-line change. \"rarities\" or \"rarity\" plus a score makes a hybrid that can be drawn through each. Gold is exclusive: a hybrid with gold is drawn only through gold. Legacy joins the draw once all light blue characters are owned. A crate first draws a rarity by its weight (among rarities with items left to win), then one of its items uniformly. Items with \"placeholder\": true have no picture of their own yet and tint the default art; a listed image or preview that does not exist in images/ is simply ignored.",
   "rarities": [
-    {"id": "hellblau", "name": "Hellblau", "color": "#5E98D9", "weight": 45, "minScore": 0},
-    {"id": "blau", "name": "Blau", "color": "#4B69FF", "weight": 25, "minScore": 28},
-    {"id": "technik", "name": "Technik", "color": "#2FBF71", "weight": 14},
-    {"id": "pink", "name": "Pink", "color": "#D32CE6", "weight": 10, "minScore": 48},
-    {"id": "legacy", "name": "Legacy", "color": "#A47A4B", "weight": 8, "style": "antique", "requires": {"rarity": "hellblau", "kind": "character"}, "hint": "Sammle alle hellblauen Figuren"},
-    {"id": "rot", "name": "Rot", "color": "#EB4B4B", "weight": 4.5, "minScore": 62},
-    {"id": "gold", "name": "Gold", "color": "#E4AE39", "weight": 1.5, "minScore": 68, "exclusive": true}
+    {"id": "hellblau", "name": "Hellblau", "color": "#5E98D9", "weight": 45, "minScore": 0, "gage": 10},
+    {"id": "blau", "name": "Blau", "color": "#4B69FF", "weight": 25, "minScore": 28, "gage": 20},
+    {"id": "technik", "name": "Technik", "color": "#2FBF71", "weight": 14, "gage": 30},
+    {"id": "pink", "name": "Pink", "color": "#D32CE6", "weight": 10, "minScore": 48, "gage": 40},
+    {"id": "legacy", "name": "Legacy", "color": "#A47A4B", "weight": 8, "style": "antique", "requires": {"rarity": "hellblau", "kind": "character"}, "hint": "Sammle alle hellblauen Figuren", "gage": 50},
+    {"id": "rot", "name": "Rot", "color": "#EB4B4B", "weight": 4.5, "minScore": 62, "gage": 80},
+    {"id": "gold", "name": "Gold", "color": "#E4AE39", "weight": 1.5, "minScore": 68, "exclusive": true, "gage": 200, "buyable": false}
   ],
   "departments": [
     {"id": "licht", "name": "Licht", "icon": "light"},
@@ -18,6 +18,25 @@
     {"id": "foto", "name": "Fotografie", "icon": "photo"},
     {"id": "website", "name": "Website", "icon": "web"}
   ],
+  "dupes": {"note": "Duplicates (runnerDupes): a rarity drawn by its weight that is complete gives a duplicate: a role variant with a picture if one is missing, else the rarity's gage. shinyChance per draw; a trade costs tradeDupes duplicates of the rarity below its target, a chosen item buyDupes duplicates of its rarity (not where buyable is false).", "shinyChance": 0.03, "tradeDupes": 5, "buyDupes": 10},
+  "ensemble": {
+    "note": "Ensemble-Strecke (runnerEnsemble): the metres of all players together. Each milestone (km) unlocks its reward item (reward: true) for everybody once its picture is there, and gives every active member one Ensemble-Kiste with a guaranteed shine; after the last listed one a milestone with just the crate every `every` km.",
+    "rarity": {"id": "ensemble", "name": "Ensemble", "color": "#F28C28"},
+    "crateName": "Ensemble-Kiste",
+    "every": 250,
+    "milestones": [
+      {"km": 25, "item": "backdrop.anno"},
+      {"km": 50, "item": "fx.goldregen"},
+      {"km": 100, "item": "backdrop.schicksal"},
+      {"km": 175, "item": "fx.applaus"},
+      {"km": 250, "item": "backdrop.hell"},
+      {"km": 350, "item": "fx.hoellenglut"},
+      {"km": 500, "item": "backdrop.nexus"},
+      {"km": 650, "item": "fx.schwanenfedern"},
+      {"km": 800, "item": "backdrop.black-swan"},
+      {"km": 1000, "item": "backdrop.romeo-julia", "note": "Premiere am 27.12.2026"}
+    ]
+  },
   "items": [
     {"id": "character.engel-logge", "kind": "character", "name": "Engel Logge", "rarity": "hellblau", "default": true},
     {"id": "backdrop.standard", "kind": "backdrop", "name": "Bühnenwand", "rarity": "hellblau", "default": true},
@@ -80,6 +99,16 @@
     {"id": "fx.funken", "kind": "fx", "name": "Funkenflug", "rarity": "hellblau", "effect": {"trail": "sparkle", "colors": ["#FFD86B", "#FFB347"]}},
     {"id": "fx.konfetti", "kind": "fx", "name": "Konfetti", "rarity": "blau", "effect": {"trail": "confetti", "colors": ["#FF5A7A", "#4FC3F7", "#FFE066", "#7CE38B"]}},
     {"id": "fx.nebel", "kind": "fx", "name": "Bühnennebel", "rarity": "technik", "department": "licht", "effect": {"trail": "smoke", "colors": ["#E8ECEF", "#B8C2CC"]}},
-    {"id": "fx.sternschnuppe", "kind": "fx", "name": "Sternschnuppe", "rarity": "rot", "effect": {"trail": "stars", "colors": ["#FFE7A3", "#E4AE39", "#FFFFFF"]}}
+    {"id": "fx.sternschnuppe", "kind": "fx", "name": "Sternschnuppe", "rarity": "rot", "effect": {"trail": "stars", "colors": ["#FFE7A3", "#E4AE39", "#FFFFFF"]}},
+    {"id": "backdrop.anno", "kind": "backdrop", "name": "Anno 1146", "reward": true, "rarityReason": "Bühnenbild von Anno 1146 (2025) · Ensemble-Ziel 25 km", "image": "backdrop-anno.webp"},
+    {"id": "backdrop.schicksal", "kind": "backdrop", "name": "Schicksalsfäden", "reward": true, "rarityReason": "Bühnenbild von Schicksalsfäden (2025) · Ensemble-Ziel 100 km", "image": "backdrop-schicksal.webp"},
+    {"id": "backdrop.hell", "kind": "backdrop", "name": "Eine höllische Herausforderung", "reward": true, "rarityReason": "Bühnenbild von Eine höllische Herausforderung (2024) · Ensemble-Ziel 250 km", "image": "backdrop-hell.webp"},
+    {"id": "backdrop.nexus", "kind": "backdrop", "name": "Nexus", "reward": true, "rarityReason": "Bühnenbild von Nexus (2024) · Ensemble-Ziel 500 km", "image": "backdrop-nexus.webp"},
+    {"id": "backdrop.black-swan", "kind": "backdrop", "name": "Die Geschichte der Black Swan", "reward": true, "rarityReason": "Bühnenbild von Die Geschichte der Black Swan (2016) · Ensemble-Ziel 800 km", "image": "backdrop-black-swan.webp"},
+    {"id": "backdrop.romeo-julia", "kind": "backdrop", "name": "Romeo und Julia", "reward": true, "rarityReason": "Bühnenbild von Romeo und Julia (Premiere 27.12.2026) · Ensemble-Ziel 1000 km", "image": "backdrop-romeo-julia.webp"},
+    {"id": "fx.goldregen", "kind": "fx", "name": "Goldregen", "reward": true, "rarityReason": "Ensemble-Ziel 50 km", "effect": {"trail": "sparkle", "colors": ["#FFE7A3", "#E4AE39", "#FFFFFF"]}},
+    {"id": "fx.applaus", "kind": "fx", "name": "Applaus", "reward": true, "rarityReason": "Ensemble-Ziel 175 km", "effect": {"trail": "confetti", "colors": ["#FFFFFF", "#E4AE39", "#F28C28", "#EB4B4B"]}},
+    {"id": "fx.hoellenglut", "kind": "fx", "name": "Höllenglut", "reward": true, "rarityReason": "Ensemble-Ziel 350 km", "effect": {"trail": "sparkle", "colors": ["#FF5A1F", "#FFB347", "#B3121F"]}},
+    {"id": "fx.schwanenfedern", "kind": "fx", "name": "Schwanenfedern", "reward": true, "rarityReason": "Ensemble-Ziel 650 km", "effect": {"trail": "smoke", "colors": ["#FFFFFF", "#3A3A44"]}}
   ]
 }

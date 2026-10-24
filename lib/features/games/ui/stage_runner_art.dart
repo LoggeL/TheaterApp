@@ -9,11 +9,16 @@ import '../domain/stage_runner.dart';
 
 /// A trail behind the flying runner, from a worn effect.
 class RunnerEffectStyle {
-  const RunnerEffectStyle(this.trail, this.colors);
+  const RunnerEffectStyle(this.trail, this.colors, {this.shine = false});
 
-  /// `sparkle`, `confetti`, `smoke` or `stars`; anything else sparkles.
+  /// `sparkle`, `confetti`, `smoke` or `stars`; anything else sparkles;
+  /// empty for no trail (only the [shine]).
   final String trail;
   final List<ui.Color> colors;
+
+  /// A shiny character: a spotlight and glints around the runner. Only
+  /// drawn: hitbox and physics stay the same.
+  final bool shine;
 }
 
 /// Where each picture sits in `assets/games/stage_runner/atlas.webp`.

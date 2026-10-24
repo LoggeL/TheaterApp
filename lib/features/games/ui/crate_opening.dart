@@ -22,6 +22,7 @@ Future<Wardrobe?> showCrateOpening(
   required Wardrobe wardrobe,
   required RunnerSound sound,
   RunnerArt? art,
+  bool ensemble = false,
 }) => Navigator.of(context).push<Wardrobe>(
   PageRouteBuilder(
     opaque: false,
@@ -31,6 +32,7 @@ Future<Wardrobe?> showCrateOpening(
       wardrobe: wardrobe,
       sound: sound,
       art: art,
+      ensemble: ensemble,
     ),
     transitionsBuilder: (context, animation, _, child) =>
         FadeTransition(opacity: animation, child: child),
@@ -51,11 +53,15 @@ class CrateOpeningPage extends StatefulWidget {
     this.art,
     this.open,
     this.random,
+    this.ensemble = false,
   });
   final AppController controller;
   final Wardrobe wardrobe;
   final RunnerSound sound;
   final RunnerArt? art;
+
+  /// An Ensemble-Kiste (always shiny) instead of a crate of the own metres.
+  final bool ensemble;
 
   /// Replaces the server call in tests.
   @visibleForTesting
@@ -117,7 +123,12 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
     widget.sound.prepare();
     try {
       final opening =
-          await (widget.open ?? () => openCrate(widget.controller))();
+          await (widget.open ??
+              () => openCrate(
+                widget.controller,
+                dupes: dupesAvailable(widget.controller),
+                ensemble: widget.ensemble,
+              ))();
       // The cards' portraits, so the reel never shows an empty card; a slow
       // connection waits a moment at most.
       final ids = <String>{};
@@ -178,9 +189,13 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
     }
   }
 
+  /// A new shine: its own, bigger reveal.
+  bool get _shine => _result?.outcome.shineNew ?? false;
+
   bool get _jackpot {
     final item = _result?.item;
     if (item == null) return false;
+    if (_shine) return true;
     final rarities = _wardrobe.catalog.rarities;
     return rarities.isNotEmpty &&
         _wardrobe.catalog.rarityOf(item).id == rarities.last.id;
@@ -197,10 +212,10 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
     if (_phase == _Phase.spinning) _skipTo = _reel!.duration;
   }
 
-  Future<void> _wear(WardrobeItem item) async {
+  Future<void> _wear(WardrobeItem item, [WardrobeVariant? role]) async {
     setState(() => _wearing = true);
     try {
-      final next = await wearItem(widget.controller, item);
+      final next = await wearItem(widget.controller, item, variant: role);
       if (mounted) setState(() => _wardrobe = next);
     } catch (e) {
       if (mounted) showProblem(context, e);
@@ -239,9 +254,11 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
       children: [
         _ShakingCrate(vsync: this),
         const SizedBox(height: 24),
-        const Text(
-          'Die Kostümkiste geht auf …',
-          style: TextStyle(color: Colors.white70, fontSize: 16),
+        Text(
+          widget.ensemble
+              ? 'Die Ensemble-Kiste geht auf …'
+              : 'Die Kostümkiste geht auf …',
+          style: const TextStyle(color: Colors.white70, fontSize: 16),
         ),
       ],
     ),
@@ -292,7 +309,11 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
               children: [
                 const SizedBox(height: 16),
                 Text(
-                  revealed ? 'Aus der Kiste:' : 'Kostümkiste',
+                  revealed
+                      ? 'Aus der Kiste:'
+                      : widget.ensemble
+                      ? 'Ensemble-Kiste'
+                      : 'Kostümkiste',
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 15,
@@ -339,10 +360,22 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
     final item = result.item;
     final catalog = _wardrobe.catalog;
     final rarity = catalog.rarityOf(item);
-    final colors = rarityColors(catalog, item);
+    final shine = _shine;
+    final colors = shine ? shineColors : rarityColors(catalog, item);
     final jackpot = _jackpot;
-    final worn = _wardrobe.worn(item.kind)?.id == item.id;
-    final left = _wardrobe.progress.crates;
+    final outcome = result.outcome;
+    final role = outcome.type == 'variant'
+        ? item.variants.where((v) => v.id == outcome.variantId).firstOrNull
+        : null;
+    final worn =
+        _wardrobe.worn(item.kind)?.id == item.id &&
+        (role == null || _wardrobe.variantOf(item)?.id == role.id);
+    final p = _wardrobe.progress;
+    final left = widget.ensemble ? _wardrobe.ensemble?.crates ?? 0 : p.crates;
+    final more = left > 0 && (widget.ensemble || p.dupes || !p.complete);
+    final line = outcome.type == 'new' && outcome.shiny
+        ? 'Neu – und gleich in Glanz!'
+        : outcome.line;
     final label = catalog.labelOf(item);
     return Stack(
       alignment: Alignment.center,
@@ -367,7 +400,44 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (jackpot)
+              if (shine)
+                ScaleTransition(
+                  scale: CurvedAnimation(
+                    parent: _pop,
+                    curve: Curves.elasticOut,
+                  ),
+                  child: AnimatedBuilder(
+                    animation: _glow,
+                    builder: (context, child) => ShaderMask(
+                      blendMode: BlendMode.srcIn,
+                      shaderCallback: (bounds) => LinearGradient(
+                        colors: const [
+                          Color(0xFFFFD86B),
+                          Color(0xFFFFFFFF),
+                          Color(0xFFB8F1FF),
+                          Color(0xFFFFC2F0),
+                          Color(0xFFFFD86B),
+                        ],
+                        transform: GradientRotation(_glow.value * 2 * pi),
+                      ).createShader(bounds),
+                      child: child,
+                    ),
+                    child: const Text(
+                      'GLANZ!',
+                      key: ValueKey('crate-shine'),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 44,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 6,
+                        shadows: [
+                          Shadow(color: Color(0xFFFFE7A3), blurRadius: 28),
+                        ],
+                      ),
+                    ),
+                  ),
+                )
+              else if (jackpot)
                 ScaleTransition(
                   scale: CurvedAnimation(
                     parent: _pop,
@@ -400,6 +470,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                     controller: widget.controller,
                     art: widget.art,
                     worn: worn,
+                    animateShine: true,
                   ),
                 ),
               ),
@@ -426,6 +497,32 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              if (line != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  key: const ValueKey('crate-outcome'),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.first.withValues(alpha: .18),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: colors.first.withValues(alpha: .6),
+                    ),
+                  ),
+                  child: Text(
+                    line,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
               if (item.rarityReason case final reason?) ...[
                 const SizedBox(height: 6),
                 Text(
@@ -442,11 +539,11 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                 children: [
                   if (!worn)
                     FilledButton.icon(
-                      onPressed: _wearing ? null : () => _wear(item),
+                      onPressed: _wearing ? null : () => _wear(item, role),
                       icon: const Icon(Icons.checkroom),
-                      label: const Text('Anlegen'),
+                      label: Text(role == null ? 'Anlegen' : 'Rolle anlegen'),
                     ),
-                  if (left > 0 && !_wardrobe.progress.complete)
+                  if (more)
                     FilledButton.tonalIcon(
                       onPressed: _start,
                       icon: const Icon(Icons.inventory_2_outlined),

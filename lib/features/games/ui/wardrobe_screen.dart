@@ -9,6 +9,7 @@ import '../../../shared/navigation.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
 import 'crate_opening.dart';
+import 'ensemble_card.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart' show obstacleName;
 import 'stage_runner_look.dart';
@@ -37,10 +38,18 @@ final _number = NumberFormat.decimalPattern('de');
 /// "1.234 m".
 String metersText(int meters) => '${_number.format(meters)} m';
 
-/// "noch 1.234 m bis zur nächsten Kiste".
-String nextCrateText(RunnerProgress p) => p.complete
+/// "noch 1.234 m bis zur nächsten Kiste". With duplicates a complete
+/// collection still gets crates.
+String nextCrateText(RunnerProgress p) => p.complete && !p.dupes
     ? 'Fundus komplett – neue Kostüme kommen bald.'
     : 'noch ${metersText(p.remaining)} bis zur nächsten Kiste';
+
+/// "+1,2 km fürs Ensemble · noch 18 km bis Anno 1146", after a run.
+String ensembleRunText(EnsembleRun e) =>
+    '+${kmText(e.gained)} fürs Ensemble · noch ${kmText(e.remaining)} bis ${e.next.name}';
+
+/// "Gage" with a figure, "1 Gage".
+String gageText(int gage) => '${_number.format(gage)} Gage';
 
 /// "Garderobe" of the stage runner: costume crates to open, the collection
 /// by kind with what is worn, and the statistics of the own runs.
@@ -67,9 +76,11 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   late Wardrobe? _wardrobe = widget.initial;
   RunnerArt? _base = RunnerArt.loaded, _dressed;
   String? _error;
-  bool _loading = false, _busy = false;
+  bool _loading = false, _busy = false, _celebrating = false;
 
   AppController get controller => widget.controller;
+  bool get _dupes => dupesAvailable(controller);
+  bool get _ensemble => ensembleAvailable(controller);
 
   @override
   void initState() {
@@ -95,6 +106,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       final w = await loadWardrobe(controller);
       if (!mounted) return;
       _update(w);
+      _celebrate(w);
     } catch (e) {
       if (mounted) setState(() => _error = userMessage(e));
     } finally {
@@ -116,7 +128,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     _dress();
   }
 
-  Future<void> _open() async {
+  Future<void> _open({bool ensemble = false}) async {
     final w = _wardrobe;
     if (w == null) return;
     final next = await showCrateOpening(
@@ -125,14 +137,49 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       wardrobe: w,
       sound: widget.sound,
       art: _base,
+      ensemble: ensemble,
     );
     if (next != null && mounted) _update(next);
   }
 
-  Future<void> _wear(WardrobeItem item) async {
+  /// A reached milestone not celebrated yet: once, when the wardrobe opens.
+  Future<void> _celebrate(Wardrobe w) async {
+    final e = w.ensemble;
+    if (!_ensemble || e == null || e.unseen.isEmpty || _celebrating) return;
+    _celebrating = true;
+    widget.sound.play(RunnerSfx.jackpot);
+    final reached = [for (final km in e.unseen) ?e.milestone(km)];
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (context) => EnsembleCelebration(
+        reached: reached,
+        wardrobe: w,
+        controller: controller,
+        art: _base,
+      ),
+    );
+    try {
+      final next = await markEnsembleSeen(controller, e.unseen.last);
+      if (mounted) _update(next);
+    } catch (_) {
+      // Shown again next time.
+    }
+    if (open == true && mounted) await _open(ensemble: true);
+  }
+
+  Future<void> _wear(
+    WardrobeItem item, {
+    WardrobeVariant? variant,
+    bool plainLook = false,
+  }) async {
     setState(() => _busy = true);
     try {
-      final w = await wearItem(controller, item);
+      final w = await wearItem(
+        controller,
+        item,
+        variant: variant,
+        plainLook: plainLook,
+      );
       if (mounted) _update(w);
     } catch (e) {
       if (mounted) showProblem(context, e);
@@ -146,10 +193,15 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final catalog = w.catalog;
     final owned = w.owns(item);
     final worn = w.worn(item.kind)?.id == item.id;
-    final hint = w.lockHint(item);
+    final hint = w.lockHint(item) ?? rewardHint(w, item);
     final rarities = catalog.raritiesOf(item);
     final label = catalog.labelOf(item);
+    final shiny = owned && w.isShiny(item);
+    final cost = _dupes ? w.buyCost(item) : null;
+    final role = w.variantOf(item);
+    final milestone = item.reward ? w.ensemble?.rewardOf(item) : null;
     showModalBottomSheet<void>(
+      isScrollControlled: true,
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
@@ -170,6 +222,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                       controller: controller,
                       art: _base,
                       worn: worn,
+                      animateShine: true,
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -178,9 +231,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          owned ? item.name : 'Noch nicht gefunden',
+                          owned || item.reward
+                              ? item.name
+                              : 'Noch nicht gefunden',
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
+                        if (role != null && owned) Text('Als ${role.name}'),
                         const SizedBox(height: 4),
                         Text(
                           [
@@ -196,6 +252,24 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                             fontWeight: FontWeight.w700,
                           ),
                         ),
+                        if (shiny)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 2),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.auto_awesome,
+                                  size: 16,
+                                  color: Color(0xFFE4AE39),
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Glanz-Version',
+                                  style: TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                              ],
+                            ),
+                          ),
                         if (owned && label != null) Text(label),
                         if (owned && item.rarityReason != null)
                           Padding(
@@ -213,10 +287,21 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ),
+                        if (milestone != null && owned)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              'Ensemble-Belohnung für ${kmText(milestone.meters)} gemeinsam.',
+                            ),
+                          ),
                         if (hint != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
-                            child: Text(hint),
+                            child: Text(
+                              item.reward && milestone?.reached != true
+                                  ? '$hint: für alle, sobald das Ensemble so weit gelaufen ist.'
+                                  : hint,
+                            ),
                           )
                         else if (!owned)
                           const Padding(
@@ -225,11 +310,62 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                               'Kommt vielleicht aus der nächsten Kostümkiste.',
                             ),
                           ),
+                        if (!owned &&
+                            hint == null &&
+                            _dupes &&
+                            cost == null &&
+                            !item.reward)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              '${catalog.rarityOf(item).name} gibt es nur aus Kisten und Tauschverträgen.',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
                       ],
                     ),
                   ),
                 ],
               ),
+              if (owned && item.variants.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text('Rolle', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    ChoiceChip(
+                      key: const ValueKey('variant-plain'),
+                      label: const Text('Eigene Figur'),
+                      selected: worn && role == null,
+                      onSelected: _busy
+                          ? null
+                          : (_) {
+                              Navigator.pop(context);
+                              _wear(item, plainLook: true);
+                            },
+                    ),
+                    for (final v in item.variants)
+                      ChoiceChip(
+                        key: ValueKey('variant-${v.id}'),
+                        avatar: w.variants.contains(v.id)
+                            ? null
+                            : const Icon(Icons.lock_outline, size: 16),
+                        label: Text(
+                          w.variants.contains(v.id) ? v.name : '? (Duplikat)',
+                        ),
+                        selected: worn && role?.id == v.id,
+                        onSelected: _busy || !w.variants.contains(v.id)
+                            ? null
+                            : (_) {
+                                Navigator.pop(context);
+                                _wear(item, variant: v);
+                              },
+                      ),
+                  ],
+                ),
+              ],
               if (owned && !worn) ...[
                 const SizedBox(height: 20),
                 FilledButton.icon(
@@ -243,11 +379,206 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                   label: const Text('Anlegen'),
                 ),
               ],
+              if (cost != null && hint == null) ...[
+                const SizedBox(height: 20),
+                FilledButton.tonalIcon(
+                  key: const ValueKey('wardrobe-buy'),
+                  onPressed: _busy || w.gage < cost
+                      ? null
+                      : () {
+                          Navigator.pop(context);
+                          _buy(item, cost);
+                        },
+                  icon: const Icon(Icons.shopping_bag_outlined),
+                  label: Text('Gezielt holen · ${gageText(cost)}'),
+                ),
+                if (w.gage < cost)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      'Dir fehlen noch ${gageText(cost - w.gage)}. Gage gibt es für Duplikate.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+              ],
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<bool> _confirm(String title, String text, String action) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(text),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              key: const ValueKey('deal-confirm'),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(action),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _buy(WardrobeItem item, int cost) async {
+    final w = _wardrobe!;
+    final ok = await _confirm(
+      'Gezielt holen?',
+      '${item.kind.singular} der Stufe ${w.catalog.rarityOf(item).name} für ${gageText(cost)}. Danach bleiben ${gageText(w.gage - cost)}.',
+      'Für ${gageText(cost)} holen',
+    );
+    if (!ok || !mounted) return;
+    await _deal(() => buyItem(controller, item));
+  }
+
+  /// The Tauschvertrag: one of the offered trades, then a confirmation.
+  Future<void> _trade() async {
+    final w = _wardrobe!;
+    final catalog = w.catalog;
+    WardrobeRarity rarity(String id) =>
+        catalog.rarities.where((r) => r.id == id).firstOrNull ??
+        WardrobeRarity.unknown;
+    final chosen = await showModalBottomSheet<TradeOption>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) {
+        TradeOption? pick = w.trades.where((t) => t.cost <= w.gage).lastOrNull;
+        return StatefulBuilder(
+          builder: (context, setSheet) => SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Tauschvertrag',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${catalog.dupes.tradeDupes} Duplikate einer Stufe in Gage gegen ein zufälliges Teil, das dir in der Stufe darüber noch fehlt. Du hast ${gageText(w.gage)}.',
+                  ),
+                  const SizedBox(height: 8),
+                  if (w.trades.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text('Gerade ist kein Tausch möglich.'),
+                    ),
+                  for (final t in w.trades)
+                    ListTile(
+                      key: ValueKey('trade-${t.to}'),
+                      contentPadding: EdgeInsets.zero,
+                      enabled: t.cost <= w.gage,
+                      selected: identical(pick, t),
+                      leading: Icon(
+                        identical(pick, t)
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                      ),
+                      title: Text('→ zufällig ${rarity(t.to).name}'),
+                      subtitle: Text(
+                        '${catalog.dupes.tradeDupes} × ${rarity(t.from).name} · ${gageText(t.cost)}',
+                      ),
+                      trailing: CircleAvatar(
+                        radius: 8,
+                        backgroundColor: rarity(t.to).color,
+                      ),
+                      onTap: () => setSheet(() => pick = t),
+                    ),
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    key: const ValueKey('trade-sign'),
+                    onPressed: pick == null
+                        ? null
+                        : () => Navigator.pop(context, pick),
+                    icon: const Icon(Icons.draw_outlined),
+                    label: Text(
+                      pick == null
+                          ? 'Vertrag unterschreiben'
+                          : 'Für ${gageText(pick!.cost)} unterschreiben',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    if (chosen == null || !mounted) return;
+    final ok = await _confirm(
+      'Tauschvertrag unterschreiben?',
+      '${gageText(chosen.cost)} gegen ein zufälliges ${rarity(chosen.to).name}-Teil, das dir noch fehlt.',
+      'Unterschreiben',
+    );
+    if (!ok || !mounted) return;
+    await _deal(() => tradeGage(controller, chosen.from));
+  }
+
+  /// Runs a trade or purchase and shows what it brought.
+  Future<void> _deal(Future<GageDeal> Function() run) async {
+    setState(() => _busy = true);
+    try {
+      final deal = await run();
+      if (!mounted) return;
+      _update(deal.wardrobe);
+      widget.sound.play(RunnerSfx.reveal);
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(deal.outcome.line ?? 'Neu in der Garderobe'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 140,
+                height: 175,
+                child: WardrobeCard(
+                  key: const ValueKey('deal-item'),
+                  item: deal.item,
+                  wardrobe: deal.wardrobe,
+                  controller: controller,
+                  art: _base,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                deal.item.name,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _wear(deal.item);
+              },
+              child: const Text('Anlegen'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Fertig'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -291,8 +622,24 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     return CustomScrollView(
       key: const PageStorageKey('wardrobe-costumes'),
       slivers: [
+        if (_ensemble && w.ensemble != null)
+          SliverPadding(
+            padding: padding.copyWith(bottom: 12),
+            sliver: SliverToBoxAdapter(
+              child: EnsembleCard(
+                wardrobe: w,
+                controller: controller,
+                art: _base,
+                onOpen: _busy ? null : () => _open(ensemble: true),
+                onReward: _details,
+              ),
+            ),
+          ),
         SliverPadding(
-          padding: padding.copyWith(bottom: 0),
+          padding: padding.copyWith(
+            bottom: 0,
+            top: _ensemble && w.ensemble != null ? 0 : null,
+          ),
           sliver: SliverToBoxAdapter(child: _crates(context, w)),
         ),
         // A kind with nothing to collect yet (only its default) stays hidden.
@@ -307,7 +654,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   Widget _crates(BuildContext context, Wardrobe w) {
     final theme = Theme.of(context);
     final p = w.progress;
-    final ready = p.crates > 0 && !p.complete;
+    final ready = p.crates > 0 && (_dupes || !p.complete);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -361,7 +708,15 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               '${metersText(p.meters)} gelaufen · ${nextCrateText(p)}',
               style: theme.textTheme.bodyMedium,
             ),
-            if (p.complete && p.crates > 0)
+            if (p.complete && _dupes)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Fundus komplett – Kisten bringen jetzt Rollen, Glanz oder Gage.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              )
+            else if (p.complete && p.crates > 0)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
@@ -376,6 +731,32 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               icon: const Icon(Icons.inventory_2),
               label: const Text('Kiste öffnen'),
             ),
+            if (_dupes) ...[
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const Icon(Icons.payments_outlined, color: Color(0xFFE4AE39)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      gageText(w.gage),
+                      key: const ValueKey('wardrobe-gage'),
+                      style: theme.textTheme.titleSmall,
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    key: const ValueKey('wardrobe-trade'),
+                    onPressed: _busy ? null : _trade,
+                    icon: const Icon(Icons.handshake_outlined),
+                    label: const Text('Tauschvertrag'),
+                  ),
+                ],
+              ),
+              Text(
+                'Duplikate einer kompletten Stufe bringen Gage. Fehlende Teile kannst du über ihre Karte gezielt holen.',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
             const SizedBox(height: 16),
             _odds(context, w),
           ],
@@ -404,6 +785,19 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 style: theme.textTheme.bodySmall,
               ),
             ),
+        if (_dupes)
+          Chip(
+            visualDensity: VisualDensity.compact,
+            avatar: const Icon(
+              Icons.auto_awesome,
+              size: 14,
+              color: Color(0xFFE4AE39),
+            ),
+            label: Text(
+              'Glanz: ${_percent(catalog.dupes.shinyChance)}',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
       ],
     );
   }
@@ -606,9 +1000,43 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   );
 }
 
+/// After a run: what it added to the Ensemble-Strecke, and a milestone it
+/// reached.
+class EnsembleRunNote extends StatelessWidget {
+  const EnsembleRunNote(this.run, {super.key});
+  final EnsembleRun run;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      key: const ValueKey('runner-ensemble'),
+      children: [
+        const SizedBox(height: 8),
+        Text(
+          ensembleRunText(run),
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall,
+        ),
+        for (final m in run.reached) ...[
+          const SizedBox(height: 6),
+          Text(
+            'Ensemble-Ziel erreicht: ${m.name}! Eine Ensemble-Kiste wartet in der Garderobe.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: StageTheme.orange,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 /// Whether [w] has a crate waiting that can be opened.
 bool crateWaiting(Wardrobe? w) =>
-    w != null && w.progress.crates > 0 && !w.progress.complete;
+    w != null && (w.progress.canOpen || w.progress.ensembleCrates > 0);
 
 /// A small "Garderobe" button with the number of waiting crates.
 class WardrobeButton extends StatelessWidget {

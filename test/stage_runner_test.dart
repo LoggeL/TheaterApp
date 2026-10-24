@@ -1192,8 +1192,7 @@ void main() {
         ..stopMusic()
         ..dispose();
 
-      final audio = _FakeWebAudio(await _soundAssets())
-        ..broken.add('rose.mp3');
+      final audio = _FakeWebAudio(await _soundAssets())..broken.add('rose.mp3');
       final sound = WebRunnerSound(open: () => audio)..prepare();
       await _decoded(audio, RunnerSfx.values.length);
       audio.log.clear();
