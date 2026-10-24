@@ -2,7 +2,27 @@
 """Build a web release and deploy its immutable Docker image to the existing Dokploy app.
 Secrets stay in macOS Keychain / the server's private bind mount.
 """
-import argparse, hashlib, json, pathlib, shlex, subprocess, tarfile
+import argparse, hashlib, json, pathlib, shlex, subprocess, tarfile, os, sys, stat
+
+def api_key():
+    """Explicit CI/Linux credentials take precedence over the macOS Keychain."""
+    key = os.environ.get('DOKPLOY_API_KEY', '').strip()
+    if not key and os.environ.get('DOKPLOY_API_KEY_FILE'):
+        path = pathlib.Path(os.environ['DOKPLOY_API_KEY_FILE']).expanduser()
+        if not path.is_file() or stat.S_IMODE(path.stat().st_mode) & 0o077:
+            raise RuntimeError('DOKPLOY_API_KEY_FILE must be a private file (mode 600 or stricter).')
+        key = path.read_text().strip()
+    if not key and sys.platform == 'darwin':
+        key = subprocess.check_output(['security', 'find-generic-password', '-s', 'dokploy.logge.top API Key', '-w'], text=True).strip()
+    if not key or '\n' in key or '\r' in key:
+        raise RuntimeError('Set DOKPLOY_API_KEY or DOKPLOY_API_KEY_FILE, or configure macOS Keychain.')
+    return key
+
+def host_transport(config):
+    """Run on HomeBox only after explicit opt-in; SSH remains the default."""
+    if os.environ.get('THEATER_DEPLOY_LOCAL') == '1':
+        return ['sh', '-c']
+    return ['ssh', '-i', str(pathlib.Path(config['sshKey']).expanduser()), '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes', config['sshHost']]
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CFG = ROOT / 'config/dokploy.json'
 
@@ -10,11 +30,11 @@ def run(args, **kw):
     return subprocess.run(args, cwd=ROOT, check=True, **kw)
 
 def api(path, payload=None):
-    key = subprocess.check_output(['security', 'find-generic-password', '-s', 'dokploy.logge.top API Key', '-w'], text=True).strip()
+    key = api_key()
     config = 'header = ' + json.dumps('x-api-key: ' + key) + '\n'
     if payload is not None:
         config += 'request = "POST"\nheader = "Content-Type: application/json"\ndata = ' + json.dumps(json.dumps(payload)) + '\n'
-    r = run(['curl', '--config', '-', '-sS', '--max-time', '45', '-w', '\n%{http_code}', 'https://dokploy.logge.top/api/' + path], input=config, text=True, capture_output=True)
+    r = run(['curl', '--config', '-', '-sS', '--max-time', '45', '-w', '\n%{http_code}', os.environ.get('DOKPLOY_API_URL', 'https://dokploy.logge.top/api').rstrip('/') + '/' + path], input=config, text=True, capture_output=True)
     body, _, status = r.stdout.rpartition('\n')
     if status != '200':
         raise RuntimeError(f'Dokploy {path}: HTTP {status}')
@@ -26,6 +46,8 @@ def main():
     args = parser.parse_args()
     c = json.loads(CFG.read_text())
     hosts = list(dict.fromkeys([c['host'], *c.get('additionalHosts', [])]))
+    # Refuse a rollout if the consistent database + referenced-media backup fails.
+    run([sys.executable, 'tool/backup.py'])
     if not args.skip_build:
         run(['node', 'tool/configure.mjs', 'config/production.web.json'])
         # --wasm adds a dart2wasm/skwasm build for Chromium; Safari and Firefox keep dart2js with CanvasKit.
@@ -46,7 +68,7 @@ def main():
     archive = artifacts/f'deploy-{release}.tar.gz'
     with tarfile.open(archive, 'w:gz') as tar:
         for f in files: tar.add(f, arcname=str(f.relative_to(ROOT)), recursive=False)
-    ssh = ['ssh', '-i', str(pathlib.Path(c['sshKey']).expanduser()), '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes', c['sshHost']]
+    ssh = host_transport(c)
     remote = c['remotePath']; context = f'{remote}/releases/{release}'
     command = f'mkdir -p {shlex.quote(context)} && tar xzf - -C {shlex.quote(context)} && docker build --build-arg RELEASE_SHA={release} -t theater-app:{release} {shlex.quote(context)}'
     with archive.open('rb') as stream: run(ssh+[command], stdin=stream)

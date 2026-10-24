@@ -2,10 +2,10 @@
 """Download a consistent backup from the Theater-App container without stopping it."""
 from pathlib import Path
 import json,subprocess,datetime,shlex,os,sqlite3
-from deploy import api
+from deploy import api, host_transport
 root=Path(__file__).resolve().parents[1]; c=json.loads((root/'config/dokploy.json').read_text())
 app=api('compose.one?composeId='+c['composeId']); app_name=app['appName']
-ssh=['ssh','-i',str(Path(c['sshKey']).expanduser()),'-o','IdentitiesOnly=yes','-o','BatchMode=yes',c['sshHost']]
+ssh=host_transport(c)
 ps=subprocess.run(ssh+['docker ps --filter '+shlex.quote('label=com.docker.compose.project='+app_name)+' --filter label=com.docker.compose.service=theater --format "{{.Names}}"'],capture_output=True,text=True,check=True)
 containers=ps.stdout.splitlines()
 if len(containers)!=1:raise RuntimeError('Expected exactly one running Theater-App container')
