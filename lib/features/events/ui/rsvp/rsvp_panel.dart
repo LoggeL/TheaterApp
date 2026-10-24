@@ -32,16 +32,20 @@ class _RsvpPanelState extends State<RsvpPanel> {
   Future<void> _save(String status, {String? done, String? queued}) async {
     setState(() => _busy = true);
     try {
-      final outcome = await widget.controller.respond(
+      final result = await widget.controller.respondWithResult(
         widget.event.id,
         status,
         expectedArrivalAt: status == 'late' ? _arrival : null,
       );
       if (mounted) setState(() => _editingLate = false);
-      if (done != null && mounted) {
+      // A commitment that brought a Termin-Kiste says thanks.
+      final notice = widget.controller.eventCrateNotice(result);
+      if (notice != null && mounted) {
+        showDone(context, notice);
+      } else if (done != null && mounted) {
         showDone(
           context,
-          outcomeText(outcome, done: done, queued: queued ?? done),
+          outcomeText(result.outcome, done: done, queued: queued ?? done),
         );
       }
     } catch (e) {

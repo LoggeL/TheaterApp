@@ -120,8 +120,8 @@ export async function deliverPush(theater, messaging, appOrigin = process.env.AP
           const actions = canRespond ? 'true' : planned ? 'planned' : null;
           const target = job.data?.eventId ? ['events', job.data.eventId] : job.data?.messageId ? ['messages', job.data.messageId] : job.data?.pollId ? ['polls', job.data.pollId] : job.data?.productionId ? ['productions', job.data.productionId] : job.data?.accountUid ? ['accounts', job.data.accountUid] : job.data?.slotPoolId ? ['slots', job.data.slotPoolId] : job.data?.feedbackId ? ['feedback', job.data.feedbackId] : job.data?.adminFeedbackId ? ['admin-feedback', job.data.adminFeedbackId] : null;
           const link = appOrigin ? new URL('/', appOrigin) : null;
-          // Older apps ignore the query and just open the event.
-          if (link && target) link.searchParams.set('target', `theaterapp://app/${target[0]}/${encodeURIComponent(target[1])}${target[0] === 'events' && job.data?.intent === 'decline' ? '?intent=decline' : ''}`);
+          // Older apps ignore the query and just open the event; `checkin` opens its attendance check-in.
+          if (link && target) link.searchParams.set('target', `theaterapp://app/${target[0]}/${encodeURIComponent(target[1])}${target[0] === 'events' && ['decline', 'checkin'].includes(job.data?.intent) ? `?intent=${job.data.intent}` : ''}`);
           const result = await messaging.sendEachForMulticast({ tokens: chunk.map(d => d.token), ...(custom ? { data: { ...job.data, title, body, notificationId: job.id, recipientUid: chunk[0].uid, ...(actions ? { attendanceActions: actions } : {}) } } : { notification: { title, body }, data: job.data ?? {} }), ...(link?.protocol === 'https:' ? { webpush: { fcmOptions: { link: link.href } } } : {}), android: { priority: 'high', ...(custom ? {} : { notification: { channelId: 'theater_updates' } }) }, apns: { payload: { aps: { sound: 'default' } } } });
           result.responses.forEach((r, index) => {
             if (r.success) { accepted++; already.add(chunk[index].id); }

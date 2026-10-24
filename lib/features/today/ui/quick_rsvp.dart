@@ -50,12 +50,19 @@ class _QuickRsvpState extends State<QuickRsvp> {
     widget.onAnswer?.call();
     setState(() => _busy = true);
     try {
-      final outcome = await controller.respond(
+      final result = await controller.respondWithResult(
         before.id,
         status,
         expectedArrivalAt: arrival,
       );
-      _confirm(messenger, controller, before, status, outcome);
+      _confirm(
+        messenger,
+        controller,
+        before,
+        status,
+        result.outcome,
+        notice: controller.eventCrateNotice(result),
+      );
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(userMessage(e))));
     } finally {
@@ -218,8 +225,9 @@ void _confirm(
   AppController controller,
   TheaterEvent before,
   String status,
-  ActionOutcome outcome,
-) {
+  ActionOutcome outcome, {
+  String? notice,
+}) {
   final label = switch (status) {
     'yes' => 'Zusage',
     'late' => 'Später',
@@ -229,12 +237,14 @@ void _confirm(
     ..hideCurrentSnackBar()
     ..showSnackBar(
       SnackBar(
+        // A commitment that brought a Termin-Kiste says thanks instead.
         content: Text(
-          outcomeText(
-            outcome,
-            done: '$label gespeichert',
-            queued: '$label vorgemerkt – wird bei Verbindung gesendet',
-          ),
+          notice ??
+              outcomeText(
+                outcome,
+                done: '$label gespeichert',
+                queued: '$label vorgemerkt – wird bei Verbindung gesendet',
+              ),
         ),
         action: _canRestore(controller, before)
             ? SnackBarAction(

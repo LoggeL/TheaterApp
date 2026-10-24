@@ -9,6 +9,7 @@ import '../features/events/ui/event_detail_screen.dart';
 import '../features/feedback/feedback.dart';
 import '../features/messages/ui/message_detail_screen.dart';
 import '../features/polls/ui/poll_detail_screen.dart';
+import '../features/rehearsal/ui/attendance_screen.dart';
 import '../features/scripts/ui/script_reader_screen.dart';
 import '../features/slots/ui/slot_pool_screen.dart';
 import '../shared/feedback.dart';
@@ -47,7 +48,19 @@ class DeepLinkRouter {
       return;
     }
     _pendingTarget = null;
+    final checkinEvent = target.intent == 'checkin'
+        ? controller.events.where((e) => e.id == target.id).firstOrNull
+        : null;
     final (section, page) = switch (target.kind) {
+      // The reminder to record the attendance opens the check-in; without
+      // the right (or the event) just the event.
+      'events'
+          when checkinEvent != null &&
+              controller.user?.canManageEvents == true =>
+        (
+          AppSection.schedule,
+          AttendanceEditorScreen(controller: controller, event: checkinEvent),
+        ),
       'events' => (
         AppSection.schedule,
         EventDetailScreen(

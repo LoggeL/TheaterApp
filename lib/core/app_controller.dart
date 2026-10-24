@@ -76,6 +76,13 @@ class AppController extends ChangeNotifier {
   JsonMap get arrivalsByEvent => jsonMap(_baseSnapshot['arrivalsByEvent']);
   JsonMap get checkinVersions => cloneJson(_checkinVersions);
   JsonMap _checkinVersions = {};
+
+  /// Leaders only: the people of [eventId] whose attendance was adopted from
+  /// their own commitment (Termin-Kisten) instead of recorded by hand.
+  Set<int> autoCheckins(String eventId) => {
+    for (final id in jsonList(jsonMap(_view['autoCheckinsByEvent'])[eventId]))
+      intValue(id),
+  };
   List<JsonMap> get productionRecords =>
       jsonList(_view['productions']).map(jsonMap).toList()..sort(
         (left, right) => Production.compareNewestFirst(

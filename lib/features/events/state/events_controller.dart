@@ -10,6 +10,20 @@ extension EventsController on AppController {
     String status, {
     String reason = '',
     DateTime? expectedArrivalAt,
+  }) async => (await respondWithResult(
+    eventId,
+    status,
+    reason: reason,
+    expectedArrivalAt: expectedArrivalAt,
+  )).outcome;
+
+  /// Like [respond], with the server's reply once it confirmed the answer,
+  /// e.g. for [eventCrateNotice].
+  Future<ActionResult> respondWithResult(
+    String eventId,
+    String status, {
+    String reason = '',
+    DateTime? expectedArrivalAt,
   }) async {
     final event = _events.where((e) => e.id == eventId).firstOrNull;
     if (event == null) {
@@ -50,7 +64,7 @@ extension EventsController on AppController {
         statusCode: 400,
       );
     }
-    return performAction({
+    return performActionWithResult({
       'action': 'attendance',
       'eventId': eventId,
       'status': status,
@@ -60,6 +74,25 @@ extension EventsController on AppController {
           : null,
     });
   }
+
+  /// The thanks for a commitment that can bring a Termin-Kiste
+  /// (`runnerEventCrates`): it comes once the attendance is confirmed after
+  /// the event. Null otherwise, and for people who do not know the stage
+  /// runner: it is a hidden game, the hint would puzzle the others (their
+  /// crate comes all the same).
+  String? eventCrateNotice(ActionResult result) {
+    final crate = result.data?['eventCrate'];
+    if (!supports('runnerEventCrates') ||
+        crate is! Map ||
+        crate['pending'] != true ||
+        crate['player'] != true) {
+      return null;
+    }
+    return eventCrateThanks;
+  }
+
+  static const eventCrateThanks =
+      'Danke für deine Zusage! Nach dem Termin wartet eine Termin-Kiste auf dich.';
 
   Future<String> respondFromNotification(
     String eventId,
@@ -92,7 +125,7 @@ extension EventsController on AppController {
         statusCode: 409,
       );
     }
-    await respond(eventId, status);
+    final result = await respondWithResult(eventId, status);
     checkAccount();
     if (_outbox.any(
       (a) =>
@@ -102,7 +135,8 @@ extension EventsController on AppController {
     )) {
       return 'Rückmeldung vorgemerkt. Sie wird bei Verbindung gesendet.';
     }
-    return status == 'yes' ? 'Zusage gespeichert.' : 'Absage gespeichert.';
+    return eventCrateNotice(result) ??
+        (status == 'yes' ? 'Zusage gespeichert.' : 'Absage gespeichert.');
   }
 
   Future<void> linkEventScript(

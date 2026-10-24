@@ -137,6 +137,20 @@ extension ProjectionController on AppController {
             textValue(jsonMap(member)['id']): jsonMap(member)['present'],
         };
         view['checkinsByEvent'] = checkins;
+        // Recorded by hand now: no longer adopted from the commitment.
+        final auto = jsonMap(view['autoCheckinsByEvent']);
+        final recorded = {
+          for (final member in jsonList(body['members']))
+            intValue(jsonMap(member)['id']),
+        };
+        final eventId = textValue(body['eventId']);
+        if (auto[eventId] != null) {
+          auto[eventId] = [
+            for (final id in jsonList(auto[eventId]))
+              if (!recorded.contains(intValue(id))) id,
+          ];
+          view['autoCheckinsByEvent'] = auto;
+        }
         final versions = jsonMap(view['checkinVersions']);
         for (final item in jsonList(body['members'])) {
           final member = jsonMap(item);

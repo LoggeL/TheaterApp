@@ -155,6 +155,7 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
         );
         final theme = Theme.of(context);
         final unsaved = _changes.length;
+        final auto = controller.autoCheckins(event.id);
         return [
           Text('${event.title} · ${eventDate(event)}'),
           const SizedBox(height: 20),
@@ -170,6 +171,17 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
                     '$here da · ${away == 1 ? '1 fehlt' : '$away fehlen'} · '
                     '${members.length - here - away} nicht erfasst',
                   ),
+                  if (members.any(
+                    (m) => auto.contains(m.id) && _saved(m.id) == true,
+                  ))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Niemand hat erfasst: Die Zusagen wurden automatisch als da übernommen. Korrigieren geht jederzeit.',
+                        key: const ValueKey('attendance-auto'),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
                   const SizedBox(height: 10),
                   Row(
                     children: [
@@ -233,7 +245,14 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
               child: _AttendanceRow(
                 controller: controller,
                 member: m,
-                response: memberResponseLabel(controller, event, m.id),
+                // Adopted from the own commitment after the deadline
+                // (Termin-Kisten): an admin can still correct it.
+                response:
+                    !_changes.containsKey(m.id) &&
+                        _saved(m.id) == true &&
+                        auto.contains(m.id)
+                    ? '${memberResponseLabel(controller, event, m.id)} · automatisch übernommen'
+                    : memberResponseLabel(controller, event, m.id),
                 present: present(m.id),
                 changed: _changes.containsKey(m.id),
                 onChanged: _busy

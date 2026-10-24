@@ -25,11 +25,12 @@ class AppTarget {
   final String? attendance, recipientUid;
 
   /// 'decline' opens the decline sheet of the event (the "Du bist eingeplant"
-  /// reminder); null otherwise.
+  /// reminder), 'checkin' its attendance check-in (the reminder to record
+  /// it); null otherwise.
   final String? intent;
 
   static String? _intent(Object? value) =>
-      value == 'decline' ? 'decline' : null;
+      value == 'decline' || value == 'checkin' ? value as String : null;
 
   static AppTarget? fromNotificationResponse(NotificationResponse response) {
     try {
