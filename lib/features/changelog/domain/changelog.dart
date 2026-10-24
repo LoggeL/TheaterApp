@@ -27,6 +27,16 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.11.2',
+    date: '24. Oktober 2026',
+    items: [
+      'Neue Einstellung „Leistungsdaten senden“ unter Benachrichtigungen & '
+          'Darstellung: Sie hilft uns, Ruckler auf verschiedenen Geräten zu '
+          'finden, und lässt sich jederzeit abschalten.',
+      'Kleinere Verbesserungen und Feinschliff.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.11.1',
     date: '24. Oktober 2026',
     items: ['Weitere kleine Verbesserungen und Feinschliff.'],
