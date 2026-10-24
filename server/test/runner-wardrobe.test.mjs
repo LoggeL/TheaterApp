@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { Store } from '../src/store.mjs';
 import { Theater, apiFeatures, stageRunner, runnerMaxMeters } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
@@ -327,6 +327,9 @@ test('the bundled catalog is valid and ships only finished costumes', () => {
   assert.deepEqual(drawable.filter(x => x.placeholder).map(x => x.id), []);
   assert.ok(drawable.filter(x => x.kind !== 'fx').every(x => x.image), 'every costume has its picture');
   assert.ok(drawable.filter(x => x.kind === 'character').every(x => x.portrait && x.harness), 'characters have a portrait and their wire points');
+  const variants = c.items.flatMap(x => x.variants ?? []);
+  assert.equal(variants.length, 34, 'the role variants of Anno 1146 and Schicksalsfäden');
+  assert.ok(variants.every(v => v.portrait && v.harness && / \(.+, \d{4}\)$/.test(v.name)), 'variants have a portrait, wire points and "Rolle (Stück, Jahr)"');
   assert.ok(drawable.filter(x => x.kind === 'fx').every(x => x.effect?.colors.length));
   assert.equal(c.byId.get('backdrop.creepshow').kind, 'backdrop');
   assert.equal(c.rarities.at(-1).id, 'gold');
@@ -339,7 +342,9 @@ test('the bundled catalog is valid and ships only finished costumes', () => {
 test('the bundled pictures have the sizes the app accepts', () => {
   const c = bundledCatalog(), sizes = { character: [1124, 577], obstacles: [1124, 577], backdrop: [1024, 603] };
   const named = new Set();
-  for (const x of c.items) {
+  // Role variants are characters too: same atlas, same square portrait.
+  const pictured = c.items.flatMap(x => [x, ...(x.variants ?? []).map(v => ({ ...v, kind: x.kind }))]);
+  for (const x of pictured) {
     const file = path => path && decodeURIComponent(path.slice(path.lastIndexOf('/') + 1).split('?')[0]);
     if (x.image) {
       named.add(file(x.image));
@@ -351,11 +356,15 @@ test('the bundled pictures have the sizes the app accepts', () => {
       assert.ok(w === h && w >= 256, `${x.portrait} is square`);
     }
   }
-  // Every picture in the folder is used, and together they stay light.
+  // Every picture in the folder is used, and together they stay light. Disabled entries keep their
+  // pictures so they can simply be switched on again.
   const folder = new URL('../src/wardrobe/images/', import.meta.url);
-  assert.deepEqual(readdirSync(folder).filter(f => !named.has(f)), []);
+  const parked = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url))).items
+    .filter(x => x.disabled === true).flatMap(x => [x.image, x.portrait]).filter(Boolean);
+  assert.deepEqual(readdirSync(folder).filter(f => !named.has(f) && !parked.includes(f)), []);
   const bytes = [...c.files.values()].reduce((sum, f) => sum + f.bytes.length, 0);
-  assert.ok(bytes < 15e6, `${bytes} bytes of pictures`);
+  // 0.11.2: 159 pictures in use (42 characters, 34 role variants, 7 backdrops) are about 16 MB.
+  assert.ok(bytes < 20e6, `${bytes} bytes of pictures`);
 });
 
 test('disabled entries are left out until their picture is done', () => {
