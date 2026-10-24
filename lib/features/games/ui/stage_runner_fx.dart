@@ -12,8 +12,8 @@ class RunnerPopup {
 }
 
 /// Juice of a run that does not touch the score: sparkles, point popups,
-/// milestone and combo banners, the crash shake and the sounds that go with
-/// them. Coordinates are in stage heights relative to the visible stage.
+/// milestone banners, the crash shake and the sounds that go with them.
+/// Coordinates are in stage heights relative to the visible stage.
 ///
 /// Everything lives in fixed pools, so a run allocates nothing per frame.
 class RunnerFx {
@@ -27,7 +27,7 @@ class RunnerFx {
   final void Function(RunnerSfx sfx)? onSound;
 
   static const maxParticles = 64, popupLife = .7, bannerLife = 1.6;
-  static const comboWindow = 1.2, cheerTime = .35, shakeTime = .35;
+  static const cheerTime = .35, shakeTime = .35;
 
   final px = Float32List(maxParticles), py = Float32List(maxParticles);
   final vx = Float32List(maxParticles), vy = Float32List(maxParticles);
@@ -48,8 +48,7 @@ class RunnerFx {
 
   /// Seconds left of the cheering pose.
   double cheer = 0;
-  int combo = 0;
-  double _sincePickup = 99, _sinceWhoosh = 99;
+  double _sinceWhoosh = 99;
   bool _wasHolding = false, _crashed = false, _curtain = false;
   bool recordBroken = false;
   int _milestone = 0;
@@ -74,13 +73,6 @@ class RunnerFx {
   /// The banner for a new kind of obstacle.
   static String debutText(ObstacleKind kind) => 'Neu: ${obstacleName(kind)}!';
 
-  static String? comboText(int combo) => switch (combo) {
-    5 => 'Kombo ×5 – Bravo!',
-    10 => 'Kombo ×10 – Bravissimo!',
-    20 => 'Kombo ×20 – Da capo!',
-    _ => null,
-  };
-
   void _banner(String text) {
     banner = text;
     bannerAge = 0;
@@ -88,8 +80,6 @@ class RunnerFx {
 
   /// A pickup was taken at [viewX], [y].
   void pickup(PickupKind kind, double viewX, double y) {
-    combo = _sincePickup < comboWindow ? combo + 1 : 1;
-    _sincePickup = 0;
     cheer = cheerTime;
     onSound?.call(switch (kind) {
       PickupKind.rose => RunnerSfx.rose,
@@ -117,8 +107,6 @@ class RunnerFx {
         kind.index,
       );
     }
-    final text = comboText(combo);
-    if (text != null) _banner(text);
   }
 
   void _particle(
@@ -144,7 +132,6 @@ class RunnerFx {
   /// Advances the effects after [game] moved by [dt].
   void update(double dt, StageRunner game) {
     dt = dt.clamp(0, .05).toDouble();
-    _sincePickup += dt;
     _sinceWhoosh += dt;
     cheer = max(0, cheer - dt);
     if (bannerAge < bannerLife) bannerAge += dt;

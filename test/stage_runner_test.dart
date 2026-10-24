@@ -1408,7 +1408,7 @@ void main() {
       expect(game.score, game.meters + game.pickupPoints);
       expect(played, contains(RunnerSfx.rose));
       expect(played, contains(RunnerSfx.bravo));
-      expect(fx.combo, greaterThan(0));
+      expect(fx.popups.any((p) => p.text.startsWith('+')), isTrue);
     });
 
     test('milestones at 100, 500 and 1000 m, then every thousand', () {
