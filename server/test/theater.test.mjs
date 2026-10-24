@@ -204,7 +204,7 @@ test('the snapshot lists the supported API features next to the existing capabil
     assert.deepEqual(capabilities.features, [...apiFeatures]);
     assert.deepEqual(Object.keys(capabilities).slice(0, 6), ['pushConfigured', 'emailConfigured', 'firebaseAuth', 'checkins', 'admin', 'sampleData']);
   }
-  assert.deepEqual([...apiFeatures].sort(), ['absenceOutcome', 'accountPermissions', 'accountRole', 'addressedToMe', 'autoAccept', 'calendarFeed', 'ensembleProfiles', 'errorCodes', 'eventDetailsV2', 'feedback', 'feedbackTickets', 'lateDeclines', 'nudges', 'perfTelemetry', 'pollDelete', 'pollPush', 'pollRemind', 'productionScopeEvents', 'pushSettings', 'runnerDailyBonus', 'runnerDupes', 'runnerEnsemble', 'runnerEventCrates', 'runnerMissions', 'runnerRoleFigures', 'runnerUnlocks', 'seriesEdit', 'seriesManage', 'slotNotices', 'stageRunner']);
+  assert.deepEqual([...apiFeatures].sort(), ['absenceOutcome', 'accountPermissions', 'accountRole', 'addressedToMe', 'autoAccept', 'calendarFeed', 'ensembleProfiles', 'errorCodes', 'eventDetailsV2', 'feedback', 'feedbackTickets', 'lateDeclines', 'nudges', 'perfTelemetry', 'pollDelete', 'pollPush', 'pollRemind', 'productionScopeEvents', 'pushSettings', 'runnerDailyBonus', 'runnerDupes', 'runnerEnsemble', 'runnerEventCrates', 'runnerMissions', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerUnlocks', 'seriesEdit', 'seriesManage', 'slotNotices', 'stageRunner']);
 });
 
 test('event saves explain a skipped push and message sends count their recipients', t => {

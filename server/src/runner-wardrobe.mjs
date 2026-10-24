@@ -5,7 +5,8 @@ import { berlinDay } from './event-series.mjs';
 import { missionsView, recordMissionRun } from './runner-missions.mjs';
 import { crateView, markEventCrateOpened, nextEventCrate, waitingEventCrates } from './runner-event-crates.mjs';
 import { migrateToRoleFigures, olderAppDeal, olderAppOpening, olderAppOutfit, olderAppView, roleFiguresModel } from './runner-role-figures.mjs';
-import { addEnsembleMeters, countSection, ensembleCrates, ensembleRunView, ensembleState, ensembleView, grantEnsembleCrates, ownedRewards, parseEnsemble, reachedMilestones } from './runner-ensemble.mjs';
+import { addEnsembleMeters, countSection, ensembleCrates, ensembleRunView, ensembleState, ensembleView, grantEnsembleCrates, ownedRewards, parseEnsemble, reachedMilestones, revealedRewards } from './runner-ensemble.mjs';
+import { checkUniqueEntry, isUniqueEntry, markUniquesSeen, ownedUniques, parseUniqueRarity, settleUniques, uniqueView, withoutUniques } from './runner-unique.mjs';
 
 // "Garderobe" of the stage runner: every metre run counts towards costume crates; a crate holds one
 // item (a character, a backdrop, an obstacle set or an effect) that the person does not own yet.
@@ -49,6 +50,9 @@ import { addEnsembleMeters, countSection, ensembleCrates, ensembleRunView, ensem
 //   score and the Ensemble-Strecke keep the real metres. No cooldown, no diminishing returns.
 // - The shared "Ensemble-Strecke" of all players lives in runner-ensemble.mjs, the private
 //   "Termin-Kiste" for an own commitment to an event (`runnerEventCrates`) in runner-event-crates.mjs.
+// - Unique figures (`runnerUniqueFigures`, `rarity: "unique"`): one non-human character per play,
+//   unlocked by owning all of the play's active role figures, a secret until then; see
+//   runner-unique.mjs. Apps ask for them with `unique`; apps from before never see them.
 
 export const runnerUnlocks = Object.freeze({
   firstMeters: 2000, stepMeters: 100,
@@ -178,6 +182,10 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
   const roleFigures = data?.roleFigures === true;
   if (roleFigures) for (const x of list(data?.items)) checkRoleFigure(x, rarity, rawIds, list(data?.items), bad);
   const ensemble = parseEnsemble(data?.ensemble, rawIds, bad);
+  // The unique figures' look: apart from the draw's rarities, like the ensemble's.
+  const uniqueRarity = parseUniqueRarity(data?.uniqueFigures, rarity, bad);
+  // Every unique figure is checked, waiting ones (`disabled`) included.
+  for (const x of list(data?.items)) if (isUniqueEntry(x, uniqueRarity)) checkUniqueEntry(x, uniqueRarity, list(data?.items), bad);
   const rewardIds = new Set((ensemble?.milestones ?? []).map(m => m.item).filter(Boolean));
   const files = new Map(), byId = new Map();
   // Pictures and music share one route (`/games/runner/skins/<file>`); their names never overlap.
@@ -207,9 +215,11 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
     // An ensemble reward: owned by everyone once its milestone is reached, never drawn or bought.
     const reward = x.reward === true;
     if (reward !== rewardIds.has(x.id) || (reward && x.default === true)) bad(`reward ${x.id} needs exactly one ensemble milestone`);
+    // A unique figure: unlocked by all role figures of its play, never drawn, traded or bought.
+    const unique = isUniqueEntry(x, uniqueRarity), unlock = unique ? checkUniqueEntry(x, uniqueRarity, list(data?.items), bad) : null;
     const fixed = x.rarities !== undefined ? list(x.rarities) : x.rarity !== undefined ? [x.rarity] : [];
     const own = reward && !fixed.length ? [ensemble.rarity.id] : [...new Set([...fixed, ...(x.score !== undefined && byScore(x.score) ? [byScore(x.score)] : [])])];
-    if (!own.length || own.some(id => !rarity.has(id) && !(reward && id === ensemble.rarity.id))) bad(`unknown rarity of ${x.id}`);
+    if (!own.length || own.some(id => !rarity.has(id) && !(reward && id === ensemble.rarity.id) && !(unique && id === uniqueRarity.id))) bad(`unknown rarity of ${x.id}`);
     // Rarest first: the first one is the item's main colour.
     own.sort((a, b) => (rarity.get(b)?.rank ?? -1) - (rarity.get(a)?.rank ?? -1));
     // One department or several ("Bühnentechnik · Videotechnik"); only a label, never a rarity.
@@ -222,6 +232,7 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
       ...(x.default === true ? { default: true } : {}),
       ...(x.placeholder === true ? { placeholder: true } : {}),
       ...(reward ? { reward: true } : {}),
+      ...(unique ? { unique: true, unlock } : {}),
       ...(departmentIds.length ? { departments: [...departmentIds] } : {}),
       ...(typeof x.rarityReason === 'string' && x.rarityReason ? { rarityReason: x.rarityReason } : {}),
       // A free label instead of the department names, e.g. "Bühnentechnik · Ensemble".
@@ -236,7 +247,7 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
     };
     // The rarities it can be drawn through: only the exclusive ones if it has any.
     const exclusive = own.filter(id => rarity.get(id)?.exclusive);
-    Object.defineProperty(item, 'drawnBy', { value: reward ? [] : exclusive.length ? exclusive : own, enumerable: false });
+    Object.defineProperty(item, 'drawnBy', { value: reward || unique ? [] : exclusive.length ? exclusive : own, enumerable: false });
     // `image`: the atlas (or backdrop); `portrait`: a square picture for the cards.
     const image = picture(x.image), portrait = picture(x.portrait);
     if (image) item.image = image;
@@ -289,14 +300,24 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
     return item;
   });
   for (const kind of wardrobeKinds) if (items.filter(x => x.kind === kind && x.default).length !== 1) bad(`exactly one default ${kind} needed`);
-  // What crates, trades and purchases can bring: all but the default outfit and ensemble rewards.
-  const collectible = items.filter(x => !x.default && !x.reward);
+  // What crates, trades and purchases can bring: all but the default outfit, ensemble rewards and unique figures.
+  const collectible = items.filter(x => !x.default && !x.reward && !x.unique);
+  const uniques = items.filter(x => x.unique);
   // For apps before role figures: figure → the person's figure it is a variant of (both available),
   // and that figure → its variants in catalog order.
   const baseOf = new Map(items.filter(x => x.variantOf && byId.has(x.variantOf)).map(x => [x.id, x.variantOf]));
   const rolesOf = new Map();
   for (const [id, base] of baseOf) rolesOf.set(base, [...(rolesOf.get(base) ?? []), byId.get(id)]);
-  return { rarities, departments, items, collectible, byId, files, rarity, dupes, ensemble, roleFigures, baseOf, rolesOf, defaults: Object.fromEntries(wardrobeKinds.map(k => [k, items.find(x => x.kind === k && x.default).id])) };
+  // Files only ensemble rewards use (name → their ids): not served before a milestone reveals one.
+  const users = new Map();
+  for (const x of items) for (const key of ['image', 'portrait', 'obstacles', 'collectibles', 'music']) {
+    const name = typeof x[key] === 'string' ? x[key].match(/\/skins\/([^?]+)/)?.[1] : null;
+    if (name) users.set(name, [...(users.get(name) ?? []), x]);
+  }
+  const rewardFiles = new Map([...users].filter(([, xs]) => xs.every(x => x.reward)).map(([name, xs]) => [name, xs.map(x => x.id)]));
+  // Files only unique figures use: served only to those who unlocked one of them.
+  const uniqueFiles = new Map([...users].filter(([, xs]) => xs.every(x => x.unique)).map(([name, xs]) => [name, xs.map(x => x.id)]));
+  return { rarities, departments, items, collectible, uniques, uniqueRarity, byId, files, rewardFiles, uniqueFiles, rarity, dupes, ensemble, roleFigures, baseOf, rolesOf, defaults: Object.fromEntries(wardrobeKinds.map(k => [k, items.find(x => x.kind === k && x.default).id])) };
 }
 
 /**
@@ -393,10 +414,13 @@ const progressOf = (t, personId) => {
   return settled === p ? p : t.store.put('runnerProgress', personId, settled);
 };
 
-/** Item ids [p] owns: the defaults, what crates brought, the person's own character and the ensemble's rewards. */
+/**
+ * Item ids [p] owns: the defaults, what crates brought, the person's own character, the ensemble's
+ * rewards and the unique figures unlocked.
+ */
 const ownedIds = (t, p) => {
   const c = catalog(t);
-  return new Set([...Object.values(c.defaults), ...list(p.owned).filter(id => c.byId.has(id)), ...c.items.filter(x => x.personId === p.personId).map(x => x.id), ...ownedRewards(t, credit)]);
+  return new Set([...Object.values(c.defaults), ...list(p.owned).filter(id => c.byId.has(id)), ...c.items.filter(x => x.personId === p.personId).map(x => x.id), ...ownedRewards(t, credit), ...ownedUniques(c, p)]);
 };
 /**
  * Whether [owned] meets a rarity's `requires`: `count` items of its rarity (and kind), or all of them
@@ -414,11 +438,14 @@ const requirementMet = (c, q, owned) => {
 export const openRarities = (c, owned, unlocked = []) => new Set(c.rarities.filter(r => !r.requires || list(unlocked).includes(r.id) || requirementMet(c, r.requires, owned)).map(r => r.id));
 /** The rarities open for [p]. */
 const openFor = (c, p, owned) => openRarities(c, owned, p.unlockedRarities);
-/** [p] with every rarity whose `requires` is met now remembered as open (or [p] itself). */
+/**
+ * [p] with every rarity whose `requires` is met now remembered as open and every unique figure whose
+ * play is complete now unlocked for good (or [p] itself).
+ */
 function settleUnlocks(t, p, owned = ownedIds(t, p)) {
   const c = catalog(t), have = list(p.unlockedRarities);
   const fresh = c.rarities.filter(r => r.requires && !have.includes(r.id) && requirementMet(c, r.requires, owned)).map(r => r.id);
-  return fresh.length ? { ...p, unlockedRarities: [...have, ...fresh] } : p;
+  return settleUniques(c, fresh.length ? { ...p, unlockedRarities: [...have, ...fresh] } : p, owned, t.clock());
 }
 const pool = (t, p, owned = ownedIds(t, p)) => {
   const c = catalog(t), open = openFor(c, p, owned);
@@ -478,26 +505,30 @@ export function statsView(t, p) {
   return { rounds, best: score?.best ?? 0, meters: p.meters, creditedMeters: p.creditedMeters ?? 0, bonusMeters: p.bonusMeters ?? 0, missionMeters: p.missionMeters ?? 0, deaths, unknown: p.deaths?.unknown ?? 0, untracked: Math.max(0, rounds - counted) };
 }
 
-// Ensemble rewards come apart from `items`, so older apps neither count nor show them.
-const catalogView = t => {
-  const c = catalog(t);
+// Ensemble rewards come apart from `items`, so older apps neither count nor show them; only those
+// of reached milestones: until then a reward is a surprise (name, pictures and id stay on the server).
+// Unique figures likewise, and only the person's own ([owned]) for apps that ask with [unique].
+const catalogView = (t, owned, unique) => {
+  const c = catalog(t), revealed = revealedRewards(t, credit);
   return {
     kinds: [...wardrobeKinds], rarities: c.rarities.map(({ rank, ...r }) => r), departments: c.departments,
-    items: c.items.filter(x => !x.reward), rewards: c.items.filter(x => x.reward), dupes: c.dupes,
+    items: c.items.filter(x => !x.reward && !x.unique), rewards: c.items.filter(x => x.reward && revealed.has(x.id)), dupes: c.dupes,
     ...(c.ensemble ? { ensembleRarity: c.ensemble.rarity } : {}),
+    ...(unique ? { uniqueRarity: c.uniqueRarity, uniques: c.uniques.filter(x => owned.has(x.id)) } : {}),
   };
 };
 
 /**
  * The wardrobe of [p]. [roles]: the app knows role figures (`runnerRoleFigures`) and gets them as
  * they are; apps from before get one figure per person with its roles as variants (see
- * runner-role-figures.mjs), all from the same ownership.
+ * runner-role-figures.mjs), all from the same ownership. [unique]: the app knows unique figures
+ * (`runnerUniqueFigures`); apps from before neither see nor wear them.
  */
-function view(t, p, roles = false) {
-  const c = catalog(t), owned = ownedIds(t, p), open = openFor(c, p, owned);
+function view(t, p, roles = false, unique = false) {
+  const c = catalog(t), all = ownedIds(t, p), owned = unique ? all : withoutUniques(c, all), open = openFor(c, p, owned);
   const ensemble = ensembleView(t, p, credit);
   const plain = {
-    progress: progressView(t, p), catalog: catalogView(t), lockedRarities: c.rarities.filter(r => !open.has(r.id)).map(r => r.id),
+    progress: progressView(t, p), catalog: catalogView(t, owned, unique), lockedRarities: c.rarities.filter(r => !open.has(r.id)).map(r => r.id),
     owned: c.items.filter(x => owned.has(x.id)).map(x => x.id), selected: selection(t, p, owned), stats: statsView(t, p),
     // Added with `runnerDupes` and `runnerEnsemble`; older apps ignore them. Role figures have no
     // variants: both stay empty for apps that know them.
@@ -507,16 +538,18 @@ function view(t, p, roles = false) {
     // Added with `runnerEventCrates`: the Termin-Kisten waiting, the earliest event first.
     eventCrates: waitingEventCrates(t, p.personId).map(crateView),
     ...(c.roleFigures ? { roleFigures: true } : {}),
+    // Added with `runnerUniqueFigures`: per play the progress towards its unique figure.
+    ...(unique ? { uniqueFigures: uniqueView(c, p, all) } : {}),
   };
   return roles ? plain : olderAppView(c, plain, p, owned);
 }
 
 /**
  * GET /games/runner/wardrobe: progress, catalog, inventory, selection and statistics; `roles`
- * (`?roles=1`) for apps that know role figures.
+ * (`?roles=1`) for apps that know role figures, `unique` (`?unique=1`) for apps that know unique figures.
  */
-export function wardrobe(t, uid, { roles = false } = {}) {
-  return t.store.transaction(() => view(t, progressOf(t, t.account(uid).personId), roles === true));
+export function wardrobe(t, uid, { roles = false, unique = false } = {}) {
+  return t.store.transaction(() => view(t, progressOf(t, t.account(uid).personId), roles === true, unique === true));
 }
 
 /** Plausible metres of a finished run; without `meters` (older clients) a conservative estimate. */
@@ -587,7 +620,7 @@ function duplicate(p, draw, shiny) {
  * role figure shows as a role of the person's figure (runner-role-figures.mjs).
  */
 export function openCrate(t, uid, requestId, b = {}) {
-  const dupes = b?.dupes === true, ensemble = b?.crate === 'ensemble', mission = b?.crate === 'mission', event = b?.crate === 'event', roles = b?.roles === true;
+  const dupes = b?.dupes === true, ensemble = b?.crate === 'ensemble', mission = b?.crate === 'mission', event = b?.crate === 'event', roles = b?.roles === true, unique = b?.unique === true;
   if (event && !dupes) fail(400, 'Termin-Kisten gibt es nur in der neuen App.');
   if (mission && !dupes) fail(400, 'Missionskisten gibt es nur in der neuen App.');
   if (ensemble && !dupes) fail(400, 'Ensemble-Kisten gibt es nur in der neuen App.');
@@ -601,7 +634,7 @@ export function openCrate(t, uid, requestId, b = {}) {
       if (!candidates.length) fail(409, 'Der Fundus ist komplett. Neue Kostüme kommen bald – die Kisten bleiben so lange zu.', 'wardrobe_complete');
       const item = drawItem(c, candidates, t.random, 1, open);
       const next = t.store.put('runnerProgress', a.personId, settleUnlocks(t, { ...p, opened: p.opened + 1, owned: [...list(p.owned), item.id] }));
-      const result = { item, ...reel(t, item, open), wardrobe: view(t, next, roles) };
+      const result = { item, ...reel(t, item, open), wardrobe: view(t, next, roles, unique) };
       return { result: roles ? result : olderAppOpening(c, result), subject: item.id };
     }
     const owned = ownedIds(t, p), open = openFor(c, p, owned);
@@ -614,7 +647,7 @@ export function openCrate(t, uid, requestId, b = {}) {
     const counted = event ? {} : mission ? { missionOpened: (p.missionOpened ?? 0) + 1 } : ensemble ? { ensembleOpened: (p.ensembleOpened ?? 0) + 1 } : { opened: p.opened + 1 };
     if (eventCrate) markEventCrateOpened(t, eventCrate, draw.item.id);
     const saved = t.store.put('runnerProgress', a.personId, settleUnlocks(t, { ...next, ...counted }));
-    const result = { item: draw.item, ...reel(t, draw.item, open), outcome: { ...outcome, duplicate: draw.duplicate, shiny, rarity: draw.tier.id, crate, ...(eventCrate ? { event: crateView(eventCrate) } : {}) }, wardrobe: view(t, saved, roles) };
+    const result = { item: draw.item, ...reel(t, draw.item, open), outcome: { ...outcome, duplicate: draw.duplicate, shiny, rarity: draw.tier.id, crate, ...(eventCrate ? { event: crateView(eventCrate) } : {}) }, wardrobe: view(t, saved, roles, unique) };
     return { result: roles ? result : olderAppOpening(c, result), subject: `${draw.item.id}${draw.duplicate ? ` ${outcome.type}` : ''}${shiny ? ' shiny' : ''}` };
   });
 }
@@ -632,7 +665,7 @@ export function tradeGage(t, uid, requestId, b) {
     if ((p.gage ?? 0) < cost) fail(409, 'Dafür reicht die Gage noch nicht.', 'not_enough_gage');
     const item = pickOne(c.collectible.filter(x => x.drawnBy.includes(target.id) && !owned.has(x.id)), t.random);
     const next = t.store.put('runnerProgress', a.personId, settleUnlocks(t, { ...p, gage: p.gage - cost, owned: [...list(p.owned), item.id] }));
-    const result = { item, outcome: { type: 'trade', rarity: target.id, cost }, wardrobe: view(t, next, b?.roles === true) };
+    const result = { item, outcome: { type: 'trade', rarity: target.id, cost }, wardrobe: view(t, next, b?.roles === true, b?.unique === true) };
     return { result: b?.roles === true ? result : olderAppDeal(c, result), subject: `${item.id} -${cost}` };
   });
 }
@@ -641,7 +674,8 @@ export function tradeGage(t, uid, requestId, b) {
 export function buyItem(t, uid, requestId, b) {
   return once(t, uid, buyRequestPrefix, requestId, 'runner.buy', a => {
     const c = catalog(t), item = c.byId.get(b?.itemId);
-    if (!item || item.default || item.reward) fail(404, 'Dieses Teil gibt es nicht.');
+    // A unique figure is unlocked, never bought: the same answer as an unknown id, it stays a secret.
+    if (!item || item.default || item.reward || item.unique) fail(404, 'Dieses Teil gibt es nicht.');
     const p = progressOf(t, a.personId), owned = ownedIds(t, p), open = openFor(c, p, owned);
     if (owned.has(item.id)) fail(409, 'Das hast du schon.', 'already_owned');
     const cost = buyCost(c, item);
@@ -649,7 +683,7 @@ export function buyItem(t, uid, requestId, b) {
     if (!item.drawnBy.some(r => open.has(r))) fail(409, c.rarity.get(item.rarity)?.hint ?? 'Noch gesperrt.', 'locked');
     if ((p.gage ?? 0) < cost) fail(409, 'Dafür reicht die Gage noch nicht.', 'not_enough_gage');
     const next = t.store.put('runnerProgress', a.personId, settleUnlocks(t, { ...p, gage: p.gage - cost, owned: [...list(p.owned), item.id] }));
-    const result = { item, outcome: { type: 'buy', rarity: item.rarity, cost }, wardrobe: view(t, next, b?.roles === true) };
+    const result = { item, outcome: { type: 'buy', rarity: item.rarity, cost }, wardrobe: view(t, next, b?.roles === true, b?.unique === true) };
     return { result: b?.roles === true ? result : olderAppDeal(c, result), subject: `${item.id} -${cost}` };
   });
 }
@@ -661,7 +695,16 @@ export function ensembleSeen(t, uid, b) {
     const a = t.account(uid), c = catalog(t), p = progressOf(t, a.personId);
     const highest = c.ensemble ? reachedMilestones(c.ensemble, ensembleState(t, credit).meters).at(-1)?.km ?? 0 : 0;
     const seen = Math.max(p.ensembleSeen ?? 0, Math.min(b.km, highest));
-    return view(t, seen === (p.ensembleSeen ?? 0) ? p : t.store.put('runnerProgress', a.personId, { ...p, ensembleSeen: seen }), b.roles === true);
+    return view(t, seen === (p.ensembleSeen ?? 0) ? p : t.store.put('runnerProgress', a.personId, { ...p, ensembleSeen: seen }), b.roles === true, b.unique === true);
+  });
+}
+
+/** PUT /games/runner/unique/seen `{ itemIds }`: the celebration of these unlocked unique figures was shown. */
+export function uniqueSeen(t, uid, b) {
+  if (!Array.isArray(b?.itemIds) || b.itemIds.length > 100 || b.itemIds.some(id => typeof id !== 'string')) fail(400, 'Ungültige Figuren.');
+  return t.store.transaction(() => {
+    const a = t.account(uid), c = catalog(t), p = progressOf(t, a.personId), next = markUniquesSeen(c, p, b.itemIds);
+    return view(t, next === p ? p : t.store.put('runnerProgress', a.personId, next), b.roles === true, true);
   });
 }
 
@@ -686,21 +729,32 @@ function reel(t, item, open) {
  */
 export function selectOutfit(t, uid, b) {
   return t.store.transaction(() => {
-    const a = t.account(uid), c = catalog(t), roles = b?.roles === true;
+    const a = t.account(uid), c = catalog(t), roles = b?.roles === true, unique = b?.unique === true;
     if (!wardrobeKinds.includes(b?.kind)) fail(400, 'Unbekannte Art.');
     const item = c.byId.get(b.itemId);
     if (!item || item.kind !== b.kind) fail(404, 'Dieses Teil gibt es nicht.');
     const p = progressOf(t, a.personId), owned = ownedIds(t, p);
+    // A unique figure not unlocked (or asked for by an app from before) is no known item.
+    if (item.unique && (!unique || !owned.has(item.id))) fail(404, 'Dieses Teil gibt es nicht.');
     const { wear, selectedVariant } = roles || !c.rolesOf.has(item.id) ? { wear: item.id, selectedVariant: p.selectedVariant } : olderAppOutfit(c, p, owned, item, b.variant);
     if (!owned.has(wear)) fail(409, 'Dieses Teil ist noch nicht in deiner Garderobe.', 'not_owned');
-    return view(t, t.store.put('runnerProgress', a.personId, { ...p, selected: { ...p.selected, [b.kind]: wear }, ...(selectedVariant ? { selectedVariant } : {}) }), roles);
+    return view(t, t.store.put('runnerProgress', a.personId, { ...p, selected: { ...p.selected, [b.kind]: wear }, ...(selectedVariant ? { selectedVariant } : {}) }), roles, unique);
   });
 }
 
-/** GET /games/runner/skins/<file>: a picture of the catalog, for signed-in members. */
+/**
+ * GET /games/runner/skins/<file>: a picture of the catalog, for signed-in members; one only ensemble
+ * rewards use not before one of them is revealed, one only unique figures use only for those who
+ * unlocked one of them (both the same 404 as an unknown file).
+ */
 export function skinFile(t, uid, name) {
-  t.account(uid);
-  const file = catalog(t).files.get(name);
+  const a = t.account(uid);
+  const c = catalog(t), file = c.files.get(name), rewards = c.rewardFiles?.get(name), uniques = c.uniqueFiles?.get(name);
   if (!file) fail(404, 'Nicht gefunden.');
+  if (rewards && !t.store.transaction(() => { const revealed = revealedRewards(t, credit); return rewards.some(id => revealed.has(id)); })) fail(404, 'Nicht gefunden.');
+  if (uniques) {
+    const mine = new Set(a.personId == null ? [] : list(t.store.get('runnerProgress', a.personId)?.uniques));
+    if (!uniques.some(id => mine.has(id))) fail(404, 'Nicht gefunden.');
+  }
   return file;
 }

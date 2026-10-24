@@ -11,6 +11,10 @@
 //   effect, …): never in crates, trades or purchases. Once its milestone is reached everybody owns
 //   it, as soon as it is ready (a picture for backdrops and characters, the effect for effects);
 //   until then the app shows "Belohnung wird vorbereitet" and it arrives with the picture.
+// - A reward is a surprise until its milestone is reached: a milestone not reached yet shows only
+//   its distance and that something waits there (`hidden: true`, `name: '???'`, `reward: null`,
+//   no note), the catalog leaves the item out and its pictures and music are not served
+//   (`revealedRewards`). Apps from before take it for a milestone with only the crate.
 // - No ranking of contributors: the app shows one's own share of the current section and how many
 //   took part (see docs/operations.md, „Bühnenlauf: Garderobe").
 
@@ -128,14 +132,28 @@ export function countSection(t, p, meters, creditPerRound) {
   return { ...p, section: { from, meters: own + meters } };
 }
 
+/** What a milestone not reached yet is called while its reward is a surprise. */
+export const hiddenName = '???';
+
+/** Ids of the reward items whose milestone is reached: the only ones anybody may see. */
+export function revealedRewards(t, creditPerRound) {
+  const e = t.runnerCatalog.ensemble;
+  if (!e) return new Set();
+  return new Set(reachedMilestones(e, ensembleState(t, creditPerRound).meters).map(m => m.item).filter(Boolean));
+}
+
 function milestoneView(c, m, s) {
-  const item = m.item ? c.byId.get(m.item) : null;
   const reached = s.meters >= m.km * kmToMeters;
+  // Not reached yet: only the distance; name, note, item, kind and picture stay a surprise.
+  // `name` and `reward: null` keep apps from before working (they show "???" and the crate).
+  if (!reached && m.item) return { km: m.km, name: hiddenName, hidden: true, reward: null, reached: false };
+  const item = m.item ? c.byId.get(m.item) : null;
   return {
     km: m.km,
     name: m.name ?? item?.name ?? c.ensemble.crateName,
     ...(m.note ? { note: m.note } : {}),
-    reward: m.item ? { itemId: m.item, ready: rewardReady(item) } : null,
+    // `kind` came with the hidden rewards: what was unlocked ("Bühnenbild"), for the reveal.
+    reward: m.item ? { itemId: m.item, ready: rewardReady(item), ...(item ? { kind: item.kind } : {}) } : null,
     reached,
     ...(reached && s.reached?.[m.km] ? { reachedAt: s.reached[m.km] } : {}),
   };

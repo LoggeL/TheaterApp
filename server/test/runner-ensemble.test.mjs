@@ -127,15 +127,16 @@ test('the chance of a shine is set per crate kind', t => {
 test('a reward is everybody\'s once reached, as soon as its picture is there', t => {
   const { app, play } = setup(t);
   let w = app.runnerWardrobe('kim');
-  assert.deepEqual(w.catalog.rewards.map(x => x.id), ['bd.anno', 'fx.gold']);
-  assert.ok(!w.catalog.items.some(x => x.reward), 'older apps do not see rewards as costumes');
+  assert.deepEqual(w.catalog.rewards, [], 'a surprise until reached');
   assert.deepEqual(w.catalog.ensembleRarity, { id: 'ensemble', name: 'Ensemble', color: '#F28C28' });
   play('sam', 5200);
   w = app.runnerWardrobe('kim');
+  assert.deepEqual(w.catalog.rewards.map(x => x.id), ['bd.anno', 'fx.gold']);
+  assert.ok(!w.catalog.items.some(x => x.reward), 'older apps do not see rewards as costumes');
   // The effect is ready; the backdrop has no picture yet: "Belohnung wird vorbereitet".
   assert.ok(w.owned.includes('fx.gold'));
   assert.ok(!w.owned.includes('bd.anno'));
-  assert.deepEqual(w.ensemble.milestones.slice(0, 3).map(m => [m.km, m.reached, m.reward?.ready ?? null]), [[1, true, false], [2, true, null], [5, true, true]]);
+  assert.deepEqual(w.ensemble.milestones.slice(0, 3).map(m => [m.km, m.reached, m.reward?.ready ?? null, m.reward?.kind ?? null]), [[1, true, false, 'backdrop'], [2, true, null, null], [5, true, true, 'fx']]);
   assert.equal(w.ensemble.milestones[2].note, 'Premiere');
   assert.throws(() => app.runnerOutfit('kim', { kind: 'backdrop', itemId: 'bd.anno' }), { code: 'not_owned' });
   // Rewards never come from crates or the shop.
@@ -216,4 +217,108 @@ test('the HTTP API marks the celebration seen', async t => {
   const response = await fetch(`http://127.0.0.1:${server.address().port}/api/mobile/v1/games/runner/ensemble/seen`, { method: 'PUT', headers: { Authorization: 'Bearer sam', 'Content-Type': 'application/json' }, body: JSON.stringify({ km: 1 }) });
   assert.equal(response.status, 200);
   assert.deepEqual((await response.json()).ensemble.unseen, []);
+});
+
+// What a reply must not contain while the rewards are a surprise.
+const secrets = ['Anno 1146', 'bd.anno', 'figure.webp', 'Goldregen', 'fx.gold', 'Premiere', 'sparkle'];
+const leaks = (reply, hidden = secrets) => hidden.filter(x => JSON.stringify(reply).includes(x));
+
+test('a reward is a surprise until its milestone is reached: no name, picture, id or note', t => {
+  const { app } = setup(t, { catalog: catalogOf('figure.webp') });
+  for (const roles of [false, true]) {
+    const w = app.runnerWardrobe('kim', { roles });
+    assert.deepEqual(leaks(w), [], `roles ${roles}`);
+    assert.deepEqual(w.ensemble.next, { km: 1, name: '???', hidden: true, reward: null, reached: false });
+    // Only the crate at 2 km: nothing to hide, named as before.
+    assert.deepEqual(w.ensemble.milestones.map(m => [m.km, m.name, m.hidden ?? false]), [[1, '???', true], [2, 'Ensemble-Kiste', false], [5, '???', true]]);
+    assert.deepEqual(w.catalog.rewards, []);
+    assert.ok(!w.owned.includes('bd.anno'));
+  }
+  // The picture of a hidden reward is not served, not even by its guessed name.
+  assert.throws(() => app.runnerSkin('kim', 'figure.webp'), { status: 404 });
+  assert.throws(() => app.runnerSkin('kim', 'nope.webp'), { status: 404 });
+});
+
+test('the boundary is the milestone itself: 999 m hide it, 1000 m reveal it', t => {
+  const { app, play } = setup(t, { catalog: catalogOf('figure.webp') });
+  const before = play('sam', 999);
+  assert.deepEqual(leaks(before), []);
+  assert.deepEqual(before.progress.ensemble.next, { km: 1, name: '???', hidden: true, reward: null, reached: false });
+  assert.deepEqual(leaks(app.runnerWardrobe('kim')), []);
+  assert.throws(() => app.runnerSkin('kim', 'figure.webp'), { status: 404 });
+  // The very metre that reaches 1 km: the run reply reveals it, with what it unlocked.
+  const run = play('sam', 1);
+  assert.equal(run.progress.ensemble.meters, 1000);
+  assert.deepEqual(run.progress.ensemble.reached, [{ km: 1, name: 'Anno 1146', reward: { itemId: 'bd.anno', ready: true, kind: 'backdrop' }, reached: true, reachedAt: '2026-10-24T10:20:00.000Z' }]);
+  assert.equal(run.progress.ensemble.reached[0].hidden, undefined);
+  const w = app.runnerWardrobe('kim', { roles: true });
+  assert.deepEqual(w.ensemble.milestones[0].name, 'Anno 1146');
+  assert.deepEqual(w.catalog.rewards.map(x => [x.id, x.name, x.image?.includes('figure.webp')]), [['bd.anno', 'Anno 1146', true]]);
+  assert.ok(w.owned.includes('bd.anno'));
+  assert.equal(app.runnerSkin('kim', 'figure.webp').mime, 'image/webp');
+  // The effect at 5 km and its note stay hidden.
+  assert.deepEqual(leaks(w, ['Goldregen', 'fx.gold', 'Premiere', 'sparkle']), []);
+  assert.deepEqual(w.ensemble.next, { km: 2, name: 'Ensemble-Kiste', reward: null, reached: false });
+  play('sam', 4000);
+  const all = app.runnerWardrobe('kim', { roles: true });
+  assert.deepEqual(leaks(all, ['Goldregen', 'fx.gold', 'Premiere']), ['Goldregen', 'fx.gold', 'Premiere']);
+  assert.equal(all.ensemble.milestones[2].note, 'Premiere');
+});
+
+test('the bundled catalog reveals nothing before the first goal, not even file names', t => {
+  const store = new Store(); t.after(() => store.close());
+  const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', clock: () => new Date('2026-10-24T10:00:00Z') });
+  app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
+  const c = bundledCatalog(), w = app.runnerWardrobe('admin', { roles: true });
+  const rewards = c.items.filter(x => x.reward);
+  assert.equal(rewards.length, 10);
+  // Figures of the earlier plays may name their play ("Anno 1146"); the goals and rewards may not.
+  const json = JSON.stringify(w), goals = JSON.stringify(w.ensemble);
+  assert.deepEqual(w.catalog.rewards, []);
+  for (const x of rewards) {
+    assert.ok(!json.includes(x.id), x.id);
+    assert.ok(!goals.includes(x.name), x.name);
+    for (const key of ['image', 'obstacles', 'collectibles', 'music']) if (x[key]) {
+      const file = x[key].match(/skins\/([^?]+)/)[1];
+      assert.ok(!json.includes(file), file);
+      assert.throws(() => app.runnerSkin('admin', file), { status: 404 }, file);
+    }
+  }
+  assert.ok(!json.includes('Premiere am 27.12.2026'));
+  assert.ok(!/hell|nexus|black-swan|romeo|schicksal|anno|gold|applaus|schwan/i.test(goals), goals);
+  assert.equal(w.ensemble.milestones.filter(m => m.hidden).length, 10);
+  // A picture of a crate item is served as before.
+  const creepshow = c.byId.get('backdrop.creepshow').image.match(/skins\/([^?]+)/)[1];
+  assert.equal(app.runnerSkin('admin', creepshow).mime, 'image/webp');
+});
+
+test('an older app reads hidden goals like goals with only the crate', t => {
+  const { app } = setup(t, { catalog: catalogOf('figure.webp') });
+  // What 0.11.2 and 0.11.3 read of each milestone (EnsembleMilestone.fromJson): km a number, name a
+  // text, reward a map with itemId or null; the catalog's rewards a list of items.
+  const w = app.runnerWardrobe('kim');
+  for (const m of [w.ensemble.next, ...w.ensemble.milestones]) {
+    assert.equal(typeof m.km, 'number');
+    assert.equal(typeof m.name, 'string');
+    assert.ok(m.name.length > 0);
+    assert.equal(typeof m.reached, 'boolean');
+    assert.ok(m.reward === null || typeof m.reward.itemId === 'string');
+  }
+  assert.ok(Array.isArray(w.catalog.rewards));
+});
+
+test('over HTTP a hidden reward\'s picture is a 404 until reached', async t => {
+  const { app, play } = setup(t, { catalog: catalogOf('figure.webp') });
+  const server = createHttpServer({ theater: app, verifyToken: async token => ({ uid: token }) });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const get = path => fetch(`http://127.0.0.1:${server.address().port}/api/mobile/v1${path}`, { headers: { Authorization: 'Bearer kim' } });
+  assert.equal((await get('/games/runner/skins/figure.webp')).status, 404);
+  for (const query of ['', '?roles=1']) assert.deepEqual(leaks(await (await get(`/games/runner/wardrobe${query}`)).json()), [], query);
+  play('sam', 1000);
+  const shown = await (await get('/games/runner/wardrobe?roles=1')).json();
+  assert.equal(shown.ensemble.milestones[0].name, 'Anno 1146');
+  const picture = await get(shown.catalog.rewards[0].image);
+  assert.equal(picture.status, 200);
+  assert.equal(picture.headers.get('content-type'), 'image/webp');
 });

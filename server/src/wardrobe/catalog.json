@@ -38,6 +38,10 @@
       {"km": 1000, "item": "backdrop.romeo-julia", "note": "Premiere am 27.12.2026"}
     ]
   },
+  "uniqueFigures": {
+    "note": "Unique figures (runnerUniqueFigures): one non-human character per play (rarity unique, no personId, unlock.play), unlocked for good by owning all active role figures of that play; never in crates, trades or purchases, never shiny; a secret (\"???\") until unlocked, apps from before never see them. Without its picture an entry stays disabled. See docs/operations.md, „Unique-Figuren“.",
+    "rarity": {"id": "unique", "name": "Unique", "color": "#B388FF", "style": "holo"}
+  },
   "items": [
     {"id": "character.engel-logge", "kind": "character", "name": "Engel Logge", "rarity": "hellblau", "default": true},
     {"id": "backdrop.standard", "kind": "backdrop", "name": "Bühnenwand", "rarity": "hellblau", "default": true, "music": "music-standard.m4a"},
@@ -305,6 +309,12 @@
     {"id": "fx.goldregen", "kind": "fx", "name": "Goldregen", "reward": true, "rarityReason": "Ensemble-Ziel 50 km", "effect": {"trail": "sparkle", "colors": ["#FFE7A3", "#E4AE39", "#FFFFFF"]}},
     {"id": "fx.applaus", "kind": "fx", "name": "Applaus", "reward": true, "rarityReason": "Ensemble-Ziel 175 km", "effect": {"trail": "confetti", "colors": ["#FFFFFF", "#E4AE39", "#F28C28", "#EB4B4B"]}},
     {"id": "fx.hoellenglut", "kind": "fx", "name": "Höllenglut", "reward": true, "rarityReason": "Ensemble-Ziel 350 km", "effect": {"trail": "sparkle", "colors": ["#FF5A1F", "#FFB347", "#B3121F"]}},
-    {"id": "fx.schwanenfedern", "kind": "fx", "name": "Schwanenfedern", "reward": true, "rarityReason": "Ensemble-Ziel 650 km", "effect": {"trail": "smoke", "colors": ["#FFFFFF", "#3A3A44"]}}
+    {"id": "fx.schwanenfedern", "kind": "fx", "name": "Schwanenfedern", "reward": true, "rarityReason": "Ensemble-Ziel 650 km", "effect": {"trail": "smoke", "colors": ["#FFFFFF", "#3A3A44"]}},
+    {"id": "character.unique-captain-kuschel", "kind": "character", "name": "Captain Kuschel", "role": "Captain Kuschel", "play": "Creepshow", "year": 2026, "rarity": "unique", "unlock": {"play": "Creepshow"}, "rarityReason": "Seit 2022 dabei und immer im Dienst: Wilsons Seelentröster im Butler-Westchen. Er ist ein sehr guter Zuhörer – wegen der großen Ohren.", "image": "character-unique-captain-kuschel.webp", "portrait": "character-unique-captain-kuschel-portrait.webp", "disabled": true},
+    {"id": "character.unique-ki-nexus", "kind": "character", "name": "KI Nexus", "role": "KI Nexus", "play": "Nexus", "year": 2024, "rarity": "unique", "unlock": {"play": "Nexus"}, "rarityReason": "Seid gegrüßt, Master. Die Schwarmintelligenz in jedem Neurochip ist zu 99,9 % fehlerfrei – bis ihre Berechnungen ergeben, dass Menschen keine Führung übernehmen sollten.", "image": "character-unique-ki-nexus.webp", "portrait": "character-unique-ki-nexus-portrait.webp", "disabled": true},
+    {"id": "character.unique-ritterpuppe", "kind": "character", "name": "Johannas Ritterpuppe", "role": "Johannas Ritterpuppe", "play": "Anno 1146", "year": 2025, "rarity": "unique", "unlock": {"play": "Anno 1146"}, "rarityReason": "Roderich hat ihr den Kopf abgerissen, Konrad hat ihn wieder angenäht. Der erste Ritter, den Johanna beschützt hat.", "image": "character-unique-ritterpuppe.webp", "portrait": "character-unique-ritterpuppe-portrait.webp", "disabled": true},
+    {"id": "character.unique-willi", "kind": "character", "name": "Willi", "role": "Willi", "play": "Eine höllische Herausforderung", "year": 2024, "rarity": "unique", "unlock": {"play": "Eine höllische Herausforderung"}, "rarityReason": "Der engste Berater des Teufels: grün, plüschig und erstaunlich vernünftig.", "image": "character-unique-willi.webp", "portrait": "character-unique-willi-portrait.webp", "disabled": true},
+    {"id": "character.unique-kristall", "kind": "character", "name": "Der Kristall der Träume", "role": "Der Kristall der Träume", "play": "Der Kristall der Träume", "year": 2020, "rarity": "unique", "unlock": {"play": "Der Kristall der Träume"}, "rarityReason": "Nur königliches Blut kann ihn erwecken. Seit Merle ihn berührt hat, träumt das Kaiserreich wieder.", "image": "character-unique-kristall.webp", "portrait": "character-unique-kristall-portrait.webp", "disabled": true},
+    {"id": "character.unique-rabe", "kind": "character", "name": "Der Rabe", "role": "Der Rabe", "play": "Verrat im Kloster", "year": 2017, "rarity": "unique", "unlock": {"play": "Verrat im Kloster"}, "rarityReason": "Wenn im Stumpfwald die Raben tanzen, ist die Hexe nicht weit.", "image": "character-unique-rabe.webp", "portrait": "character-unique-rabe-portrait.webp", "disabled": true}
   ]
 }
