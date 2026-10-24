@@ -56,8 +56,9 @@ test('every actor figure of the bundled catalog has role, play and year; technic
   assert.deepEqual(['hellblau', 'blau', 'technik', 'pink', 'legacy', 'rot', 'gold'].map(count), [31, 15, 8, 15, 15, 11, 7]);
   assert.ok(raw.filter(x => x.id.endsWith('--romeo-julia')).every(x => x.disabled === true));
   const nexus = raw.filter(x => x.id.endsWith('--nexus'));
-  assert.equal(nexus.length, 26);
-  assert.deepEqual(nexus.filter(x => x.disabled === true).map(x => x.id), ['character.logge--nexus', 'character.fynn--nexus']);
+  // Logge's role "KI" is gone: the AI is a unique figure (character.unique-ki-nexus).
+  assert.equal(nexus.length, 25);
+  assert.deepEqual(nexus.filter(x => x.disabled === true).map(x => x.id), ['character.fynn--nexus']);
   assert.ok(nexus.every(x => x.play === 'Nexus' && x.year === 2024));
   assert.ok(nexus.filter(x => !x.disabled).every(x => c.collectible.includes(at(x.id)) && at(x.id).harness && at(x.id).portrait), 'active Nexus figures can be drawn');
   // Former members stay legacy in Nexus as well, whatever their roles weigh (Raven, Hunter …).

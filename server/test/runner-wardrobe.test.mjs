@@ -344,8 +344,9 @@ test('the bundled catalog is valid and ships only finished costumes', () => {
   assert.equal(c.rarities.at(-1).id, 'gold');
   assert.ok(c.rarities.some(r => r.id === 'technik'));
   assert.ok(c.items.every(x => (x.departments ?? []).every(id => c.departments.some(d => d.id === id))));
-  // People's characters belong to them.
-  assert.ok(drawable.filter(x => x.kind === 'character').every(x => Number.isInteger(x.personId)));
+  // People's characters belong to them; unique figures (never drawn) to nobody.
+  assert.ok(drawable.filter(x => x.kind === 'character' && !x.unique).every(x => Number.isInteger(x.personId)));
+  assert.ok(c.uniques.every(x => x.personId === undefined && !c.collectible.includes(x)));
 });
 
 test('the bundled pictures have the sizes the app accepts', () => {

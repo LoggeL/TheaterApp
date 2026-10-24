@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { Store } from '../src/store.mjs';
 import { Theater, apiFeatures } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
@@ -207,19 +208,130 @@ test('apps from before neither see nor wear it, also once unlocked', t => {
   assert.equal(app.runnerWardrobe('sam', now).selected.character, 'u.spuk');
 });
 
-test('the bundled catalog: unique figures without pictures wait, nothing shows and nothing breaks', t => {
+// Across plays (from 0.11.5): `unlock: { plays }` needs all active role figures of every one of them.
+// Gruft: two more role figures; the figure across Spuk and Gruft is apart from Spuk's own.
+const gruft = [role('g1', 906, 'Gruft', 2024), role('g2', 907, 'Gruft', 2024, { rarity: 'gold' })];
+const hase = { id: 'u.hase', kind: 'character', name: 'Hase Hoppel', role: 'Hase Hoppel', play: 'Spuk', year: 2026, rarity: 'unique', unlock: { plays: ['Spuk', 'Gruft'] }, rarityReason: 'Seit 2020 dabei.', image: 'figure.webp' };
+const acrossOf = (extra = []) => catalogOf([...defaults, ...figures, ...gruft, kuschel, waiting, hase, ...extra]);
+
+test('across plays: the catalog checks unlock.plays and keeps { play } as it was', () => {
+  const c = acrossOf();
+  assert.deepEqual(c.uniques.map(x => x.id), ['u.spuk', 'u.hase']);
+  assert.deepEqual(c.byId.get('u.hase').unlock, { plays: ['Spuk', 'Gruft'] });
+  // The old form stays exactly as it was.
+  assert.deepEqual(c.byId.get('u.spuk').unlock, { play: 'Spuk' });
+  assert.deepEqual(catalogOf([...defaults, ...figures, { ...kuschel, unlock: { play: 'Spuk', year: 2026 } }]).byId.get('u.spuk').unlock, { play: 'Spuk', year: 2026 });
+  // A play with its year.
+  assert.deepEqual(acrossOf().byId.get('u.hase').unlock, { plays: ['Spuk', 'Gruft'] });
+  assert.deepEqual(catalogOf([...defaults, ...figures, ...gruft, { ...hase, unlock: { plays: ['Spuk', { play: 'Gruft', year: 2024 }] } }]).byId.get('u.hase').unlock, { plays: ['Spuk', { play: 'Gruft', year: 2024 }] });
+  assert.ok(!c.collectible.includes(c.byId.get('u.hase')));
+  assert.deepEqual(c.byId.get('u.hase').drawnBy, []);
+  const bad = (items, why = /Wardrobe catalog/) => assert.throws(() => catalogOf([...defaults, ...figures, ...gruft, ...items]), why);
+  bad([{ ...hase, unlock: { plays: ['Spuk'] } }]);
+  bad([{ ...hase, unlock: { plays: [] } }]);
+  bad([{ ...hase, unlock: { plays: 'Spuk' } }]);
+  bad([{ ...hase, unlock: { plays: ['Spuk', 'Spuk'] } }], /a play twice/);
+  bad([{ ...hase, unlock: { plays: ['Spuk', 'Unbekannt'] } }], /no role figure of Unbekannt/);
+  bad([{ ...hase, unlock: { plays: ['Spuk', { play: 'Gruft', year: 1999 }] } }], /no role figure of Gruft/);
+  bad([{ ...hase, unlock: { plays: ['Spuk', ''] } }]);
+  bad([{ ...hase, unlock: { plays: ['Spuk', { play: 'Gruft', year: '2024' }] } }]);
+  bad([{ ...hase, unlock: { play: 'Spuk', plays: ['Spuk', 'Gruft'] } }]);
+  bad([{ ...hase, unlock: { year: 2026, plays: ['Spuk', 'Gruft'] } }]);
+  // One figure per set of plays, in whatever order, a waiting one counted.
+  bad([hase, { ...hase, id: 'u.hase2', unlock: { plays: ['Gruft', 'Spuk'] }, disabled: true }], /one unique figure per play/);
+  // Next to the single plays' own figures: fine.
+  catalogOf([...defaults, ...figures, ...gruft, kuschel, hase, { ...kuschel, id: 'u.gruft', play: 'Gruft', year: 2024, unlock: { play: 'Gruft' } }]);
+});
+
+test('across plays: only Spuk complete unlocks Spuk\'s figure, not the one across Spuk and Gruft', t => {
+  const { app, give, saved } = setup(t, { catalog: acrossOf() });
+  give(['r1', 'r2']);
+  let w = app.runnerWardrobe('sam', now);
+  // One entry for both plays: the plays named together, the progress summed up and per play.
+  const hidden = { play: 'Spuk und Gruft', plays: [{ play: 'Spuk', year: 2026, have: 2, total: 3 }, { play: 'Gruft', year: 2024, have: 0, total: 2 }], have: 2, total: 5, unlocked: false, hidden: true, name: '???' };
+  assert.deepEqual(w.uniqueFigures.plays, [{ play: 'Spuk', year: 2026, have: 2, total: 3, unlocked: false, hidden: true, name: '???' }, hidden]);
+  assert.deepEqual(leaks(w, [...secrets, 'u.hase', 'Hase', 'Hoppel', 'Seit 2020']), []);
+  assert.throws(() => app.runnerOutfit('sam', { kind: 'character', itemId: 'u.hase', ...now }), { status: 404, message: 'Dieses Teil gibt es nicht.' });
+  // Spuk complete: its own figure, the one across plays still hidden.
+  give(['r1', 'r2', 'r3']);
+  w = app.runnerWardrobe('sam', now);
+  assert.deepEqual(saved().uniques, ['u.spuk']);
+  assert.ok(w.owned.includes('u.spuk') && !w.owned.includes('u.hase'));
+  assert.deepEqual(w.uniqueFigures.plays[1], { ...hidden, plays: [{ ...hidden.plays[0], have: 3 }, hidden.plays[1]], have: 3 });
+  assert.deepEqual(w.uniqueFigures.unseen, ['u.spuk']);
+  assert.deepEqual(leaks(w, ['u.hase', 'Hase', 'Hoppel', 'Seit 2020']), []);
+  // Gruft complete and Spuk not is not enough either.
+  give(['r1', 'g1', 'g2']);
+  assert.deepEqual(app.runnerWardrobe('sam', now).uniqueFigures.plays[1].plays.map(x => x.have), [1, 2]);
+  assert.equal(saved().uniques, undefined);
+});
+
+test('across plays: both complete unlock it, here with the last role figure bought', t => {
+  const { app, give, saved } = setup(t, { catalog: acrossOf() });
+  give(['r1', 'r2', 'r3', 'g2'], { gage: 500 });
+  assert.deepEqual(app.runnerWardrobe('sam', now).uniqueFigures.plays[1].have, 4);
+  assert.deepEqual(saved().uniques, ['u.spuk']);
+  const deal = app.runnerBuy('sam', 'b-g1', { itemId: 'g1', ...now });
+  const w = deal.wardrobe;
+  assert.ok(w.owned.includes('u.hase'));
+  assert.deepEqual(saved().uniques, ['u.spuk', 'u.hase']);
+  assert.deepEqual(w.uniqueFigures.plays[1], { play: 'Spuk und Gruft', plays: [{ play: 'Spuk', year: 2026, have: 3, total: 3 }, { play: 'Gruft', year: 2024, have: 2, total: 2 }], have: 5, total: 5, unlocked: true, itemId: 'u.hase', name: 'Hase Hoppel', unlockedAt: '2026-10-24T10:00:00.000Z' });
+  assert.deepEqual(w.uniqueFigures.unseen, ['u.spuk', 'u.hase']);
+  assert.deepEqual(w.catalog.uniques.map(x => [x.id, JSON.stringify(x.unlock)]), [['u.spuk', '{"play":"Spuk"}'], ['u.hase', '{"plays":["Spuk","Gruft"]}']]);
+  assert.equal(app.runnerOutfit('sam', { kind: 'character', itemId: 'u.hase', ...now }).selected.character, 'u.hase');
+  // Kim has neither.
+  assert.deepEqual(leaks(app.runnerWardrobe('kim', now), ['u.hase', 'Hoppel']), []);
+  // Apps from before see nothing of it.
+  assert.deepEqual(leaks(app.runnerWardrobe('sam', { roles: true }), ['u.hase', 'Hoppel', 'Spuk und Gruft']), []);
+});
+
+test('across plays: a play without active role figures unlocks nothing and shows nothing', t => {
+  // Gruft's figures all wait for their pictures: the figure across plays is left out.
+  const catalog = catalogOf([...defaults, ...figures, ...gruft.map(x => ({ ...x, disabled: true })), kuschel, hase]);
+  const { app, give, saved } = setup(t, { catalog });
+  give(['r1', 'r2', 'r3']);
+  const w = app.runnerWardrobe('sam', now);
+  assert.deepEqual(w.uniqueFigures.plays.map(x => x.play), ['Spuk']);
+  assert.deepEqual(saved().uniques, ['u.spuk']);
+  // The year of a play comes from its role figures if unlock names none, and no year if they differ.
+  const mixed = catalogOf([...defaults, ...figures, ...gruft, role('g3', 908, 'Gruft', 2025), hase]);
+  const { app: other } = setup(t, { catalog: mixed });
+  assert.deepEqual(other.runnerWardrobe('sam', now).uniqueFigures.plays[0].plays[1], { play: 'Gruft', have: 0, total: 3 });
+});
+
+test('the bundled catalog: Beatrice for Creepshow, the AI for Nexus, Captain Kuschel for both', t => {
   const c = bundledCatalog();
   assert.equal(c.uniqueRarity.id, 'unique');
   assert.equal(c.uniqueRarity.style, 'holo');
-  // Every unique figure of the catalog (all still without picture) is left out.
-  assert.deepEqual(c.uniques.filter(x => !x.image).map(x => x.id), []);
+  // Every active unique figure has its picture, portrait and wire points.
+  for (const u of c.uniques) assert.ok(u.image && u.portrait && u.harness, u.id);
+  assert.deepEqual(c.uniques.map(x => [x.id, JSON.stringify(x.unlock)]), [
+    ['character.unique-beatrice', '{"play":"Creepshow"}'],
+    ['character.unique-ki-nexus', '{"play":"Nexus"}'],
+    ['character.unique-captain-kuschel', '{"plays":["Creepshow","Nexus"]}'],
+  ]);
+  assert.deepEqual([...c.uniqueFiles.keys()].sort(), ['character-unique-beatrice-portrait.webp', 'character-unique-beatrice.webp', 'character-unique-captain-kuschel-portrait.webp', 'character-unique-captain-kuschel.webp', 'character-unique-ki-nexus-portrait.webp', 'character-unique-ki-nexus.webp']);
+  const raw = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url), 'utf8')).items;
+  const beatrice = c.byId.get('character.unique-beatrice');
+  assert.deepEqual([beatrice.name, beatrice.play, beatrice.year, beatrice.unlock], ['Beatrice', 'Creepshow', 2026, { play: 'Creepshow' }]);
+  // The others still wait for their pictures.
+  assert.deepEqual(raw.filter(x => x.rarity === 'unique' && x.disabled).map(x => x.id),
+    ['character.unique-ritterpuppe', 'character.unique-willi', 'character.unique-kristall', 'character.unique-rabe']);
+  // Logge's role "KI" in Nexus is gone: the AI is a unique figure.
+  assert.ok(!raw.some(x => x.id === 'character.logge--nexus'));
   const store = new Store(); t.after(() => store.close());
   const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', clock });
   app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
   const w = app.runnerWardrobe('admin', now);
-  assert.deepEqual(w.uniqueFigures.plays.map(x => x.play), c.uniques.map(x => x.unlock.play));
-  for (const p of w.uniqueFigures.plays) assert.ok(p.total > 0, p.play);
+  assert.deepEqual(w.uniqueFigures.plays.map(x => [x.play, x.year]), [['Creepshow', 2026], ['Nexus', 2024], ['Creepshow und Nexus', undefined]]);
+  const [creepshow, nexus, across] = w.uniqueFigures.plays;
+  assert.deepEqual(across.plays.map(x => [x.play, x.year]), [['Creepshow', 2026], ['Nexus', 2024]]);
+  // Kuschel needs exactly the role figures of Beatrice and of the AI together.
+  assert.deepEqual([across.plays[0].total, across.plays[1].total], [creepshow.total, nexus.total]);
+  assert.equal(across.total, creepshow.total + nexus.total);
+  for (const p of w.uniqueFigures.plays) assert.ok(p.total > 0 && p.hidden, p.play);
   assert.deepEqual(w.catalog.uniques, []);
+  assert.deepEqual(leaks(w, ['Kuschel', 'KI Nexus', 'unique-', 'Beatrice']), []);
 });
 
 test('over HTTP: the flag in the query and the body, the seen route, and the picture a 404 until unlocked', async t => {
