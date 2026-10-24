@@ -81,6 +81,7 @@ Future<RoundResult> submitRound(
   required int score,
   required int meters,
   ObstacleKind? hitBy,
+  Map<String, Object>? missionStats,
 }) async {
   final data = await controller.remote(
     '/games/runner/scores',
@@ -91,6 +92,8 @@ Future<RoundResult> submitRound(
       'score': score,
       'meters': meters,
       if (hitBy != null) 'hitBy': hitBy.name,
+      // For the Tagesmissionen (`runnerMissions`); older servers ignore it.
+      'missionStats': ?missionStats,
     },
   );
   return RoundResult(
