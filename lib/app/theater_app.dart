@@ -5,6 +5,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../core/app_controller.dart';
 import '../core/device_services.dart';
+import '../core/telemetry/perf_telemetry.dart';
 import 'background_sync.dart';
 import 'brand.dart';
 import 'deep_links.dart';
@@ -38,6 +39,12 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
   late final DeepLinkRouter _deepLinks;
   late final BackgroundSync _sync;
   final _updates = AppUpdateCheck();
+  final _perf = PerfTelemetry.instance;
+
+  /// Stable, so the navigator never re-attaches the telemetry's observer.
+  late final _navigatorObservers = [
+    if (_perf.available) _perf.navigatorObserver,
+  ];
   String? _identity;
   bool _starting = true;
   Object? _startupError;
@@ -70,6 +77,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     );
     _identity = _sessionIdentity;
     widget.controller.addListener(_accountChanged);
+    _navigationTab.addListener(_perfRoot);
     _start();
   }
 
@@ -85,6 +93,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
           _starting = false;
           _startupError = null;
         });
+        _perf.markReady();
         _sync.start();
         _updateCheck = _checkForUpdate();
         final target = _deepLinks.takePending();
@@ -122,8 +131,16 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     );
   }
 
+  /// The screen the telemetry attributes frames to below opened pages.
+  void _perfRoot() => _perf.setRoot(
+    widget.controller.hasAccess
+        ? AppSection.values[_navigationTab.value].name
+        : 'gate',
+  );
+
   void _accountChanged() {
     _rootState.value = _rootKey;
+    _perfRoot();
     final current = _sessionIdentity;
     if (current != _identity) {
       _identity = current;
@@ -179,6 +196,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     _sync.dispose();
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_accountChanged);
+    _navigationTab.removeListener(_perfRoot);
     _devices.dispose();
     _navigationTab.dispose();
     _rootState.dispose();
@@ -197,6 +215,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
           title: Brand.name,
           debugShowCheckedModeBanner: false,
           navigatorKey: _navigator,
+          navigatorObservers: _navigatorObservers,
           scaffoldMessengerKey: _messenger,
           locale: const Locale('de'),
           supportedLocales: const [Locale('de')],

@@ -14,6 +14,7 @@ import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/core/models.dart';
+import 'package:theater_app/core/telemetry/perf_telemetry.dart';
 import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/features/changelog/changelog.dart';
 import 'package:theater_app/features/games/domain/stage_runner.dart';
@@ -280,6 +281,21 @@ Future<AppController> _demo() async {
   addTearDown(demo.dispose);
   await demo.startDemo();
   return demo;
+}
+
+/// Receives the performance telemetry's reports.
+class _PerfUplink implements PerfUplink {
+  final sent = <Map<String, Object?>>[];
+  @override
+  bool get isDemo => false;
+  @override
+  bool get hasAccess => true;
+  @override
+  bool get featuresKnown => true;
+  @override
+  bool supports(String feature) => true;
+  @override
+  Future<void> send(Map<String, Object?> report) async => sent.add(report);
 }
 
 /// Pumps frames until the run is over and the result shows.
@@ -770,6 +786,45 @@ void main() {
       await tester.tap(find.text('Nochmal'));
       await tester.pump();
       expect(find.byKey(const ValueKey('runner-stage')), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a run reports its frame times to the telemetry', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      final uplink = _PerfUplink();
+      PerfTelemetry.instance.startForTest(uplink: uplink);
+      addTearDown(PerfTelemetry.instance.stopForTest);
+      StageRunner? game;
+      await _pump(
+        tester,
+        StageRunnerScreen(
+          controller: await _demo(),
+          sound: _FakeSound(),
+          onRun: (g) => game = g,
+        ),
+      );
+      await tester.tap(find.text('Vorhang auf'));
+      await _runUntilOver(tester);
+      await PerfTelemetry.instance.flush();
+      final report = uplink.sent.singleWhere((r) => r['kind'] == 'stageRunner');
+      final run = report['run']! as Map;
+      expect(run['m'], game!.meters);
+      expect(run['score'], game!.score);
+      expect(run['end'], 'crash');
+      expect(run['ms'], closeTo(game!.time * 1000, 1));
+      expect(run.containsKey('character'), isFalse, reason: 'default costume');
+      final frames = report['frames']! as Map;
+      // The test pumps every 50 ms: each step is a (small) jank.
+      expect(frames['n'], greaterThan(10));
+      expect(frames['p50'], closeTo(50, 1));
+      expect(frames['j25'], frames['n']);
+      final worst = (report['worst']! as List).cast<Map>();
+      expect(worst, hasLength(5));
+      expect(worst.first['m'], isA<int>());
+      final events = worst.expand((w) => '${w['ev'] ?? ''}'.split(',')).toSet();
+      expect(events, contains('sound'), reason: 'the music starts the run');
       await tester.pumpWidget(const SizedBox());
     });
 

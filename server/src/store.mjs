@@ -11,6 +11,9 @@ export class Store {
       CREATE TABLE IF NOT EXISTS accounts(uid TEXT PRIMARY KEY, person_id INTEGER UNIQUE, status TEXT NOT NULL DEFAULT 'pending', role TEXT NOT NULL DEFAULT 'member', data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS requests(uid TEXT NOT NULL, request_id TEXT NOT NULL, hash TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(uid,request_id));
       CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, created_at TEXT NOT NULL);
+      -- Anonymous performance telemetry (perf-telemetry.mjs): grouping columns plus the trimmed report.
+      CREATE TABLE IF NOT EXISTS perf_reports(id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, install_id TEXT NOT NULL, session_id TEXT, kind TEXT NOT NULL, platform TEXT NOT NULL, renderer TEXT, browser TEXT, os TEXT, pwa INTEGER, app_version TEXT, app_build TEXT, data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS perf_reports_created ON perf_reports(created_at);
     `);
   }
   get(kind, id) {

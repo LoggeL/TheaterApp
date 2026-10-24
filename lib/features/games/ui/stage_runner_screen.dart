@@ -18,6 +18,7 @@ import '../domain/stage_runner.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart';
 import 'stage_runner_look.dart';
+import 'stage_runner_perf.dart';
 import 'stage_runner_sound.dart';
 import 'wardrobe_screen.dart';
 
@@ -61,6 +62,9 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   _Phase _phase = _Phase.intro;
   StageRunner _game = StageRunner();
   RunnerFx _fx = RunnerFx();
+
+  /// Frame times of the current run for the performance telemetry.
+  RunnerPerf? _perf;
 
   /// The art in the worn costume (see [dressArt]); the default art until
   /// the wardrobe is known.
@@ -126,7 +130,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     final base = RunnerArt.loaded, w = _wardrobe;
     if (base == null || w == null) return;
     final art = await dressArt(base, w, controller);
-    if (mounted && identical(w, _wardrobe)) setState(() => _art = art);
+    if (mounted && identical(w, _wardrobe)) {
+      setState(() => _art = art);
+      _perf?.skin();
+    }
   }
 
   Future<void> _openWardrobe() => openWardrobe(
@@ -146,6 +153,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   @override
   void dispose() {
+    if (_phase == _Phase.playing) _perf?.finish(_wardrobe, end: 'quit');
     _sound.stopMusic();
     if (widget.sound == null) _sound.dispose();
     _ticker.dispose();
@@ -172,15 +180,26 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   void _play() {
     final run = ++_run;
     final game = _game = StageRunner(random: widget.random);
-    final fx = _fx = RunnerFx(best: _board?.own?.score, onSound: _sound.play);
+    final perf = _perf = RunnerPerf(game, curtainStart: _curtainStart);
+    final fx = _fx = RunnerFx(
+      best: _board?.own?.score,
+      onSound: (sfx) {
+        perf.sound();
+        _sound.play(sfx);
+      },
+    );
     // Its own dice, so courses stay reproducible.
     _trail = RunnerTrail();
     _progress = null;
-    game.onPickup = (kind, x, y) => fx.pickup(kind, x - game.distance, y);
+    game.onPickup = (kind, x, y) {
+      perf.pickup();
+      fx.pickup(kind, x - game.distance, y);
+    };
     // Called from the tap on "Vorhang auf", so browsers allow the sound.
     _sound
       ..prepare()
       ..startMusic();
+    perf.sound();
     widget.onRun?.call(_game);
     _hud.value = (0, 0);
     _pointers = 0;
@@ -215,12 +234,14 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   void _tick(Duration elapsed) {
     final dt = (elapsed - _lastFrame).inMicroseconds / 1e6;
     _lastFrame = elapsed;
+    _perf?.step(dt);
     final keys = HardwareKeyboard.instance.logicalKeysPressed;
     _game
       ..holding = _pointers > 0 || keys.any(_holdKeys.contains)
       ..update(dt);
     _fx.update(dt, _game);
     _trail.update(dt, _game, _art?.effect);
+    _perf?.observe();
     _frame.value++;
     final hud = (_game.score, _game.meters);
     if (hud != _hud.value) _hud.value = hud;
@@ -228,6 +249,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     if (_game.over && _game.sinceOver >= _curtainEnd) {
       _ticker.stop();
       _sound.stopMusic();
+      _perf?.finish(_wardrobe);
+      _perf = null;
       _finish(_run);
     }
   }

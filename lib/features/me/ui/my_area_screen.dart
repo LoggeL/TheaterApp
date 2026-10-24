@@ -230,8 +230,8 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                       icon: Icons.tune,
                       title: 'Benachrichtigungen & Darstellung',
                       subtitle: calendarFeedAvailable(controller)
-                          ? 'Push, E-Mail, Erinnerungen, Kalender-Abo und Farbschema'
-                          : 'Push, E-Mail, Erinnerungen und Farbschema',
+                          ? 'Push, E-Mail, Erinnerungen, Kalender-Abo, Farbschema und Leistungsdaten'
+                          : 'Push, E-Mail, Erinnerungen, Farbschema und Leistungsdaten',
                       onTap: () => openPage(
                         context,
                         SettingsScreen(

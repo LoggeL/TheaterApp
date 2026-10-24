@@ -1,5 +1,6 @@
 import { unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { perfTelemetry } from './perf-telemetry.mjs';
 
 const dayMs = 24 * 3600000;
 // Deletion periods promised in the privacy notice (web/privacy.html#speicherdauer).
@@ -10,6 +11,8 @@ export const retention = Object.freeze({
   absenceDays: 28,
   orphanProfileImageDays: 1,
   rejectedAccountDays: 180,
+  // Anonymous performance reports (perf-telemetry.mjs).
+  perfReportDays: perfTelemetry.retentionDays,
 });
 
 const day = value => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin' }).format(new Date(value));
@@ -17,10 +20,11 @@ const day = value => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin
 /** Deletes data that is no longer needed. `deleteIdentity` removes the Firebase login of a rejected account. */
 export async function purgeExpired(theater, { now = new Date(), mediaDirectory = null, deleteIdentity = null } = {}) {
   const s = theater.store, at = +now, before = days => new Date(at - days * dayMs).toISOString();
-  const counts = { requests: 0, pushJobs: 0, emailJobs: 0, reminderSent: 0, reasons: 0, absences: 0, profileImages: 0, rejectedAccounts: 0 };
+  const counts = { requests: 0, pushJobs: 0, emailJobs: 0, reminderSent: 0, reasons: 0, absences: 0, profileImages: 0, rejectedAccounts: 0, perfReports: 0 };
   s.transaction(() => {
     // Stored idempotency results can contain decline reasons.
     counts.requests = Number(s.db.prepare('DELETE FROM requests WHERE created_at < ?').run(before(retention.requestDays)).changes);
+    counts.perfReports = Number(s.db.prepare('DELETE FROM perf_reports WHERE created_at < ?').run(before(retention.perfReportDays)).changes);
     for (const kind of ['pushJobs', 'emailJobs']) for (const job of s.all(kind).filter(j => j.createdAt < before(retention.pushJobDays))) { s.delete(kind, job.id); counts[kind]++; }
     s.db.prepare("DELETE FROM entities WHERE kind = 'reminderSent' AND json_extract(data, '$.at') < ?").run(before(retention.pushJobDays));
     const events = new Map(s.all('events').map(e => [e.id, e]));

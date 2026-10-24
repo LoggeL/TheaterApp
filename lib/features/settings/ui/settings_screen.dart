@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/brand.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/device_services.dart';
+import '../../../core/telemetry/perf_telemetry.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/layout/content_width.dart';
@@ -22,9 +23,14 @@ class SettingsScreen extends StatefulWidget {
     super.key,
     required this.controller,
     required this.devices,
+    this.perf,
   });
   final AppController controller;
   final DeviceServices devices;
+
+  /// The performance telemetry whose sending the user can switch off;
+  /// [PerfTelemetry.instance] unless a test passes its own.
+  final PerfTelemetry? perf;
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
@@ -415,9 +421,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ),
+            const SectionTitle('Datenschutz'),
+            _PerfSwitch(widget.perf ?? PerfTelemetry.instance),
           ],
         ),
       );
     },
+  );
+}
+
+/// „Leistungsdaten senden“: the performance telemetry's opt-out. It holds
+/// for this installation only, since the telemetry knows no account.
+class _PerfSwitch extends StatelessWidget {
+  const _PerfSwitch(this.perf);
+  final PerfTelemetry perf;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: ValueListenableBuilder<bool>(
+      valueListenable: perf.enabled,
+      builder: (context, on, _) => SwitchListTile(
+        key: const ValueKey('perf-telemetry'),
+        secondary: const Icon(Icons.speed_outlined),
+        title: const Text('Leistungsdaten senden'),
+        subtitle: const Text(
+          'Hilft uns, Ruckler und langsame Stellen auf verschiedenen Geräten '
+          'zu finden. Pseudonym, ohne Inhalte, 30 Tage gespeichert. '
+          'Gilt für dieses Gerät.',
+        ),
+        value: on,
+        onChanged: perf.setEnabled,
+      ),
+    ),
   );
 }

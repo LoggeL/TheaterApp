@@ -3,6 +3,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../app/shell/app_navigation.dart';
 import '../core/app_controller.dart';
+import '../core/telemetry/perf_telemetry.dart';
 
 /// Opens [screen] as a new page on top of the current route.
 ///
@@ -14,12 +15,13 @@ Future<T?> openPage<T>(
   BuildContext context,
   Widget screen, {
   bool fullscreen = false,
-}) => Navigator.push<T>(
-  context,
-  MaterialPageRoute<T>(
+}) {
+  final route = MaterialPageRoute<T>(
     builder: (_) => _RoutePage(screen: screen, fullscreen: fullscreen),
-  ),
-);
+  );
+  PerfTelemetry.nameRoute(route, screen);
+  return Navigator.push<T>(context, route);
+}
 
 class _RoutePage extends StatefulWidget {
   const _RoutePage({required this.screen, required this.fullscreen});

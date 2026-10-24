@@ -58,7 +58,7 @@ def main():
         raise RuntimeError('build/web contains another Firebase configuration; build the production app first.')
     files = [ROOT/'Dockerfile', ROOT/'server/package.json', ROOT/'server/package-lock.json']
     files += sorted(p for p in (ROOT/'server/src').rglob('*') if p.is_file())
-    files += [ROOT/'server/scripts/bootstrap-admin.mjs', ROOT/'server/scripts/import-website-team.mjs']
+    files += [ROOT/'server/scripts/bootstrap-admin.mjs', ROOT/'server/scripts/import-website-team.mjs', ROOT/'server/scripts/perf-report.mjs']
     files += sorted(p for p in (ROOT/'build/web').rglob('*') if p.is_file())
     digest = hashlib.sha256()
     for f in files:

@@ -7,6 +7,7 @@ import { clientAddress } from './bot-check.mjs';
 import { linkWebsiteProfile, websiteProfilesView } from './website-team.mjs';
 import { adminTicketView, closeOwnFeedback, markFeedbackRead, ownFeedback, ownTicketView, replyAsAdmin, replyAsMember } from './feedback-tickets.mjs';
 import { CalendarFeedLimiter, calendarFeed, calendarFeedLink, resetCalendarFeed } from './calendar-feed.mjs';
+import { PerfTelemetry, perfTelemetry } from './perf-telemetry.mjs';
 
 // Content-addressed web files from tool/version-web.mjs never change under their name.
 // Entry points (index.html, workers, manifests) and unhashed files must stay revalidated.
@@ -17,12 +18,13 @@ const hashedWebFile = /^\/(?:main\.[a-f0-9]{16}\.dart\.(?:js|mjs|wasm)|(?:flutte
 // `clientIpHeader` names the proxy header with the client address for its attempt limit
 // (e.g. `cf-connecting-ip`). `appOrigin` is the public address of the app, used for the
 // personal calendar feed links (see calendar-feed.mjs).
-export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null, appOrigin = null, calendarLimiter = new CalendarFeedLimiter() }) {
+export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null, appOrigin = null, calendarLimiter = new CalendarFeedLimiter(), perf = null }) {
   const origins = new Set(allowedOrigins);
+  const telemetry = perf ?? new PerfTelemetry(defaultTheater.store);
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   const readBody = async (req, route) => {
     let body = {}, length = 0; const chunks = [];
-    for await (const chunk of req) { length += chunk.length; if (length > (route === '/media' ? 12 : 2) * 1024 * 1024) throw new AppError(413, 'Die Anfrage ist zu groß.'); chunks.push(chunk); }
+    for await (const chunk of req) { length += chunk.length; if (length > (route === '/media' ? 12 * 1024 * 1024 : route === '/telemetry/perf' ? perfTelemetry.maxBytes : 2 * 1024 * 1024)) throw new AppError(413, 'Die Anfrage ist zu groß.'); chunks.push(chunk); }
     if (length) { try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new AppError(400, 'Ungültiges JSON.'); } }
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AppError(400, 'Ungültige Anfrage.');
     return body;
@@ -84,6 +86,14 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (!identity?.uid) throw new AppError(401, 'Ungültige Anmeldung.');
       if (review && identity.uid === review.uid) {
         ({ theater, scriptService, focusBridge, media } = review);
+      }
+      // Performance telemetry (perf-telemetry.mjs) never shows the app an error: invalid, too large,
+      // rate-limited reports and those of the review account or unapproved accounts are dropped.
+      if (route === '/telemetry/perf' && req.method === 'POST') {
+        try {
+          if (theater === defaultTheater) { theater.account(identity.uid); telemetry.record(identity.uid, await readBody(req, route)); }
+        } catch (e) { if (!(e instanceof AppError)) console.error('Telemetry:', e.code ?? e.name, e.message); }
+        res.writeHead(204, { 'Cache-Control': 'no-store' }); res.end(); return;
       }
       if (!['/auth/session', '/auth/logout', '/devices'].includes(route)) theater.account(identity.uid);
       const body = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await readBody(req, route) : {};

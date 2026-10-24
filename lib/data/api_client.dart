@@ -41,6 +41,16 @@ class ApiClient {
   Future<String> Function(String expectedUid)? firebaseToken;
   static const pathPrefix = '/api/mobile/v1';
 
+  /// Sees every request's method, path, status (0: no answer) and duration;
+  /// set by the performance telemetry.
+  static void Function(
+    String method,
+    String path,
+    int status,
+    Duration elapsed,
+  )?
+  observer;
+
   static String normalizeBaseUrl(String input) {
     final uri = Uri.tryParse(input.trim());
     if (uri == null ||
@@ -103,11 +113,14 @@ class ApiClient {
       request.headers['Content-Type'] = 'application/json';
       request.body = jsonEncode(body);
     }
+    final watch = Stopwatch()..start();
+    var status = 0;
     try {
       final response = await _client
           .send(request)
           .then(http.Response.fromStream)
           .timeout(timeout);
+      status = response.statusCode;
       if (response.bodyBytes.length > 30 * 1024 * 1024) {
         throw const ApiException(
           'Die Serverantwort ist zu groß. Bitte die Produktion in kleinere Abschnitte aufteilen.',
@@ -145,6 +158,8 @@ class ApiClient {
       throw const ApiException(
         'Keine Verbindung zum Server. Bereits geladene Inhalte bleiben verfügbar.',
       );
+    } finally {
+      observer?.call(method, path, status, watch.elapsed);
     }
   }
 
@@ -167,10 +182,13 @@ class ApiClient {
     final request = http.Request('GET', uri)
       ..followRedirects = false
       ..headers['Authorization'] = 'Bearer $actualToken';
+    final watch = Stopwatch()..start();
+    var status = 0;
     try {
       final response = await _client
           .send(request)
           .timeout(const Duration(seconds: 30));
+      status = response.statusCode;
       if (response.statusCode != 200) {
         final body = await response.stream.bytesToString().timeout(timeout);
         String message = 'Das Bild konnte nicht geladen werden.';
@@ -217,6 +235,8 @@ class ApiClient {
       );
     } on http.ClientException {
       throw const ApiException('Keine Verbindung zur Fotogalerie.');
+    } finally {
+      observer?.call('GET', path, status, watch.elapsed);
     }
   }
 
