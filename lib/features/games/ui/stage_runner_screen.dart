@@ -676,6 +676,9 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                               () => _art,
                               _frame,
                               () => _trail,
+                              pixelRatio: MediaQuery.devicePixelRatioOf(
+                                context,
+                              ),
                             ),
                           ),
                         ),
@@ -902,14 +905,24 @@ class _LegendPainter extends CustomPainter {
 /// issues a few dozen rectangles, circles and sprite copies from one atlas.
 /// Without the pictures (offline on the web) it draws simple shapes.
 class _StagePainter extends CustomPainter {
-  _StagePainter(this.game, this.fx, this.art, Listenable repaint, this.trail)
-    : super(repaint: repaint);
+  _StagePainter(
+    this.game,
+    this.fx,
+    this.art,
+    Listenable repaint,
+    this.trail, {
+    this.pixelRatio = 1,
+  }) : super(repaint: repaint);
   final StageRunner Function() game;
   final RunnerFx Function() fx;
   final RunnerArt? Function() art;
 
   /// The trail of the worn effect.
   final RunnerTrail Function() trail;
+
+  /// Device pixels per logical pixel; the stage scrolls in whole device
+  /// pixels.
+  final double pixelRatio;
 
   static final _bg = _fill(_stageDark), _wallPaint = _fill(_wall);
   static final _velvetPaint = _fill(_velvet);
@@ -956,19 +969,22 @@ class _StagePainter extends CustomPainter {
     canvas.save();
     canvas.translate(dx * s, dy * s);
 
-    // The set stands still like on a real stage: only the floor, the course
-    // and the front row move, all exactly at the running pace. Layers at
-    // their own pace (parallax) made players feel sick.
-    _backdrop(canvas, a, s, w, floorY);
-    _spotlights(canvas, s, w, floorY);
-    _wings(canvas, s);
-    _floor(canvas, g, s, w, floorY);
+    // The whole stage moves as one, exactly at the running pace: backdrop,
+    // lights, wings, floor, course and front row. Layers at their own pace
+    // (parallax) made players feel sick. The shift is rounded to whole
+    // device pixels, so each frame is the last one moved by whole pixels and
+    // the pictures don't shimmer.
+    final scroll = (g.distance * s * pixelRatio).round() / pixelRatio;
+    _backdrop(canvas, a, s, w, floorY, scroll);
+    _spotlights(canvas, s, w, floorY, scroll);
+    _wings(canvas, s, w, scroll);
+    _floor(canvas, s, w, floorY, scroll);
 
     for (final o in g.obstacles) {
       final rect = Rect.fromLTRB(
-        (o.left - g.distance) * s,
+        o.left * s - scroll,
         o.top * s,
-        (o.right - g.distance) * s,
+        o.right * s - scroll,
         o.bottom * s,
       );
       if (rect.right < -s * .1 || rect.left > w + s * .1) continue;
@@ -979,7 +995,7 @@ class _StagePainter extends CustomPainter {
       }
     }
 
-    _pickups(canvas, g, a, s, w);
+    _pickups(canvas, g, a, s, w, scroll);
     trail().paint(canvas, s, a?.effect);
     if (a == null) {
       _plainRunner(canvas, g, s);
@@ -987,21 +1003,24 @@ class _StagePainter extends CustomPainter {
       _runner(canvas, g, f, a, s);
     }
     _particles(canvas, f, s);
-    _audience(canvas, g, f, s);
+    _audience(canvas, g, f, s, w, scroll);
     _bannerAndValance(canvas, f, s, w);
     canvas.restore();
 
     if (g.over) _curtain(canvas, g, s, w);
   }
 
-  /// The painted backdrop stands still; a mirrored copy fills wide stages
-  /// without a seam.
+  /// The painted backdrop passes [scroll] pixels to the left, tiled in turn
+  /// as painted and mirrored, so the seams match for runs of any length.
+  /// Its paint samples with mipmaps ([FilterQuality.medium]): smooth when
+  /// scaled down, no stair steps when scaled up.
   void _backdrop(
     Canvas canvas,
     RunnerArt? a,
     double s,
     double w,
     double floorY,
+    double scroll,
   ) {
     if (a == null) {
       canvas.drawRect(Rect.fromLTRB(0, s * .1, w, floorY), _wallPaint);
@@ -1015,7 +1034,7 @@ class _StagePainter extends CustomPainter {
       image.width.toDouble(),
       image.height.toDouble(),
     );
-    for (var x = 0.0; x < w; x += 2 * tile) {
+    for (var x = -(scroll % (2 * tile)); x < w; x += 2 * tile) {
       canvas.drawImageRect(
         image,
         src,
@@ -1036,10 +1055,21 @@ class _StagePainter extends CustomPainter {
     }
   }
 
-  /// Two fixed light cones: flat translucent shapes, no blur.
-  void _spotlights(Canvas canvas, double s, double w, double floorY) {
-    for (var i = 0; i < 2; i++) {
-      final x = w * (.3 + .45 * i);
+  /// Light cones hung every .72 stage heights, passing with the stage:
+  /// flat translucent shapes, no blur.
+  void _spotlights(
+    Canvas canvas,
+    double s,
+    double w,
+    double floorY,
+    double scroll,
+  ) {
+    final period = s * .72;
+    for (
+      var x = s * .48 - scroll % period - period;
+      x < w + s * .25;
+      x += period
+    ) {
       _path
         ..reset()
         ..moveTo(x - s * .02, 0)
@@ -1059,12 +1089,12 @@ class _StagePainter extends CustomPainter {
     }
   }
 
-  /// Four fixed velvet wings, evenly spread from edge to edge.
-  void _wings(Canvas canvas, double s) {
-    const width = .07, spacing = (StageRunner.viewWidth - width) / 3;
-    for (var i = 0; i < 4; i++) {
-      final left = i * spacing * s, top = s * .05;
-      final bottom = s * StageRunner.floor;
+  /// Velvet wings every .51 stage heights, passing with the stage.
+  void _wings(Canvas canvas, double s, double w, double scroll) {
+    const width = .07;
+    final period = s * .51;
+    for (var left = -(scroll % period); left < w; left += period) {
+      final top = s * .05, bottom = s * StageRunner.floor;
       canvas.drawRect(
         Rect.fromLTRB(left, top, left + s * width, bottom),
         _velvetPaint,
@@ -1078,16 +1108,11 @@ class _StagePainter extends CustomPainter {
     }
   }
 
-  void _floor(Canvas canvas, StageRunner g, double s, double w, double floorY) {
+  void _floor(Canvas canvas, double s, double w, double floorY, double scroll) {
     canvas.drawRect(Rect.fromLTRB(0, floorY, w, s), _floorPaint);
-    const plankSpacing = .25;
-    final plankOffset = g.distance % plankSpacing;
-    for (var x = -plankOffset; x < StageRunner.viewWidth; x += plankSpacing) {
-      canvas.drawLine(
-        Offset(x * s, floorY),
-        Offset(x * s - s * .04, s),
-        _plankPaint,
-      );
+    final period = s * .25;
+    for (var x = -(scroll % period); x < w + s * .04; x += period) {
+      canvas.drawLine(Offset(x, floorY), Offset(x - s * .04, s), _plankPaint);
     }
     canvas.drawLine(Offset(0, floorY), Offset(w, floorY), _edgePaint);
   }
@@ -1324,11 +1349,12 @@ class _StagePainter extends CustomPainter {
     RunnerArt? a,
     double s,
     double w,
+    double scroll,
   ) {
     final glyph = s * .075, height = s * .085;
     for (final p in g.pickups) {
       if (p.taken) continue;
-      final x = (p.x - g.distance) * s;
+      final x = p.x * s - scroll;
       if (x < -glyph || x > w + glyph) continue;
       // A gentle bob; the hitbox stays where it is.
       final y = p.y * s + sin(g.time * 4 + p.x * 7) * s * .008;
@@ -1444,19 +1470,21 @@ class _StagePainter extends CustomPainter {
 
   /// Heads in the front row, passing at the pace of the floor; they bounce
   /// while a banner celebrates.
-  void _audience(Canvas canvas, StageRunner g, RunnerFx f, double s) {
-    const spacing = .11;
-    final travel = g.distance;
-    final first = (travel / spacing).floor();
+  void _audience(
+    Canvas canvas,
+    StageRunner g,
+    RunnerFx f,
+    double s,
+    double w,
+    double scroll,
+  ) {
+    final spacing = s * .11;
+    final first = (scroll / spacing).floor();
     final cheering = f.showsBanner && !g.over;
-    for (
-      var i = first - 1;
-      i * spacing - travel < StageRunner.viewWidth + spacing;
-      i++
-    ) {
+    for (var i = first - 1; i * spacing - scroll < w + spacing; i++) {
       final h = (i * 7919) % 13;
       final r = s * (.034 + (h % 3) * .004);
-      final x = (i * spacing - travel) * s + (h % 5) * s * .004;
+      final x = i * spacing - scroll + (h % 5) * s * .004;
       final hop = cheering ? -(sin(g.time * 9 + i) * .5 + .5) * s * .014 : 0.0;
       final y = s * (.985 - (h % 4) * .006) + hop;
       canvas.drawCircle(Offset(x, y - r * .6), r, _crowdPaint);
@@ -1654,5 +1682,5 @@ class _StagePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_StagePainter old) => false;
+  bool shouldRepaint(_StagePainter old) => old.pixelRatio != pixelRatio;
 }

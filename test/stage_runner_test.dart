@@ -1483,12 +1483,10 @@ void main() {
     });
   });
 
-  // Layers that drift at their own pace made players feel sick: the set
-  // stands still and everything that moves keeps the running pace.
+  // Layers that drift at their own pace made players feel sick: the whole
+  // stage moves as one, exactly at the running pace.
   group('motion', () {
-    testWidgets('the set stands still, floor and front row keep pace', (
-      tester,
-    ) async {
+    testWidgets('the whole stage keeps the running pace', (tester) async {
       late StageRunner game;
       await _pump(
         tester,
@@ -1528,16 +1526,21 @@ void main() {
         return bytes!;
       }
 
-      // 0.1 stage heights of running are exactly 40 pixels.
-      final a = await shot(.02, .5), b = await shot(.12, 1.7);
       // Mean difference per channel between [b] and [a] moved left by
       // [shift] pixels, in the rows from [top] to [bottom] (stage heights),
-      // left and right of the runner (no course is in view yet).
-      double difference(int shift, double top, double bottom) {
+      // left and right of the runner and its rope in both (no course is in
+      // view).
+      double difference(
+        Uint8List a,
+        Uint8List b,
+        int shift,
+        double top,
+        double bottom,
+      ) {
         var sum = 0, count = 0;
         for (var y = (top * s).ceil(); y < bottom * s; y++) {
           for (var x = 60; x < 560; x++) {
-            if (x > .3 * s && x < .6 * s) continue;
+            if (x + shift > .3 * s && x < .6 * s) continue;
             for (var c = 0; c < 3; c++) {
               sum += (b[(y * w + x) * 4 + c] - a[(y * w + x + shift) * 4 + c])
                   .abs();
@@ -1548,12 +1551,41 @@ void main() {
         return sum / count;
       }
 
-      // Backdrop, wings and lights between the valance and the floor.
-      expect(difference(0, .08, StageRunner.floor - .01), lessThan(.5));
-      // Floor and audience moved exactly as far as the runner ran.
-      final pace = difference(40, StageRunner.floor + .01, 1);
-      expect(pace, lessThan(1));
-      expect(difference(0, StageRunner.floor + .01, 1), greaterThan(pace + 5));
+      // The shift in pixels that best lines up [b] with [a].
+      int shift(Uint8List a, Uint8List b, double top, double bottom) {
+        var best = 0;
+        var least = double.infinity;
+        for (var i = 0; i <= 60; i++) {
+          final d = difference(a, b, i, top, bottom);
+          if (d < least) (best, least) = (i, d);
+        }
+        return best;
+      }
+
+      // Backdrop, wings and lights between the valance and the floor; the
+      // floor with the front row below it.
+      const set = (.08, StageRunner.floor - .01);
+      const floor = (StageRunner.floor + .01, 1.0);
+
+      // 0.1 stage heights of running are exactly 40 pixels, at the start and
+      // far into a run (the backdrop is tiled without end).
+      for (final start in [.02, 1000.02]) {
+        final a = await shot(start, .5), b = await shot(start + .1, .5);
+        expect(shift(a, b, set.$1, set.$2), 40, reason: 'set at $start');
+        expect(shift(a, b, floor.$1, floor.$2), 40, reason: 'floor at $start');
+        expect(difference(a, b, 40, set.$1, set.$2), lessThan(.5));
+        expect(difference(a, b, 40, floor.$1, floor.$2), lessThan(1));
+        expect(difference(a, b, 0, set.$1, set.$2), greaterThan(5));
+      }
+
+      // Lights don't sway: at the same place the stage looks the same later.
+      final now = await shot(.12, .5), later = await shot(.12, 1.7);
+      expect(difference(now, later, 0, set.$1, set.$2), 0);
+      // The stage moves in whole pixels: less than half a pixel of running
+      // leaves it where it is, so the pictures don't shimmer.
+      final nudged = await shot(.12 + .4 / s, 1.7);
+      expect(difference(later, nudged, 0, set.$1, set.$2), 0);
+      expect(difference(later, nudged, 0, floor.$1, floor.$2), 0);
     });
 
     test('the crash only nudges the stage, briefly', () {
