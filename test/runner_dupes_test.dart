@@ -118,7 +118,11 @@ JsonMap _json({
       },
     ],
     'departments': [],
-    'dupes': {'shinyChance': .03, 'tradeDupes': 5, 'buyDupes': 10},
+    'dupes': {
+      'shinyChance': {'costume': .03, 'ensemble': .03},
+      'tradeDupes': 5,
+      'buyDupes': 10,
+    },
     'ensembleRarity': {
       'id': 'ensemble',
       'name': 'Ensemble',
@@ -289,6 +293,19 @@ void main() {
       expect(w.progress.canOpen, isTrue);
     });
 
+    test('the chance of a shine comes per crate kind', () {
+      final old = DupeRules.fromJson({'shinyChance': .05});
+      expect((old.shinyChance, old.shinyChanceOf('ensemble')), (.05, .05));
+      final kinds = DupeRules.fromJson({
+        'shinyChance': {'costume': .03, 'ensemble': .03, 'mission': .05},
+      });
+      expect(kinds.shinyChance, .03);
+      expect(kinds.shinyChanceOf('ensemble'), .03);
+      expect(kinds.shinyChanceOf('mission'), .05);
+      expect(kinds.shinyChanceOf('unknown'), .03);
+      expect(DupeRules.fromJson({}).shinyChanceOf('ensemble'), .03);
+    });
+
     test('the ensemble shows the way to the next milestone', () {
       final e = Wardrobe.fromJson(_json()).ensemble!;
       expect(e.remaining, 18200);
@@ -333,7 +350,7 @@ void main() {
           'type': 'variant',
           'variant': {'id': 'v', 'name': 'Julia (Romeo und Julia, 2026)'},
         }).line,
-        'Neue Rolle: Julia (Romeo und Julia, 2026)',
+        'Neue Rolle: Julia · Romeo und Julia 2026',
       );
       expect(o({'type': 'shine', 'shiny': true}).shineNew, isTrue);
       expect(o({'type': 'gage', 'shiny': true}).shineNew, isFalse);
@@ -390,16 +407,51 @@ void main() {
       },
     );
 
-    test('the shine alone leaves no trail and draws around the runner', () {
+    test('the shine alone leaves no trail and glints on the figure', () {
       final game = StageRunner(random: Random(1))..update(.016);
       final trail = RunnerTrail(random: Random(2));
       const style = RunnerEffectStyle('', [], shine: true);
-      for (var i = 0; i < 30; i++) {
+      for (var i = 0; i < 60; i++) {
         trail.update(1 / 60, game, style);
       }
       expect(trail.life.every((l) => l <= 0), isTrue);
+      // Running, every glint sits on the figure.
+      final glints = [
+        for (var i = 0; i < RunnerTrail.glints; i++)
+          if (trail.glintLife[i] > 0) i,
+      ];
+      expect(glints, isNotEmpty);
+      expect(glints.every((i) => trail.glintLeft[i] == 0), isTrue);
+      // In flight some are left behind as a short trail; the pool stays.
+      game
+        ..y = .4
+        ..vy = -.6;
+      for (var i = 0; i < 120; i++) {
+        trail.update(1 / 60, game, style);
+      }
+      final left = [
+        for (var i = 0; i < RunnerTrail.glints; i++)
+          if (trail.glintLife[i] > 0 && trail.glintLeft[i] == 1)
+            trail.glintX[i],
+      ];
+      expect(left, isNotEmpty);
+      expect(left.every((x) => x < StageRunner.runnerX), isTrue);
+      expect(
+        left.every((x) => x > StageRunner.runnerX - .25),
+        isTrue,
+        reason: 'a short trail',
+      );
+      expect(trail.glintLife.length, RunnerTrail.glints);
+      // Without the shine no new glints come.
+      for (var i = 0; i < 60; i++) {
+        trail.update(1 / 60, game, null);
+      }
+      expect(trail.glintLife.every((l) => l <= 0), isTrue);
       final recorder = ui.PictureRecorder();
-      trail.paint(Canvas(recorder), 400, style);
+      final canvas = Canvas(recorder);
+      trail
+        ..paint(canvas, 400, style)
+        ..paintGlints(canvas, const Rect.fromLTWH(140, 300, 60, 60), 400);
       recorder.endRecording().dispose();
     });
   });
@@ -547,10 +599,7 @@ void main() {
       await _settle(tester);
       expect(find.text('Ensemble-Ziel erreicht!'), findsOneWidget);
       expect(find.text('Gemeinsam 25 km gelaufen'), findsOneWidget);
-      expect(
-        find.text('Für dich wartet 1 Ensemble-Kiste mit garantiertem Glanz.'),
-        findsOneWidget,
-      );
+      expect(find.text('Für dich wartet 1 Ensemble-Kiste.'), findsOneWidget);
       expect(sound.played, contains(RunnerSfx.jackpot));
       await tester.tap(find.text('Weiter'));
       await _settle(tester);
@@ -562,7 +611,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a role is chosen on the card', (tester) async {
+    // Role figures: every role is a figure of its own, so the card offers
+    // no role to choose any more, also when an older server sends variants.
+    testWidgets('the card offers no role choice', (tester) async {
       final bodies = <JsonMap>[];
       final controller = await _signedIn((request) {
         final path = _path(request);
@@ -588,13 +639,46 @@ void main() {
       await _settle(tester);
       await tester.tap(find.byKey(const ValueKey('wardrobe-h1')));
       await _settle(tester);
-      expect(find.text('Rolle'), findsOneWidget);
-      expect(find.text('? (Duplikat)'), findsOneWidget, reason: 'Amme');
-      await tester.tap(find.byKey(const ValueKey('variant-h1.julia')));
+      expect(find.text('Rolle'), findsNothing);
+      expect(find.text('? (Duplikat)'), findsNothing);
+      expect(find.byKey(const ValueKey('variant-h1.julia')), findsNothing);
+      expect(find.byKey(const ValueKey('variant-plain')), findsNothing);
+      expect(bodies, isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    // "Von Statistik auf Kostüme: ein weißer Block": the goals' tile and the
+    // costumes' scroll view kept their state under the same storage id.
+    testWidgets('back from the statistics the costumes keep goals and scroll', (
+      tester,
+    ) async {
+      final controller = await _signedIn(
+        (request) => _path(request).contains('/games/runner/')
+            ? Future.value(jsonResponse(_json()))
+            : null,
+      );
+      await _pump(
+        tester,
+        WardrobeScreen(controller: controller, sound: _Sound()),
+      );
+      tester.view.physicalSize = const Size(400, 800);
       await _settle(tester);
-      expect(bodies, [
-        {'kind': 'character', 'itemId': 'h1', 'variant': 'h1.julia'},
-      ]);
+      await tester.tap(find.text('Alle Ziele'));
+      await _settle(tester);
+      expect(find.text('1.000 km · Romeo und Julia'), findsOneWidget);
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
+      await _settle(tester);
+      final scrolled = tester.getTopLeft(find.text('Alle Ziele')).dy;
+
+      for (final tab in ['Statistik', 'Kostüme', 'Statistik', 'Kostüme']) {
+        await tester.tap(find.text(tab));
+        await _settle(tester);
+      }
+      expect(tester.takeException(), isNull);
+      expect(find.byType(ErrorWidget), findsNothing);
+      expect(find.byKey(const ValueKey('ensemble-card')), findsOneWidget);
+      expect(find.text('1.000 km · Romeo und Julia'), findsOneWidget);
+      expect(tester.getTopLeft(find.text('Alle Ziele')).dy, scrolled);
       await tester.pumpWidget(const SizedBox());
     });
 

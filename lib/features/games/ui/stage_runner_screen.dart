@@ -13,11 +13,15 @@ import '../../../shared/layout/content_width.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../data/leaderboard_api.dart';
+import '../data/missions_api.dart';
+import '../data/score_outbox.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
+import 'missions_card.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart';
 import 'stage_runner_look.dart';
+import 'stage_runner_music.dart';
 import 'stage_runner_perf.dart';
 import 'stage_runner_sound.dart';
 import 'wardrobe_screen.dart';
@@ -77,6 +81,18 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   Wardrobe? _wardrobe;
   RunnerProgress? _progress;
 
+  /// The day's Tagesmissionen (`runnerMissions`), the watch of the current
+  /// run and its banner when the run makes one.
+  DailyMissions? _missions;
+  MissionWatch? _watch;
+  final _missionBanner = ValueNotifier<DailyMission?>(null);
+  double _bannerUntil = 0;
+  bool get _missionsOn => missionsAvailable(controller);
+
+  /// What the worn backdrop calls the pickups, for the missions' texts.
+  Map<String, String> get _pickupNames =>
+      _wardrobe?.worn(WardrobeKind.backdrop)?.collectibleNames ?? const {};
+
   /// The closing line of the last run; its own dice, so courses stay
   /// reproducible.
   final _lines = Random();
@@ -96,15 +112,45 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   String? _boardError, _saveError;
   bool _loadingBoard = false, _saving = false, _improved = false;
 
+  /// Whether the last run's result waits in the outbox for a connection.
+  bool _queued = false;
+
+  /// The stage's size in this run, and whether the run waits for a tap
+  /// after the size changed (see [_resized]).
+  Size? _stageSize;
+  bool _paused = false;
+
   AppController get controller => widget.controller;
   bool get _ranked => leaderboardAvailable(controller);
   bool get _dressable => wardrobeAvailable(controller);
+
+  /// Whether to point out today's open Tagesbonus before the next run: as
+  /// the last run left it, else as the wardrobe said.
+  bool get _bonusOpen =>
+      dailyBonusAvailable(controller) &&
+      (_progress ?? _wardrobe?.progress)?.bonusOpen == true;
+
+  /// The music holds while the app is in the background.
+  late final AppLifecycleListener _lifecycle;
 
   @override
   void initState() {
     super.initState();
     _ticker = createTicker(_tick);
-    if (_ranked) _loadBoard();
+    _lifecycle = AppLifecycleListener(
+      onHide: () {
+        if (_sound case final RunnerMusic music) music.pauseMusic();
+      },
+      onShow: () {
+        if (_paused) return;
+        if (_sound case final RunnerMusic music) music.resumeMusic();
+      },
+    );
+    if (_ranked) {
+      _loadBoard();
+      // Results that found no connection earlier in this session.
+      unawaited(runnerScoreOutbox(controller).retry());
+    }
     if (_art == null) {
       RunnerArt.load().then((art) {
         if (mounted && art != null) setState(() => _art = art);
@@ -118,7 +164,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   Future<void> _loadWardrobe() async {
     try {
       final w = await loadWardrobe(controller);
-      if (!mounted) return;
+      // A late reply must not undo what was worn in the wardrobe meanwhile.
+      if (!mounted || _wardrobe != null) return;
       setState(() => _wardrobe = w);
       await _dress();
     } catch (e) {
@@ -127,6 +174,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   }
 
   Future<void> _dress() async {
+    unawaited(_tune());
     final base = RunnerArt.loaded, w = _wardrobe;
     if (base == null || w == null) return;
     final art = await dressArt(base, w, controller);
@@ -134,6 +182,16 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       setState(() => _art = art);
       _perf?.skin();
     }
+  }
+
+  /// Gives the sound the worn backdrop's music; without one (or until it
+  /// is loaded) the game's own tune plays.
+  Future<void> _tune() async {
+    if (_sound is! RunnerMusic) return;
+    final path = RunnerTunes.of(_wardrobe);
+    final tune = await RunnerTunes.load(controller, path);
+    if (!mounted || path != RunnerTunes.of(_wardrobe)) return;
+    if (_sound case final RunnerMusic music) music.useTune(tune);
   }
 
   Future<void> _openWardrobe() => openWardrobe(
@@ -154,11 +212,13 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   @override
   void dispose() {
     if (_phase == _Phase.playing) _perf?.finish(_wardrobe, end: 'quit');
+    _lifecycle.dispose();
     _sound.stopMusic();
     if (widget.sound == null) _sound.dispose();
     _ticker.dispose();
     _frame.dispose();
     _hud.dispose();
+    _missionBanner.dispose();
     super.dispose();
   }
 
@@ -191,6 +251,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     // Its own dice, so courses stay reproducible.
     _trail = RunnerTrail();
     _progress = null;
+    _watch = _missionsOn ? MissionWatch(_missions) : null;
+    _missionBanner.value = null;
     game.onPickup = (kind, x, y) {
       perf.pickup();
       fx.pickup(kind, x - game.distance, y);
@@ -206,6 +268,9 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _saveError = null;
     _improved = false;
     _saving = false;
+    _queued = false;
+    _stageSize = null;
+    _paused = false;
     // The server times the run; a failed start only means it is not ranked.
     _start = _ranked
         ? startRound(controller).then<String?>(
@@ -242,6 +307,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _fx.update(dt, _game);
     _trail.update(dt, _game, _art?.effect);
     _perf?.observe();
+    if (_watch?.check(_game) case final made?) {
+      _missionBanner.value = made;
+      _bannerUntil = _game.time + 2.5;
+    } else if (_missionBanner.value != null && _game.time > _bannerUntil) {
+      _missionBanner.value = null;
+    }
     _frame.value++;
     final hud = (_game.score, _game.meters);
     if (hud != _hud.value) _hud.value = hud;
@@ -262,43 +333,60 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     });
     final start = _start;
     if (start == null) return;
+    // Fixed now, before anything is awaited: a quick "Nochmal" replaces
+    // `_game` and `_start`, and this run must still be sent as it ended,
+    // with its own round. The outbox sends it even when the next run plays.
+    final outbox = runnerScoreOutbox(controller);
+    final score = RunScore(
+      round: start,
+      score: _game.score,
+      meters: _game.meters,
+      hitBy: _game.hitBy,
+      missionStats: _game.missionStats,
+    );
     setState(() => _saving = true);
     try {
-      final roundId = await start;
-      if (roundId == null || roundId.isEmpty) return;
-      final result = await submitRound(
-        controller,
-        roundId: roundId,
-        score: _game.score,
-        meters: _game.meters,
-        hitBy: _game.hitBy,
-      );
-      if (!mounted || run != _run) return;
+      final result = await outbox.send(score);
+      if (result == null || !mounted) return;
+      if (run != _run) {
+        // Counted while the next run plays: its list is the newest so far.
+        if (_phase == _Phase.playing) _board = result.leaderboard;
+        return;
+      }
       // The fanfare, unless it already played when the record fell.
       if (result.improved && !_fx.recordBroken) {
         _sound.play(RunnerSfx.record);
       } else if ((result.progress?.newCrates ?? 0) > 0) {
         _sound.play(RunnerSfx.reveal);
       }
+      if (result.progress?.missions?.justCompletedAll ?? false) {
+        _sound.play(RunnerSfx.jackpot);
+      }
       setState(() {
         _improved = result.improved;
         _progress = result.progress;
+        if (result.progress?.missions case final m?) _missions = m;
         _board = result.leaderboard;
         _boardError = null;
       });
     } catch (e) {
+      if (kDebugMode) debugPrint('Bühnenlauf: Ergebnis nicht gesendet: $e');
       if (mounted && run == _run) {
-        setState(() => _saveError = userMessage(e));
+        setState(() {
+          _saveError = userMessage(e);
+          _queued = outbox.waits(score);
+        });
       }
     } finally {
       if (mounted && run == _run) setState(() => _saving = false);
     }
   }
 
-  KeyEventResult _key(FocusNode node, KeyEvent event) =>
-      _holdKeys.contains(event.logicalKey)
-      ? KeyEventResult.handled
-      : KeyEventResult.ignored;
+  KeyEventResult _key(FocusNode node, KeyEvent event) {
+    if (!_holdKeys.contains(event.logicalKey)) return KeyEventResult.ignored;
+    if (event is KeyDownEvent) _resume();
+    return KeyEventResult.handled;
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -329,6 +417,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         padding: pagePadding(context, maxWidth: 640),
         children: [
           if (_phase == _Phase.intro) ..._intro(context) else _result(context),
+          if (_phase != _Phase.intro && _missionsOn && _missions != null) ...[
+            const SizedBox(height: 20),
+            _missionsCard(),
+          ],
           const SizedBox(height: 20),
           _leaderboard(context),
         ],
@@ -357,9 +449,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       PageHeader(
         'Bühnenlauf',
         eyebrow: 'Hinter der Bühne',
-        // Names whoever is worn, as the picture below shows them.
+        // Names whoever is worn in the worn role ("Elena als Lucy"), as the
+        // picture below shows them.
         subtitle:
-            '${_wardrobe?.worn(WardrobeKind.character)?.name ?? 'Engel Logge'} hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt. Vorbei an Kisten, Kulissen, Scheinwerfern und Sandsäcken, immer schneller, bis der Vorhang fällt.',
+            '${_wardrobe?.wornCharacterName() ?? 'Engel Logge'} hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt. Vorbei an Kisten, Kulissen, Scheinwerfern und Sandsäcken, immer schneller, bis der Vorhang fällt.',
       ),
       if (_art case final art?)
         Center(
@@ -380,7 +473,16 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
             children: [
               legend(null, 'Jeder Meter', '+1'),
               for (final kind in PickupKind.values)
-                legend(kind, _pickupLabel(kind), '+${kind.points}'),
+                legend(
+                  kind,
+                  // A backdrop's own collectible keeps the plain name the
+                  // missions use: "Bonbon (Rose)".
+                  switch (_art?.pickupNames[kind]) {
+                    final name? => '$name (${_pickupLabel(kind)})',
+                    null => _pickupLabel(kind),
+                  },
+                  '+${kind.points}',
+                ),
               const SizedBox(height: 12),
               Text(
                 'Halten zieht dich nach oben, Loslassen lässt dich sinken: Finger oder Maustaste auf der Bühne, am Rechner auch Leertaste oder Pfeil nach oben. Ein Zusammenstoß beendet den Lauf.',
@@ -391,6 +493,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         ),
       ),
       const SizedBox(height: 20),
+      if (_bonusOpen) ...[_dailyBonusHint(context), const SizedBox(height: 12)],
       Center(
         child: FilledButton.icon(
           onPressed: _play,
@@ -407,7 +510,38 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
           ),
         ),
       ],
+      if (_missionsOn) ...[const SizedBox(height: 20), _missionsCard()],
     ];
+  }
+
+  /// The day's missions; loads them on first sight.
+  Widget _missionsCard() => DailyMissionsCard(
+    controller: controller,
+    missions: _missions,
+    collectibleNames: _pickupNames,
+    onChanged: (m) {
+      if (mounted) setState(() => _missions = m);
+    },
+  );
+
+  /// A quiet note while today's first run still counts twice for the crates.
+  Widget _dailyBonusHint(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      key: const ValueKey('runner-daily-bonus'),
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.wb_sunny_outlined, size: 16, color: theme.hintColor),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            dailyBonusHint,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall,
+          ),
+        ),
+      ],
+    );
   }
 
   /// The way to the next costume crate after a run.
@@ -426,7 +560,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         ),
         const SizedBox(height: 6),
         Text(
-          '+${metersText(p.gained)} · ${nextCrateText(p)}',
+          runProgressText(p, showBonus: dailyBonusAvailable(controller)),
           textAlign: TextAlign.center,
           style: theme.textTheme.bodySmall,
         ),
@@ -455,6 +589,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         ? null
         : _saving
         ? 'Punkte werden eingetragen …'
+        : _queued
+        ? 'Gerade keine Verbindung: Die Punkte werden nachgetragen, sobald der Server erreichbar ist.'
         : _saveError != null
         ? 'Nicht in der Bestenliste: $_saveError'
         : _improved
@@ -519,6 +655,13 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
               ),
             ],
             if (_progress case final p?) _crateProgress(context, p),
+            if (_progress?.missions case final m? when _missionsOn)
+              MissionRunNote(m, names: _pickupNames),
+            // A run of 0 m leaves the bonus open for the next one.
+            if (_bonusOpen && !_saving) ...[
+              const SizedBox(height: 12),
+              _dailyBonusHint(context),
+            ],
             const SizedBox(height: 20),
             Wrap(
               spacing: 12,
@@ -651,80 +794,168 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     );
   }
 
-  /// The whole area below the app bar takes the touch, so a thumb anywhere
-  /// on the screen flies; the stage keeps its fixed proportions.
+  /// The stage fills the whole area below the app bar, in every
+  /// orientation, and all of it takes the touch, so a thumb anywhere flies.
+  /// The numbers and the hint lie on the picture, inside the safe area.
   Widget _stage(BuildContext context) {
     final theme = Theme.of(context);
+    final pad = MediaQuery.paddingOf(context);
+    final ratio = MediaQuery.devicePixelRatioOf(context);
+    const shadow = [
+      Shadow(color: Color(0xCC000000), blurRadius: 4, offset: Offset(0, 1)),
+    ];
+    final number = theme.textTheme.titleLarge?.copyWith(
+      color: const Color(0xFFFFF1D6),
+      shadows: shadow,
+    );
     return Listener(
       behavior: HitTestBehavior.opaque,
-      onPointerDown: (_) => _pointers++,
+      onPointerDown: (_) {
+        _pointers++;
+        _resume();
+      },
       onPointerUp: (_) => _pointers = max(0, _pointers - 1),
       onPointerCancel: (_) => _pointers = max(0, _pointers - 1),
-      child: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 960),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-                  child: ValueListenableBuilder(
-                    valueListenable: _hud,
-                    builder: (context, hud, _) => Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            hud.$1 == 1 ? '1 Punkt' : '${hud.$1} Punkte',
-                            style: theme.textTheme.titleLarge,
-                          ),
-                        ),
-                        Text('${hud.$2} m', style: theme.textTheme.titleLarge),
-                      ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = constraints.biggest;
+          final layout = stageLayout(size, ratio);
+          _resized(size, layout.view);
+          // Right above the playing field when the house has room for the
+          // numbers (tall pictures), else over its top edge.
+          final hudTop = max(pad.top + 4, layout.top - 52);
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    key: const ValueKey('runner-stage'),
+                    size: Size.infinite,
+                    painter: _StagePainter(
+                      () => _game,
+                      () => _fx,
+                      () => _art,
+                      _frame,
+                      () => _trail,
+                      pixelRatio: ratio,
                     ),
                   ),
                 ),
-                Flexible(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: AspectRatio(
-                      aspectRatio: StageRunner.viewWidth,
-                      child: RepaintBoundary(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(20),
-                          child: CustomPaint(
-                            key: const ValueKey('runner-stage'),
-                            size: Size.infinite,
-                            painter: _StagePainter(
-                              () => _game,
-                              () => _fx,
-                              () => _art,
-                              _frame,
-                              () => _trail,
-                              pixelRatio: MediaQuery.devicePixelRatioOf(
-                                context,
-                              ),
+              ),
+              Positioned(
+                left: pad.left + 20,
+                right: pad.right + 20,
+                top: hudTop,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    ValueListenableBuilder(
+                      valueListenable: _hud,
+                      builder: (context, hud, _) => Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              hud.$1 == 1 ? '1 Punkt' : '${hud.$1} Punkte',
+                              style: number,
                             ),
                           ),
-                        ),
+                          Text('${hud.$2} m', style: number),
+                        ],
+                      ),
+                    ),
+                    // A made mission, briefly, between points and metres.
+                    ValueListenableBuilder(
+                      valueListenable: _missionBanner,
+                      builder: (context, made, _) => AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 250),
+                        child: made == null
+                            ? const SizedBox.shrink()
+                            : FractionallySizedBox(
+                                key: ValueKey(made.slot),
+                                widthFactor: .6,
+                                child: Center(
+                                  child: MissionBanner(
+                                    made,
+                                    names: _pickupNames,
+                                  ),
+                                ),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                left: pad.left + 20,
+                right: pad.right + 20,
+                bottom: pad.bottom + 10,
+                child: Text(
+                  'Halten zum Steigen',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: const Color(0xCCFFF1D6),
+                    shadows: shadow,
+                  ),
+                ),
+              ),
+              if (_paused)
+                Positioned.fill(
+                  child: ColoredBox(
+                    key: const ValueKey('runner-paused'),
+                    color: const Color(0x99000000),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('Pause', style: number),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Tippen zum Weiterlaufen',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: const Color(0xFFFFF1D6),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  'Halten zum Steigen',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
-            ),
-          ),
-        ),
+            ],
+          );
+        },
       ),
     );
+  }
+
+  /// The stage got its size: the course is laid out to the picture's right
+  /// edge at once. When the size changes during a run (a turned phone, a
+  /// resized window), the run pauses until the next tap. The game counts in
+  /// stage heights, so the new size only scales the picture; nothing jumps.
+  void _resized(Size size, double view) {
+    _game.view = view;
+    final last = _stageSize;
+    _stageSize = size;
+    if (last == null ||
+        last == size ||
+        _phase != _Phase.playing ||
+        _game.over ||
+        _paused) {
+      return;
+    }
+    // Called while building: the pause shows in this very build.
+    _paused = true;
+    _pointers = 0;
+    _ticker.stop();
+    if (_sound case final RunnerMusic music) music.pauseMusic();
+  }
+
+  /// Runs on after a pause, from the first fresh frame.
+  void _resume() {
+    if (!_paused) return;
+    setState(() => _paused = false);
+    _lastFrame = Duration.zero;
+    _ticker.start();
+    if (_sound case final RunnerMusic music) music.resumeMusic();
   }
 }
 
@@ -748,7 +979,7 @@ const _canvas = Color(0xFFD9CBB0), _canvasEdge = Color(0xFF8E7D62);
 const _metal = Color(0xFF59605C), _beam = Color(0xFFFFF1C9);
 const _sack = Color(0xFF8A6A48), _rope = Color(0xFFBDB29C);
 const _roseColor = Color(0xFFE5486B), _starColor = Color(0xFFFFC94A);
-const _crowd = Color(0xFF07090A);
+const _crowd = Color(0xFF07090A), _house = Color(0xFF231412);
 
 Paint _fill(Color color) => Paint()..color = color;
 Paint _stroke(Color color, double width) => Paint()
@@ -926,6 +1157,45 @@ class _LegendPainter extends CustomPainter {
   bool shouldRepaint(_LegendPainter old) => old.kind != kind || old.art != art;
 }
 
+/// The painter of the stage for one fixed [game], for tests and renders.
+@visibleForTesting
+CustomPainter stagePainterFor(
+  StageRunner game,
+  RunnerArt? art, {
+  RunnerFx? fx,
+  RunnerTrail? trail,
+  double pixelRatio = 1,
+}) {
+  final f = fx ?? RunnerFx(), t = trail ?? RunnerTrail();
+  return _StagePainter(
+    () => game,
+    () => f,
+    () => art,
+    _never,
+    () => t,
+    pixelRatio: pixelRatio,
+  );
+}
+
+/// Where the stage sits in a picture of [size]: one stage height [s] in
+/// pixels, the top of the playing field and the visible width in stage
+/// heights. Wide pictures scale the stage to their height and fill the
+/// width with the passing set; tall ones keep [StageRunner.viewWidth] in
+/// view and fill the rest with the house: the drapes above, the stalls
+/// below. [top] lies on whole device pixels.
+@visibleForTesting
+({double s, double top, double view}) stageLayout(
+  Size size, [
+  double pixelRatio = 1,
+]) {
+  final s = min(size.height, size.width / StageRunner.viewWidth);
+  if (!(s > 0)) return (s: 0, top: 0, view: StageRunner.viewWidth);
+  final top = ((size.height - s) * .4 * pixelRatio).floor() / pixelRatio;
+  return (s: s, top: top, view: size.width / s);
+}
+
+final _never = ValueNotifier(0);
+
 /// Paints the run. Paints, paths and text are created once; per frame it
 /// issues a few dozen rectangles, circles and sprite copies from one atlas.
 /// Without the pictures (offline on the web) it draws simple shapes.
@@ -945,13 +1215,16 @@ class _StagePainter extends CustomPainter {
   /// The trail of the worn effect.
   final RunnerTrail Function() trail;
 
-  /// Device pixels per logical pixel; the stage scrolls in whole device
+  /// Device pixels per logical pixel; the stage moves in whole device
   /// pixels.
   final double pixelRatio;
 
   static final _bg = _fill(_stageDark), _wallPaint = _fill(_wall);
   static final _velvetPaint = _fill(_velvet);
   static final _foldPaint = _fill(_velvetDark);
+  // The border in the colour of the worn backdrop, set when it changes.
+  static final _borderPaint = _fill(_velvet),
+      _borderFoldPaint = _fill(_velvetDark);
   static final _goldPaint = _fill(_gold);
   static final _floorPaint = _fill(_floorColor);
   static final _plankPaint = _stroke(_plank, 2);
@@ -966,6 +1239,11 @@ class _StagePainter extends CustomPainter {
   static final _lensPaint = _fill(_beam);
   static final _ropePaint = _stroke(_rope, 1.5);
   static final _crowdPaint = _fill(_crowd);
+  static final _housePaint = _fill(_house), _seatPaint = _fill(_velvetDark);
+  static final _seatEdgePaint = _fill(_velvet);
+  static final _sheenPaint = _fill(const Color(0x1FFFFFFF));
+  final _shadePaint = Paint();
+  double? _shadeTop;
   static final _platePaint = _fill(const Color(0xDD151A17));
   static final _plateEdge = _stroke(_gold, 2);
   static final _bodyPaint = _fill(StageTheme.onInkAccent);
@@ -984,32 +1262,43 @@ class _StagePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final g = game(), f = fx(), a = art();
-    // One stage height in pixels; the course is viewWidth heights wide.
-    final s = size.height, w = size.width;
+    // One stage height in pixels; the playing field is [view] heights wide
+    // and starts [top] pixels down (see [stageLayout]).
+    final (:s, :top, view: _) = stageLayout(size, pixelRatio);
+    if (s <= 0) return;
+    final w = size.width, below = size.height - top - s;
     final floorY = s * StageRunner.floor;
     _glyphs.stage(s);
 
     canvas.drawRect((Offset.zero & size).inflate(s * .05), _bg);
     final (dx, dy) = f.shake(g);
     canvas.save();
-    canvas.translate(dx * s, dy * s);
+    canvas.translate(dx * s, dy * s + top);
 
-    // The whole stage moves as one, exactly at the running pace: backdrop,
-    // lights, wings, floor, course and front row. Layers at their own pace
-    // (parallax) made players feel sick. The shift is rounded to whole
-    // device pixels, so each frame is the last one moved by whole pixels and
-    // the pictures don't shimmer.
-    final scroll = (g.distance * s * pixelRatio).round() / pixelRatio;
-    _backdrop(canvas, a, s, w, floorY, scroll);
-    _spotlights(canvas, s, w, floorY, scroll);
-    _wings(canvas, s, w, scroll);
-    _floor(canvas, s, w, floorY, scroll);
+    // The whole stage passes as one, exactly at the running pace, like the
+    // world in a side-scroller: backdrop, lights, wings, floor, course,
+    // audience and valance, and in tall pictures the drapes and stalls.
+    // Nothing moves at its own pace (parallax made players feel sick). The
+    // shift is rounded to whole device pixels, so each frame is the last one
+    // moved by whole pixels and nothing shimmers.
+    final course = (g.distance * s * pixelRatio).round() / pixelRatio;
+    // The house around a tall picture's playing field; the field itself
+    // ends at its edges, as on a picture of its own shape.
+    if (top > 0) _drapes(canvas, s, w, top, course);
+    if (below > 0) _stalls(canvas, s, w, below, course);
+    canvas
+      ..save()
+      ..clipRect(Rect.fromLTRB(-s, 0, w + s, s));
+    _backdrop(canvas, a, s, w, floorY, course);
+    _spotlights(canvas, s, w, floorY, course);
+    _wings(canvas, s, w, course);
+    _floor(canvas, s, w, floorY, course);
 
     for (final o in g.obstacles) {
       final rect = Rect.fromLTRB(
-        o.left * s - scroll,
+        o.left * s - course,
         o.top * s,
-        o.right * s - scroll,
+        o.right * s - course,
         o.bottom * s,
       );
       if (rect.right < -s * .1 || rect.left > w + s * .1) continue;
@@ -1020,7 +1309,7 @@ class _StagePainter extends CustomPainter {
       }
     }
 
-    _pickups(canvas, g, a, s, w, scroll);
+    _pickups(canvas, g, a, s, w, course);
     trail().paint(canvas, s, a?.effect);
     if (a == null) {
       _plainRunner(canvas, g, s);
@@ -1028,17 +1317,21 @@ class _StagePainter extends CustomPainter {
       _runner(canvas, g, f, a, s);
     }
     _particles(canvas, f, s);
-    _audience(canvas, g, f, s, w, scroll);
-    _bannerAndValance(canvas, f, s, w);
-    canvas.restore();
+    _audience(canvas, s, w, course);
+    _bannerAndValance(canvas, f, s, w, course);
+    canvas
+      ..restore()
+      ..restore();
 
-    if (g.over) _curtain(canvas, g, s, w);
+    if (g.over) _curtain(canvas, g, s, w, size.height);
   }
 
   /// The painted backdrop passes [scroll] pixels to the left, tiled in turn
-  /// as painted and mirrored, so the seams match for runs of any length.
-  /// Its paint samples with mipmaps ([FilterQuality.medium]): smooth when
-  /// scaled down, no stair steps when scaled up.
+  /// as painted and mirrored, so the seams match for any picture: no
+  /// backdrop needs edges that fit together. A tile is a whole number of
+  /// device pixels wide, so the seams fall on pixel edges and stay
+  /// invisible. Its paint samples with mipmaps ([FilterQuality.medium]):
+  /// smooth when scaled down, no stair steps when scaled up.
   void _backdrop(
     Canvas canvas,
     RunnerArt? a,
@@ -1052,7 +1345,10 @@ class _StagePainter extends CustomPainter {
       return;
     }
     final image = a.backdrop, top = s * .04, h = floorY - top;
-    final tile = h * image.width / image.height;
+    final tile = max(
+      1 / pixelRatio,
+      (h * image.width / image.height * pixelRatio).round() / pixelRatio,
+    );
     final src = Rect.fromLTWH(
       0,
       0,
@@ -1133,6 +1429,7 @@ class _StagePainter extends CustomPainter {
     }
   }
 
+  /// The floor; its planks pass exactly with the course.
   void _floor(Canvas canvas, double s, double w, double floorY, double scroll) {
     canvas.drawRect(Rect.fromLTRB(0, floorY, w, s), _floorPaint);
     final period = s * .25;
@@ -1173,7 +1470,7 @@ class _StagePainter extends CustomPainter {
       case ObstacleKind.flat:
         _flat(canvas, a, rect);
       case ObstacleKind.border:
-        _velvetPiece(canvas, rect, s);
+        _velvetPiece(canvas, rect, s, a.border);
       case ObstacleKind.lamp:
         final width = rect.width * 1.05;
         final body = _lamp(
@@ -1346,13 +1643,19 @@ class _StagePainter extends CustomPainter {
   }
 
   /// A border (short curtain) hanging from the fly loft, with gold fringe.
-  void _velvetPiece(Canvas canvas, Rect rect, double s) {
-    canvas.drawRect(rect, _velvetPaint);
+  /// In [color] if the backdrop gives one (the folds a third darker),
+  /// else in the theatre's red.
+  void _velvetPiece(Canvas canvas, Rect rect, double s, [Color? color]) {
+    if (color != null && color != _borderPaint.color) {
+      _borderPaint.color = color;
+      _borderFoldPaint.color = Color.lerp(color, const Color(0xFF000000), .34)!;
+    }
+    canvas.drawRect(rect, color == null ? _velvetPaint : _borderPaint);
     final fold = rect.width / 5;
     for (var i = 1; i < 5; i += 2) {
       canvas.drawRect(
         Rect.fromLTWH(rect.left + fold * i, rect.top, fold * .7, rect.height),
-        _foldPaint,
+        color == null ? _foldPaint : _borderFoldPaint,
       );
     }
     canvas.drawRect(
@@ -1374,12 +1677,12 @@ class _StagePainter extends CustomPainter {
     RunnerArt? a,
     double s,
     double w,
-    double scroll,
+    double course,
   ) {
     final glyph = s * .075, height = s * .085;
     for (final p in g.pickups) {
       if (p.taken) continue;
-      final x = p.x * s - scroll;
+      final x = p.x * s - course;
       if (x < -glyph || x > w + glyph) continue;
       // A gentle bob; the hitbox stays where it is.
       final y = p.y * s + sin(g.time * 4 + p.x * 7) * s * .008;
@@ -1456,18 +1759,37 @@ class _StagePainter extends CustomPainter {
         _ropePaint,
       );
     }
+    final shine = a.effect?.shine ?? false;
     if (angle == 0) {
-      _sprite(canvas, a, sprite, dst);
-      return;
+      _figure(canvas, a, sprite, dst, shine);
+    } else {
+      final pivot = dst.center;
+      canvas
+        ..save()
+        ..translate(pivot.dx, pivot.dy)
+        ..rotate(angle)
+        ..translate(-pivot.dx, -pivot.dy);
+      _figure(canvas, a, sprite, dst, shine);
+      canvas.restore();
     }
-    final pivot = dst.center;
-    canvas
-      ..save()
-      ..translate(pivot.dx, pivot.dy)
-      ..rotate(angle)
-      ..translate(-pivot.dx, -pivot.dy);
+    if (shine) trail().paintGlints(canvas, dst, s);
+  }
+
+  /// The figure; a shiny one with a golden rim and a sheen sweeping over
+  /// it, on its own pixels, so it fits every pose. Hitbox and physics stay
+  /// the same.
+  void _figure(
+    Canvas canvas,
+    RunnerArt a,
+    RunnerSprite sprite,
+    Rect dst,
+    bool shine,
+  ) {
+    if (!shine) return _sprite(canvas, a, sprite, dst);
+    final image = a.imageOf(sprite), time = trail().time;
+    paintRim(canvas, image, sprite.rect, dst, time);
     _sprite(canvas, a, sprite, dst);
-    canvas.restore();
+    paintSheen(canvas, image, sprite.rect, dst, time);
   }
 
   void _particles(Canvas canvas, RunnerFx f, double s) {
@@ -1493,25 +1815,19 @@ class _StagePainter extends CustomPainter {
     }
   }
 
-  /// Heads in the front row, passing at the pace of the floor; they bounce
+  /// Heads in the front row, passing with the stage. They sit calmly, also
   /// while a banner celebrates.
-  void _audience(
-    Canvas canvas,
-    StageRunner g,
-    RunnerFx f,
-    double s,
-    double w,
-    double scroll,
-  ) {
+  void _audience(Canvas canvas, double s, double w, double scroll) {
     final spacing = s * .11;
-    final first = (scroll / spacing).floor();
-    final cheering = f.showsBanner && !g.over;
-    for (var i = first - 1; i * spacing - scroll < w + spacing; i++) {
+    for (
+      var i = (scroll / spacing).floor() - 1;
+      i * spacing - scroll < w + spacing;
+      i++
+    ) {
       final h = (i * 7919) % 13;
       final r = s * (.034 + (h % 3) * .004);
       final x = i * spacing - scroll + (h % 5) * s * .004;
-      final hop = cheering ? -(sin(g.time * 9 + i) * .5 + .5) * s * .014 : 0.0;
-      final y = s * (.985 - (h % 4) * .006) + hop;
+      final y = s * (.985 - (h % 4) * .006);
       canvas.drawCircle(Offset(x, y - r * .6), r, _crowdPaint);
       canvas.drawRRect(
         RRect.fromRectAndRadius(
@@ -1527,8 +1843,96 @@ class _StagePainter extends CustomPainter {
     }
   }
 
-  /// The banner pops in below the valance and slides up behind it.
-  void _bannerAndValance(Canvas canvas, RunnerFx f, double s, double w) {
+  /// Tall pictures: above the playing field the house's velvet drape,
+  /// [top] pixels high, its folds passing with the stage, darker towards
+  /// the top and hemmed in gold above the valance.
+  void _drapes(Canvas canvas, double s, double w, double top, double scroll) {
+    final from = -top - s * .05;
+    canvas.drawRect(Rect.fromLTRB(0, from, w, 0), _velvetPaint);
+    final period = s * .09;
+    for (var x = -(scroll % period); x < w; x += period) {
+      canvas
+        ..drawRect(
+          Rect.fromLTRB(x + period * .12, from, x + period * .3, 0),
+          _sheenPaint,
+        )
+        ..drawRect(
+          Rect.fromLTRB(x + period * .55, from, x + period * .85, 0),
+          _foldPaint,
+        );
+    }
+    // The drape fades into the dark of the fly loft; the shader is made
+    // again only when the picture changes its size.
+    if (_shadeTop != top) {
+      _shadeTop = top;
+      _shadePaint.shader = const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Color(0xCC000000), Color(0x00000000)],
+      ).createShader(Rect.fromLTRB(0, -top, 1, -top * .4));
+    }
+    if (top > s * .2) {
+      canvas.drawRect(Rect.fromLTRB(0, from, w, -top * .4), _shadePaint);
+    }
+    canvas.drawRect(Rect.fromLTRB(0, -s * .012, w, -s * .004), _goldPaint);
+  }
+
+  /// Tall pictures: below the stage the stalls, [below] pixels high, rows
+  /// of silhouettes behind red seat backs, a little larger the nearer they
+  /// sit. They pass with the stage, exactly like the front row.
+  void _stalls(Canvas canvas, double s, double w, double below, double scroll) {
+    final bottom = s + below + s * .05, gap = s * .24;
+    canvas.drawRect(Rect.fromLTRB(0, s, w, bottom), _housePaint);
+    // The first row right below the stage's edge, so even a thin strip of
+    // stalls shows heads.
+    for (var row = 1; s + (row - 1) * gap < bottom; row++) {
+      final grow = 1 + row * .05, y = s + (row - .65) * gap;
+      final spacing = s * .16 * grow, shift = scroll + row * spacing * .5;
+      for (
+        var i = (shift / spacing).floor() - 1;
+        i * spacing - shift < w + spacing;
+        i++
+      ) {
+        final h = (i * 7919 + row * 104729) % 13;
+        // Now and then a seat stays empty.
+        if (h == 4) continue;
+        final r = s * (.03 + (h % 3) * .004) * grow;
+        final x = i * spacing - shift + (h % 5) * s * .006;
+        final head = y - r * (1.9 + (h % 4) * .1);
+        canvas.drawCircle(Offset(x, head), r, _crowdPaint);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(
+              center: Offset(x, head + r * 1.8),
+              width: r * 3.1,
+              height: r * 2.2,
+            ),
+            Radius.circular(r),
+          ),
+          _crowdPaint,
+        );
+      }
+      // The backs of the seats in front hide the shoulders.
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTRB(-s, y, w + s, y + gap * .32),
+          Radius.circular(s * .02),
+        ),
+        _seatPaint,
+      );
+      canvas.drawRect(Rect.fromLTRB(0, y, w, y + s * .006), _seatEdgePaint);
+    }
+  }
+
+  /// The banner pops in below the valance and slides up behind it. The
+  /// valance's scallops pass with the stage.
+  void _bannerAndValance(
+    Canvas canvas,
+    RunnerFx f,
+    double s,
+    double w,
+    double scroll,
+  ) {
     final text = f.banner;
     if (text != null && f.showsBanner) {
       final t = f.bannerAge;
@@ -1556,7 +1960,7 @@ class _StagePainter extends CustomPainter {
     // Valance of the stage portal with a scalloped edge.
     final bottom = s * StageRunner.ceiling * .7, r = s * .03;
     canvas.drawRect(Rect.fromLTRB(0, 0, w, bottom), _velvetPaint);
-    for (var x = r; x < w + r; x += r * 2) {
+    for (var x = r - scroll % (r * 2); x < w + r; x += r * 2) {
       canvas.drawCircle(Offset(x, bottom), r, _velvetPaint);
     }
     canvas.drawRect(
@@ -1565,8 +1969,15 @@ class _StagePainter extends CustomPainter {
     );
   }
 
-  /// The curtain closes from both sides after the crash.
-  void _curtain(Canvas canvas, StageRunner g, double s, double w) {
+  /// The curtain closes from both sides after the crash, over the whole
+  /// picture, [height] pixels tall.
+  void _curtain(
+    Canvas canvas,
+    StageRunner g,
+    double s,
+    double w,
+    double height,
+  ) {
     final t = Curves.easeIn.transform(
       ((g.sinceOver - _curtainStart) / (_curtainEnd - _curtainStart - .05))
           .clamp(0, 1)
@@ -1576,14 +1987,14 @@ class _StagePainter extends CustomPainter {
     final half = w * .5 * t, fold = s * .06;
     for (final left in [true, false]) {
       final rect = left
-          ? Rect.fromLTRB(0, 0, half, s)
-          : Rect.fromLTRB(w - half, 0, w, s);
+          ? Rect.fromLTRB(0, 0, half, height)
+          : Rect.fromLTRB(w - half, 0, w, height);
       canvas.drawRect(rect, _velvetPaint);
       for (var x = rect.left + fold * .5; x < rect.right; x += fold) {
-        canvas.drawRect(Rect.fromLTWH(x, 0, fold * .35, s), _foldPaint);
+        canvas.drawRect(Rect.fromLTWH(x, 0, fold * .35, height), _foldPaint);
       }
       final edge = left ? rect.right - s * .012 : rect.left;
-      canvas.drawRect(Rect.fromLTWH(edge, 0, s * .012, s), _goldPaint);
+      canvas.drawRect(Rect.fromLTWH(edge, 0, s * .012, height), _goldPaint);
     }
   }
 

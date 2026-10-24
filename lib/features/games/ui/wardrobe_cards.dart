@@ -61,10 +61,21 @@ IconData kindIcon(WardrobeKind kind) => switch (kind) {
 
 final _silhouette = ColorFilter.mode(const Color(0xFF39413B), BlendMode.srcIn);
 
-/// Draws the picture of [item] into [rect]: its portrait if loaded, else
-/// the cheer pose (or crate and lamp) of its own atlas, else the default art
-/// in the item's tint (stand-ins). [hidden] shows only a
-/// silhouette, for items not found yet.
+/// Whether [item] brings pictures of its own (portrait, atlas or backdrop);
+/// stand-ins and the default outfit show the game's art.
+bool hasOwnPictures(WardrobeItem item) =>
+    item.portrait != null ||
+    (item.image != null && item.kind != WardrobeKind.fx);
+
+final _placeholder = Paint()..color = const Color(0x14FFFFFF);
+
+/// Draws the picture of [item] into [rect]: its [portrait] if loaded, else
+/// the cheer pose (or crate and lamp) of its [own] atlas, else the default
+/// art in the item's tint (stand-ins). Both default to what
+/// [WardrobePictures] has. An item with pictures of its own that are not
+/// there (yet, or dropped from the cache) gets a neutral placeholder, never
+/// the default figure. [hidden] shows only a silhouette, for items not
+/// found yet.
 void paintItemArt(
   Canvas canvas,
   Rect rect,
@@ -72,6 +83,8 @@ void paintItemArt(
   RunnerArt? base, {
   bool hidden = false,
   bool antique = false,
+  ui.Image? portrait,
+  ui.Image? own,
 }) {
   final paint = Paint()
     ..filterQuality = FilterQuality.medium
@@ -92,7 +105,7 @@ void paintItemArt(
     canvas.drawImageRect(image, src, dst, paint);
   }
 
-  final preview = WardrobePictures.cached(item.portrait);
+  final preview = portrait ?? WardrobePictures.cached(item.portrait);
   if (preview != null) {
     canvas.save();
     canvas.clipRect(rect);
@@ -105,13 +118,23 @@ void paintItemArt(
     canvas.restore();
     return;
   }
-  final own = WardrobePictures.cached(item.image);
+  final mine = item.kind == WardrobeKind.fx
+      ? null
+      : own ?? WardrobePictures.cached(item.image);
+  if (mine == null && hasOwnPictures(item)) {
+    final r = rect.deflate(rect.shortestSide * .1);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(r, Radius.circular(r.shortestSide * .12)),
+      _placeholder,
+    );
+    return;
+  }
   final atlas =
-      own != null &&
+      mine != null &&
           base != null &&
-          own.width == base.atlas.width &&
-          own.height == base.atlas.height
-      ? own
+          mine.width == base.atlas.width &&
+          mine.height == base.atlas.height
+      ? mine
       : base?.atlas;
   switch (item.kind) {
     case WardrobeKind.character when atlas != null:
@@ -121,7 +144,7 @@ void paintItemArt(
         rect.deflate(rect.shortestSide * .06),
       );
     case WardrobeKind.backdrop when base != null:
-      final image = own ?? base.backdrop;
+      final image = mine ?? base.backdrop;
       canvas.save();
       canvas.clipRect(rect);
       fit(
@@ -214,6 +237,11 @@ class WardrobeItemArt extends StatefulWidget {
 }
 
 class _WardrobeItemArtState extends State<WardrobeItemArt> {
+  // The pictures this card shows, held here: the shared cache may drop
+  // them meanwhile without the card falling back to the default figure.
+  ui.Image? _portrait, _own;
+  bool _loading = false;
+
   @override
   void initState() {
     super.initState();
@@ -223,25 +251,54 @@ class _WardrobeItemArtState extends State<WardrobeItemArt> {
   @override
   void didUpdateWidget(WardrobeItemArt old) {
     super.didUpdateWidget(old);
-    if (old.item.id != widget.item.id) _load();
+    // Another role of the same figure keeps its id ([WardrobeItem.inRole])
+    // but brings its own pictures: without them the card would show the
+    // default art (Engel Logge) instead of the chosen role.
+    if (old.item.id != widget.item.id ||
+        old.item.portrait != widget.item.portrait ||
+        old.item.image != widget.item.image) {
+      _portrait = _own = null;
+      _load();
+    } else if (_portrait == null && _own == null && !_loading) {
+      // Not there yet (offline before): try again.
+      _load();
+    }
   }
 
   /// The portrait; without one (or offline) the item's own atlas or
-  /// backdrop, which the fallback picture is cut from.
+  /// backdrop, which the fallback picture is cut from. Dropped from the
+  /// cache, they are fetched again.
   Future<void> _load() async {
     final item = widget.item;
-    if (WardrobePictures.cached(item.portrait) != null) return;
-    final portrait = await WardrobePictures.load(
-      widget.controller,
-      item.portrait,
-    );
-    if (portrait == null &&
-        item.image != null &&
-        item.kind != WardrobeKind.fx &&
-        WardrobePictures.cached(item.image) == null) {
-      await WardrobePictures.load(widget.controller, item.image);
+    if (!hasOwnPictures(item)) return;
+    _portrait = WardrobePictures.cached(item.portrait);
+    if (_portrait != null) return;
+    _loading = true;
+    try {
+      final portrait = await WardrobePictures.loadPortrait(
+        widget.controller,
+        item.portrait,
+      );
+      ui.Image? own;
+      if (portrait == null &&
+          item.image != null &&
+          item.kind != WardrobeKind.fx) {
+        own = await WardrobePictures.load(widget.controller, item.image);
+      }
+      // Only for the item still shown: a late picture of the one before
+      // must not land on this card.
+      if (!mounted ||
+          item.portrait != widget.item.portrait ||
+          item.image != widget.item.image) {
+        return;
+      }
+      setState(() {
+        _portrait = portrait;
+        _own = own;
+      });
+    } finally {
+      _loading = false;
     }
-    if (mounted) setState(() {});
   }
 
   @override
@@ -252,18 +309,25 @@ class _WardrobeItemArtState extends State<WardrobeItemArt> {
       widget.art,
       widget.hidden,
       widget.antique,
-      WardrobePictures.cached(widget.item.portrait) ??
-          WardrobePictures.cached(widget.item.image),
+      _portrait,
+      _own,
     ),
   );
 }
 
 class _ArtPainter extends CustomPainter {
-  _ArtPainter(this.item, this.art, this.hidden, this.antique, this.preview);
+  _ArtPainter(
+    this.item,
+    this.art,
+    this.hidden,
+    this.antique,
+    this.portrait,
+    this.own,
+  );
   final WardrobeItem item;
   final RunnerArt? art;
   final bool hidden, antique;
-  final ui.Image? preview;
+  final ui.Image? portrait, own;
 
   @override
   void paint(Canvas canvas, Size size) => paintItemArt(
@@ -273,6 +337,8 @@ class _ArtPainter extends CustomPainter {
     art,
     hidden: hidden,
     antique: antique,
+    portrait: portrait,
+    own: own,
   );
 
   @override
@@ -281,11 +347,13 @@ class _ArtPainter extends CustomPainter {
       old.art != art ||
       old.hidden != hidden ||
       old.antique != antique ||
-      old.preview != preview;
+      old.portrait != portrait ||
+      old.own != own;
 }
 
-/// A card of the wardrobe: picture, name, label and the rarity bar below.
-/// Items not found yet show as a silhouette with "?" in their rarity colour.
+/// A card of the wardrobe: picture, name, the role ("als Lucy · Creepshow
+/// 2026"), the label and the rarity bar below. Items not found yet show as a
+/// silhouette with "?" in their rarity colour.
 class WardrobeCard extends StatelessWidget {
   const WardrobeCard({
     super.key,
@@ -296,6 +364,8 @@ class WardrobeCard extends StatelessWidget {
     this.worn = false,
     this.onTap,
     this.animateShine = false,
+    this.role,
+    this.showRole = true,
   });
   final WardrobeItem item;
   final Wardrobe wardrobe;
@@ -308,6 +378,13 @@ class WardrobeCard extends StatelessWidget {
   /// in the grid it stands still.
   final bool animateShine;
 
+  /// Shows the card in this role (e.g. the one just won) instead of the
+  /// worn one.
+  final WardrobeVariant? role;
+
+  /// The role line; off where it stands next to the card.
+  final bool showRole;
+
   @override
   Widget build(BuildContext context) {
     final catalog = wardrobe.catalog;
@@ -316,7 +393,13 @@ class WardrobeCard extends StatelessWidget {
     final owned = wardrobe.owns(item);
     final shiny = owned && wardrobe.isShiny(item);
     // The worn role's pictures, if one is chosen.
-    final look = owned ? item.inRole(wardrobe.variantOf(item)) : item;
+    final variant = role ?? wardrobe.variantOf(item);
+    final look = owned ? item.inRole(variant) : item;
+    final playing = !owned
+        ? null
+        : role != null
+        ? role!.role
+        : wardrobe.roleOf(item);
     final hint = wardrobe.lockHint(item) ?? rewardHint(wardrobe, item);
     final label = catalog.labelOf(item);
     final department = item.departments.isEmpty
@@ -329,7 +412,7 @@ class WardrobeCard extends StatelessWidget {
       button: onTap != null,
       selected: worn,
       label: owned
-          ? '${item.name}, ${rarity.name}${shiny ? ', Glanz' : ''}${worn ? ', angelegt' : ''}'
+          ? '${item.name}${playing == null ? '' : ' ${playing.line}'}, ${rarity.name}${shiny ? ', Glanz' : ''}${worn ? ', angelegt' : ''}'
           : 'Noch nicht gefunden, ${rarity.name}',
       child: Material(
         color: antique ? const Color(0xFF2A2117) : wardrobeInk,
@@ -462,6 +545,17 @@ class WardrobeCard extends StatelessWidget {
                           fontSize: 13,
                         ),
                       ),
+                      if (showRole && playing != null)
+                        Text(
+                          playing.line,
+                          key: const ValueKey('card-role'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 10.5,
+                          ),
+                        ),
                       Text(
                         hint ?? (owned ? label ?? rarity.name : rarity.name),
                         maxLines: 1,

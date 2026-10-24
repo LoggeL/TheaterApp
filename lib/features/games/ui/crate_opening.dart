@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../../../core/app_controller.dart';
 import '../../../shared/feedback.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/crate_reel.dart';
+import 'event_crates_card.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_look.dart';
 import 'stage_runner_sound.dart';
@@ -23,6 +25,9 @@ Future<Wardrobe?> showCrateOpening(
   required RunnerSound sound,
   RunnerArt? art,
   bool ensemble = false,
+  bool mission = false,
+  bool event = false,
+  EventCrate? eventCrate,
 }) => Navigator.of(context).push<Wardrobe>(
   PageRouteBuilder(
     opaque: false,
@@ -33,6 +38,9 @@ Future<Wardrobe?> showCrateOpening(
       sound: sound,
       art: art,
       ensemble: ensemble,
+      mission: mission,
+      event: event,
+      eventCrate: eventCrate,
     ),
     transitionsBuilder: (context, animation, _, child) =>
         FadeTransition(opacity: animation, child: child),
@@ -54,14 +62,24 @@ class CrateOpeningPage extends StatefulWidget {
     this.open,
     this.random,
     this.ensemble = false,
+    this.mission = false,
+    this.event = false,
+    this.eventCrate,
   });
   final AppController controller;
   final Wardrobe wardrobe;
   final RunnerSound sound;
   final RunnerArt? art;
 
-  /// An Ensemble-Kiste (always shiny) instead of a crate of the own metres.
+  /// An Ensemble-Kiste instead of a crate of the own metres.
   final bool ensemble;
+
+  /// A Missionskiste (all three Tagesmissionen of a day).
+  final bool mission;
+
+  /// A Termin-Kiste: [eventCrate] if one was chosen, else the earliest.
+  final bool event;
+  final EventCrate? eventCrate;
 
   /// Replaces the server call in tests.
   @visibleForTesting
@@ -90,7 +108,15 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   _Phase _phase = _Phase.opening;
   CrateOpening? _result;
   CrateReel? _reel;
+
+  /// The reel's portraits, held while the crate is open: the shared cache
+  /// may drop them meanwhile, the reel must not.
+  final _pictures = <String, ui.Image>{};
   late Wardrobe _wardrobe = widget.wardrobe;
+
+  /// The Termin-Kiste to open; after the first one "Nächste Kiste" takes the
+  /// earliest waiting.
+  late EventCrate? _eventCrate = widget.eventCrate;
   bool _changed = false, _wearing = false;
   String? _error;
   int _card = 0;
@@ -118,6 +144,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
       _error = null;
       _result = null;
       _reel = null;
+      _pictures.clear();
       _position.value = 0;
     });
     widget.sound.prepare();
@@ -128,19 +155,28 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                 widget.controller,
                 dupes: dupesAvailable(widget.controller),
                 ensemble: widget.ensemble,
+                mission: widget.mission,
+                event: widget.event,
+                eventId: _eventCrate?.eventId,
               ))();
       // The cards' portraits, so the reel never shows an empty card; a slow
       // connection waits a moment at most.
       final ids = <String>{};
       await Future.wait([
         for (final item in opening.reel)
-          if (ids.add(item.id) && item.portrait != null)
-            WardrobePictures.load(widget.controller, item.portrait),
+          if (item.portrait case final portrait? when ids.add(item.id))
+            WardrobePictures.loadPortrait(widget.controller, portrait).then((
+              image,
+            ) {
+              if (image != null) _pictures[portrait] = image;
+              return image;
+            }),
       ]).timeout(const Duration(milliseconds: 1500), onTimeout: () => []);
       if (!mounted) return;
       final quick = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
       _wardrobe = opening.wardrobe;
       _changed = true;
+      _eventCrate = null;
       setState(() {
         _result = opening;
         _reel = CrateReel(
@@ -255,7 +291,11 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         _ShakingCrate(vsync: this),
         const SizedBox(height: 24),
         Text(
-          widget.ensemble
+          widget.event
+              ? 'Die Termin-Kiste geht auf …'
+              : widget.mission
+              ? 'Die Missionskiste geht auf …'
+              : widget.ensemble
               ? 'Die Ensemble-Kiste geht auf …'
               : 'Die Kostümkiste geht auf …',
           style: const TextStyle(color: Colors.white70, fontSize: 16),
@@ -311,6 +351,10 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                 Text(
                   revealed
                       ? 'Aus der Kiste:'
+                      : widget.event
+                      ? eventCrateTitle(result.outcome.event ?? _eventCrate)
+                      : widget.mission
+                      ? 'Missionskiste'
                       : widget.ensemble
                       ? 'Ensemble-Kiste'
                       : 'Kostümkiste',
@@ -334,6 +378,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                         _position,
                         cardWidth,
                         dim: revealed,
+                        pictures: _pictures,
                       ),
                     ),
                   ),
@@ -371,12 +416,29 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         _wardrobe.worn(item.kind)?.id == item.id &&
         (role == null || _wardrobe.variantOf(item)?.id == role.id);
     final p = _wardrobe.progress;
-    final left = widget.ensemble ? _wardrobe.ensemble?.crates ?? 0 : p.crates;
-    final more = left > 0 && (widget.ensemble || p.dupes || !p.complete);
+    final left = widget.event
+        ? _wardrobe.eventCrates.length
+        : widget.mission
+        ? p.missionCrates
+        : widget.ensemble
+        ? _wardrobe.ensemble?.crates ?? 0
+        : p.crates;
+    final more =
+        left > 0 &&
+        (widget.ensemble ||
+            widget.mission ||
+            widget.event ||
+            p.dupes ||
+            !p.complete);
     final line = outcome.type == 'new' && outcome.shiny
         ? 'Neu – und gleich in Glanz!'
         : outcome.line;
     final label = catalog.labelOf(item);
+    // "als Johanna · Anno 1146 2025": the role just won, else the one the
+    // card shows.
+    final playing = role != null
+        ? role.role ?? outcome.variantRole
+        : _wardrobe.roleOf(item);
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -471,6 +533,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                     art: widget.art,
                     worn: worn,
                     animateShine: true,
+                    role: role,
                   ),
                 ),
               ),
@@ -484,6 +547,17 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                   fontWeight: FontWeight.w800,
                 ),
               ),
+              if (playing != null && !item.reward)
+                Text(
+                  playing.line,
+                  key: const ValueKey('crate-role'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               const SizedBox(height: 4),
               Text(
                 [
@@ -605,7 +679,11 @@ class _ReelPainter extends CustomPainter {
     this.position,
     this.cardWidth, {
     this.dim = false,
+    this.pictures = const {},
   }) : super(repaint: position);
+
+  /// Portraits by path, held by the opening (see [paintItemArt]).
+  final Map<String, ui.Image> pictures;
   final List<WardrobeItem> items;
   final WardrobeCatalog catalog;
   final RunnerArt? art;
@@ -674,6 +752,7 @@ class _ReelPainter extends CustomPainter {
         item,
         art,
         antique: antique,
+        portrait: pictures[item.portrait],
       );
       final name = _name(item);
       name.paint(canvas, Offset(6, h * .72));

@@ -75,6 +75,11 @@ class Obstacle {
   /// A sandbag is falling or a drum is rolling.
   bool falling = false;
 
+  /// Whether passing it counts for the missions: one per section (the flat
+  /// below a border and the top crates of a pile belong to it), and whether
+  /// the runner is past it.
+  bool counted = false, passed = false;
+
   /// Where a drum comes to rest (its left edge), or the middle height of a
   /// drop's lower edge.
   double anchor = 0;
@@ -144,6 +149,32 @@ class StageRunner {
   double sinceOver = 0;
   int pickupPoints = 0, collected = 0;
 
+  /// What the Tagesmissionen (`runnerMissions`) need, counted on the way
+  /// without allocating: pickups by kind, obstacles passed by kind (indexed
+  /// by the enums) and the distance on the floor and right below the fly
+  /// loft, within [ceilingZone] of the highest position.
+  final List<int> collectedBy = List.filled(PickupKind.values.length, 0);
+  final List<int> passedBy = List.filled(ObstacleKind.values.length, 0);
+  double groundDistance = 0, ceilingDistance = 0;
+  static const ceilingZone = .05;
+
+  int get groundMeters => (groundDistance * RunnerRules.metersPerUnit).floor();
+  int get ceilingMeters =>
+      (ceilingDistance * RunnerRules.metersPerUnit).floor();
+  int collectedOf(PickupKind kind) => collectedBy[kind.index];
+  int passedOf(ObstacleKind kind) => passedBy[kind.index];
+
+  /// The run's statistics as the app sends them with the score.
+  Map<String, Object> get missionStats => {
+    for (final k in PickupKind.values) k.name: collectedBy[k.index],
+    'ground': groundMeters,
+    'ceiling': ceilingMeters,
+    'passed': {
+      for (final k in ObstacleKind.values)
+        if (passedBy[k.index] > 0) k.name: passedBy[k.index],
+    },
+  };
+
   /// Lets tests run long courses without crashing.
   @visibleForTesting
   bool invincible = false;
@@ -154,8 +185,8 @@ class StageRunner {
   /// How many of the [debuts] the score has reached.
   int unlocked = 0;
 
-  /// The newest obstacle kind and where its first one stands, so the stage
-  /// can announce it when it comes into view.
+  /// The newest obstacle kind and where its first one stands. The stage
+  /// does not announce it; the run's telemetry marks it.
   ({ObstacleKind kind, double x})? debut;
   int _debuted = 0;
 
@@ -170,6 +201,39 @@ class StageRunner {
 
   /// Where the next section starts, and the centre of the last gap.
   double _nextX = viewWidth + .3, _lastGapX = 0, _lastGapCenter = .5;
+
+  /// The visible width in stage heights, never less than [viewWidth]; the
+  /// runner stays [runnerX] from its left edge. The course is laid out .4
+  /// beyond its right edge, so on wide screens, too, every obstacle comes in
+  /// from outside the picture. What is laid out and how fast stays the same:
+  /// only how early.
+  double get view => _view;
+  double _view = viewWidth;
+  set view(double width) {
+    final view = max(viewWidth, width);
+    if (view == _view) return;
+    final wider = view > _view;
+    _view = view;
+    // A wider picture (a rotated phone, a resized window) shows its new
+    // part filled at once.
+    if (wider && !over) _layOut();
+  }
+
+  void _layOut() {
+    while (_nextX < distance + _view + .4) {
+      _section();
+    }
+  }
+
+  /// Seconds the runner needs for [units] more stage heights at the growing
+  /// speed.
+  double _secondsFor(double units) {
+    const a = RunnerRules.acceleration, top = RunnerRules.maxSpeed;
+    final v = speed, rising = (top - v) / a;
+    final reach = v * rising + a * rising * rising / 2;
+    if (units >= reach) return rising + (units - reach) / top;
+    return (sqrt(v * v + 2 * a * units) - v) / a;
+  }
 
   /// Pickup points placed so far, for the per-metre limit.
   int placedPickupPoints = 0;
@@ -211,7 +275,8 @@ class StageRunner {
       return;
     }
     time += dt;
-    distance += speed * dt;
+    final step = speed * dt;
+    distance += step;
     vy = (vy + (holding ? -lift : gravity) * dt)
         .clamp(-maxRise, maxFall)
         .toDouble();
@@ -221,9 +286,12 @@ class StageRunner {
       y = y.clamp(minY, maxY).toDouble();
       vy = 0;
     }
-    while (_nextX < distance + viewWidth + .4) {
-      _section();
+    if (y >= maxY - 1e-9) {
+      groundDistance += step;
+    } else if (y <= minY + ceilingZone) {
+      ceilingDistance += step;
     }
+    _layOut();
     final x = runnerWorldX;
     for (final o in obstacles) {
       switch (o.kind) {
@@ -259,11 +327,20 @@ class StageRunner {
         }
       }
     }
+    if (!over) {
+      for (final o in obstacles) {
+        if (o.counted && !o.passed && o.right < x - hw) {
+          o.passed = true;
+          passedBy[o.kind.index]++;
+        }
+      }
+    }
     for (final p in pickups) {
       if (!p.taken && (p.x - x).abs() < .06 && (p.y - y).abs() < .075) {
         p.taken = true;
         pickupPoints += p.kind.points;
         collected++;
+        collectedBy[p.kind.index]++;
         onPickup?.call(p.kind, p.x, p.y);
       }
     }
@@ -300,7 +377,9 @@ class StageRunner {
       ..width = width
       ..top = top
       ..bottom = bottom
-      ..falling = false;
+      ..falling = false
+      ..counted = false
+      ..passed = false;
     obstacles.add(o);
     return o;
   }
@@ -319,8 +398,14 @@ class StageRunner {
   /// pickups in the safe space next to it.
   void _section() {
     final x = _nextX, m = x * RunnerRules.metersPerUnit;
-    // The speed when the runner gets here, not the current one.
-    final arrival = time + max(0.0, x - runnerWorldX) / max(speed, .01);
+    // The speed when the runner gets here, not the current one. It is
+    // estimated as on the narrowest picture, from [lead] ahead: a wider one
+    // lays the course out earlier, but must not lay out another one.
+    const lead = viewWidth + .4 - runnerX;
+    final ahead = max(0.0, x - runnerWorldX);
+    final then = ahead > lead ? time + _secondsFor(ahead - lead) : time;
+    final arrival =
+        then + min(ahead, lead) / max(RunnerRules.speedAt(then), .01);
     final v = RunnerRules.speedAt(arrival);
     final spacing = max(.6, v * reactionTime(m));
     while (unlocked < debuts.length && score >= debuts[unlocked].$1) {
@@ -342,6 +427,7 @@ class StageRunner {
       ];
       kind = kinds[_random.nextInt(kinds.length)];
     }
+    final first = obstacles.length;
     var width = .1;
     // The middle of the safe space, where pickups go.
     double safeY;
@@ -414,6 +500,7 @@ class StageRunner {
           ..phase = phase;
         safeY = (dropMiddle + dropSwing + floor) / 2;
     }
+    obstacles[first].counted = true;
     final length = width + spacing;
     _nextX = x + length;
     if (_random.nextDouble() < .55) _pickups(x + width / 2, safeY, length);

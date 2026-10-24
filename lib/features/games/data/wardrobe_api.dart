@@ -4,6 +4,7 @@ import 'dart:ui' show Color;
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../domain/stage_runner.dart';
+import 'missions_api.dart';
 
 /// Whether the "Garderobe" (costume crates for the metres run) is offered:
 /// the server must announce it. The demo has no server and no wardrobe: the
@@ -20,6 +21,37 @@ bool dupesAvailable(AppController controller) =>
 /// The shared "Ensemble-Strecke" of all players (`runnerEnsemble`).
 bool ensembleAvailable(AppController controller) =>
     wardrobeAvailable(controller) && controller.supports('runnerEnsemble');
+
+/// The Tagesbonus (`runnerDailyBonus`): the first run of a Berlin calendar
+/// day counts twice for the crates. The server always credits it; the app
+/// only shows it when the server announces the feature.
+bool dailyBonusAvailable(AppController controller) =>
+    wardrobeAvailable(controller) && controller.supports('runnerDailyBonus');
+
+/// The private "Termin-Kiste" for an own commitment to an event
+/// (`runnerEventCrates`); it opens with duplicates, like the Missionskiste.
+bool eventCratesAvailable(AppController controller) =>
+    dupesAvailable(controller) && controller.supports('runnerEventCrates');
+
+/// Role figures (`runnerRoleFigures`): every stage role is a figure of its
+/// own with its own rarity, no role variants. The app asks for them with
+/// `roles`; older servers keep sending a figure per person with variants.
+bool roleFiguresAvailable(AppController controller) =>
+    wardrobeAvailable(controller) && controller.supports('runnerRoleFigures');
+
+/// A Termin-Kiste waiting in the wardrobe: the event it came from, as it was
+/// when the crate came (it stays when the event changes later).
+class EventCrate {
+  const EventCrate({required this.eventId, this.title = '', this.startsAt});
+  final String eventId, title;
+  final DateTime? startsAt;
+
+  factory EventCrate.fromJson(JsonMap json) => EventCrate(
+    eventId: textValue(json['eventId']),
+    title: textValue(json['title']),
+    startsAt: DateTime.tryParse(textValue(json['startsAt']))?.toLocal(),
+  );
+}
 
 /// What an item changes: exactly one of each kind is worn.
 enum WardrobeKind {
@@ -43,6 +75,13 @@ Color _color(Object? value, [Color fallback = const Color(0xFF9AA3AD)]) {
   final hex = textValue(value).replaceFirst('#', '');
   final parsed = hex.length == 6 ? int.tryParse(hex, radix: 16) : null;
   return parsed == null ? fallback : Color(0xFF000000 | parsed);
+}
+
+/// `#RRGGBB` as an opaque colour; null for anything else.
+Color? _colorOrNull(Object? value) {
+  final hex = value is String ? value.replaceFirst('#', '') : '';
+  final parsed = hex.length == 6 ? int.tryParse(hex, radix: 16) : null;
+  return parsed == null ? null : Color(0xFF000000 | parsed);
 }
 
 double _double(Object? value, [double fallback = 0]) =>
@@ -140,8 +179,26 @@ class WardrobeItem {
     this.effect,
     this.reward = false,
     this.variants = const [],
+    this.role,
+    this.obstacles,
+    this.collectibles,
+    this.collectibleNames = const {},
+    this.borderColor,
+    this.music,
+    this.importance,
   });
+
+  /// How much the role carries its play (0–100), from which its rarity was
+  /// chosen; null for other items and older servers.
+  final int? importance;
+
+  /// [name] is the person's name for a character ("Elena").
   final String id, name;
+
+  /// The role the person plays on this figure ("Lucy" in Creepshow 2026);
+  /// null for older servers and for items without one. In [inRole] it is
+  /// the variant's role.
+  final WardrobeRole? role;
 
   /// An ensemble reward: everybody's once its milestone is reached.
   final bool reward;
@@ -165,6 +222,25 @@ class WardrobeItem {
   /// API paths of the full picture (atlas or backdrop) and of the square
   /// portrait for the cards.
   final String? image, portrait;
+
+  /// A backdrop's own obstacle set (API path of an atlas in the layout of
+  /// the game's one) and the colour of its border, the short curtain the
+  /// game draws; null for the default stage, other kinds and older servers.
+  final String? obstacles;
+  final Color? borderColor;
+
+  /// A backdrop's own music (API path of AAC in M4A or MP3), looped during
+  /// a run while it is worn; null for older servers and other kinds (the
+  /// game's own tune plays).
+  final String? music;
+
+  /// A backdrop's own collectibles (API path of an atlas in the layout of
+  /// the game's one, only the pickups used); null keeps the game's own.
+  final String? collectibles;
+
+  /// What the backdrop's collectibles are called, by [PickupKind] name
+  /// (`rose`, `mask`, `star`); empty for the game's own.
+  final Map<String, String> collectibleNames;
 
   /// Where the flying wire meets the harness, by pose name, in pixels of
   /// the pose; poses left out keep the default.
@@ -196,6 +272,13 @@ class WardrobeItem {
           effect: effect,
           reward: reward,
           variants: variants,
+          role: variant.role,
+          obstacles: obstacles,
+          collectibles: collectibles,
+          collectibleNames: collectibleNames,
+          borderColor: borderColor,
+          music: music,
+          importance: importance,
         );
 
   static WardrobeItem? fromJson(JsonMap json) {
@@ -203,6 +286,7 @@ class WardrobeItem {
     if (kind == null) return null;
     String? path(Object? v) => v is String && v.isNotEmpty ? v : null;
     return WardrobeItem(
+      role: WardrobeRole.fromJson(json),
       reward: json['reward'] == true,
       variants: [
         for (final v in jsonList(json['variants']))
@@ -231,6 +315,19 @@ class WardrobeItem {
       effect: json['effect'] is Map
           ? WardrobeEffect.fromJson(jsonMap(json['effect']))
           : null,
+      obstacles: path(json['obstacles']),
+      collectibles: path(json['collectibles']),
+      collectibleNames: {
+        for (final MapEntry(:key, :value) in jsonMap(
+          json['collectibleNames'],
+        ).entries)
+          if (value is String && value.isNotEmpty) key: value,
+      },
+      borderColor: _colorOrNull(json['borderColor']),
+      music: path(json['music']),
+      importance: json['importance'] is num
+          ? (json['importance'] as num).round()
+          : null,
     );
   }
 }
@@ -241,8 +338,72 @@ Map<String, (double, double)> _harness(Object? json) => {
       key: ((value[0] as num).toDouble(), (value[1] as num).toDouble()),
 };
 
-/// A role of the person on a character card, e.g. "Julia (Romeo und Julia,
-/// 2026)": its own atlas, portrait and wire points.
+/// The role a person plays on a figure: [role] "Lucy" in [play]
+/// "Creepshow" ([year] 2026). Technicians work across plays: their function
+/// ("Lichttechnik") without play and year ([isFunction]).
+class WardrobeRole {
+  const WardrobeRole(this.role, {this.play, this.year});
+  final String role;
+  final String? play;
+  final int? year;
+
+  /// "Creepshow 2026"; null without play and year.
+  String? get production {
+    final text = [?play, ?year?.toString()].join(' ');
+    return text.isEmpty ? null : text;
+  }
+
+  /// A function such as "Lichttechnik": no play, no year.
+  bool get isFunction => production == null;
+
+  /// The line under the name: "als Lucy · Creepshow 2026"; a function
+  /// alone ("Lichttechnik").
+  String get line => isFunction ? role : 'als $role · $production';
+
+  /// From `role`, `play` and `year` of an item or variant; null without a
+  /// role (older servers).
+  static WardrobeRole? fromJson(JsonMap json) {
+    final role = textValue(json['role']).trim();
+    if (role.isEmpty) return null;
+    final play = textValue(json['play']).trim();
+    return WardrobeRole(
+      role,
+      play: play.isEmpty ? null : play,
+      year: json['year'] is num ? intValue(json['year']) : null,
+    );
+  }
+
+  static final _name = RegExp(r'^(.+) \((.+), (\d{4})\)$');
+
+  /// From a variant's name "Johanna (Anno 1146, 2025)", as servers without
+  /// the structured fields send it; a name without play and year is the
+  /// role alone.
+  static WardrobeRole? parse(String name) {
+    final text = name.trim();
+    if (text.isEmpty) return null;
+    final m = _name.firstMatch(text);
+    return m == null
+        ? WardrobeRole(text)
+        : WardrobeRole(m[1]!, play: m[2], year: int.parse(m[3]!));
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is WardrobeRole &&
+      other.role == role &&
+      other.play == play &&
+      other.year == year;
+
+  @override
+  int get hashCode => Object.hash(role, play, year);
+
+  @override
+  String toString() => line;
+}
+
+/// A role of the person on a character card, e.g. Julia in Romeo und Julia
+/// (2026): its own atlas, portrait and wire points. [name] is "Julia (Romeo
+/// und Julia, 2026)" as older servers send it.
 class WardrobeVariant {
   const WardrobeVariant({
     required this.id,
@@ -250,40 +411,80 @@ class WardrobeVariant {
     required this.image,
     this.portrait,
     this.harness = const {},
+    this.role,
   });
   final String id, name, image;
   final String? portrait;
   final Map<String, (double, double)> harness;
+  final WardrobeRole? role;
+
+  /// The role's name for a chip ("Julia"); the full name without a role.
+  String get roleName => role?.role ?? name;
 
   static WardrobeVariant? fromJson(JsonMap json) {
     final id = textValue(json['id']), image = textValue(json['image']);
     if (id.isEmpty || image.isEmpty) return null;
     final portrait = textValue(json['portrait']);
+    final name = textValue(json['name']);
     return WardrobeVariant(
       id: id,
-      name: textValue(json['name']),
+      name: name,
       image: image,
       portrait: portrait.isEmpty ? null : portrait,
       harness: _harness(json['harness']),
+      role: WardrobeRole.fromJson(json) ?? WardrobeRole.parse(name),
     );
   }
 }
 
+/// "Elena als Lucy", the person and the role of a character; with a
+/// function "Florian (Lichttechnik)"; the name alone without a role (Engel
+/// Logge, older servers).
+String nameInRole(String name, WardrobeRole? role) => switch (role) {
+  null => name,
+  final r when r.isFunction => '$name (${r.role})',
+  final r => '$name als ${r.role}',
+};
+
 /// How duplicates are paid and spent (`catalog.dupes`).
 class DupeRules {
   const DupeRules({
-    this.shinyChance = .03,
+    this.shinyChances = const {'costume': .03, 'ensemble': .03},
     this.tradeDupes = 5,
     this.buyDupes = 10,
   });
-  final double shinyChance;
+
+  /// The chance of a shine per crate kind (`costume`, `ensemble`, …).
+  final Map<String, double> shinyChances;
   final int tradeDupes, buyDupes;
 
+  /// The chance of a shine in a crate of [kind]; a kind not listed has
+  /// the chance of the own costume crate, like on the server.
+  double shinyChanceOf(String kind) =>
+      shinyChances[kind] ?? shinyChances['costume'] ?? .03;
+
+  /// The chance of a shine in the own costume crate.
+  double get shinyChance => shinyChanceOf('costume');
+
   factory DupeRules.fromJson(JsonMap json) => DupeRules(
-    shinyChance: _double(json['shinyChance'], .03),
+    shinyChances: _shinyChances(json['shinyChance']),
     tradeDupes: json['tradeDupes'] is num ? intValue(json['tradeDupes']) : 5,
     buyDupes: json['buyDupes'] is num ? intValue(json['buyDupes']) : 10,
   );
+
+  // One number for all kinds (older servers) or one per kind.
+  static Map<String, double> _shinyChances(Object? value) {
+    if (value is num) {
+      return {'costume': value.toDouble(), 'ensemble': value.toDouble()};
+    }
+    return {
+      'costume': .03,
+      'ensemble': .03,
+      if (value is Map)
+        for (final e in value.entries)
+          if (e.value is num) '${e.key}': (e.value as num).toDouble(),
+    };
+  }
 }
 
 class WardrobeCatalog {
@@ -413,8 +614,42 @@ class RunnerProgress {
     this.ensembleCrates = 0,
     this.dupes = false,
     this.ensemble,
-  });
+    int? runMeters,
+    this.bonusMeters = 0,
+    this.bonusOpen = false,
+    this.bonus = 0,
+    this.missionMeters = 0,
+    this.missionCrates = 0,
+    this.missionBonus = 0,
+    this.missions,
+    this.eventCrates = 0,
+  }) : runMeters = runMeters ?? meters;
+
+  /// Termin-Kisten waiting (`runnerEventCrates`).
+  final int eventCrates;
+
+  /// Crate metres from Tagesmissionen in total (part of [meters]) and
+  /// Missionskisten waiting (`runnerMissions`).
+  final int missionMeters, missionCrates;
+
+  /// Only in the reply to a run: the crate metres its missions brought, and
+  /// the day's missions after it.
+  final int missionBonus;
+  final DailyMissions? missions;
+
+  /// [meters] is the "Kistenstrecke": the metres run plus all Tagesbonus
+  /// metres; [previousAt] and [nextAt] are measured on it.
   final int meters, earned, opened, crates, previousAt, nextAt, poolSize;
+
+  /// The metres really run, and the Tagesbonus metres on top
+  /// (`runnerDailyBonus`; older servers send neither).
+  final int runMeters, bonusMeters;
+
+  /// Whether today's Tagesbonus is still open.
+  final bool bonusOpen;
+
+  /// Only in the reply to a run: the Tagesbonus it brought (0 or [gained]).
+  final int bonus;
 
   /// Ensemble-Kisten waiting (`runnerEnsemble`).
   final int ensembleCrates;
@@ -425,8 +660,9 @@ class RunnerProgress {
   /// Only in the reply to a run: what it added to the ensemble.
   final EnsembleRun? ensemble;
 
-  /// All crates waiting, the own and the ensemble's.
-  int get waiting => crates + ensembleCrates;
+  /// All crates waiting: the own, the ensemble's, the missions' and the
+  /// events'.
+  int get waiting => crates + ensembleCrates + missionCrates + eventCrates;
 
   /// Whether a crate of the own metres can be opened now.
   bool get canOpen => crates > 0 && (dupes || !complete);
@@ -460,6 +696,17 @@ class RunnerProgress {
     ensemble: json['ensemble'] is Map
         ? EnsembleRun.fromJson(jsonMap(json['ensemble']))
         : null,
+    runMeters: json['runMeters'] is num ? intValue(json['runMeters']) : null,
+    bonusMeters: intValue(json['bonusMeters']),
+    bonusOpen: json['bonusOpen'] == true,
+    bonus: intValue(json['bonus']),
+    missionMeters: intValue(json['missionMeters']),
+    missionCrates: intValue(json['missionCrates']),
+    missionBonus: intValue(json['missionBonus']),
+    missions: json['missions'] is Map
+        ? DailyMissions.fromJson(jsonMap(json['missions']))
+        : null,
+    eventCrates: intValue(json['eventCrates']),
   );
 }
 
@@ -602,6 +849,8 @@ class RunnerStats {
     this.best = 0,
     this.meters = 0,
     this.creditedMeters = 0,
+    this.bonusMeters = 0,
+    this.missionMeters = 0,
     this.deaths = const [],
     this.unknown = 0,
     this.untracked = 0,
@@ -610,6 +859,14 @@ class RunnerStats {
 
   /// Part of [meters] credited once for runs before metres were counted.
   final int creditedMeters;
+
+  /// Tagesbonus metres in total; not part of [meters], they count only for
+  /// the crates.
+  final int bonusMeters;
+
+  /// Crate metres from Tagesmissionen in total; like [bonusMeters] not part
+  /// of [meters].
+  final int missionMeters;
 
   /// Runs that ended at each obstacle, most often first.
   final List<(ObstacleKind, int)> deaths;
@@ -625,6 +882,8 @@ class RunnerStats {
     best: intValue(json['best']),
     meters: intValue(json['meters']),
     creditedMeters: intValue(json['creditedMeters']),
+    bonusMeters: intValue(json['bonusMeters']),
+    missionMeters: intValue(json['missionMeters']),
     deaths: [
       for (final d in jsonList(json['deaths']))
         if (ObstacleKind.values
@@ -655,8 +914,12 @@ class Wardrobe {
     this.gageEarned = 0,
     this.trades = const [],
     this.ensemble,
+    this.eventCrates = const [],
   });
   final WardrobeCatalog catalog;
+
+  /// Termin-Kisten waiting, the earliest event first (`runnerEventCrates`).
+  final List<EventCrate> eventCrates;
   final Set<String> owned;
   final Map<WardrobeKind, String> selected;
 
@@ -677,6 +940,19 @@ class Wardrobe {
   /// The worn role of [item], if one is chosen.
   WardrobeVariant? variantOf(WardrobeItem item) =>
       item.variants.where((v) => v.id == selectedVariants[item.id]).firstOrNull;
+
+  /// The role [item] is worn in: the chosen variant's, else the figure's own.
+  WardrobeRole? roleOf(WardrobeItem item) {
+    final variant = variantOf(item);
+    return variant == null ? item.role : variant.role;
+  }
+
+  /// The worn character as "Elena als Lucy" (its chosen role), e.g. for the
+  /// game's intro; [fallback] without a wardrobe.
+  String wornCharacterName([String fallback = 'Engel Logge']) {
+    final item = worn(WardrobeKind.character);
+    return item == null ? fallback : nameInRole(item.name, roleOf(item));
+  }
 
   /// What one chosen missing [item] costs; null if it cannot be bought
   /// (owned, a reward, gold).
@@ -738,6 +1014,10 @@ class Wardrobe {
       ensemble: json['ensemble'] is Map
           ? EnsembleProgress.fromJson(jsonMap(json['ensemble']))
           : null,
+      eventCrates: [
+        for (final e in jsonList(json['eventCrates']))
+          if (e is Map) EventCrate.fromJson(jsonMap(e)),
+      ],
       catalog: WardrobeCatalog.fromJson(jsonMap(json['catalog'])),
       owned: {for (final id in jsonList(json['owned'])) '$id'},
       lockedRarities: {
@@ -803,7 +1083,12 @@ class CrateOutcome {
     this.cost = 0,
     this.variantName,
     this.variantId,
+    this.variantRole,
+    this.event,
   });
+
+  /// From a Termin-Kiste: the event it came from.
+  final EventCrate? event;
 
   /// `new`, `shine` (a duplicate made it shiny), `variant`, `gage`, `trade`
   /// or `buy`.
@@ -818,6 +1103,7 @@ class CrateOutcome {
 
   /// The new role, for `variant`.
   final String? variantName, variantId;
+  final WardrobeRole? variantRole;
 
   /// Whether the shine is new: a shiny new item or a plain one made shiny.
   bool get shineNew => shiny && (type == 'new' || type == 'shine');
@@ -825,7 +1111,10 @@ class CrateOutcome {
   /// The line under the won card for a duplicate; null for a new item.
   String? get line => switch (type) {
     'gage' => 'Duplikat → +$gage Gage',
-    'variant' => 'Neue Rolle: ${variantName ?? ''}',
+    'variant' => switch (variantRole) {
+      final r? => 'Neue Rolle: ${[r.role, ?r.production].join(' · ')}',
+      null => 'Neue Rolle: ${variantName ?? ''}',
+    },
     'shine' => 'Duplikat → jetzt in Glanz!',
     'trade' => 'Aus dem Tauschvertrag (−$cost Gage)',
     'buy' => 'Gekauft für $cost Gage',
@@ -844,6 +1133,13 @@ class CrateOutcome {
         : null,
     variantId: json['variant'] is Map
         ? textValue(jsonMap(json['variant'])['id'])
+        : null,
+    variantRole: json['variant'] is Map
+        ? WardrobeRole.fromJson(jsonMap(json['variant'])) ??
+              WardrobeRole.parse(textValue(jsonMap(json['variant'])['name']))
+        : null,
+    event: json['crate'] == 'event' && json['event'] is Map
+        ? EventCrate.fromJson(jsonMap(json['event']))
         : null,
   );
 }
@@ -869,7 +1165,13 @@ class GageDeal {
 }
 
 Future<Wardrobe> loadWardrobe(AppController controller) async =>
-    Wardrobe.fromJson(await controller.remote('/games/runner/wardrobe'));
+    Wardrobe.fromJson(
+      await controller.remote(
+        roleFiguresAvailable(controller)
+            ? '/games/runner/wardrobe?roles=1'
+            : '/games/runner/wardrobe',
+      ),
+    );
 
 /// A fresh key per opening: a repeated request (after a lost reply) returns
 /// the same crate instead of opening another one.
@@ -883,16 +1185,27 @@ String crateKey([Random? random]) {
 
 /// Opens a crate of the own metres, or an Ensemble-Kiste with [ensemble].
 /// With [dupes] (`runnerDupes`) the server may answer with a duplicate.
+/// [event] opens a Termin-Kiste: the one of [eventId], else the earliest.
 Future<CrateOpening> openCrate(
   AppController controller, {
   String? key,
   bool dupes = false,
   bool ensemble = false,
+  bool mission = false,
+  bool event = false,
+  String? eventId,
 }) async => CrateOpening.fromJson(
   await controller.remote(
     '/games/runner/crates',
     method: 'POST',
-    body: {if (dupes) 'dupes': true, if (ensemble) 'crate': 'ensemble'},
+    body: {
+      if (dupes) 'dupes': true,
+      if (ensemble) 'crate': 'ensemble',
+      if (mission) 'crate': 'mission',
+      if (event) 'crate': 'event',
+      if (event && eventId != null) 'eventId': eventId,
+      if (roleFiguresAvailable(controller)) 'roles': true,
+    },
     idempotencyKey: key ?? crateKey(),
   ),
 );
@@ -911,6 +1224,7 @@ Future<Wardrobe> wearItem(
     body: {
       'kind': item.kind.name,
       'itemId': item.id,
+      if (roleFiguresAvailable(controller)) 'roles': true,
       if (variant != null)
         'variant': variant.id
       else if (plainLook)
@@ -928,7 +1242,7 @@ Future<GageDeal> tradeGage(
   await controller.remote(
     '/games/runner/trade',
     method: 'POST',
-    body: {'rarity': from},
+    body: {'rarity': from, if (roleFiguresAvailable(controller)) 'roles': true},
     idempotencyKey: key ?? crateKey(),
   ),
 );
@@ -942,7 +1256,10 @@ Future<GageDeal> buyItem(
   await controller.remote(
     '/games/runner/buy',
     method: 'POST',
-    body: {'itemId': item.id},
+    body: {
+      'itemId': item.id,
+      if (roleFiguresAvailable(controller)) 'roles': true,
+    },
     idempotencyKey: key ?? crateKey(),
   ),
 );
@@ -953,6 +1270,6 @@ Future<Wardrobe> markEnsembleSeen(AppController controller, num km) async =>
       await controller.remote(
         '/games/runner/ensemble/seen',
         method: 'PUT',
-        body: {'km': km},
+        body: {'km': km, if (roleFiguresAvailable(controller)) 'roles': true},
       ),
     );

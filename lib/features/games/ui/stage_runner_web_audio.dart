@@ -41,24 +41,51 @@ class _BrowserClip implements WebAudioClip {
   final web.AudioBuffer _buffer;
   final web.GainNode _gain;
 
-  /// A buffer source plays once and is cheap: a new one for every play.
+  /// A buffer source plays once and is cheap: a new one for every play. A
+  /// loop (the music) gets a gain of its own, to fade in and out; an effect
+  /// goes straight to the clip's gain.
   @override
-  WebAudioVoice play({bool loop = false}) {
+  WebAudioVoice play({bool loop = false, Duration fadeIn = Duration.zero}) {
     final source = _context.createBufferSource()
       ..buffer = _buffer
       ..loop = loop;
-    source
-      ..connect(_gain)
-      ..start();
-    return _BrowserVoice(source);
+    web.GainNode? fader;
+    if (loop || fadeIn > Duration.zero) {
+      fader = _context.createGain()..connect(_gain);
+      if (fadeIn > Duration.zero) {
+        final now = _context.currentTime;
+        fader.gain
+          ..setValueAtTime(0, now)
+          ..linearRampToValueAtTime(1, now + _seconds(fadeIn));
+      }
+      source.connect(fader);
+    } else {
+      source.connect(_gain);
+    }
+    source.start();
+    return _BrowserVoice(_context, source, fader);
   }
 }
 
-class _BrowserVoice implements WebAudioVoice {
-  _BrowserVoice(this._source);
-  final web.AudioBufferSourceNode _source;
+double _seconds(Duration d) => d.inMicroseconds / 1e6;
 
-  /// Stopping a source that has already ended does nothing.
+class _BrowserVoice implements WebAudioVoice {
+  _BrowserVoice(this._context, this._source, this._fader);
+  final web.AudioContext _context;
+  final web.AudioBufferSourceNode _source;
+  final web.GainNode? _fader;
+
+  /// Stopping a source that has already ended does nothing. A fade runs on
+  /// the audio clock: the source stops by itself at its end.
   @override
-  void stop() => _source.stop();
+  void stop({Duration fadeOut = Duration.zero}) {
+    final fader = _fader;
+    if (fader == null || fadeOut <= Duration.zero) return _source.stop();
+    final now = _context.currentTime, end = now + _seconds(fadeOut);
+    fader.gain
+      ..cancelScheduledValues(now)
+      ..setValueAtTime(fader.gain.value, now)
+      ..linearRampToValueAtTime(0, end);
+    _source.stop(end);
+  }
 }

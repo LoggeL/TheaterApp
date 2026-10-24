@@ -134,8 +134,8 @@ class EnsembleCard extends StatelessWidget {
                       ),
                       Text(
                         reward == null
-                            ? '1 Ensemble-Kiste mit garantiertem Glanz'
-                            : '${reward.kind.singular} „${reward.name}“ + 1 Ensemble-Kiste mit garantiertem Glanz',
+                            ? '1 Ensemble-Kiste für jede:n'
+                            : '${reward.kind.singular} „${reward.name}“ + 1 Ensemble-Kiste für jede:n',
                       ),
                       if (next.note != null)
                         Text(
@@ -181,7 +181,12 @@ class EnsembleCard extends StatelessWidget {
             Theme(
               data: theme.copyWith(dividerColor: Colors.transparent),
               child: ExpansionTile(
-                key: const ValueKey('ensemble-goals'),
+                // Its own PageStorageKey: without one the tile stores its
+                // open state (a bool) under the id of the wardrobe's
+                // scroll view, which keeps its offset (a double) there; back
+                // from the Statistik tab either read failed and the card
+                // turned into an error box (a white block in release).
+                key: const PageStorageKey('ensemble-goals'),
                 tilePadding: EdgeInsets.zero,
                 title: const Text('Alle Ziele'),
                 children: [
@@ -327,8 +332,8 @@ class _EnsembleCelebrationState extends State<EnsembleCelebration>
                 const SizedBox(height: 12),
                 Text(
                   crates == 1
-                      ? 'Für dich wartet 1 Ensemble-Kiste mit garantiertem Glanz.'
-                      : 'Für dich warten $crates Ensemble-Kisten mit garantiertem Glanz.',
+                      ? 'Für dich wartet 1 Ensemble-Kiste.'
+                      : 'Für dich warten $crates Ensemble-Kisten.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w700,

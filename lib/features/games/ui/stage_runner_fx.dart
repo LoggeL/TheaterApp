@@ -52,7 +52,6 @@ class RunnerFx {
   bool _wasHolding = false, _crashed = false, _curtain = false;
   bool recordBroken = false;
   int _milestone = 0;
-  ObstacleKind? _announced;
 
   /// The metres that get a banner, then every further thousand.
   static int milestoneAt(int index) => switch (index) {
@@ -69,9 +68,6 @@ class RunnerFx {
     2000 => '2000 m – Standing Ovations!',
     _ => '$meters m – Bühnenlegende!',
   };
-
-  /// The banner for a new kind of obstacle.
-  static String debutText(ObstacleKind kind) => 'Neu: ${obstacleName(kind)}!';
 
   void _banner(String text) {
     banner = text;
@@ -179,14 +175,6 @@ class RunnerFx {
       _banner(milestoneText(milestoneAt(_milestone)));
       _milestone++;
       onSound?.call(RunnerSfx.bravo);
-    }
-    // A new obstacle is announced when its first one comes into view.
-    final debut = game.debut;
-    if (debut != null &&
-        debut.kind != _announced &&
-        debut.x - game.distance < StageRunner.viewWidth) {
-      _announced = debut.kind;
-      _banner(debutText(debut.kind));
     }
     final best = this.best;
     if (!recordBroken && best != null && best > 0 && game.score > best) {

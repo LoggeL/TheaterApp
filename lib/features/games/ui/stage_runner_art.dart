@@ -16,8 +16,8 @@ class RunnerEffectStyle {
   final String trail;
   final List<ui.Color> colors;
 
-  /// A shiny character: a spotlight and glints around the runner. Only
-  /// drawn: hitbox and physics stay the same.
+  /// A shiny character: a golden rim, a sheen sweeping over the figure and
+  /// glints around it. Only drawn: hitbox and physics stay the same.
   final bool shine;
 }
 
@@ -78,8 +78,9 @@ enum RunnerSprite {
   };
 
   /// Which picture of a costume holds it: the runner's poses come from the
-  /// worn character, the obstacles from the worn obstacle set, the pickups
-  /// always from the game's own atlas.
+  /// worn character, the obstacles from the worn obstacle set (or the
+  /// backdrop's own), the pickups from the backdrop's collectibles, else
+  /// from the game's own atlas.
   RunnerLayer get layer => switch (this) {
     fly ||
     dangle ||
@@ -123,11 +124,14 @@ class RunnerArt {
   RunnerArt._(this.atlas, this.backdrop)
     : runnerAtlas = atlas,
       obstacleAtlas = atlas,
+      pickupAtlas = atlas,
       runnerPaint = _paint(),
       obstaclePaint = _paint(),
       backdropPaint = _paint(),
       harness = const {},
-      effect = null;
+      effect = null,
+      border = null,
+      pickupNames = const {};
 
   /// Art from already decoded pictures, for tests.
   @visibleForTesting
@@ -138,19 +142,22 @@ class RunnerArt {
     this.backdrop, {
     required this.runnerAtlas,
     required this.obstacleAtlas,
+    required this.pickupAtlas,
     required this.runnerPaint,
     required this.obstaclePaint,
     required this.backdropPaint,
     this.harness = const {},
     this.effect,
+    this.border,
+    this.pickupNames = const {},
   });
 
-  /// The game's own atlas (always the pickups) and the shown backdrop.
+  /// The game's own atlas and the shown backdrop.
   final ui.Image atlas, backdrop;
 
-  /// The atlases of the worn character and obstacle set, in the layout of
-  /// [atlas]; the default ones are [atlas] itself.
-  final ui.Image runnerAtlas, obstacleAtlas;
+  /// The atlases of the worn character, obstacle set and collectibles, in
+  /// the layout of [atlas]; the default ones are [atlas] itself.
+  final ui.Image runnerAtlas, obstacleAtlas, pickupAtlas;
 
   /// How each layer is drawn; a stand-in costume tints the default art.
   final Paint runnerPaint, obstaclePaint, backdropPaint;
@@ -158,6 +165,14 @@ class RunnerArt {
 
   /// The worn effect, if any.
   final RunnerEffectStyle? effect;
+
+  /// The colour of the border (the short curtain the game draws) on the
+  /// worn backdrop; null for the theatre's red.
+  final ui.Color? border;
+
+  /// What the backdrop's own collectibles are called; empty for the game's
+  /// own (and whenever its collectibles did not load).
+  final Map<PickupKind, String> pickupNames;
 
   /// Wire points of the worn character's own atlas that differ from
   /// [RunnerSprite.harness].
@@ -169,28 +184,34 @@ class RunnerArt {
   RunnerArt dressed({
     ui.Image? runner,
     ui.Image? obstacles,
+    ui.Image? pickups,
     ui.Image? backdrop,
     ColorFilter? runnerFilter,
     ColorFilter? obstacleFilter,
     ColorFilter? backdropFilter,
     Map<RunnerSprite, ui.Offset> harness = const {},
     RunnerEffectStyle? effect,
+    ui.Color? border,
+    Map<PickupKind, String> pickupNames = const {},
   }) => RunnerArt._dressed(
     atlas,
     backdrop ?? this.backdrop,
     runnerAtlas: runner ?? atlas,
     obstacleAtlas: obstacles ?? atlas,
+    pickupAtlas: pickups ?? atlas,
     runnerPaint: _paint(runnerFilter),
     obstaclePaint: _paint(obstacleFilter),
     backdropPaint: _paint(backdropFilter),
     harness: runner == null ? const {} : harness,
     effect: effect,
+    border: border,
+    pickupNames: pickups == null ? const {} : pickupNames,
   );
 
   ui.Image imageOf(RunnerSprite sprite) => switch (sprite.layer) {
     RunnerLayer.runner => runnerAtlas,
     RunnerLayer.obstacles => obstacleAtlas,
-    RunnerLayer.pickups => atlas,
+    RunnerLayer.pickups => pickupAtlas,
   };
 
   Paint paintOf(RunnerSprite sprite) => switch (sprite.layer) {

@@ -6,10 +6,13 @@ import '../../../core/app_controller.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/layout/content_width.dart';
 import '../../../shared/navigation.dart';
+import '../data/missions_api.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
 import 'crate_opening.dart';
+import 'event_crates_card.dart';
 import 'ensemble_card.dart';
+import 'missions_card.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart' show obstacleName;
 import 'stage_runner_look.dart';
@@ -43,6 +46,33 @@ String metersText(int meters) => '${_number.format(meters)} m';
 String nextCrateText(RunnerProgress p) => p.complete && !p.dupes
     ? 'Fundus komplett – neue Kostüme kommen bald.'
     : 'noch ${metersText(p.remaining)} bis zur nächsten Kiste';
+
+/// Before a run while today's Tagesbonus is open (`runnerDailyBonus`).
+const dailyBonusHint =
+    'Tagesbonus: Dein erster Lauf heute zählt doppelt für die nächste Kiste.';
+
+/// "+812 m · Tagesbonus +812 m · noch 376 m bis zur nächsten Kiste", after a
+/// run; the bonus only with [showBonus] (`runnerDailyBonus`).
+String runProgressText(RunnerProgress p, {bool showBonus = false}) => [
+  '+${metersText(p.gained)}',
+  if (showBonus && p.bonus > 0) 'Tagesbonus +${metersText(p.bonus)}',
+  // Only servers with `runnerMissions` send it.
+  if (p.missionBonus > 0) 'Missionen +${metersText(p.missionBonus)}',
+  nextCrateText(p),
+].join(' · ');
+
+/// "2.888 m gelaufen + 812 m Tagesbonus · noch …": the Kistenstrecke of
+/// [p], with its Tagesbonus part when [showBonus] and there is one.
+String crateDistanceText(RunnerProgress p, {bool showBonus = false}) {
+  final extra = [
+    if (showBonus && p.bonusMeters > 0)
+      '${metersText(p.bonusMeters)} Tagesbonus',
+    if (p.missionMeters > 0) '${metersText(p.missionMeters)} Missionen',
+  ];
+  return extra.isEmpty
+      ? '${metersText(p.meters)} gelaufen · ${nextCrateText(p)}'
+      : '${[metersText(p.runMeters), ...extra].join(' + ').replaceFirst(' + ', ' gelaufen + ')} · ${nextCrateText(p)}';
+}
 
 /// "+1,2 km fürs Ensemble · noch 18 km bis Anno 1146", after a run.
 String ensembleRunText(EnsembleRun e) =>
@@ -81,6 +111,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   AppController get controller => widget.controller;
   bool get _dupes => dupesAvailable(controller);
   bool get _ensemble => ensembleAvailable(controller);
+  bool get _bonus => dailyBonusAvailable(controller);
+  bool get _missions => missionsAvailable(controller);
+  bool get _eventCrates => eventCratesAvailable(controller);
 
   @override
   void initState() {
@@ -128,7 +161,11 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     _dress();
   }
 
-  Future<void> _open({bool ensemble = false}) async {
+  Future<void> _open({
+    bool ensemble = false,
+    bool mission = false,
+    EventCrate? event,
+  }) async {
     final w = _wardrobe;
     if (w == null) return;
     final next = await showCrateOpening(
@@ -138,6 +175,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       sound: widget.sound,
       art: _base,
       ensemble: ensemble,
+      mission: mission,
+      event: event != null,
+      eventCrate: event,
     );
     if (next != null && mounted) _update(next);
   }
@@ -167,19 +207,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     if (open == true && mounted) await _open(ensemble: true);
   }
 
-  Future<void> _wear(
-    WardrobeItem item, {
-    WardrobeVariant? variant,
-    bool plainLook = false,
-  }) async {
+  /// Wears [item]: every role is a figure of its own (`runnerRoleFigures`),
+  /// so there is no role to choose; with older servers the worn role stays.
+  Future<void> _wear(WardrobeItem item) async {
     setState(() => _busy = true);
     try {
-      final w = await wearItem(
-        controller,
-        item,
-        variant: variant,
-        plainLook: plainLook,
-      );
+      final w = await wearItem(controller, item);
       if (mounted) _update(w);
     } catch (e) {
       if (mounted) showProblem(context, e);
@@ -198,7 +231,6 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final label = catalog.labelOf(item);
     final shiny = owned && w.isShiny(item);
     final cost = _dupes ? w.buyCost(item) : null;
-    final role = w.variantOf(item);
     final milestone = item.reward ? w.ensemble?.rewardOf(item) : null;
     showModalBottomSheet<void>(
       isScrollControlled: true,
@@ -223,6 +255,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                       art: _base,
                       worn: worn,
                       animateShine: true,
+                      showRole: false,
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -236,7 +269,14 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                               : 'Noch nicht gefunden',
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
-                        if (role != null && owned) Text('Als ${role.name}'),
+                        // "als Lucy · Creepshow 2026": the worn role.
+                        if (owned)
+                          if (w.roleOf(item) case final playing?)
+                            Text(
+                              playing.line,
+                              key: const ValueKey('wardrobe-role'),
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
                         const SizedBox(height: 4),
                         Text(
                           [
@@ -327,45 +367,6 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                   ),
                 ],
               ),
-              if (owned && item.variants.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Text('Rolle', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    ChoiceChip(
-                      key: const ValueKey('variant-plain'),
-                      label: const Text('Eigene Figur'),
-                      selected: worn && role == null,
-                      onSelected: _busy
-                          ? null
-                          : (_) {
-                              Navigator.pop(context);
-                              _wear(item, plainLook: true);
-                            },
-                    ),
-                    for (final v in item.variants)
-                      ChoiceChip(
-                        key: ValueKey('variant-${v.id}'),
-                        avatar: w.variants.contains(v.id)
-                            ? null
-                            : const Icon(Icons.lock_outline, size: 16),
-                        label: Text(
-                          w.variants.contains(v.id) ? v.name : '? (Duplikat)',
-                        ),
-                        selected: worn && role?.id == v.id,
-                        onSelected: _busy || !w.variants.contains(v.id)
-                            ? null
-                            : (_) {
-                                Navigator.pop(context);
-                                _wear(item, variant: v);
-                              },
-                      ),
-                  ],
-                ),
-              ],
               if (owned && !worn) ...[
                 const SizedBox(height: 20),
                 FilledButton.icon(
@@ -557,6 +558,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 deal.item.name,
                 style: Theme.of(context).textTheme.titleLarge,
               ),
+              if (deal.wardrobe.roleOf(deal.item) case final playing?)
+                Text(playing.line, textAlign: TextAlign.center),
             ],
           ),
           actions: [
@@ -622,6 +625,32 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     return CustomScrollView(
       key: const PageStorageKey('wardrobe-costumes'),
       slivers: [
+        // Termin-Kisten for own commitments, only while some wait.
+        if (_eventCrates && w.eventCrates.isNotEmpty)
+          SliverPadding(
+            padding: padding.copyWith(bottom: 12),
+            sliver: SliverToBoxAdapter(
+              child: EventCratesCard(
+                crates: w.eventCrates,
+                onOpen: _busy ? null : (e) => _open(event: e),
+              ),
+            ),
+          ),
+        // Tagesmissionen with the Missionskisten to open.
+        if (_missions)
+          SliverPadding(
+            padding: padding.copyWith(bottom: 12),
+            sliver: SliverToBoxAdapter(
+              child: DailyMissionsCard(
+                controller: controller,
+                crates: w.progress.missionCrates,
+                collectibleNames:
+                    w.worn(WardrobeKind.backdrop)?.collectibleNames ??
+                    const {},
+                onOpenCrate: _busy ? null : () => _open(mission: true),
+              ),
+            ),
+          ),
         if (_ensemble && w.ensemble != null)
           SliverPadding(
             padding: padding.copyWith(bottom: 12),
@@ -705,14 +734,25 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              '${metersText(p.meters)} gelaufen · ${nextCrateText(p)}',
+              crateDistanceText(p, showBonus: _bonus),
               style: theme.textTheme.bodyMedium,
             ),
+            if (_bonus && p.bonusOpen)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  dailyBonusHint,
+                  key: const ValueKey('wardrobe-daily-bonus'),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
             if (p.complete && _dupes)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  'Fundus komplett – Kisten bringen jetzt Rollen, Glanz oder Gage.',
+                  roleFiguresAvailable(controller)
+                      ? 'Fundus komplett – Kisten bringen jetzt Glanz oder Gage.'
+                      : 'Fundus komplett – Kisten bringen jetzt Rollen, Glanz oder Gage.',
                   style: theme.textTheme.bodySmall,
                 ),
               )
@@ -813,6 +853,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     WardrobeKind kind,
     EdgeInsets padding,
   ) {
+    if (kind == WardrobeKind.character) return _characters(context, w, padding);
     final items = w.catalog.items.where((i) => i.kind == kind).toList()
       // Defaults first, then from rare to common; owned before missing.
       ..sort((a, b) {
@@ -846,11 +887,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       SliverPadding(
         padding: EdgeInsets.symmetric(horizontal: padding.left),
         sliver: SliverGrid.builder(
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          // Figures are a little taller: their role stands under the name.
+          gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
             maxCrossAxisExtent: 132,
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
-            childAspectRatio: .78,
+            childAspectRatio: kind == WardrobeKind.character ? .7 : .78,
           ),
           itemCount: items.length,
           itemBuilder: (context, i) => WardrobeCard(
@@ -866,6 +908,202 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       ),
     ];
   }
+
+  // The figures' filters: a play ("Creepshow 2026") and a person.
+  String? _play;
+  int? _person;
+
+  /// The figures, one card per role: grouped by rarity from rare to common,
+  /// in a rarity the owned ones first, then by the weight of the role. The
+  /// list can be narrowed to one play or one person.
+  List<Widget> _characters(
+    BuildContext context,
+    Wardrobe w,
+    EdgeInsets padding,
+  ) {
+    final theme = Theme.of(context);
+    final catalog = w.catalog;
+    final all = [
+      for (final i in catalog.items)
+        if (i.kind == WardrobeKind.character) i,
+    ];
+    final collectible = [
+      for (final i in all)
+        if (!i.isDefault) i,
+    ];
+    final years = <String, int>{
+      for (final i in collectible) ?i.role?.production: i.role?.year ?? 0,
+    };
+    // Newest play first.
+    final plays = years.keys.toList()
+      ..sort((a, b) {
+        final year = years[b]!.compareTo(years[a]!);
+        return year != 0 ? year : a.compareTo(b);
+      });
+    final people = <int, String>{
+      for (final i in collectible) ?i.personId: i.name,
+    };
+    final persons = people.entries.toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    final play = plays.contains(_play) ? _play : null;
+    final person = people.containsKey(_person) ? _person : null;
+    bool shown(WardrobeItem i) =>
+        (play == null || i.role?.production == play) &&
+        (person == null || i.personId == person);
+    int order(WardrobeItem a, WardrobeItem b) {
+      if (w.owns(a) != w.owns(b)) return w.owns(a) ? -1 : 1;
+      final weight = (b.importance ?? 0).compareTo(a.importance ?? 0);
+      if (weight != 0) return weight;
+      return nameInRole(a.name, a.role).compareTo(nameInRole(b.name, b.role));
+    }
+
+    final worn = w.worn(WardrobeKind.character)?.id;
+    final defaults = [
+      if (play == null && person == null)
+        for (final i in all)
+          if (i.isDefault) i,
+    ];
+    final groups = [
+      for (final r in catalog.rarities.reversed)
+        if ([
+              for (final i in collectible)
+                if (i.rarity == r.id && shown(i)) i,
+            ]..sort(order)
+            case final items when items.isNotEmpty)
+          (r, items),
+    ];
+    final owned = collectible.where(w.owns).length;
+    Widget filter<T>({
+      required Key key,
+      required T? value,
+      required String all,
+      required List<(T, String)> options,
+      required ValueChanged<T?> onChanged,
+    }) => DropdownButton<T?>(
+      key: key,
+      value: value,
+      isDense: true,
+      underline: const SizedBox.shrink(),
+      items: [
+        DropdownMenuItem<T?>(value: null, child: Text(all)),
+        for (final (v, label) in options)
+          DropdownMenuItem<T?>(value: v, child: Text(label)),
+      ],
+      onChanged: onChanged,
+    );
+    return [
+      SliverPadding(
+        padding: EdgeInsets.fromLTRB(padding.left, 24, padding.right, 4),
+        sliver: SliverToBoxAdapter(
+          child: Row(
+            children: [
+              Icon(kindIcon(WardrobeKind.character), size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  WardrobeKind.character.plural,
+                  style: theme.textTheme.titleMedium,
+                ),
+              ),
+              Text('$owned/${collectible.length}'),
+            ],
+          ),
+        ),
+      ),
+      if (plays.length > 1 || persons.length > 1)
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(padding.left, 0, padding.right, 4),
+          sliver: SliverToBoxAdapter(
+            child: Wrap(
+              spacing: 16,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                filter<String>(
+                  key: const ValueKey('wardrobe-filter-play'),
+                  value: play,
+                  all: 'Alle Stücke',
+                  options: [for (final p in plays) (p, p)],
+                  onChanged: (v) => setState(() => _play = v),
+                ),
+                filter<int>(
+                  key: const ValueKey('wardrobe-filter-person'),
+                  value: person,
+                  all: 'Alle Personen',
+                  options: [for (final e in persons) (e.key, e.value)],
+                  onChanged: (v) => setState(() => _person = v),
+                ),
+              ],
+            ),
+          ),
+        ),
+      if (defaults.isNotEmpty) _grid(defaults, w, worn, padding, top: 8),
+      for (final (rarity, items) in groups) ...[
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(padding.left, 14, padding.right, 6),
+          sliver: SliverToBoxAdapter(
+            child: Row(
+              key: ValueKey('wardrobe-group-${rarity.id}'),
+              children: [
+                CircleAvatar(radius: 5, backgroundColor: rarity.color),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    w.lockedRarities.contains(rarity.id)
+                        ? '${rarity.name} · ${rarity.hint ?? 'gesperrt'}'
+                        : rarity.name,
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                Text(
+                  '${items.where(w.owns).length}/${items.length}',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ),
+        _grid(items, w, worn, padding),
+      ],
+      if (groups.isEmpty)
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(padding.left, 12, padding.right, 0),
+          sliver: const SliverToBoxAdapter(
+            child: Text('Keine Figur in dieser Auswahl.'),
+          ),
+        ),
+    ];
+  }
+
+  /// A grid of figure cards.
+  Widget _grid(
+    List<WardrobeItem> items,
+    Wardrobe w,
+    String? worn,
+    EdgeInsets padding, {
+    double top = 0,
+  }) => SliverPadding(
+    padding: EdgeInsets.fromLTRB(padding.left, top, padding.left, 0),
+    sliver: SliverGrid.builder(
+      // Figures are a little taller: their role stands under the name.
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 132,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: .7,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, i) => WardrobeCard(
+        key: ValueKey('wardrobe-${items[i].id}'),
+        item: items[i],
+        wardrobe: w,
+        controller: controller,
+        art: _base,
+        worn: items[i].id == worn,
+        onTap: () => _details(items[i]),
+      ),
+    ),
+  );
 
   Widget _statistics(BuildContext context) {
     final theme = Theme.of(context);
@@ -907,6 +1145,26 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
             padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
             child: Text(
               'Davon ${metersText(s.creditedMeters)} als Gutschrift für frühere Läufe (150 m je Lauf).',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        // The Tagesbonus is not in the Gesamtstrecke: it counts only for
+        // the crates (the Kistenstrecke).
+        if (_bonus)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+            child: Text(
+              'Tagesbonus gesamt: ${metersText(s.bonusMeters)} · zählt nur für die Kisten (Kistenstrecke ${metersText(_wardrobe!.progress.meters)}).',
+              key: const ValueKey('wardrobe-bonus-total'),
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        if (_missions)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
+            child: Text(
+              'Tagesmissionen gesamt: ${metersText(s.missionMeters)} · zählen wie der Tagesbonus nur für die Kisten.',
+              key: const ValueKey('wardrobe-mission-total'),
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -1036,7 +1294,11 @@ class EnsembleRunNote extends StatelessWidget {
 
 /// Whether [w] has a crate waiting that can be opened.
 bool crateWaiting(Wardrobe? w) =>
-    w != null && (w.progress.canOpen || w.progress.ensembleCrates > 0);
+    w != null &&
+    (w.progress.canOpen ||
+        w.progress.ensembleCrates > 0 ||
+        w.progress.missionCrates > 0 ||
+        w.eventCrates.isNotEmpty);
 
 /// A small "Garderobe" button with the number of waiting crates.
 class WardrobeButton extends StatelessWidget {

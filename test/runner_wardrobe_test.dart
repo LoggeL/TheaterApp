@@ -19,6 +19,7 @@ import 'package:theater_app/features/games/ui/crate_opening.dart';
 import 'package:theater_app/features/games/ui/stage_runner_art.dart';
 import 'package:theater_app/features/games/ui/stage_runner_look.dart';
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
+import 'package:theater_app/features/games/ui/wardrobe_cards.dart';
 import 'package:theater_app/features/games/ui/wardrobe_screen.dart';
 
 import 'app_controller_test.dart'
@@ -69,6 +70,7 @@ JsonMap _wardrobeJson({
   int crates = 1,
   List<String> locked = const ['legacy'],
   JsonMap? stats,
+  JsonMap progress = const {},
 }) => {
   'progress': {
     'meters': meters,
@@ -79,6 +81,7 @@ JsonMap _wardrobeJson({
     'nextAt': 4100,
     'poolSize': 4,
     'complete': false,
+    ...progress,
   },
   'catalog': {
     'kinds': ['character', 'backdrop', 'obstacles', 'fx'],
@@ -302,14 +305,20 @@ void main() {
     });
 
     test('a missing picture falls back to the tinted default art', () async {
+      WardrobePictures.retryDelay = Duration.zero;
+      addTearDown(
+        () => WardrobePictures.retryDelay = const Duration(seconds: 1),
+      );
+      var asked = 0;
       final server = TestServer();
       server.data['capabilities'] = {
         'features': ['stageRunner', 'runnerUnlocks'],
       };
-      server.override = (request) =>
-          _path(request).contains('/games/runner/skins/')
-          ? Future.value(http.Response('', 404))
-          : null;
+      server.override = (request) {
+        if (!_path(request).contains('/games/runner/skins/')) return null;
+        asked++;
+        return Future.value(http.Response('', 404));
+      };
       final controller = server.controller();
       addTearDown(controller.dispose);
       await signIn(controller);
@@ -330,6 +339,7 @@ void main() {
           controller,
         );
         expect(dressed.imageOf(RunnerSprite.cheer), atlas);
+        expect(asked, 2, reason: 'asked once more before falling back');
         expect(dressed.runnerPaint.colorFilter, isNotNull);
         expect(dressed.obstaclePaint.colorFilter, isNull);
         expect(dressed.effect?.trail, 'sparkle');
@@ -385,6 +395,363 @@ void main() {
       await dressArt(base, w, controller);
       expect(fetched, 1, reason: 'kept for the session');
     });
+
+    test('a role whose atlas fails once is asked again, not Logge', () async {
+      WardrobePictures.retryDelay = Duration.zero;
+      addTearDown(
+        () => WardrobePictures.retryDelay = const Duration(seconds: 1),
+      );
+      final own = await createTestImage(width: 1124, height: 577);
+      final png = (await own.toByteData(format: ui.ImageByteFormat.png))!;
+      final asked = <String>[];
+      final server = TestServer();
+      server.data['capabilities'] = {
+        'features': ['stageRunner', 'runnerUnlocks'],
+      };
+      server.override = (request) {
+        if (!_path(request).contains('/games/runner/skins/')) return null;
+        asked.add(_path(request));
+        // A dropped connection the first time, the picture the second.
+        return Future.value(
+          asked.length == 1
+              ? http.Response('', 503)
+              : http.Response.bytes(
+                  png.buffer.asUint8List(),
+                  200,
+                  headers: {'content-type': 'image/png'},
+                ),
+        );
+      };
+      final controller = server.controller();
+      addTearDown(controller.dispose);
+      await signIn(controller);
+      final atlas = await createTestImage(width: 1124, height: 577);
+      final backdrop = await createTestImage(width: 64, height: 32);
+      final json = _wardrobeJson(
+        owned: ['elena'],
+        selected: {'character': 'elena'},
+      );
+      // Elena as Johanna: the role's atlas, not her own.
+      final items = jsonList(jsonMap(json['catalog'])['items']);
+      (items[5] as Map)
+        ..['image'] = '/games/runner/skins/character-elena.webp?v=1'
+        ..['variants'] = [
+          {
+            'id': 'elena--anno',
+            'role': 'Johanna',
+            'play': 'Anno 1146',
+            'year': 2025,
+            'image': '/games/runner/skins/character-elena--anno.webp?v=2',
+            'harness': {
+              'fly': [106, 42],
+            },
+          },
+        ];
+      json['variants'] = ['elena--anno'];
+      json['selectedVariants'] = {'elena': 'elena--anno'};
+      final dressed = await dressArt(
+        RunnerArt.test(atlas, backdrop),
+        Wardrobe.fromJson(json),
+        controller,
+      );
+      expect(asked, [
+        '/api/mobile/v1/games/runner/skins/character-elena--anno.webp',
+        '/api/mobile/v1/games/runner/skins/character-elena--anno.webp',
+      ]);
+      expect(dressed.imageOf(RunnerSprite.cheer), isNot(atlas));
+      expect(dressed.harnessOf(RunnerSprite.fly), const ui.Offset(106, 42));
+    });
+
+    testWidgets('a card shows the pictures of the role chosen on it', (
+      tester,
+    ) async {
+      final asked = <String>[];
+      final controller = await _signedIn(tester, (request) {
+        if (!_path(request).contains('/games/runner/skins/')) return null;
+        asked.add(_path(request).split('/').last);
+        return Future.value(http.Response('', 404));
+      });
+      const role = WardrobeVariant(
+        id: 'elena--anno',
+        name: 'Johanna (Anno 1146, 2025)',
+        image: '/games/runner/skins/character-elena--anno.webp',
+        portrait: '/games/runner/skins/character-elena--anno-portrait.webp',
+      );
+      const elena = WardrobeItem(
+        id: 'elena',
+        kind: WardrobeKind.character,
+        name: 'Elena',
+        rarity: 'gold',
+        image: '/games/runner/skins/character-elena.webp',
+        portrait: '/games/runner/skins/character-elena-portrait.webp',
+        variants: [role],
+      );
+      Widget card(WardrobeVariant? variant) => Directionality(
+        textDirection: TextDirection.ltr,
+        child: WardrobeItemArt(
+          item: elena.inRole(variant),
+          controller: controller,
+        ),
+      );
+      await tester.pumpWidget(card(null));
+      await tester.pump();
+      await tester.pump();
+      expect(asked, contains('character-elena-portrait.webp'));
+      // Same figure, other role: its own pictures are fetched.
+      await tester.pumpWidget(card(role));
+      await tester.pump();
+      await tester.pump();
+      expect(asked, contains('character-elena--anno-portrait.webp'));
+    });
+
+    test('the picture cache keeps by bytes, drops the least used first and '
+        'the game fetches a dropped atlas again', () async {
+      final maxBytes = WardrobePictures.maxBytes;
+      addTearDown(() => WardrobePictures.maxBytes = maxBytes);
+      final own = await createTestImage(width: 1124, height: 577);
+      final png = (await own.toByteData(format: ui.ImageByteFormat.png))!;
+      const size = 1124 * 577 * 4;
+      // Room for two atlases.
+      WardrobePictures.maxBytes = 2 * size + 1000;
+      final asked = <String>[];
+      final server = TestServer();
+      server.data['capabilities'] = {
+        'features': ['stageRunner', 'runnerUnlocks'],
+      };
+      server.override = (request) {
+        if (!_path(request).contains('/games/runner/skins/')) return null;
+        asked.add(_path(request).split('/').last);
+        return Future.value(
+          http.Response.bytes(
+            png.buffer.asUint8List(),
+            200,
+            headers: {'content-type': 'image/png'},
+          ),
+        );
+      };
+      final controller = server.controller();
+      addTearDown(controller.dispose);
+      await signIn(controller);
+      const a = '/games/runner/skins/a.webp', b = '/games/runner/skins/b.webp';
+      const c = '/games/runner/skins/c.webp';
+      await WardrobePictures.load(controller, a);
+      await WardrobePictures.load(controller, b);
+      // Used again: b is now the least used one.
+      expect(WardrobePictures.cached(a), isNotNull);
+      await WardrobePictures.load(controller, c);
+      expect(WardrobePictures.cached(b), isNull);
+      expect(WardrobePictures.cached(a), isNotNull);
+      expect(WardrobePictures.cached(c), isNotNull);
+      expect(WardrobePictures.bytes, 2 * size);
+
+      // Maren's atlas was dropped: the game asks for it again instead of
+      // dressing her as Engel Logge.
+      final atlas = await createTestImage(width: 1124, height: 577);
+      final backdrop = await createTestImage(width: 64, height: 32);
+      final json = _wardrobeJson(
+        owned: ['maren'],
+        selected: {'character': 'maren'},
+      );
+      final items = jsonList(jsonMap(json['catalog'])['items']);
+      (items[4] as Map)['image'] = b;
+      final dressed = await dressArt(
+        RunnerArt.test(atlas, backdrop),
+        Wardrobe.fromJson(json),
+        controller,
+      );
+      expect(asked, ['a.webp', 'b.webp', 'c.webp', 'b.webp']);
+      expect(dressed.imageOf(RunnerSprite.cheer), isNot(atlas));
+      expect(dressed.runnerPaint.colorFilter, isNotNull, reason: 'her tint');
+    });
+
+    test(
+      'a card waits on a neutral placeholder, never on Engel Logge',
+      () async {
+        final atlas = await createTestImage(width: 1124, height: 577);
+        final backdrop = await createTestImage(width: 64, height: 32);
+        final base = RunnerArt.test(atlas, backdrop);
+        const elena = WardrobeItem(
+          id: 'elena',
+          kind: WardrobeKind.character,
+          name: 'Elena',
+          rarity: 'gold',
+          image: '/games/runner/skins/character-elena.webp',
+          portrait: '/games/runner/skins/character-elena-portrait.webp',
+        );
+        const rect = Rect.fromLTWH(0, 0, 120, 150);
+        // Her pictures are not there (yet, or dropped): a placeholder.
+        final waiting = _DrawnImages();
+        paintItemArt(waiting, rect, elena, base);
+        expect(waiting.images, isEmpty);
+        expect(waiting.rrects, hasLength(1));
+        // Once held, her portrait.
+        final portrait = await createTestImage(width: 512, height: 512);
+        final shown = _DrawnImages();
+        paintItemArt(shown, rect, elena, base, portrait: portrait);
+        expect(shown.images, [portrait]);
+        // A stand-in without pictures keeps the default art in its tint.
+        final standIn = _DrawnImages();
+        paintItemArt(
+          standIn,
+          rect,
+          const WardrobeItem(
+            id: 'maren',
+            kind: WardrobeKind.character,
+            name: 'Maren',
+            rarity: 'technik',
+            placeholder: true,
+          ),
+          base,
+        );
+        expect(standIn.images, [atlas]);
+      },
+    );
+
+    testWidgets('a card keeps its picture when the cache drops it', (
+      tester,
+    ) async {
+      final png = (await tester.runAsync(() async {
+        final image = await createTestImage(width: 512, height: 512);
+        return image.toByteData(format: ui.ImageByteFormat.png);
+      }))!;
+      var fetched = 0;
+      final controller = await _signedIn(tester, (request) {
+        if (!_path(request).contains('/games/runner/skins/')) return null;
+        fetched++;
+        return Future.value(
+          http.Response.bytes(
+            png.buffer.asUint8List(),
+            200,
+            headers: {'content-type': 'image/png'},
+          ),
+        );
+      });
+      const elena = WardrobeItem(
+        id: 'elena',
+        kind: WardrobeKind.character,
+        name: 'Elena',
+        rarity: 'gold',
+        portrait: '/games/runner/skins/character-elena-portrait.webp',
+      );
+      final portrait = await tester.runAsync(
+        () => WardrobePictures.load(controller, elena.portrait),
+      );
+      expect(portrait, isNotNull);
+      Widget card() => Directionality(
+        textDirection: TextDirection.ltr,
+        child: WardrobeItemArt(item: elena, controller: controller),
+      );
+      ui.Image? drawn() {
+        final paint = tester.widget<CustomPaint>(
+          find.descendant(
+            of: find.byType(WardrobeItemArt),
+            matching: find.byType(CustomPaint),
+          ),
+        );
+        final canvas = _DrawnImages();
+        paint.painter!.paint(canvas, const Size(120, 150));
+        return canvas.images.firstOrNull;
+      }
+
+      await tester.pumpWidget(card());
+      expect(drawn(), portrait);
+      // Many other pictures later the cache has dropped hers; a rebuild
+      // still shows her.
+      WardrobePictures.clear();
+      await tester.pumpWidget(card());
+      expect(drawn(), portrait);
+      expect(fetched, 1);
+    });
+
+    test(
+      'a backdrop brings its obstacles and the colour of its border',
+      () async {
+        final own = await createTestImage(width: 1124, height: 577);
+        final png = (await own.toByteData(format: ui.ImageByteFormat.png))!;
+        final asked = <String>[];
+        final server = TestServer();
+        server.data['capabilities'] = {
+          'features': ['stageRunner', 'runnerUnlocks'],
+        };
+        server.override = (request) {
+          if (!_path(request).contains('/games/runner/skins/')) return null;
+          asked.add(_path(request));
+          return Future.value(
+            http.Response.bytes(
+              png.buffer.asUint8List(),
+              200,
+              headers: {'content-type': 'image/png'},
+            ),
+          );
+        };
+        final controller = server.controller();
+        addTearDown(controller.dispose);
+        await signIn(controller);
+        final atlas = await createTestImage(width: 1124, height: 577);
+        final backdrop = await createTestImage(width: 64, height: 32);
+        final base = RunnerArt.test(atlas, backdrop);
+        JsonMap wearing(String? stage) {
+          final json = _wardrobeJson(
+            owned: ['gruft'],
+            selected: {'backdrop': ?stage},
+          );
+          jsonList(jsonMap(json['catalog'])['items']).add(
+            _item(
+              'gruft',
+              'backdrop',
+              'Gruft',
+              'hellblau',
+              extra: {
+                'image': '/games/runner/skins/backdrop-gruft.webp?v=1',
+                'obstacles': '/games/runner/skins/obstacles-gruft.webp?v=1',
+                'borderColor': '#3E2A5C',
+                'collectibles':
+                    '/games/runner/skins/collectibles-gruft.webp?v=1',
+                'collectibleNames': {'rose': 'Bonbon', 'star': 'Vollmond'},
+              },
+            ),
+          );
+          return json;
+        }
+
+        final item = Wardrobe.fromJson(wearing('gruft')).catalog.items.last;
+        expect(item.obstacles, '/games/runner/skins/obstacles-gruft.webp?v=1');
+        expect(item.borderColor, const Color(0xFF3E2A5C));
+        final dressed = await dressArt(
+          base,
+          Wardrobe.fromJson(wearing('gruft')),
+          controller,
+        );
+        expect(asked, contains(contains('obstacles-gruft.webp')));
+        expect(dressed.imageOf(RunnerSprite.crate), isNot(atlas));
+        expect(dressed.imageOf(RunnerSprite.cheer), atlas);
+        expect(dressed.border, const Color(0xFF3E2A5C));
+        // Its collectibles replace rose, mask and star, with their names.
+        expect(asked, contains(contains('collectibles-gruft.webp')));
+        expect(dressed.imageOf(RunnerSprite.star), isNot(atlas));
+        expect(dressed.pickupNames, {
+          PickupKind.rose: 'Bonbon',
+          PickupKind.star: 'Vollmond',
+        });
+        // The default stage keeps the game's own obstacles and red border.
+        final plain = await dressArt(
+          base,
+          Wardrobe.fromJson(wearing(null)),
+          controller,
+        );
+        expect(plain.imageOf(RunnerSprite.crate), atlas);
+        expect(plain.border, isNull);
+        expect(plain.imageOf(RunnerSprite.rose), atlas);
+        expect(plain.pickupNames, isEmpty);
+        // Older servers send neither; a broken colour is no colour.
+        final old = WardrobeItem.fromJson({
+          ..._item('b1', 'backdrop', 'Alt', 'hellblau'),
+          'borderColor': 'red',
+        })!;
+        expect(old.obstacles, isNull);
+        expect(old.borderColor, isNull);
+      },
+    );
 
     test('the trail follows a worn effect and stays behind', () {
       final game = StageRunner(random: Random(1))..update(.016);
@@ -634,10 +1001,7 @@ void main() {
         if (path.endsWith('/wardrobe')) {
           return Future.value(
             jsonResponse(
-              _wardrobeJson(
-                owned: ['maren'],
-                selected: {'character': 'maren'},
-              ),
+              _wardrobeJson(owned: ['maren'], selected: {'character': 'maren'}),
             ),
           );
         }
@@ -654,6 +1018,187 @@ void main() {
       );
       expect(find.textContaining('Engel Logge hängt'), findsNothing);
       await tester.pumpWidget(const SizedBox());
+    });
+
+    group('Tagesbonus', () {
+      // What a server with the bonus sends, whether or not it announces it.
+      final bonusWardrobe = _wardrobeJson(
+        crates: 0,
+        progress: {'runMeters': 2488, 'bonusMeters': 412, 'bonusOpen': true},
+        stats: {'rounds': 5, 'best': 900, 'meters': 2488, 'bonusMeters': 412},
+      );
+      final runReply = {
+        'meters': 4524,
+        'earned': 2,
+        'opened': 1,
+        'crates': 1,
+        'previousAt': 4100,
+        'nextAt': 6300,
+        'poolSize': 3,
+        'complete': false,
+        'runMeters': 3300,
+        'bonusMeters': 1224,
+        'bonusOpen': false,
+        'gained': 812,
+        'bonus': 812,
+        'newCrates': 1,
+      };
+      Future<AppController> server(
+        WidgetTester tester,
+        List<String> features,
+      ) => _signedIn(tester, (request) {
+        final path = _path(request);
+        if (path.endsWith('/leaderboard')) {
+          return Future.value(
+            jsonResponse({'players': 0, 'top': [], 'own': null}),
+          );
+        }
+        if (path.endsWith('/wardrobe')) {
+          return Future.value(jsonResponse(bonusWardrobe));
+        }
+        if (path.endsWith('/rounds')) {
+          return Future.value(jsonResponse({'roundId': 'r-1'}));
+        }
+        if (path.endsWith('/scores')) {
+          return Future.value(
+            jsonResponse({
+              'score': 10,
+              'improved': false,
+              'leaderboard': {'players': 0, 'top': [], 'own': null},
+              'progress': runReply,
+            }),
+          );
+        }
+        return null;
+      }, features: features);
+
+      Future<void> run(WidgetTester tester) async {
+        await tester.tap(find.text('Vorhang auf'));
+        for (
+          var i = 0;
+          i < 60 * 20 && find.text('Nochmal').evaluate().isEmpty;
+          i++
+        ) {
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      test('reads the bonus; older servers leave it out', () {
+        final p = RunnerProgress.fromJson(runReply);
+        expect(
+          [p.meters, p.runMeters, p.bonusMeters, p.bonus],
+          [4524, 3300, 1224, 812],
+        );
+        expect(p.bonusOpen, isFalse);
+        expect(p.fraction, closeTo(424 / 2200, 1e-9));
+        final old = RunnerProgress.fromJson({'meters': 2900, 'gained': 250});
+        expect([old.runMeters, old.bonusMeters, old.bonus], [2900, 0, 0]);
+        expect(old.bonusOpen, isFalse);
+      });
+
+      testWidgets('with the feature: a hint before the run, the bonus after', (
+        tester,
+      ) async {
+        final controller = await server(tester, const [
+          'stageRunner',
+          'runnerUnlocks',
+          'runnerDailyBonus',
+        ]);
+        await _pump(
+          tester,
+          StageRunnerScreen(
+            controller: controller,
+            random: Random(3),
+            sound: _Sound(),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(find.text(dailyBonusHint), findsOneWidget);
+        await run(tester);
+        expect(
+          find.text(
+            '+812 m · Tagesbonus +812 m · noch 1.776 m bis zur nächsten Kiste',
+          ),
+          findsOneWidget,
+        );
+        final bar = tester.widget<LinearProgressIndicator>(
+          find.descendant(
+            of: find.byKey(const ValueKey('runner-progress')),
+            matching: find.byType(LinearProgressIndicator),
+          ),
+        );
+        expect(bar.value, closeTo(424 / 2200, 1e-9));
+        // Used up: no more hint after the run.
+        expect(find.text(dailyBonusHint), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('without the feature nothing of it shows', (tester) async {
+        final controller = await server(tester, const [
+          'stageRunner',
+          'runnerUnlocks',
+        ]);
+        await _pump(
+          tester,
+          StageRunnerScreen(
+            controller: controller,
+            random: Random(3),
+            sound: _Sound(),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(find.text(dailyBonusHint), findsNothing);
+        await run(tester);
+        expect(
+          find.text('+812 m · noch 1.776 m bis zur nächsten Kiste'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('Tagesbonus'), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      for (final supported in [true, false]) {
+        testWidgets(
+          'the wardrobe lists the bonus only with the feature ($supported)',
+          (tester) async {
+            final controller = await server(tester, [
+              'stageRunner',
+              'runnerUnlocks',
+              if (supported) 'runnerDailyBonus',
+            ]);
+            await _pump(
+              tester,
+              WardrobeScreen(controller: controller, sound: _Sound()),
+            );
+            await tester.pump(const Duration(milliseconds: 100));
+            expect(
+              find.text(
+                supported
+                    ? '2.488 m gelaufen + 412 m Tagesbonus · noch 1.200 m bis zur nächsten Kiste'
+                    : '2.900 m gelaufen · noch 1.200 m bis zur nächsten Kiste',
+              ),
+              findsOneWidget,
+            );
+            expect(
+              find.byKey(const ValueKey('wardrobe-daily-bonus')),
+              supported ? findsOneWidget : findsNothing,
+            );
+            await tester.tap(find.text('Statistik'));
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 400));
+            // The Gesamtstrecke stays the real metres.
+            expect(find.text('2.488 m'), findsOneWidget);
+            expect(
+              find.text(
+                'Tagesbonus gesamt: 412 m · zählt nur für die Kisten (Kistenstrecke 2.900 m).',
+              ),
+              supported ? findsOneWidget : findsNothing,
+            );
+            await tester.pumpWidget(const SizedBox());
+          },
+        );
+      }
     });
 
     testWidgets('without the feature or in the demo there is no wardrobe', (
@@ -678,4 +1223,20 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   });
+}
+
+/// Records the pictures and rounded boxes drawn; everything else is ignored.
+class _DrawnImages implements Canvas {
+  final images = <ui.Image>[];
+  final rrects = <RRect>[];
+
+  @override
+  void drawImageRect(ui.Image image, Rect src, Rect dst, Paint paint) =>
+      images.add(image);
+
+  @override
+  void drawRRect(RRect rrect, Paint paint) => rrects.add(rrect);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }

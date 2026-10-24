@@ -21,8 +21,10 @@ import 'package:theater_app/features/games/domain/stage_runner.dart';
 import 'package:theater_app/features/games/games.dart';
 import 'package:theater_app/features/games/ui/stage_runner_art.dart';
 import 'package:theater_app/features/games/ui/stage_runner_fx.dart';
+import 'package:theater_app/features/games/ui/stage_runner_look.dart'
+    show RunnerTrail;
 import 'package:theater_app/features/games/ui/stage_runner_screen.dart'
-    show RunnerGlyphs;
+    show RunnerGlyphs, stageLayout, stagePainterFor;
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
 import 'package:theater_app/features/me/me.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -155,7 +157,7 @@ class _FakeClip implements WebAudioClip {
   final _FakeWebAudio audio;
   final String name;
   @override
-  WebAudioVoice play({bool loop = false}) {
+  WebAudioVoice play({bool loop = false, Duration fadeIn = Duration.zero}) {
     final voice = '$name#${++audio.plays}';
     audio.log.add('play $voice${loop ? ' loop' : ''}');
     return _FakeVoice(audio, voice);
@@ -167,7 +169,7 @@ class _FakeVoice implements WebAudioVoice {
   final _FakeWebAudio audio;
   final String name;
   @override
-  void stop() => audio.log.add('stop $name');
+  void stop({Duration fadeOut = Duration.zero}) => audio.log.add('stop $name');
 }
 
 /// The game's sounds as the asset bundle has them.
@@ -376,6 +378,25 @@ void main() {
       expect(game.sinceOver, greaterThan(0));
     });
 
+    test('the quickest crash leaves the spam guard out of reach', () {
+      // The server takes 20 starts in 10 s (`stageRunner.startBurst` in
+      // server/src/theater.mjs). The first obstacle stands far enough
+      // ahead that no run, held or not, ends before 2.5 s; with the 1 s
+      // curtain and the tap on "Nochmal" that is at most 3 starts in 10 s.
+      var quickest = double.infinity;
+      for (var seed = 0; seed < 40; seed++) {
+        for (final holding in [false, true]) {
+          final game = StageRunner(random: Random(seed))..holding = holding;
+          while (!game.over && game.time < 30) {
+            game.update(1 / 120);
+          }
+          quickest = min(quickest, game.time);
+        }
+      }
+      expect(quickest, greaterThan(2.5));
+      expect(10 / (quickest + 1), lessThan(20));
+    });
+
     test('it gets harder until reacting is impossible', () {
       expect(StageRunner.reactionTime(0), 1.2);
       expect(
@@ -454,29 +475,17 @@ void main() {
       }
     });
 
-    test('the stage announces a new obstacle as it comes into view', () {
+    test('the stage shows no banner for a new obstacle', () {
       final game = StageRunner(random: Random(4))..invincible = true;
       final fx = RunnerFx(random: Random(1));
-      final banners = <String>[];
+      final debuts = <ObstacleKind>{};
       while (game.time < 200) {
         _greedyStep(game);
         fx.update(1 / 60, game);
-        final banner = fx.banner;
-        if (banner != null && banner.startsWith('Neu: ')) {
-          if (!banners.contains(banner)) {
-            banners.add(banner);
-            final debut = game.debut!;
-            expect(game.score, greaterThanOrEqualTo(250));
-            expect(debut.x - game.distance, lessThan(StageRunner.viewWidth));
-          }
-        }
+        if (game.debut case final debut?) debuts.add(debut.kind);
+        expect(fx.banner ?? '', isNot(startsWith('Neu: ')));
       }
-      expect(banners, [
-        'Neu: Kabeltrommel!',
-        'Neu: Kistenstapel!',
-        'Neu: Lichttraverse!',
-        'Neu: Prospekt!',
-      ]);
+      expect(debuts, hasLength(StageRunner.debuts.length));
     });
 
     test('a careful player gets past all of them', () {
@@ -688,6 +697,8 @@ void main() {
         'score': game.score,
         'meters': game.meters,
         'hitBy': game.hitBy!.name,
+        // For the Tagesmissionen; servers without them ignore it.
+        'missionStats': game.missionStats,
       });
       expect(find.text('Der Vorhang fällt!'), findsOneWidget);
       expect(find.text('Neuer persönlicher Bestwert!'), findsOneWidget);
@@ -742,7 +753,7 @@ void main() {
         if (path.endsWith('/rounds')) {
           return Future.value(
             jsonResponse({
-              'error': 'Gerade wurde sehr oft gespielt.',
+              'error': 'Das waren gerade sehr viele Starts auf einmal.',
               'code': 'rate_limited',
             }, 429),
           );
@@ -765,7 +776,7 @@ void main() {
       await _runUntilOver(tester);
       expect(find.text('Der Vorhang fällt!'), findsOneWidget);
       expect(
-        find.textContaining('Nicht in der Bestenliste: Gerade wurde'),
+        find.textContaining('Nicht in der Bestenliste: Das waren gerade'),
         findsOneWidget,
       );
       await tester.pumpWidget(const SizedBox());
@@ -1060,6 +1071,10 @@ void main() {
           for (final sfx in RunnerSfx.values)
             sfx: players.singleWhere((p) => p.asset == sfx.asset),
         };
+        // The music fades in meanwhile, on a timer of its own.
+        final music = players.singleWhere((p) => !bySfx.containsValue(p));
+        Iterable<(_RecordingPlayer, String)> effects() =>
+            log.where((e) => e.$1 != music);
         for (final sfx in RunnerSfx.values) {
           expect(
             log.where(
@@ -1088,14 +1103,14 @@ void main() {
           // The effect has sounded out before the next pickup.
           bySfx[sfx]!.state = PlayerState.completed;
         }
-        expect(log, [for (final sfx in series) (bySfx[sfx], 'resume')]);
+        expect(effects(), [for (final sfx in series) (bySfx[sfx], 'resume')]);
 
         // An effect that still sounds starts over.
         log.clear();
         bySfx[RunnerSfx.rose]!.state = PlayerState.playing;
         sound.play(RunnerSfx.rose);
         await pumpEventQueue();
-        expect(log, [
+        expect(effects(), [
           (bySfx[RunnerSfx.rose], 'stop'),
           (bySfx[RunnerSfx.rose], 'resume'),
         ]);
@@ -1103,11 +1118,13 @@ void main() {
       },
     );
 
-    test('on iOS an effect is stopped before it ends by itself', () async {
+    // In fake time: the early ends are timers of 40 ms, and on the real
+    // clock a busy test machine let the second end fire before the check.
+    testWidgets('on iOS an effect is stopped before it ends by itself', (
+      tester,
+    ) async {
       // audioplayers_darwin runs a synchronous AVAudioSession.setActive on
       // the main (= UI) thread whenever an effect plays to its end.
-      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       SharedPreferences.setMockInitialValues({});
       final log = <(_RecordingPlayer, String)>[];
       final players = <_RecordingPlayer>[];
@@ -1120,17 +1137,17 @@ void main() {
           return player;
         },
       );
-      await pumpEventQueue();
+      await tester.pump();
       sound.prepare();
-      await pumpEventQueue();
+      await tester.pump();
       final rose = players.singleWhere((p) => p.asset == RunnerSfx.rose.asset);
       expect(log, contains((rose, 'getDuration')));
 
       log.clear();
       sound.play(RunnerSfx.rose);
-      await pumpEventQueue();
+      await tester.pump();
       expect(log, [(rose, 'resume')]);
-      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await tester.pump(const Duration(milliseconds: 80));
       expect(log, [(rose, 'resume'), (rose, 'stop')]);
       expect(rose.state, PlayerState.stopped);
 
@@ -1138,14 +1155,14 @@ void main() {
       // end of the first play does not cut the second.
       log.clear();
       sound.play(RunnerSfx.rose);
-      await pumpEventQueue();
-      await Future<void>.delayed(const Duration(milliseconds: 25));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 25));
       sound.play(RunnerSfx.rose);
-      await pumpEventQueue();
-      await Future<void>.delayed(const Duration(milliseconds: 25));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 25));
       expect(log, [(rose, 'resume'), (rose, 'stop'), (rose, 'resume')]);
       expect(rose.state, PlayerState.playing);
-      await Future<void>.delayed(const Duration(milliseconds: 60));
+      await tester.pump(const Duration(milliseconds: 60));
       expect(log, [
         (rose, 'resume'),
         (rose, 'stop'),
@@ -1156,13 +1173,13 @@ void main() {
       // An effect that has already ended is not stopped again.
       log.clear();
       sound.play(RunnerSfx.star);
-      await pumpEventQueue();
+      await tester.pump();
       final star = players.singleWhere((p) => p.asset == RunnerSfx.star.asset);
       star.state = PlayerState.completed;
-      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await tester.pump(const Duration(milliseconds: 80));
       expect(log, [(star, 'resume')]);
       sound.dispose();
-    });
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
     test('outside browsers the plugin plays', () {
       SharedPreferences.setMockInitialValues({});
@@ -1537,39 +1554,353 @@ void main() {
     });
   });
 
-  // Layers that drift at their own pace made players feel sick: the whole
-  // stage moves as one, exactly at the running pace.
+  // The whole stage passes as one, exactly at the running pace, like the
+  // world in a side-scroller; nothing moves at its own pace (parallax made
+  // players feel sick). It fills pictures of any shape.
   group('motion', () {
-    testWidgets('the whole stage keeps the running pace', (tester) async {
+    // Decoded here, not with RunnerArt.load: an earlier test may have left
+    // that waiting in its fake time.
+    Future<RunnerArt> decodeArt(
+      WidgetTester tester,
+    ) async => (await tester.runAsync(() async {
+      Future<ui.Image> decode(String name) async {
+        final data = await rootBundle.load('assets/games/stage_runner/$name');
+        final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+        return (await codec.getNextFrame()).image;
+      }
+
+      return RunnerArt.test(
+        await decode('atlas.webp'),
+        await decode('backdrop.webp'),
+      );
+    }))!;
+
+    Future<Uint8List> render(
+      WidgetTester tester,
+      StageRunner game,
+      RunnerArt? art,
+      int w,
+      int h, {
+      RunnerFx? fx,
+    }) async => (await tester.runAsync(() async {
+      final recorder = ui.PictureRecorder();
+      stagePainterFor(
+        game,
+        art,
+        fx: fx,
+      ).paint(Canvas(recorder), Size(w.toDouble(), h.toDouble()));
+      final image = await recorder.endRecording().toImage(w, h);
+      final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      image.dispose();
+      return data!.buffer.asUint8List();
+    }))!;
+
+    testWidgets('the whole stage passes at running speed', (tester) async {
+      final art = await decodeArt(tester);
+      // A landscape picture and a tall one with drapes and stalls; the
+      // stage height of the tall one is no whole number of pixels.
+      for (final (w, h) in [(640, 400), (390, 844)]) {
+        final (:s, :top, view: _) = stageLayout(
+          Size(w.toDouble(), h.toDouble()),
+        );
+        final game = StageRunner(random: Random(1));
+        Future<Uint8List> shot(double px, {double? crateAt}) {
+          game
+            ..distance = px / s
+            ..time = .5
+            ..obstacles.clear()
+            ..pickups.clear();
+          if (crateAt != null) {
+            game.obstacles.add(
+              Obstacle()
+                ..left = crateAt
+                ..width = .1
+                ..top = StageRunner.floor - .1
+                ..bottom = StageRunner.floor,
+            );
+          }
+          return render(tester, game, art, w, h);
+        }
+
+        // Rows from [from] to [to] (stage heights, may lie outside the
+        // playing field): the pixels of [b] that differ from those of [a]
+        // [shift] pixels to their right. The runner and its rope are left
+        // out, in both places, and so are the outermost pixels, where round
+        // shapes cut by the picture's edge are smoothed a little
+        // differently. Elsewhere, smoothed edges may differ by a few shades.
+        int moved(Uint8List a, Uint8List b, int shift, double from, double to) {
+          var n = 0;
+          final runner = (.3 * s, .6 * s);
+          bool near(int x) => x > runner.$1 && x < runner.$2;
+          final y0 = max(0, (top + from * s).ceil());
+          final y1 = min(h, top + to * s);
+          for (var y = y0; y < y1; y++) {
+            for (var x = 3; x + shift < w - 3; x++) {
+              if (near(x) || near(x + shift)) continue;
+              final i = (y * w + x) * 4, j = (y * w + x + shift) * 4;
+              if ((b[i] - a[j]).abs() > 6 ||
+                  (b[i + 1] - a[j + 1]).abs() > 6 ||
+                  (b[i + 2] - a[j + 2]).abs() > 6) {
+                n++;
+              }
+            }
+          }
+          return n;
+        }
+
+        final bands = {
+          // The gold hem and the scalloped edge.
+          'valance': (.03, .079),
+          'backdrop': (.08, StageRunner.floor - .01),
+          'floor': (StageRunner.floor + .01, .95),
+          'front row': (.95, 1.0),
+          if (top > 0) 'drapes': (-top / s, -.02),
+          if (top > 0) 'stalls': (1.0, (h - top) / s),
+        };
+        // At the start and far into a run: 40 pixels of running move every
+        // layer by exactly 40 pixels, the crate on the floor as well.
+        for (final start in [8, 400008]) {
+          final crate = (start + 160) / s;
+          final a = await shot(start.toDouble(), crateAt: crate);
+          final b = await shot(start + 40.0, crateAt: crate);
+          for (final MapEntry(key: name, value: (from, to)) in bands.entries) {
+            final at = '$name of ${w}x$h at $start';
+            expect(moved(a, b, 0, from, to), greaterThan(0), reason: at);
+            expect(moved(a, b, 40, from, to), 0, reason: at);
+          }
+          // Less than half a pixel of running leaves the stage where it is.
+          final c = await shot(start + .4, crateAt: crate);
+          expect(moved(a, c, 0, -top / s, (h - top) / s), 0);
+        }
+      }
+    });
+
+    // Phones upright and turned, a laptop, a tablet and a cinema-wide
+    // window.
+    const shapes = {
+      '9:19.5': (390, 845),
+      '19.5:9': (845, 390),
+      '16:9': (800, 450),
+      '4:3': (800, 600),
+      '21:9': (1050, 450),
+    };
+
+    testWidgets('pictures of any shape are filled to the edges', (
+      tester,
+    ) async {
+      final art = await decodeArt(tester);
+      for (final MapEntry(key: shape, value: (w, h)) in shapes.entries) {
+        final game = StageRunner(random: Random(2))
+          ..invincible = true
+          ..view = stageLayout(Size(w.toDouble(), h.toDouble())).view;
+        for (var i = 0; i < 60 * 6; i++) {
+          game.update(1 / 60);
+        }
+        final rgba = await render(tester, game, art, w, h);
+        // Every pixel is painted, and none shows the bare dark behind the
+        // stage: no bars, no gaps between the layers.
+        var bare = 0, clear = 0;
+        for (var i = 0; i < rgba.length; i += 4) {
+          if (rgba[i + 3] != 255) clear++;
+          if (rgba[i] == 0x15 && rgba[i + 1] == 0x1A && rgba[i + 2] == 0x17) {
+            bare++;
+          }
+        }
+        expect(clear, 0, reason: shape);
+        expect(bare, lessThan(w * h * .001), reason: shape);
+      }
+    });
+
+    test('obstacles come in from outside the picture, however wide', () {
+      for (final MapEntry(key: shape, value: (w, h)) in shapes.entries) {
+        final view = stageLayout(Size(w.toDouble(), h.toDouble())).view;
+        final game = StageRunner(random: Random(5))
+          ..invincible = true
+          ..view = view;
+        expect(game.view, max(StageRunner.viewWidth, view));
+        // The first obstacles stand ready when the curtain opens; every
+        // later one (and every pickup) is laid out beyond the right edge.
+        var seen = Set<Obstacle>.identity()..addAll(game.obstacles);
+        final seenPickups = Set<Pickup>.identity()..addAll(game.pickups);
+        var count = 0;
+        for (var i = 0; i < 60 * 90; i++) {
+          game.update(1 / 60);
+          for (final o in game.obstacles) {
+            if (seen.contains(o)) continue;
+            count++;
+            expect(
+              o.left - game.distance,
+              greaterThan(game.view + .05),
+              reason: '$shape at ${game.meters} m',
+            );
+          }
+          for (final p in game.pickups) {
+            if (!seenPickups.add(p)) continue;
+            expect(p.x - game.distance, greaterThan(game.view + .05));
+          }
+          seen = Set<Obstacle>.identity()..addAll(game.obstacles);
+          seenPickups.retainAll(game.pickups);
+        }
+        expect(count, greaterThan(50), reason: shape);
+      }
+    });
+
+    test('a wider picture changes only how early the course is laid out', () {
+      // Without new obstacles (they join by score, when they are laid out),
+      // the same dice give the same course in every picture: the kinds in
+      // the same order, at the same places and heights. The speed at
+      // arrival is estimated as on the narrowest picture; only the frames
+      // fall a little differently.
+      List<(ObstacleKind, double, double, double)> course(double view) {
+        final game = StageRunner(random: Random(7))
+          ..invincible = true
+          ..view = view;
+        final out = <(ObstacleKind, double, double, double)>[];
+        final seen = Set<Obstacle>.identity();
+        while (game.score < 200) {
+          game.update(1 / 60);
+          for (final o in game.obstacles) {
+            if (seen.add(o)) out.add((o.kind, o.left, o.top, o.bottom));
+          }
+          seen.retainAll(game.obstacles);
+        }
+        return out.where((o) => o.$2 < 15).toList();
+      }
+
+      final narrow = course(StageRunner.viewWidth);
+      expect(narrow.length, greaterThan(10));
+      for (final view in [2.2, 2.6, 3.5]) {
+        final wide = course(view);
+        expect(wide.length, narrow.length);
+        for (final (i, o) in narrow.indexed) {
+          expect(wide[i].$1, o.$1);
+          expect(wide[i].$2, closeTo(o.$2, .001));
+          expect(wide[i].$3, closeTo(o.$3, .001));
+          expect(wide[i].$4, closeTo(o.$4, .001));
+        }
+      }
+    });
+
+    testWidgets('a turned phone pauses the run; nothing jumps', (tester) async {
+      tester.view.physicalSize = const Size(390, 845);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final controller = TestServer().controller();
+      addTearDown(controller.dispose);
       late StageRunner game;
-      await _pump(
-        tester,
-        StageRunnerScreen(
-          controller: await _demo(),
-          onRun: (g) => game = g,
-          sound: _FakeSound(),
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StageTheme.build(Brightness.light),
+          home: StageRunnerScreen(
+            controller: controller,
+            random: Random(3),
+            onRun: (g) => game = g..invincible = true,
+            sound: _FakeSound(),
+          ),
         ),
       );
-      // The screen decodes the pictures in real time.
-      for (var i = 0; i < 100 && RunnerArt.loaded == null; i++) {
-        await tester.runAsync(() => Future<void>.delayed(Durations.short1));
-        await tester.pump();
-      }
-      expect(RunnerArt.loaded, isNotNull);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('Vorhang auf'), 200);
       await tester.tap(find.text('Vorhang auf'));
-      await tester.pump();
-      final painter = tester
-          .widget<CustomPaint>(find.byKey(const ValueKey('runner-stage')))
-          .painter!;
+      for (var i = 0; i < 40; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      Size stage() =>
+          tester.getSize(find.byKey(const ValueKey('runner-stage')));
+      // Upright, the stage keeps its width of 1.6 stage heights and fills
+      // the screen below the app bar.
+      expect(stage(), Size(390, 845 - kToolbarHeight));
+      expect(game.view, closeTo(StageRunner.viewWidth, 1e-9));
+      final (distance, y, time) = (game.distance, game.y, game.time);
+      expect(distance, greaterThan(.2));
 
+      // Turned: the run waits, the picture is filled, the course reaches
+      // its new right edge at once.
+      tester.view.physicalSize = const Size(845, 390);
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const ValueKey('runner-paused')), findsOneWidget);
+      expect(stage(), Size(845, 390 - kToolbarHeight));
+      final view = 845 / (390 - kToolbarHeight);
+      expect(game.view, closeTo(view, 1e-9));
+      final ready = Set<Obstacle>.identity()..addAll(game.obstacles);
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      // Paused, nothing moved: state in stage heights only gets scaled.
+      expect(game.time - time, lessThan(.02));
+      expect((game.distance - distance).abs(), lessThan(.02));
+      expect((game.y - y).abs(), lessThan(.02));
+
+      // A tap runs on from where it stood, at the usual pace.
+      await tester.tapAt(const Offset(400, 200));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('runner-paused')), findsNothing);
+      final before = game.distance;
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(game.distance - before, closeTo(game.speed * 30 * .016, .02));
+      // Whatever was not laid out yet comes in from beyond the new edge.
+      for (var i = 0; i < 120; i++) {
+        final known = Set<Obstacle>.identity()..addAll(game.obstacles);
+        await tester.pump(const Duration(milliseconds: 16));
+        for (final o in game.obstacles) {
+          if (known.contains(o) || ready.contains(o)) continue;
+          expect(o.left - game.distance, greaterThan(view));
+        }
+      }
+
+      // And back upright, again with a pause.
+      tester.view.physicalSize = const Size(390, 845);
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(find.byKey(const ValueKey('runner-paused')), findsOneWidget);
+      expect(game.view, closeTo(StageRunner.viewWidth, 1e-9));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the shine stays on the figure, no light on the stage', (
+      tester,
+    ) async {
       const s = 400, w = 640;
-      Future<Uint8List> shot(double distance, double time) async {
-        game
-          ..distance = distance
-          ..time = time;
+      // Decoded here: an earlier test may have left RunnerArt.load waiting
+      // in its fake time.
+      final base = (await tester.runAsync(() async {
+        Future<ui.Image> decode(String name) async {
+          final data = await rootBundle.load('assets/games/stage_runner/$name');
+          final codec = await ui.instantiateImageCodec(
+            data.buffer.asUint8List(),
+          );
+          return (await codec.getNextFrame()).image;
+        }
+
+        return RunnerArt.test(
+          await decode('atlas.webp'),
+          await decode('backdrop.webp'),
+        );
+      }))!;
+      final shiny = base.dressed(
+        effect: const RunnerEffectStyle('', [], shine: true),
+      );
+      Future<Uint8List> shot(RunnerArt art, double y, double vy) async {
+        final game = StageRunner(random: Random(1))
+          ..distance = .02
+          ..time = 1
+          ..y = y
+          ..vy = vy;
+        // The glints gather as in a run, and the sheen is midway.
+        final trail = RunnerTrail(random: Random(3));
+        for (var i = 0; i < 40; i++) {
+          trail.update(1 / 60, game, art.effect);
+        }
         final bytes = await tester.runAsync(() async {
           final recorder = ui.PictureRecorder();
-          painter.paint(Canvas(recorder), const Size(640, 400));
+          stagePainterFor(
+            game,
+            art,
+            trail: trail,
+          ).paint(Canvas(recorder), Size(w.toDouble(), s.toDouble()));
           final image = await recorder.endRecording().toImage(w, s);
           final data = await image.toByteData(
             format: ui.ImageByteFormat.rawRgba,
@@ -1580,66 +1911,38 @@ void main() {
         return bytes!;
       }
 
-      // Mean difference per channel between [b] and [a] moved left by
-      // [shift] pixels, in the rows from [top] to [bottom] (stage heights),
-      // left and right of the runner and its rope in both (no course is in
-      // view).
-      double difference(
-        Uint8List a,
-        Uint8List b,
-        int shift,
-        double top,
-        double bottom,
-      ) {
-        var sum = 0, count = 0;
-        for (var y = (top * s).ceil(); y < bottom * s; y++) {
-          for (var x = 60; x < 560; x++) {
-            if (x + shift > .3 * s && x < .6 * s) continue;
-            for (var c = 0; c < 3; c++) {
-              sum += (b[(y * w + x) * 4 + c] - a[(y * w + x + shift) * 4 + c])
-                  .abs();
-              count++;
+      // Pixels that differ in the rows from [top] to [bottom] (stage
+      // heights).
+      int changed(Uint8List a, Uint8List b, double top, double bottom) {
+        var n = 0;
+        for (var y = max(0, (top * s).floor()); y < min(s, bottom * s); y++) {
+          for (var i = y * w * 4; i < (y + 1) * w * 4; i += 4) {
+            if (a[i] != b[i] || a[i + 1] != b[i + 1] || a[i + 2] != b[i + 2]) {
+              n++;
             }
           }
         }
-        return sum / count;
+        return n;
       }
 
-      // The shift in pixels that best lines up [b] with [a].
-      int shift(Uint8List a, Uint8List b, double top, double bottom) {
-        var best = 0;
-        var least = double.infinity;
-        for (var i = 0; i <= 60; i++) {
-          final d = difference(a, b, i, top, bottom);
-          if (d < least) (best, least) = (i, d);
-        }
-        return best;
+      const ground = StageRunner.floor - StageRunner.runnerHeight / 2;
+      for (final (pose, y, vy) in [
+        ('fly', .42, -.6),
+        ('dangle', .42, .3),
+        ('run', ground, 0.0),
+      ]) {
+        final plain = await shot(base, y, vy), shine = await shot(shiny, y, vy);
+        // Around the figure it shines (rim, sheen, glints) ...
+        expect(changed(plain, shine, y - .1, y + .1), greaterThan(200));
+        // ... and nowhere else: no cone above it, no light below it, no
+        // circle of light on the floor.
+        expect(changed(plain, shine, 0, y - .1), 0, reason: '$pose above');
+        expect(
+          changed(plain, shine, max(y + .1, StageRunner.floor + .03), 1),
+          0,
+          reason: '$pose below',
+        );
       }
-
-      // Backdrop, wings and lights between the valance and the floor; the
-      // floor with the front row below it.
-      const set = (.08, StageRunner.floor - .01);
-      const floor = (StageRunner.floor + .01, 1.0);
-
-      // 0.1 stage heights of running are exactly 40 pixels, at the start and
-      // far into a run (the backdrop is tiled without end).
-      for (final start in [.02, 1000.02]) {
-        final a = await shot(start, .5), b = await shot(start + .1, .5);
-        expect(shift(a, b, set.$1, set.$2), 40, reason: 'set at $start');
-        expect(shift(a, b, floor.$1, floor.$2), 40, reason: 'floor at $start');
-        expect(difference(a, b, 40, set.$1, set.$2), lessThan(.5));
-        expect(difference(a, b, 40, floor.$1, floor.$2), lessThan(1));
-        expect(difference(a, b, 0, set.$1, set.$2), greaterThan(5));
-      }
-
-      // Lights don't sway: at the same place the stage looks the same later.
-      final now = await shot(.12, .5), later = await shot(.12, 1.7);
-      expect(difference(now, later, 0, set.$1, set.$2), 0);
-      // The stage moves in whole pixels: less than half a pixel of running
-      // leaves it where it is, so the pictures don't shimmer.
-      final nudged = await shot(.12 + .4 / s, 1.7);
-      expect(difference(later, nudged, 0, set.$1, set.$2), 0);
-      expect(difference(later, nudged, 0, floor.$1, floor.$2), 0);
     });
 
     test('the crash only nudges the stage, briefly', () {
