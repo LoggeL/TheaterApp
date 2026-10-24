@@ -83,11 +83,35 @@ const antiqueFilter = ColorFilter.matrix([
 /// picture keeps the image it got (the dressed [RunnerArt], a card's state,
 /// the crate's reel), so a picture dropped from here never vanishes from the
 /// screen; it is fetched again when it is needed anew.
+///
+/// Below the decoded pictures it keeps the files as they came from the
+/// server ([maxFileBytes]): a portrait file is a few dozen KB, a decoded one
+/// 1 MB, so a picture dropped from the decoded ones (scrolled away in a long
+/// wardrobe) is decoded again without asking the server. The links carry the
+/// file's hash (`?v=`), so a kept file never goes stale. A picture that
+/// failed is not asked for again before [failurePause] has passed: cards
+/// rebuild often, and each rebuild of one without its picture asked anew.
 abstract final class WardrobePictures {
   // In the order of last use: the first one is dropped first.
   static final _images = <String, ui.Image>{};
   static final _loading = <String, Future<ui.Image?>>{};
   static int _bytes = 0;
+  static final _files = <String, Uint8List>{};
+  static int _fileBytes = 0;
+  static final _failedAt = <String, DateTime>{};
+
+  /// File bytes kept at most (see above).
+  @visibleForTesting
+  static int maxFileBytes = (kIsWeb ? 12 : 24) << 20;
+
+  /// How long a failed picture is not asked for again (except by the second
+  /// try of [loadOrRetry]).
+  @visibleForTesting
+  static Duration failurePause = const Duration(seconds: 30);
+
+  /// The kept file bytes, for tests.
+  @visibleForTesting
+  static int get fileBytes => _fileBytes;
 
   /// Decoded bytes kept at most. A portrait takes 1 MB (512²), an atlas or
   /// backdrop about 2.5 MB: about a screen of cards with the worn costume
@@ -149,10 +173,24 @@ abstract final class WardrobePictures {
     AppController controller,
     String? path, {
     int? maxPixels,
+  }) => _load(controller, path, maxPixels: maxPixels);
+
+  static Future<ui.Image?> _load(
+    AppController controller,
+    String? path, {
+    int? maxPixels,
+    bool again = false,
   }) {
     if (path == null) return Future.value();
     final done = cached(path);
     if (done != null) return Future.value(done);
+    final failed = _failedAt[path];
+    if (!again &&
+        failed != null &&
+        DateTime.now().difference(failed) < failurePause &&
+        !_loading.containsKey(path)) {
+      return Future.value();
+    }
     // A block body: an arrow would hand whenComplete the removed future,
     // which is this very one, and it would wait for itself.
     return _loading[path] ??= _fetch(controller, path, maxPixels).whenComplete(
@@ -162,14 +200,30 @@ abstract final class WardrobePictures {
     );
   }
 
+  /// The file of [path]: kept from before, else from the server.
+  static Future<Uint8List> _file(AppController controller, String path) async {
+    final kept = _files.remove(path);
+    if (kept != null) {
+      _files[path] = kept;
+      return kept;
+    }
+    final bytes = (await controller.mediaBytes(path, cache: false)).bytes;
+    _files[path] = bytes;
+    _fileBytes += bytes.length;
+    while (_fileBytes > maxFileBytes && _files.length > 1) {
+      _fileBytes -= _files.remove(_files.keys.first)!.length;
+    }
+    return bytes;
+  }
+
   static Future<ui.Image?> _fetch(
     AppController controller,
     String path,
     int? maxPixels,
   ) async {
     try {
-      final media = await controller.mediaBytes(path, cache: false);
-      final buffer = await ui.ImmutableBuffer.fromUint8List(media.bytes);
+      final bytes = await _file(controller, path);
+      final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       final codec = await ui.instantiateImageCodecWithSize(
         buffer,
         getTargetSize: (w, h) {
@@ -184,10 +238,15 @@ abstract final class WardrobePictures {
       );
       final frame = await codec.getNextFrame();
       codec.dispose();
+      _failedAt.remove(path);
       _keep(path, frame.image);
       return frame.image;
     } catch (e) {
       if (kDebugMode) debugPrint('Bühnenlauf: Bild $path fehlt: $e');
+      _failedAt[path] = DateTime.now();
+      // A file that does not decode is not kept either.
+      final file = _files.remove(path);
+      if (file != null) _fileBytes -= file.length;
       return null;
     }
   }
@@ -202,7 +261,7 @@ abstract final class WardrobePictures {
     final image = await load(controller, path);
     if (image != null || path == null) return image;
     await Future<void>.delayed(retryDelay);
-    final again = await load(controller, path);
+    final again = await _load(controller, path, again: true);
     if (kDebugMode && again == null) {
       debugPrint('Bühnenlauf: Bild $path fehlt auch beim zweiten Versuch');
     }
@@ -218,6 +277,9 @@ abstract final class WardrobePictures {
     _images.clear();
     _loading.clear();
     _bytes = 0;
+    _files.clear();
+    _fileBytes = 0;
+    _failedAt.clear();
   }
 }
 

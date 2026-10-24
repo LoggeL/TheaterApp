@@ -80,6 +80,8 @@ class _MusicSound implements RunnerSound, RunnerMusic {
   @override
   void prepare() {}
   @override
+  void warmUp() {}
+  @override
   void play(RunnerSfx sfx) {}
   @override
   void startMusic() => log.add('start');

@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -65,6 +66,19 @@ class _FakeSound implements RunnerSound {
   void dispose() => _enabled.dispose();
 }
 
+/// A [_FakeSound] that also plays the backdrop's music and counts warm-ups.
+class _WarmSound extends _FakeSound implements RunnerMusic {
+  int warmed = 0;
+  @override
+  void warmUp() => warmed++;
+  @override
+  void useTune(Uint8List? tune) {}
+  @override
+  void pauseMusic() {}
+  @override
+  void resumeMusic() {}
+}
+
 /// Logs the calls on a player instead of touching the platform; any other
 /// call throws.
 class _RecordingPlayer extends Fake implements AudioPlayer {
@@ -92,6 +106,9 @@ class _RecordingPlayer extends Fake implements AudioPlayer {
 
   @override
   Future<void> setVolume(double volume) async => _log('setVolume $volume');
+  @override
+  Future<void> setAudioContext(AudioContext ctx) async =>
+      _log('setAudioContext');
 
   /// The length the platform reports for the loaded effect.
   Duration length = const Duration(milliseconds: 400);
@@ -1005,6 +1022,117 @@ void main() {
       expect(find.byType(StageRunnerScreen), findsOneWidget);
       await finish(tester, c);
     });
+
+    testWidgets('on wide screens a run paints nothing over the rail', (
+      tester,
+    ) async {
+      // The stage fills its page to the edges, and its set is drawn beyond
+      // them; the rail of the desktop layout lies right next to it.
+      setWidth(tester, 1200);
+      final c = await pumpDemo(tester);
+      openPage<void>(
+        tester.element(find.byType(AppShell)),
+        StageRunnerScreen(
+          controller: c,
+          random: Random(3),
+          onRun: (g) => g.invincible = true,
+          sound: _FakeSound(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final rail = tester.getRect(find.byType(NavigationRail));
+      final page = tester.getRect(find.byType(StageRunnerScreen));
+      expect(rail.right, lessThanOrEqualTo(page.left));
+      // The rail and the divider beside it, as the screen shows them.
+      Future<List<int>> left() async => (await tester.runAsync(() async {
+        final layer = tester.binding.renderViews.first.debugLayer!;
+        final image = await (layer as OffsetLayer).toImage(
+          Rect.fromLTRB(0, 0, page.left, page.bottom),
+        );
+        final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+        image.dispose();
+        return data!.buffer.asUint8List().toList();
+      }))!;
+      final before = await left();
+      await tester.scrollUntilVisible(find.text('Vorhang auf'), 200);
+      await tester.tap(find.text('Vorhang auf'));
+      for (var i = 0; i < 90; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(find.byKey(const ValueKey('runner-stage')), findsOneWidget);
+      final during = await left();
+      expect(during.length, before.length);
+      var changed = 0;
+      for (var i = 0; i < before.length; i++) {
+        if (before[i] != during[i]) changed++;
+      }
+      expect(changed, 0, reason: 'pixels of the rail changed by the stage');
+      await finish(tester, c);
+    });
+
+    testWidgets('new numbers repaint the numbers, not the page', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        StageRunnerScreen(
+          controller: await _demo(),
+          random: Random(3),
+          onRun: (g) => g.invincible = true,
+          sound: _FakeSound(),
+        ),
+      );
+      await tester.tap(find.text('Vorhang auf'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 16));
+      final painted = <RenderObject>[];
+      debugProfilePaintsEnabled = true;
+      debugOnProfilePaint = painted.add;
+      try {
+        final metres = find.textContaining(' m').evaluate().single;
+        final before = (metres.widget as Text).data;
+        for (var i = 0; i < 60; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        expect(
+          (find.textContaining(' m').evaluate().single.widget as Text).data,
+          isNot(before),
+        );
+      } finally {
+        debugProfilePaintsEnabled = false;
+        debugOnProfilePaint = null;
+      }
+      bool paints(Finder finder) =>
+          painted.contains(tester.renderObject(finder));
+
+      // The picture of the stage every frame, the numbers when they change;
+      // the app bar's title and the hint keep their pictures.
+      expect(paints(find.byKey(const ValueKey('runner-stage'))), isTrue);
+      expect(paints(find.textContaining(' m')), isTrue);
+      expect(paints(find.text('Halten zum Steigen')), isFalse);
+      expect(
+        paints(
+          find.descendant(
+            of: find.byType(AppBar),
+            matching: find.text('Bühnenlauf'),
+          ),
+        ),
+        isFalse,
+      );
+      // No blurred shadows over the stage: Impeller would blur them anew
+      // whenever their picture is redrawn.
+      for (final text in tester.widgetList<Text>(
+        find.descendant(
+          of: find.byKey(const ValueKey('runner-hud')),
+          matching: find.byType(Text),
+        ),
+      )) {
+        for (final s in text.style?.shadows ?? const <Shadow>[]) {
+          expect(s.blurRadius, 0);
+        }
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 
   group('sound', () {
@@ -1118,68 +1246,142 @@ void main() {
       },
     );
 
-    // In fake time: the early ends are timers of 40 ms, and on the real
-    // clock a busy test machine let the second end fire before the check.
-    testWidgets('on iOS an effect is stopped before it ends by itself', (
-      tester,
-    ) async {
-      // audioplayers_darwin runs a synchronous AVAudioSession.setActive on
-      // the main (= UI) thread whenever an effect plays to its end.
+    test('outside browsers effects and music are loaded before the run, '
+        'so its start only plays', () async {
       SharedPreferences.setMockInitialValues({});
       final log = <(_RecordingPlayer, String)>[];
       final players = <_RecordingPlayer>[];
       final sound = PluginRunnerSound(
         newPlayer: () {
-          final player = _RecordingPlayer(log)
-            ..length =
-                PluginRunnerSound.earlyEnd + const Duration(milliseconds: 40);
+          final player = _RecordingPlayer(log);
           players.add(player);
           return player;
         },
+        othersPlaying: () async => false,
       );
-      await tester.pump();
-      sound.prepare();
-      await tester.pump();
-      final rose = players.singleWhere((p) => p.asset == RunnerSfx.rose.asset);
-      expect(log, contains((rose, 'getDuration')));
+      await pumpEventQueue();
+      sound.warmUp();
+      await pumpEventQueue();
+      // Every effect and the music are loaded, nothing sounds yet.
+      expect(players, hasLength(RunnerSfx.values.length + 1));
+      final loaded = {for (final p in players) p.asset};
+      expect(loaded, {
+        for (final sfx in RunnerSfx.values) sfx.asset,
+        'games/stage_runner/music.mp3',
+      });
+      expect(log.where((e) => e.$2 == 'resume'), isEmpty);
 
+      // "Vorhang auf": no player is made or loaded any more.
       log.clear();
-      sound.play(RunnerSfx.rose);
-      await tester.pump();
-      expect(log, [(rose, 'resume')]);
-      await tester.pump(const Duration(milliseconds: 80));
-      expect(log, [(rose, 'resume'), (rose, 'stop')]);
-      expect(rose.state, PlayerState.stopped);
+      sound
+        ..prepare()
+        ..startMusic();
+      await pumpEventQueue();
+      expect(players, hasLength(RunnerSfx.values.length + 1));
+      expect(
+        log.where((e) => e.$2.startsWith('setSource') || e.$2 == 'create'),
+        isEmpty,
+      );
+      expect(log.map((e) => e.$2), contains('resume'));
 
-      // A new play before the end restarts the effect and moves its end; the
-      // end of the first play does not cut the second.
-      log.clear();
-      sound.play(RunnerSfx.rose);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 25));
-      sound.play(RunnerSfx.rose);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 25));
-      expect(log, [(rose, 'resume'), (rose, 'stop'), (rose, 'resume')]);
-      expect(rose.state, PlayerState.playing);
-      await tester.pump(const Duration(milliseconds: 60));
-      expect(log, [
-        (rose, 'resume'),
-        (rose, 'stop'),
-        (rose, 'resume'),
-        (rose, 'stop'),
-      ]);
-
-      // An effect that has already ended is not stopped again.
-      log.clear();
-      sound.play(RunnerSfx.star);
-      await tester.pump();
-      final star = players.singleWhere((p) => p.asset == RunnerSfx.star.asset);
-      star.state = PlayerState.completed;
-      await tester.pump(const Duration(milliseconds: 80));
-      expect(log, [(star, 'resume')]);
+      // Muted, nothing is warmed up at all.
+      final muted = PluginRunnerSound(
+        newPlayer: () => fail('no player while muted'),
+      );
+      await pumpEventQueue();
+      muted
+        ..setEnabled(false)
+        ..warmUp();
+      await pumpEventQueue();
       sound.dispose();
-    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+      muted.dispose();
+    });
+
+    testWidgets('outside browsers the game warms its sound up on opening', (
+      tester,
+    ) async {
+      final sound = _WarmSound();
+      await _pump(
+        tester,
+        StageRunnerScreen(controller: await _demo(), sound: sound),
+      );
+      expect(sound.warmed, 1);
+      // The tap still prepares, as browsers need it.
+      expect(sound.prepared, isFalse);
+      await tester.tap(find.text('Vorhang auf'));
+      await tester.pump();
+      expect(sound.prepared, isTrue);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    // In fake time: the early ends are timers of 40 ms, and on the real
+    // clock a busy test machine let the second end fire before the check.
+    testWidgets(
+      'on iOS an effect is stopped before it ends by itself',
+      (tester) async {
+        // audioplayers_darwin runs a synchronous AVAudioSession.setActive on
+        // the main (= UI) thread whenever an effect plays to its end.
+        SharedPreferences.setMockInitialValues({});
+        final log = <(_RecordingPlayer, String)>[];
+        final players = <_RecordingPlayer>[];
+        final sound = PluginRunnerSound(
+          newPlayer: () {
+            final player = _RecordingPlayer(log)
+              ..length =
+                  PluginRunnerSound.earlyEnd + const Duration(milliseconds: 40);
+            players.add(player);
+            return player;
+          },
+        );
+        await tester.pump();
+        sound.prepare();
+        await tester.pump();
+        final rose = players.singleWhere(
+          (p) => p.asset == RunnerSfx.rose.asset,
+        );
+        expect(log, contains((rose, 'getDuration')));
+
+        log.clear();
+        sound.play(RunnerSfx.rose);
+        await tester.pump();
+        expect(log, [(rose, 'resume')]);
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(log, [(rose, 'resume'), (rose, 'stop')]);
+        expect(rose.state, PlayerState.stopped);
+
+        // A new play before the end restarts the effect and moves its end; the
+        // end of the first play does not cut the second.
+        log.clear();
+        sound.play(RunnerSfx.rose);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 25));
+        sound.play(RunnerSfx.rose);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 25));
+        expect(log, [(rose, 'resume'), (rose, 'stop'), (rose, 'resume')]);
+        expect(rose.state, PlayerState.playing);
+        await tester.pump(const Duration(milliseconds: 60));
+        expect(log, [
+          (rose, 'resume'),
+          (rose, 'stop'),
+          (rose, 'resume'),
+          (rose, 'stop'),
+        ]);
+
+        // An effect that has already ended is not stopped again.
+        log.clear();
+        sound.play(RunnerSfx.star);
+        await tester.pump();
+        final star = players.singleWhere(
+          (p) => p.asset == RunnerSfx.star.asset,
+        );
+        star.state = PlayerState.completed;
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(log, [(star, 'resume')]);
+        sound.dispose();
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    );
 
     test('outside browsers the plugin plays', () {
       SharedPreferences.setMockInitialValues({});
@@ -1919,13 +2121,23 @@ void main() {
             ..obstacles.clear()
             ..pickups.clear();
           for (final (kind, width, top, bottom) in [
-            (ObstacleKind.crate, .12, StageRunner.floor - .15, StageRunner.floor),
+            (
+              ObstacleKind.crate,
+              .12,
+              StageRunner.floor - .15,
+              StageRunner.floor,
+            ),
             (ObstacleKind.truss, .3, 0.0, .3),
             (ObstacleKind.flat, .07, .5, StageRunner.floor),
             (ObstacleKind.lamp, .1, 0.0, .35),
             (ObstacleKind.border, .09, 0.0, .2),
             (ObstacleKind.sandbag, .09, .4, .5),
-            (ObstacleKind.drum, .12, StageRunner.floor - .12, StageRunner.floor),
+            (
+              ObstacleKind.drum,
+              .12,
+              StageRunner.floor - .12,
+              StageRunner.floor,
+            ),
           ]) {
             // Each one half out of the picture.
             final x = edge - width / 2;
@@ -1973,6 +2185,58 @@ void main() {
       }
     });
 
+    testWidgets('the stage paints nothing outside its picture', (tester) async {
+      final art = await decodeArt(tester);
+      const margin = 120;
+      for (final MapEntry(key: shape, value: (w, h)) in shapes.entries) {
+        for (final withArt in [true, false]) {
+          final game = StageRunner(random: Random(4))
+            ..invincible = true
+            ..view = stageLayout(Size(w.toDouble(), h.toDouble())).view;
+          for (var i = 0; i < 60 * 3; i++) {
+            game.update(1 / 60);
+          }
+          // The set is laid out beyond both edges; a picture with room
+          // around it shows whether any of it lands there.
+          final rgba = (await tester.runAsync(() async {
+            final recorder = ui.PictureRecorder();
+            final canvas = Canvas(recorder)
+              ..translate(margin.toDouble(), margin.toDouble());
+            stagePainterFor(
+              game,
+              withArt ? art : null,
+            ).paint(canvas, Size(w.toDouble(), h.toDouble()));
+            final image = await recorder.endRecording().toImage(
+              w + 2 * margin,
+              h + 2 * margin,
+            );
+            final data = await image.toByteData(
+              format: ui.ImageByteFormat.rawRgba,
+            );
+            image.dispose();
+            return data!.buffer.asUint8List();
+          }))!;
+          final width = w + 2 * margin;
+          var outside = 0, inside = 0;
+          for (var y = 0; y < h + 2 * margin; y++) {
+            for (var x = 0; x < width; x++) {
+              final within =
+                  x >= margin &&
+                  x < margin + w &&
+                  y >= margin &&
+                  y < margin + h;
+              final alpha = rgba[(y * width + x) * 4 + 3];
+              if (within && alpha == 255) inside++;
+              if (!within && alpha != 0) outside++;
+            }
+          }
+          final at = '$shape${withArt ? '' : ' without art'}';
+          expect(outside, 0, reason: at);
+          expect(inside, w * h, reason: at);
+        }
+      }
+    });
+
     testWidgets('on Android the navigation bar lays no veil over a run', (
       tester,
     ) async {
@@ -2003,7 +2267,8 @@ void main() {
           )
           .ignore();
       await tester.pumpAndSettle();
-      bool? veil() => SystemChrome.latestStyle?.systemNavigationBarContrastEnforced;
+      bool? veil() =>
+          SystemChrome.latestStyle?.systemNavigationBarContrastEnforced;
       expect(veil(), isTrue);
       await tester.scrollUntilVisible(find.text('Vorhang auf'), 200);
       await tester.tap(find.text('Vorhang auf'));

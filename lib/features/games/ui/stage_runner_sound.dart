@@ -75,6 +75,11 @@ abstract interface class RunnerMusic {
   /// game's own in its place. Changed during a run, it takes over at once.
   void useTune(Uint8List? tune);
 
+  /// Gets effects and music ready before the first run, where no tap is
+  /// needed for it (outside browsers): the game screen calls it when it
+  /// opens, so a run's first frames make no platform calls for loading.
+  void warmUp();
+
   /// Holds the music where it is while the app is in the background, and
   /// continues it after.
   void pauseMusic();
@@ -232,6 +237,7 @@ class PluginRunnerSound
       return false;
     }
   }
+
   final Map<RunnerSfx, AudioPlayer> _players = {};
   final Set<RunnerSfx> _loaded = {};
 
@@ -378,6 +384,13 @@ class PluginRunnerSound
         await _othersPlayingNow()) {
       return;
     }
+    final player = await _readyMusic();
+    await player.setVolume(_musicVolume * _musicLevel);
+    await player.resume();
+  }
+
+  /// The music player with the worn tune loaded, made on first use.
+  Future<AudioPlayer> _readyMusic() async {
     var player = _musicPlayer;
     if (player == null) {
       player = _musicPlayer = _create();
@@ -398,8 +411,17 @@ class PluginRunnerSound
     if (!_musicLoaded || !identical(_loadedTune, _tune)) {
       await _loadMusic(player);
     }
-    await player.setVolume(_musicVolume * _musicLevel);
-    await player.resume();
+    return player;
+  }
+
+  @override
+  void warmUp() {
+    if (!_enabled.value) return;
+    prepare();
+    _run(() async {
+      // A run may have started meanwhile; then it loads the music itself.
+      if (!_musicWanted) await _readyMusic();
+    });
   }
 
   Future<void> _loadMusic(AudioPlayer player) async {
@@ -467,6 +489,12 @@ class PluginRunnerSound
     _tune = tune;
     if (_musicWanted && _enabled.value && !_hidden && _musicPlayer != null) {
       _run(_resumeMusic);
+    } else if (!_musicWanted && _enabled.value && _musicPlayer != null) {
+      // Warmed up with the game's own tune: the worn one is loaded before
+      // the run, not in its first frames.
+      _run(() async {
+        if (!_musicWanted) await _readyMusic();
+      });
     }
   }
 
@@ -698,6 +726,10 @@ class WebRunnerSound
     _musicVoice = null;
     if (voice != null) _safely(() => voice.stop(fadeOut: musicFadeOut));
   }
+
+  /// Browsers start audio only from a tap: everything waits for [prepare].
+  @override
+  void warmUp() {}
 
   @override
   void useTune(Uint8List? tune) {

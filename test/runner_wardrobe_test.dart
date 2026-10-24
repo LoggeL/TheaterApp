@@ -505,7 +505,7 @@ void main() {
     });
 
     test('the picture cache keeps by bytes, drops the least used first and '
-        'the game fetches a dropped atlas again', () async {
+        'the game decodes a dropped atlas again from its kept file', () async {
       final maxBytes = WardrobePictures.maxBytes;
       addTearDown(() => WardrobePictures.maxBytes = maxBytes);
       final own = await createTestImage(width: 1124, height: 577);
@@ -544,8 +544,8 @@ void main() {
       expect(WardrobePictures.cached(c), isNotNull);
       expect(WardrobePictures.bytes, 2 * size);
 
-      // Maren's atlas was dropped: the game asks for it again instead of
-      // dressing her as Engel Logge.
+      // Maren's atlas was dropped: the game decodes it again instead of
+      // dressing her as Engel Logge, from the file kept from before.
       final atlas = await createTestImage(width: 1124, height: 577);
       final backdrop = await createTestImage(width: 64, height: 32);
       final json = _wardrobeJson(
@@ -559,9 +559,80 @@ void main() {
         Wardrobe.fromJson(json),
         controller,
       );
-      expect(asked, ['a.webp', 'b.webp', 'c.webp', 'b.webp']);
+      expect(asked, ['a.webp', 'b.webp', 'c.webp']);
       expect(dressed.imageOf(RunnerSprite.cheer), isNot(atlas));
       expect(dressed.runnerPaint.colorFilter, isNotNull, reason: 'her tint');
+      expect(WardrobePictures.cached(b), isNotNull);
+    });
+
+    test('dropped pictures come back without the server while their files '
+        'fit; a failed one is not asked for on every rebuild', () async {
+      final (maxBytes, maxFiles) = (
+        WardrobePictures.maxBytes,
+        WardrobePictures.maxFileBytes,
+      );
+      final pause = WardrobePictures.failurePause;
+      addTearDown(() {
+        WardrobePictures.maxBytes = maxBytes;
+        WardrobePictures.maxFileBytes = maxFiles;
+        WardrobePictures.failurePause = pause;
+      });
+      final portrait = await createTestImage(width: 64, height: 64);
+      final png = (await portrait.toByteData(
+        format: ui.ImageByteFormat.png,
+      ))!.buffer.asUint8List();
+      // A long wardrobe: decoded, only one portrait fits; as files, two.
+      WardrobePictures.maxBytes = 64 * 64 * 4;
+      WardrobePictures.maxFileBytes = 2 * png.length;
+      final asked = <String>[];
+      final server = TestServer();
+      server.data['capabilities'] = {
+        'features': ['stageRunner', 'runnerUnlocks'],
+      };
+      server.override = (request) {
+        if (!_path(request).contains('/games/runner/skins/')) return null;
+        final name = _path(request).split('/').last;
+        asked.add(name);
+        return Future.value(
+          name == 'gone.webp'
+              ? http.Response('', 404)
+              : http.Response.bytes(
+                  png,
+                  200,
+                  headers: {'content-type': 'image/png'},
+                ),
+        );
+      };
+      final controller = server.controller();
+      addTearDown(controller.dispose);
+      await signIn(controller);
+      const a = '/games/runner/skins/a.webp', b = '/games/runner/skins/b.webp';
+      const c = '/games/runner/skins/c.webp';
+      // Scrolled down and up again: a and b are decoded anew, not fetched.
+      for (final path in [a, b, a, b, a]) {
+        expect(await WardrobePictures.load(controller, path), isNotNull);
+      }
+      expect(asked, ['a.webp', 'b.webp']);
+      expect(WardrobePictures.fileBytes, 2 * png.length);
+      // A third file drops the least used one (b); only that is asked
+      // for again.
+      await WardrobePictures.load(controller, c);
+      await WardrobePictures.load(controller, a);
+      await WardrobePictures.load(controller, b);
+      expect(asked, ['a.webp', 'b.webp', 'c.webp', 'b.webp']);
+      expect(WardrobePictures.fileBytes, 2 * png.length);
+
+      // A missing picture: a card rebuilding without it does not ask again
+      // and again; after the pause it is tried anew.
+      const gone = '/games/runner/skins/gone.webp';
+      asked.clear();
+      for (var i = 0; i < 5; i++) {
+        expect(await WardrobePictures.load(controller, gone), isNull);
+      }
+      expect(asked, ['gone.webp']);
+      WardrobePictures.failurePause = Duration.zero;
+      expect(await WardrobePictures.load(controller, gone), isNull);
+      expect(asked, ['gone.webp', 'gone.webp']);
     });
 
     test(

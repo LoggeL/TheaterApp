@@ -176,6 +176,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       });
     }
     if (_dressable) _loadWardrobe();
+    // Outside browsers nothing waits for a tap: the players are made and
+    // loaded now, while the intro shows, and not in the first frames of the
+    // run (since Flutter 3.29 every plugin call runs on the UI thread).
+    if (!kIsWeb) {
+      if (_sound case final RunnerMusic music) music.warmUp();
+    }
   }
 
   /// Only the worn costume is loaded; without it the default one plays.
@@ -229,10 +235,14 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   @override
   void dispose() {
-    // Left during a run: the rest of the app gets the usual bar back.
+    // Left during a run: the rest of the app gets the usual bar back. Only
+    // Android has that bar; in browsers the call would only drop the
+    // page's theme colour.
     if (_phase == _Phase.playing) {
       _perf?.finish(_wardrobe, end: 'quit');
-      SystemChrome.setSystemUIOverlayStyle(runnerBarsDefault);
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        SystemChrome.setSystemUIOverlayStyle(runnerBarsDefault);
+      }
     }
     _lifecycle.dispose();
     _sound.stopMusic();
@@ -822,6 +832,22 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     );
   }
 
+  /// The stage's painter, kept across rebuilds (its laid-out texts and
+  /// shader stay); a new one only for another pixel ratio.
+  _StagePainter? _painter;
+  _StagePainter _stagePainter(double ratio) {
+    final kept = _painter;
+    if (kept != null && kept.pixelRatio == ratio) return kept;
+    return _painter = _StagePainter(
+      () => _game,
+      () => _fx,
+      () => _art,
+      _frame,
+      () => _trail,
+      pixelRatio: ratio,
+    );
+  }
+
   /// The stage fills the whole area below the app bar, in every
   /// orientation, and all of it takes the touch, so a thumb anywhere flies.
   /// The numbers and the hint lie on the picture, inside the safe area.
@@ -829,9 +855,9 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     final theme = Theme.of(context);
     final pad = MediaQuery.paddingOf(context);
     final ratio = MediaQuery.devicePixelRatioOf(context);
-    const shadow = [
-      Shadow(color: Color(0xCC000000), blurRadius: 4, offset: Offset(0, 1)),
-    ];
+    // A sharp shadow: a blurred one costs Impeller an offscreen pass with a
+    // blur each time the numbers change, several times a second.
+    const shadow = [Shadow(color: Color(0xCC000000), offset: Offset(0, 1.5))];
     final number = theme.textTheme.titleLarge?.copyWith(
       color: const Color(0xFFFFF1D6),
       shadows: shadow,
@@ -844,36 +870,38 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       },
       onPointerUp: (_) => _pointers = max(0, _pointers - 1),
       onPointerCancel: (_) => _pointers = max(0, _pointers - 1),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final size = constraints.biggest;
-          final layout = stageLayout(size, ratio);
-          _resized(size, layout.view);
-          // Right above the playing field when the house has room for the
-          // numbers (tall pictures), else over its top edge.
-          final hudTop = max(pad.top + 4, layout.top - 52);
-          return Stack(
-            children: [
-              Positioned.fill(
-                child: RepaintBoundary(
+      // Only the picture is built by its size. The numbers live outside the
+      // LayoutBuilder: a rebuild inside it (each new number) would lay out
+      // the builder again, and with it the page, which then repaints whole.
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final size = constraints.biggest;
+                _resized(size, stageLayout(size, ratio).view);
+                return RepaintBoundary(
                   child: CustomPaint(
                     key: const ValueKey('runner-stage'),
                     size: Size.infinite,
-                    painter: _StagePainter(
-                      () => _game,
-                      () => _fx,
-                      () => _art,
-                      _frame,
-                      () => _trail,
-                      pixelRatio: ratio,
-                    ),
+                    painter: _stagePainter(ratio),
                   ),
-                ),
+                );
+              },
+            ),
+          ),
+          // Layers of their own with a fixed size: new numbers lay out and
+          // repaint only them, not the page with its app bar (and the rail
+          // on wide screens).
+          Positioned.fill(
+            child: CustomSingleChildLayout(
+              delegate: _HudLayout(
+                pad,
+                ratio,
+                MediaQuery.textScalerOf(context).scale(36),
               ),
-              Positioned(
-                left: pad.left + 20,
-                right: pad.right + 20,
-                top: hudTop,
+              child: RepaintBoundary(
+                key: const ValueKey('runner-hud'),
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
@@ -913,44 +941,51 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                   ],
                 ),
               ),
-              Positioned(
-                left: pad.left + 20,
-                right: pad.right + 20,
-                bottom: pad.bottom + 10,
-                child: Text(
-                  'Halten zum Steigen',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: const Color(0xCCFFF1D6),
-                    shadows: shadow,
-                  ),
+            ),
+          ),
+          Positioned(
+            left: pad.left + 20,
+            right: pad.right + 20,
+            bottom: pad.bottom + 10,
+            child: RepaintBoundary(
+              child: Text(
+                'Halten zum Steigen',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xCCFFF1D6),
+                  shadows: shadow,
                 ),
               ),
-              if (_paused)
-                Positioned.fill(
-                  child: ColoredBox(
-                    key: const ValueKey('runner-paused'),
-                    color: const Color(0x99000000),
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text('Pause', style: number),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Tippen zum Weiterlaufen',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: const Color(0xFFFFF1D6),
+            ),
+          ),
+          // Over everything. Laid out after the picture, so a pause that its
+          // new size caused (see [_resized]) shows in the very same frame.
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, _) => !_paused
+                  ? const SizedBox.shrink()
+                  : ColoredBox(
+                      key: const ValueKey('runner-paused'),
+                      color: const Color(0x99000000),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('Pause', style: number),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Tippen zum Weiterlaufen',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xFFFFF1D6),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ),
-            ],
-          );
-        },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -985,6 +1020,31 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _ticker.start();
     if (_sound case final RunnerMusic music) music.resumeMusic();
   }
+}
+
+/// Puts the numbers right above the playing field when the house has room
+/// for them (tall pictures), else over its top edge, inside the safe area;
+/// always [height] high, so they are their own relayout boundary.
+class _HudLayout extends SingleChildLayoutDelegate {
+  _HudLayout(this.pad, this.pixelRatio, this.height);
+  final EdgeInsets pad;
+  final double pixelRatio, height;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      BoxConstraints.tight(
+        Size(max(0, constraints.maxWidth - pad.horizontal - 40), height),
+      );
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) => Offset(
+    pad.left + 20,
+    max(pad.top + 4, stageLayout(size, pixelRatio).top - 52),
+  );
+
+  @override
+  bool shouldRelayout(_HudLayout old) =>
+      old.pad != pad || old.pixelRatio != pixelRatio || old.height != height;
 }
 
 String _pickupLabel(PickupKind kind) => switch (kind) {
@@ -1298,7 +1358,14 @@ class _StagePainter extends CustomPainter {
     final floorY = s * StageRunner.floor;
     _glyphs.stage(s);
 
-    canvas.drawRect((Offset.zero & size).inflate(s * .05), _bg);
+    // The set is drawn beyond the picture on purpose (tiles and wings from
+    // off-screen, the crash nudge), and neither CustomPaint nor its
+    // RepaintBoundary clip: without this cut the stage would paint over
+    // whatever lies next to it, e.g. the section rail on wide screens.
+    canvas
+      ..save()
+      ..clipRect(Offset.zero & size, doAntiAlias: false)
+      ..drawRect((Offset.zero & size).inflate(s * .05), _bg);
     final (dx, dy) = f.shake(g);
     canvas.save();
     canvas.translate(dx * s, dy * s + top);
@@ -1352,6 +1419,7 @@ class _StagePainter extends CustomPainter {
       ..restore();
 
     if (g.over) _curtain(canvas, g, s, w, size.height);
+    canvas.restore();
   }
 
   /// The painted backdrop passes [scroll] pixels to the left, tiled in turn
