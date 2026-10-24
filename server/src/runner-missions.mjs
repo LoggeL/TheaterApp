@@ -19,11 +19,16 @@ import { berlinDay } from './event-series.mjs';
 //   debuts only with their points); implausible ones count for no mission, the run itself counts.
 // - Apps without statistics (older ones) only get the types the server can check from metres and
 //   points; the kind of client is decided when the day's missions are made.
-// - Rewards are crate metres (like the Tagesbonus: crates only, not the Ensemble-Strecke), once per
-//   mission; all three on one day also bring a "Missionskiste" (shine chance by crate kind
-//   `mission` in the catalog's `dupes.shinyChance`).
+// - Rewards are crate points (`runnerCratePoints`; like the Tagesbonus: crates only, not the
+//   Ensemble-Strecke), once per mission; all three on one day also bring a "Missionskiste" (shine
+//   chance by crate kind `mission` in the catalog's `dupes.shinyChance`). Missions made before kept
+//   their reward in metres (no `unit`): they pay it times `legacyRewardPointsPerMeter`.
 
 const fail = (status, message, code) => { throw new AppError(status, message, code); };
+/** What a mission's reward in metres (made before `runnerCratePoints`) is worth in crate points. */
+export const legacyRewardPointsPerMeter = 1.5;
+/** The crate points mission [m] brings: its `reward`, which was metres for missions without `unit`. */
+export const rewardPoints = m => m.unit === 'points' ? m.reward : Math.round(m.reward * legacyRewardPointsPerMeter);
 const list = value => Array.isArray(value) ? value : [];
 export const missionRequestPrefix = 'runner-mission:';
 export const missionSlots = Object.freeze(['easy', 'medium', 'hard']);
@@ -44,7 +49,8 @@ export const missionRules = Object.freeze({
   minRuns: 5,
   // Runs this short (an instant crash) count for nothing: no best, no counted run.
   minMeters: 20,
-  slots: { easy: { reward: 300 }, medium: { reward: 600 }, hard: { reward: 1000 } },
+  // Crate points, the 300/600/1000 crate metres of before at ~1.5 points per metre.
+  slots: { easy: { reward: 450 }, medium: { reward: 900 }, hard: { reward: 1500 } },
   // A type of yesterday is chosen with this share of its weight.
   repeatWeight: 0.2,
   // `share`: the target as a share of the person's best per run, by slot; calibrated with a
@@ -214,7 +220,7 @@ export function chooseMission(slot, ctx, exclude, previous, random) {
   if (!types.length) return null;
   const chosen = pick(types, random, x => x.d.weight * (previous.has(x.type) ? r.repeatWeight : 1));
   const option = chosen.options[Math.min(chosen.options.length - 1, Math.floor(random() * chosen.options.length))];
-  return { slot, type: chosen.type, ...option, reward: r.slots[slot].reward, progress: 0, done: false };
+  return { slot, type: chosen.type, ...option, reward: r.slots[slot].reward, unit: 'points', progress: 0, done: false };
 }
 
 /** The three missions of [day]: deterministic from person, day, the runs so far and yesterday's types. */
@@ -262,7 +268,7 @@ function runValue(m, { meters, score, stats }) {
  */
 export function recordMissionRun(t, personId, run) {
   const rules = rulesOf(t);
-  if (!rules) return { rewardMeters: 0, crate: 0, completed: [], record: null };
+  if (!rules) return { rewardPoints: 0, crate: 0, completed: [], record: null };
   const rec = missionsToday(t, personId, run.at, run.statsSent);
   const completed = [];
   const missions = list(rec.missions).map(m => {
@@ -275,7 +281,7 @@ export function recordMissionRun(t, personId, run) {
     if (done) completed.push(m.slot);
     return { ...m, progress, done, ...(done ? { doneAt: run.at.toISOString() } : {}) };
   });
-  const rewardMeters = missions.filter(m => completed.includes(m.slot)).reduce((a, m) => a + m.reward, 0);
+  const reward = missions.filter(m => completed.includes(m.slot)).reduce((a, m) => a + rewardPoints(m), 0);
   const crate = !rec.crate && missions.length === missionSlots.length && missions.every(m => m.done);
   // The bests rise with this run for the coming days; today's missions stay as they are. The
   // window of earlier runs was only needed once, to start the bests.
@@ -286,7 +292,7 @@ export function recordMissionRun(t, personId, run) {
     ...kept, missions, best: counted ? raiseBest(best, run) : best, runs: runs + (counted ? 1 : 0),
     todayMeters: (rec.todayMeters ?? 0) + run.meters, crate: rec.crate || crate,
   });
-  return { rewardMeters, crate: crate ? 1 : 0, completed, record: next };
+  return { rewardPoints: reward, crate: crate ? 1 : 0, completed, record: next };
 }
 
 const plural = (n, one, many) => n === 1 ? one : many;
@@ -334,7 +340,8 @@ export function missionsView(t, rec, completed = []) {
   if (!rec) return null;
   const missions = list(rec.missions).map(m => ({
     slot: m.slot, type: m.type, ...(m.kind ? { kind: m.kind } : {}), target: m.target, ...(m.min !== undefined ? { min: m.min } : {}),
-    progress: Math.min(m.progress, m.target), done: m.done, reward: m.reward, ...missionText(m),
+    // `reward` in crate points (`rewardUnit`, from `runnerCratePoints`; older apps say "m").
+    progress: Math.min(m.progress, m.target), done: m.done, reward: rewardPoints(m), rewardUnit: 'points', ...missionText(m),
     // Whether a single run must make it (`run`) or the day adds up (`day`).
     scope: m.type === 'dailyDistance' || m.type === 'runs' ? 'day' : 'run',
     ...(completed.includes(m.slot) ? { justDone: true } : {}),

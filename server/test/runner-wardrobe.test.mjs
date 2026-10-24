@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { Store } from '../src/store.mjs';
 import { Theater, apiFeatures, stageRunner, runnerMaxMeters } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
-import { bundledCatalog, crateMilestone, cratesEarned, drawItem, loadCatalog, runnerObstacleKinds, runnerUnlocks, weightedPick } from '../src/runner-wardrobe.mjs';
+import { bundledCatalog, crateGap, crateMilestone, cratesEarned, drawItem, legacyCrateMilestone, legacyCratesEarned, loadCatalog, maxRunPoints, runnerObstacleKinds, runnerUnlocks, weightedPick } from '../src/runner-wardrobe.mjs';
 
 const rarities = [
   { id: 'blau', name: 'Blau', color: '#4B69FF', weight: 100 },
@@ -32,8 +32,8 @@ function setup(t, { items = [{ id: 'c1', kind: 'character', name: 'Blau 1', rari
   action({ action: 'account.approve', uid: 'sam', personId, version: 1, role: 'member' });
   /** A run of [ms] with the given body fields. */
   const play = (body, ms = 600000, uid = 'sam') => { const { roundId } = app.runnerStart(uid); tick(ms); return app.runnerScore(uid, { roundId, ...body }); };
-  /** Gives the caller [meters] more without playing. */
-  const grant = meters => { const p = app.runnerWardrobe('sam') && store.get('runnerProgress', personId); store.put('runnerProgress', personId, { ...p, meters: p.meters + meters }); };
+  /** Gives the caller [points] more crate points without playing. */
+  const grant = points => { const p = app.runnerWardrobe('sam') && store.get('runnerProgress', personId); store.put('runnerProgress', personId, { ...p, points: (p.points ?? 0) + points }); };
   let key = 0;
   const open = (uid = 'sam', id = `k${++key}`) => app.runnerOpenCrate(uid, id);
   return { store, app, action, personId, tick, play, grant, open };
@@ -45,32 +45,77 @@ test('servers announce the wardrobe', t => {
   assert.ok(app.snapshot('sam').capabilities.features.includes('runnerUnlocks'));
 });
 
-test('crates come at linearly growing distances', () => {
-  assert.deepEqual([1, 2, 3, 4].map(crateMilestone), [2000, 4100, 6300, 8600]);
-  for (let n = 1; n < 40; n++) {
-    assert.equal(crateMilestone(n) - crateMilestone(n - 1), runnerUnlocks.firstMeters + runnerUnlocks.stepMeters * (n - 1));
+test('crates come at distances that grow with the square root', () => {
+  assert.deepEqual([1, 2, 3, 4, 5].map(crateMilestone), [3000, 6300, 9720, 13240, 16840]);
+  for (let n = 1; n < 400; n++) {
+    const gap = crateMilestone(n) - crateMilestone(n - 1);
+    assert.equal(gap, crateGap(n));
+    assert.equal(gap, runnerUnlocks.firstPoints + Math.round(runnerUnlocks.stepPoints * Math.sqrt(n - 1) / 10) * 10);
+    // Never shorter than the one before, and growing ever more slowly: no cap, no cooldown.
+    if (n > 1) assert.ok(gap >= crateGap(n - 1));
+    if (n > 2) assert.ok(gap - crateGap(n - 1) <= crateGap(n - 1) - crateGap(n - 2) + 10);
     assert.equal(cratesEarned(crateMilestone(n)), n);
     assert.equal(cratesEarned(crateMilestone(n) - 1), n - 1);
   }
   assert.equal(cratesEarned(0), 0);
   assert.equal(cratesEarned(-5), 0);
-  // Not too steep: 100 km bring 29 crates; the 30th is 4900 m further.
-  assert.equal(cratesEarned(100000), 29);
-  assert.equal(crateMilestone(30) - crateMilestone(29), 4900);
+  assert.equal(cratesEarned(NaN), 0);
+  // The gaps at 1, 5, 10, 20, 50 and 100 crates (the table of the release notes).
+  assert.deepEqual([1, 5, 10, 20, 50, 100].map(crateGap), [3000, 3600, 3900, 4310, 5100, 5980]);
+  // Far fewer runs than on the metre curve from crate 10 on (a run of 500 m ≈ 750 points).
+  const old = n => legacyCrateMilestone(n) - legacyCrateMilestone(n - 1);
+  assert.deepEqual([1, 5, 10, 20, 50, 100].map(old), [2000, 2400, 2900, 3900, 6900, 11900]);
+  for (const n of [10, 20, 50, 100]) assert.ok(crateGap(n) / 750 < old(n) / 500, String(n));
+  assert.ok(crateGap(50) / 750 < 0.5 * old(50) / 500);
+  // Huge numbers stay quick and exact.
+  assert.equal(cratesEarned(crateMilestone(5000)), 5000);
 });
 
-test('runs add their metres; the reply tells how far the next crate is', t => {
+test('the metre curve of before is kept to move records over', () => {
+  assert.deepEqual([1, 2, 3, 4].map(legacyCrateMilestone), [2000, 4100, 6300, 8600]);
+  assert.equal(legacyCratesEarned(100000), 29);
+  assert.equal(legacyCratesEarned(4099), 1);
+});
+
+test('runs add their points; the reply tells how far the next crate is', t => {
   const { app, play } = setup(t);
-  // The first run of the day counts twice for the crates (Tagesbonus).
-  const first = play({ score: 1500, meters: 700 });
-  assert.deepEqual(first.progress, { meters: 1400, earned: 0, opened: 0, crates: 0, previousAt: 0, nextAt: 2000, poolSize: 3, complete: false, ensembleCrates: 0, dupes: true, runMeters: 700, bonusMeters: 700, bonusOpen: false, missionMeters: 0, missionCrates: 0, eventCrates: 0, gained: 700, bonus: 700, missionBonus: 0, newCrates: 0 });
+  // The first run of the day counts twice for the crates (Tagesbonus): its points again.
+  const first = play({ score: 1400, meters: 700 });
+  assert.deepEqual(first.progress, {
+    meters: 2800, earned: 0, opened: 0, crates: 0, previousAt: 0, nextAt: 3000, poolSize: 3, complete: false, ensembleCrates: 0, dupes: true, runMeters: 700, bonusMeters: 0, bonusOpen: false, missionMeters: 0, missionCrates: 0, eventCrates: 0,
+    unit: 'points', points: { total: 2800, base: 0, runs: 1400, bonus: 1400, missions: 0 },
+    gained: 700, bonus: 700, missionBonus: 0, newCrates: 0, gainedPoints: { run: 1400, bonus: 1400, missions: 0 },
+  });
   const second = play({ score: 1200, meters: 900 });
-  assert.equal(second.progress.meters, 2300);
+  assert.equal(second.progress.meters, 4000);
+  assert.deepEqual(second.progress.points, { total: 4000, base: 0, runs: 2600, bonus: 1400, missions: 0 });
   assert.equal(second.progress.bonus, 0);
+  assert.deepEqual(second.progress.gainedPoints, { run: 1200, bonus: 0, missions: 0 });
   assert.equal(second.progress.newCrates, 1);
   assert.equal(second.progress.crates, 1);
-  assert.equal(second.progress.nextAt, 4100);
-  assert.equal(app.runnerWardrobe('sam').progress.crates, 1);
+  assert.deepEqual([second.progress.previousAt, second.progress.nextAt], [3000, 6300]);
+  const w = app.runnerWardrobe('sam');
+  assert.equal(w.progress.crates, 1);
+  // The statistics keep the real metres; the points stand apart.
+  assert.deepEqual([w.stats.meters, w.stats.points, w.stats.bonusPoints, w.stats.best], [1600, 2600, 1400, 1400]);
+});
+
+test('points must fit the metres; a high score with few metres is refused', t => {
+  const { app, tick, play } = setup(t);
+  // At most one row of pickups (25 points) per section of 6 m, plus two sections.
+  assert.equal(maxRunPoints(0), 50);
+  assert.equal(maxRunPoints(600), 600 + 25 * 102);
+  const { roundId } = app.runnerStart('sam'); tick(600000);
+  assert.throws(() => app.runnerScore('sam', { roundId, score: maxRunPoints(600) + 1, meters: 600 }), { status: 400, code: 'implausible' });
+  // The same run with what it can hold counts in full.
+  assert.equal(app.runnerScore('sam', { roundId, score: maxRunPoints(600), meters: 600 }).progress.gainedPoints.run, maxRunPoints(600));
+  // A real run (~1.5 points per metre, at most ~2 with every pickup) is far below.
+  assert.equal(play({ score: 1500, meters: 1000 }).progress.gainedPoints.run, 1500);
+  // Older clients without metres: their score up to what the estimated metres allow.
+  const legacy = play({ score: 1200 }, 20000).progress;
+  const estimate = Math.floor(Math.min(1200, runnerMaxMeters(20)) * runnerUnlocks.legacyMetersFactor);
+  assert.deepEqual([legacy.gained, legacy.gainedPoints.run], [estimate, maxRunPoints(estimate)]);
+  assert.ok(maxRunPoints(estimate) < 1200);
 });
 
 test('metres must fit the score and the measured time', t => {
@@ -99,9 +144,13 @@ test('earlier runs are credited once, on first use', t => {
   const { app, store, personId, play } = setup(t);
   store.put('runnerScores', personId, { personId, best: 500, bestAt: null, rounds: 14, lastPlayedAt: null });
   const result = play({ score: 400, meters: 300 });
-  // The credit is no run: it brings no Tagesbonus, the run after it does.
+  // The credit is no run: it brings no Tagesbonus, the run after it does. The credited 2100 m are
+  // one crate and 100 of the 2100 m to the next on the metre curve: one crate and the same share
+  // of the 3300 points to the next on the point curve.
   assert.equal(result.progress.runMeters, 14 * runnerUnlocks.creditPerRound + 300);
-  assert.equal(result.progress.meters, 14 * runnerUnlocks.creditPerRound + 300 + 300);
+  assert.equal(result.progress.points.base, 3000 + Math.ceil(100 * 3300 / 2100));
+  assert.equal(result.progress.meters, result.progress.points.base + 400 + 400);
+  assert.equal(result.progress.earned, 1);
   assert.equal(store.get('runnerScores', personId).rounds, 15);
   // Neither another run nor reading credits again.
   assert.equal(app.runnerWardrobe('sam').progress.runMeters, 14 * 150 + 300);
@@ -109,6 +158,7 @@ test('earlier runs are credited once, on first use', t => {
   // Someone without earlier runs starts at zero.
   const fresh = setup(t);
   assert.equal(fresh.app.runnerWardrobe('sam').progress.meters, 0);
+  assert.deepEqual(fresh.app.runnerWardrobe('sam').progress.points, { total: 0, base: 0, runs: 0, bonus: 0, missions: 0 });
 });
 
 test('crates hold items one does not own, never twice; then the wardrobe is complete', t => {
@@ -245,7 +295,7 @@ test('legacy joins the draw once all light blue characters are owned', t => {
   const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', runnerCatalog: c, random: () => 0.999 });
   app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
   const p = app.runnerWardrobe('admin').progress && store.get('runnerProgress', app.account('admin').personId);
-  store.put('runnerProgress', p.personId, { ...p, meters: crateMilestone(4) });
+  store.put('runnerProgress', p.personId, { ...p, points: crateMilestone(4) });
   let view = app.runnerWardrobe('admin');
   assert.deepEqual(view.lockedRarities, ['legacy']);
   assert.equal(view.catalog.rarities.find(r => r.id === 'legacy').hint, 'Sammle alle hellblauen Figuren');
@@ -376,6 +426,15 @@ test('the bundled pictures have the sizes the app accepts', () => {
       assert.deepEqual(pictureSize(c.files.get(file(x.collectibles)).bytes), sizes.obstacles, x.collectibles);
     }
   }
+  // The crates of the choice (runnerCrateTargets): closed and open on one 512² canvas, a 96² particle.
+  for (const t of c.crateTargets) {
+    const file = path => path && decodeURIComponent(path.slice(path.lastIndexOf('/') + 1).split('?')[0]);
+    for (const [field, size] of [['image', [512, 512]], ['openImage', [512, 512]], ['fxImage', [96, 96]]]) {
+      if (!t[field]) continue;
+      named.add(file(t[field]));
+      assert.deepEqual(pictureSize(c.files.get(file(t[field])).bytes), size, t[field]);
+    }
+  }
   // Every picture in the folder is used, and together they stay light. Disabled entries keep their
   // pictures so they can simply be switched on again.
   const folder = new URL('../src/wardrobe/images/', import.meta.url);
@@ -385,6 +444,7 @@ test('the bundled pictures have the sizes the app accepts', () => {
   const bytes = [...c.files.values()].filter(f => f.mime.startsWith('image/')).reduce((sum, f) => sum + f.bytes.length, 0);
   // 0.11.2: 159 pictures in use (42 characters, 34 role variants, 7 backdrops) were about 16 MB;
   // with role figures the same pictures plus Raphael's Hades; with Nexus (24 figures) about 19.4 MB.
+  // The six crates of the choice (closed, open, particle) add about 0.54 MB.
   // 40 MB leaves room for further plays: the app loads only the pictures a player needs, one by one
   // when it shows or wears them, never the whole folder; the limits per file above stay.
   assert.ok(bytes < 40e6, `${bytes} bytes of pictures`);

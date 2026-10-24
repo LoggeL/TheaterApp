@@ -4,7 +4,7 @@ import { Store } from '../src/store.mjs';
 import { Theater, apiFeatures, runnerMaxMeters, stageRunner } from '../src/theater.mjs';
 import { loadCatalog, runnerUnlocks } from '../src/runner-wardrobe.mjs';
 
-// Tagesbonus: the first counted run of a Berlin calendar day counts twice for the crates.
+// Tagesbonus: the first counted run of a Berlin calendar day counts twice for the crates (its points again).
 const rarities = [{ id: 'hell', name: 'Hellblau', color: '#5E98D9', weight: 60, gage: 10 }];
 const items = [
   { id: 'c0', kind: 'character', name: 'Engel Logge', rarity: 'hell', default: true },
@@ -50,16 +50,18 @@ test('servers announce the Tagesbonus', t => {
 test('the first run of the day counts twice for the crates, the second once; statistics keep real metres', t => {
   const { app, store, sam, play } = setup(t);
   assert.equal(app.runnerWardrobe('sam').progress.bonusOpen, true);
-  const first = play(812);
-  assert.deepEqual([first.gained, first.bonus, first.runMeters, first.bonusMeters, first.meters, first.bonusOpen], [812, 812, 812, 812, 1624, false]);
-  const second = play(500);
-  assert.deepEqual([second.gained, second.bonus, second.runMeters, second.bonusMeters, second.meters, second.bonusOpen], [500, 0, 1312, 812, 2124, false]);
-  // Grinding is fine: a third, fourth … run counts its real metres, no cooldown, nothing less.
-  assert.equal(play(500).meters, 2624);
+  const first = play(812, { body: { score: 1200 } });
+  assert.deepEqual([first.gained, first.bonus, first.runMeters, first.meters, first.bonusOpen], [812, 812, 812, 2400, false]);
+  assert.deepEqual([first.gainedPoints, first.points.bonus], [{ run: 1200, bonus: 1200, missions: 0 }, 1200]);
+  const second = play(500, { body: { score: 700 } });
+  assert.deepEqual([second.gained, second.bonus, second.runMeters, second.meters, second.bonusOpen], [500, 0, 1312, 3100, false]);
+  assert.deepEqual(second.gainedPoints, { run: 700, bonus: 0, missions: 0 });
+  // Grinding is fine: a third, fourth … run counts its points, no cooldown, nothing less.
+  assert.equal(play(500, { body: { score: 700 } }).meters, 3800);
   const w = app.runnerWardrobe('sam');
-  assert.equal(w.progress.meters, 2624);
+  assert.equal(w.progress.meters, 3800);
   assert.equal(w.progress.bonusOpen, false);
-  assert.deepEqual([w.stats.meters, w.stats.bonusMeters, w.stats.rounds, w.stats.best], [1812, 812, 3, 812]);
+  assert.deepEqual([w.stats.meters, w.stats.bonusPoints, w.stats.points, w.stats.rounds, w.stats.best], [1812, 1200, 2600, 3, 1200]);
   assert.equal(store.get('runnerProgress', sam).bonusDay, '2026-10-24');
 });
 
@@ -71,7 +73,7 @@ test('a run counts once: sending it again brings no second bonus', t => {
   assert.equal(app.runnerScore('sam', { roundId, score: 812, meters: 812 }).progress.bonus, 812);
   assert.throws(() => app.runnerScore('sam', { roundId, score: 813, meters: 812 }), { status: 409, code: 'round_unknown' });
   const w = app.runnerWardrobe('sam');
-  assert.deepEqual([w.progress.meters, w.progress.bonusMeters, w.stats.rounds], [1624, 812, 1]);
+  assert.deepEqual([w.progress.meters, w.progress.points.bonus, w.stats.rounds], [1624, 812, 1]);
 });
 
 test('the day changes at midnight in Berlin, in summer and in winter time', t => {
@@ -116,7 +118,9 @@ test('older apps without metres get the bonus on their estimate', t => {
   const run = play(0, { body: { score: 1000, meters: undefined } });
   assert.equal(run.gained, Math.floor(1000 * runnerUnlocks.legacyMetersFactor));
   assert.equal(run.bonus, run.gained);
-  assert.equal(run.meters, 2 * run.gained);
+  // The score fits the estimated metres: it counts, and again as the bonus.
+  assert.deepEqual(run.gainedPoints, { run: 1000, bonus: 1000, missions: 0 });
+  assert.equal(run.meters, 2000);
 });
 
 test('the Ensemble-Strecke counts only real metres', t => {
@@ -130,18 +134,18 @@ test('the Ensemble-Strecke counts only real metres', t => {
   assert.equal(w.ensemble.meters, 1700);
   assert.equal(w.ensemble.section.own, 1000);
   // Each person has a bonus of their own.
-  assert.equal(app.runnerWardrobe('kim').progress.bonusMeters, 700);
+  assert.equal(app.runnerWardrobe('kim').progress.points.bonus, 700);
 });
 
-test('the bonus can reach a crate that the real metres alone do not', t => {
+test('the bonus can reach a crate that the points alone do not', t => {
   const { app, play } = setup(t);
-  const run = play(1100);
-  assert.deepEqual([run.meters, run.earned, run.crates, run.newCrates, run.previousAt, run.nextAt], [2200, 1, 1, 1, 2000, 4100]);
+  const run = play(1100, { body: { score: 1600 } });
+  assert.deepEqual([run.meters, run.earned, run.crates, run.newCrates, run.previousAt, run.nextAt], [3200, 1, 1, 1, 3000, 6300]);
   const opening = app.runnerOpenCrate('sam', 'bonus-crate', { dupes: true });
   assert.ok(['h1', 'h2'].includes(opening.item.id));
   assert.equal(opening.wardrobe.progress.crates, 0);
   assert.equal(opening.wardrobe.stats.meters, 1100);
   // The same metres on a day whose bonus is used bring no crate.
-  const later = play(1100);
-  assert.deepEqual([later.meters, later.newCrates], [3300, 0]);
+  const later = play(1100, { body: { score: 1600 } });
+  assert.deepEqual([later.meters, later.newCrates], [4800, 0]);
 });

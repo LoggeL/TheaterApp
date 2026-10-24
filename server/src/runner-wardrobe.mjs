@@ -55,7 +55,18 @@ import { checkUniqueEntry, isUniqueEntry, markUniquesSeen, ownedUniques, parseUn
 //   runner-unique.mjs. Apps ask for them with `unique`; apps from before never see them.
 
 export const runnerUnlocks = Object.freeze({
+  // Crates of the own runs count points (`runnerCratePoints`): the n-th crate needs
+  // `firstPoints + stepPoints·√(n−1)` points more than the one before (rounded to `stepRound`), so the
+  // way grows with the square root and gets less steep the further one is. Calibrated on a run's
+  // points: one point per metre plus about half of the ~1 point per metre the course lays out as
+  // pickups, i.e. ~1.5 points per metre; the first crate needs about as many runs as 2000 m did.
+  firstPoints: 3000, stepPoints: 300, stepRound: 10,
+  // The metre curve before (`firstMeters + stepMeters·(n−1)`), only to move records over.
   firstMeters: 2000, stepMeters: 100,
+  // Most pickup points a section holds (a star; 3 roses 15, 2 masks 20) and the shortest section (a
+  // gap of 0.6 stage heights plus an obstacle, 6.7 m; counted as 6 m, plus 2 sections of slack):
+  // a run's points beyond its metres can never be more (the same count as checkRunStats).
+  pickupRowPoints: 25, sectionMeters: 6, extraSections: 2,
   // One-time credit per run played before metres were counted.
   creditPerRound: 150,
   // Older clients send no metres: count min(score, metres the measured time allows) × this factor.
@@ -88,20 +99,86 @@ export const runnerPoses = Object.freeze(['fly', 'dangle', 'runA', 'passA', 'run
 const fail = (status, message, code) => { throw new AppError(status, message, code); };
 const list = value => Array.isArray(value) ? value : [];
 
-/** Total metres needed for the [n]-th crate (0 for none). */
+/** Points between the ([n]−1)-th and the [n]-th crate (n ≥ 1): grows with the square root. */
+export const crateGap = n => {
+  const { firstPoints: b, stepPoints: d, stepRound: r } = runnerUnlocks;
+  return b + Math.round(d * Math.sqrt(Math.max(0, n - 1)) / r) * r;
+};
+// Milestones computed so far (index n: points for the n-th crate); they only ever grow.
+const milestones = [0];
+/** Total points needed for the [n]-th crate (0 for none). */
 export const crateMilestone = n => {
+  if (!(n > 0)) return 0;
+  while (milestones.length <= n) milestones.push(milestones.at(-1) + crateGap(milestones.length));
+  return milestones[n];
+};
+/** How many crates [points] have earned in total. */
+export const cratesEarned = points => {
+  const p = Number.isFinite(points) ? Math.max(0, points) : 0;
+  // Double up to a milestone beyond, then halve the way back.
+  let low = 0, high = 1;
+  while (crateMilestone(high) <= p) { low = high; high *= 2; }
+  while (high - low > 1) {
+    const mid = Math.floor((low + high) / 2);
+    if (crateMilestone(mid) <= p) low = mid; else high = mid;
+  }
+  return low;
+};
+
+/** The metre curve before `runnerCratePoints`: total metres for the [n]-th crate. */
+export const legacyCrateMilestone = n => {
   const { firstMeters: b, stepMeters: d } = runnerUnlocks;
   return n <= 0 ? 0 : n * b + d * n * (n - 1) / 2;
 };
-/** How many crates [meters] have earned in total. */
-export const cratesEarned = meters => {
+/** How many crates [meters] had earned on the metre curve. */
+export const legacyCratesEarned = meters => {
   const { firstMeters: b, stepMeters: d } = runnerUnlocks, m = Math.max(0, meters);
   // Solve n·b + d·n(n−1)/2 ≤ m, then correct rounding at the edges.
   let n = d ? Math.floor(((d / 2 - b) + Math.sqrt((b - d / 2) ** 2 + 2 * d * m)) / d) : Math.floor(m / b);
-  while (n > 0 && crateMilestone(n) > m) n--;
-  while (crateMilestone(n + 1) <= m) n++;
+  while (n > 0 && legacyCrateMilestone(n) > m) n--;
+  while (legacyCrateMilestone(n + 1) <= m) n++;
   return n;
 };
+
+/** Most points a run of [meters] can hold: its metres and one row of pickups per section. */
+export const maxRunPoints = meters => {
+  const { pickupRowPoints, sectionMeters, extraSections } = runnerUnlocks;
+  return meters + Math.floor(pickupRowPoints * (meters / sectionMeters + extraSections));
+};
+
+/**
+ * The crate points of a finished run: its score, which must fit its metres (`maxRunPoints`, else 400
+ * `implausible`, like metres that do not fit the time). Older clients without metres get their score
+ * up to what the estimated metres allow.
+ */
+export function runPoints(b, meters) {
+  if (b.meters === undefined || b.meters === null) return Math.min(b.score, maxRunPoints(meters));
+  if (b.score > maxRunPoints(meters)) fail(400, 'So viele Punkte sind auf dieser Strecke nicht möglich.', 'implausible');
+  return b.score;
+}
+
+/** The progress model whose crates count points. */
+export const cratePointsModel = 1;
+/** The old "Kistenstrecke" of [p]: metres run plus Tagesbonus and mission metres. */
+export const legacyCrateMeters = p => (p.meters ?? 0) + (p.bonusMeters ?? 0) + (p.missionMeters ?? 0);
+
+/**
+ * [p] moved from crate metres to crate points, or null if it is there already. Nobody loses: the
+ * crates earned on the metre curve and the share of the way to the next one become `basePoints` on
+ * the point curve (rounded up), so `earned` stays and the bar stands where it stood; `opened`, the
+ * metres and everything else stay as they are. Once per record (`crateModel`), on its first use.
+ */
+export function migrateToCratePoints(p, at) {
+  if ((p.crateModel ?? 0) >= cratePointsModel) return null;
+  const meters = legacyCrateMeters(p), earned = legacyCratesEarned(meters);
+  const from = legacyCrateMilestone(earned), span = legacyCrateMilestone(earned + 1) - from;
+  // Whole numbers throughout: ceil((meters − from) · gap / span) is exact.
+  const way = Math.ceil((meters - from) * crateGap(earned + 1) / span);
+  return {
+    ...p, crateModel: cratePointsModel, basePoints: crateMilestone(earned) + way, points: 0, bonusPoints: 0, missionPoints: 0,
+    cratePointsAt: at.toISOString(), crateMetersBefore: { meters, earned, share: Math.round((meters - from) / span * 1000) / 1000 },
+  };
+}
 
 const fileName = /^[a-z0-9][a-z0-9._-]{0,80}\.(?:webp|png)$/;
 const hex = /^#[0-9A-Fa-f]{6}$/;
@@ -317,7 +394,87 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
   const rewardFiles = new Map([...users].filter(([, xs]) => xs.every(x => x.reward)).map(([name, xs]) => [name, xs.map(x => x.id)]));
   // Files only unique figures use: served only to those who unlocked one of them.
   const uniqueFiles = new Map([...users].filter(([, xs]) => xs.every(x => x.unique)).map(([name, xs]) => [name, xs.map(x => x.id)]));
-  return { rarities, departments, items, collectible, uniques, uniqueRarity, byId, files, rewardFiles, uniqueFiles, rarity, dupes, ensemble, roleFigures, baseOf, rolesOf, defaults: Object.fromEntries(wardrobeKinds.map(k => [k, items.find(x => x.kind === k && x.default).id])) };
+  const { crateTargets, targetItems } = crateTargetsOf(collectible, rarity, data?.crates, picture, bad);
+  return { rarities, departments, items, collectible, uniques, uniqueRarity, byId, files, rewardFiles, uniqueFiles, rarity, dupes, ensemble, roleFigures, baseOf, rolesOf, crateTargets, targetItems, defaults: Object.fromEntries(wardrobeKinds.map(k => [k, items.find(x => x.kind === k && x.default).id])) };
+}
+
+// Crate targets (`runnerCrateTargets`): a crate of the own runs is opened as the Zufallskiste (all
+// collectible items, as before) or aimed at one pool: a play (its role figures, derived from the
+// catalog: every play with active role figures) or the Technik-Kiste (the technicians, a `crew`
+// rarity). Unique figures, ensemble rewards and the default outfit are in no pool.
+/** The animations an app knows for opening a crate; anything else plays `generic`. */
+export const crateAnimations = Object.freeze(['generic', 'burst', 'flightcase', 'maw', 'glitch', 'heavy', 'threads']);
+/** A play's name as part of an id or file name: "Schicksalsfäden" → "schicksalsfaeden". */
+export const playSlug = name => name.toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+  .normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'stueck';
+
+/**
+ * The targets of [collectible], newest play first: `{ id, kind: 'random' | 'tech' | 'play', name,
+ * play?, year?, animation, image?, openImage?, fxImage? }`, and their items by id. Pictures by name
+ * if they exist: `crate-<x>.webp` (closed), `crate-<x>-open.webp` (open, the same frame) and
+ * `crate-<x>-fx.webp` (particles), `<x>` being `random`, `tech` or `play-<slug>`. The catalog's
+ * `crates` (by target id) chooses an `animation` of `crateAnimations`; without one `generic`. Its
+ * `box` (`[x0, y0, x1, y1]`, pixels of the closed picture) is where the crate stands on its canvas,
+ * which leaves room above for the open lid: the choice shows just that part (`imageBox`).
+ */
+function crateTargetsOf(collectible, rarity, data, picture, bad) {
+  if (data !== undefined && (!data || typeof data !== 'object' || Array.isArray(data))) bad('crates');
+  const looks = Object.fromEntries(Object.entries(data ?? {}).filter(([key]) => key !== 'note'));
+  for (const [key, look] of Object.entries(looks)) {
+    if (!look || typeof look !== 'object' || (look.animation !== undefined && !crateAnimations.includes(look.animation))) bad(`crates.${key}`);
+    const box = look.box;
+    if (box !== undefined && !(Array.isArray(box) && box.length === 4 && box.every(v => Number.isInteger(v) && v >= 0 && v <= 4096) && box[0] < box[2] && box[1] < box[3])) bad(`crates.${key}.box`);
+  }
+  const crew = x => x.rarities.some(id => rarity.get(id)?.crew);
+  const plays = new Map();
+  for (const x of collectible) {
+    if (x.kind !== 'character' || typeof x.play !== 'string' || crew(x)) continue;
+    const key = `${x.play}\u0000${x.year ?? ''}`;
+    if (!plays.has(key)) plays.set(key, { play: x.play, year: x.year, items: [] });
+    plays.get(key).items.push(x);
+  }
+  // The same name in two years gets the year in its id.
+  const slugs = new Map();
+  for (const p of plays.values()) slugs.set(playSlug(p.play), (slugs.get(playSlug(p.play)) ?? 0) + 1);
+  const sorted = [...plays.values()].sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.play.localeCompare(b.play, 'de'));
+  const tech = collectible.filter(x => x.kind === 'character' && crew(x));
+  const entries = [
+    { id: 'random', kind: 'random', name: 'Zufallskiste', file: 'random', items: collectible },
+    ...(tech.length ? [{ id: 'tech', kind: 'tech', name: 'Technik-Kiste', file: 'tech', items: tech }] : []),
+    ...sorted.map(p => {
+      const slug = slugs.get(playSlug(p.play)) > 1 && p.year !== undefined ? `${playSlug(p.play)}-${p.year}` : playSlug(p.play);
+      return { id: `play:${slug}`, kind: 'play', name: p.play, play: p.play, ...(p.year !== undefined ? { year: p.year } : {}), file: `play-${slug}`, items: p.items };
+    }),
+  ];
+  for (const key of Object.keys(looks)) if (!entries.some(e => e.id === key)) bad(`crates.${key}: no such crate`);
+  const targetItems = new Map(entries.map(e => [e.id, e.items]));
+  const crateTargets = entries.map(({ file, items, ...e }) => {
+    const [image, openImage, fxImage] = ['', '-open', '-fx'].map(part => picture(`crate-${file}${part}.webp`));
+    const box = image && looks[e.id]?.box;
+    return { ...e, animation: looks[e.id]?.animation ?? 'generic', ...(image ? { image } : {}), ...(box ? { imageBox: [...box] } : {}), ...(openImage ? { openImage } : {}), ...(fxImage ? { fxImage } : {}) };
+  });
+  return { crateTargets, targetItems };
+}
+
+/**
+ * What the app shows of each target for [owned] and the [open] rarities: `owned`/`total` (all its
+ * items, locked ones included), `locked` (missing ones not to be drawn yet), `complete`, `available`
+ * (something can be drawn: a complete pool still gives duplicates), its shine chance and the
+ * chance of each rarity within it.
+ */
+export function crateTargetsView(c, owned, open) {
+  return c.crateTargets.map(target => {
+    const items = c.targetItems.get(target.id), drawable = items.filter(x => x.drawnBy.some(r => open.has(r)));
+    const have = items.filter(x => owned.has(x.id)).length;
+    const present = c.rarities.filter(r => open.has(r.id) && drawable.some(x => x.drawnBy.includes(r.id)));
+    const total = present.reduce((sum, r) => sum + r.weight, 0);
+    return {
+      ...target, owned: have, total: items.length, locked: items.filter(x => !owned.has(x.id) && !drawable.includes(x)).length,
+      complete: have === items.length, available: drawable.length > 0,
+      shinyChance: shinyChanceOf(c, target.kind === 'random' ? 'costume' : 'targeted'),
+      odds: present.map(r => ({ rarity: r.id, chance: r.weight / total })),
+    };
+  });
 }
 
 /**
@@ -372,11 +529,12 @@ const pickOne = (items, random) => items[Math.min(items.length - 1, Math.floor(r
  * items, complete ones included (so a complete rarity keeps its chance and gold stays rare); then
  * one of its missing items, or, if nothing of it is missing, one of all its items as a duplicate.
  */
-export function drawWithDupes(c, owned, random, open) {
-  const present = c.rarities.filter(r => open.has(r.id) && c.collectible.some(x => x.drawnBy.includes(r.id)));
+export function drawWithDupes(c, owned, random, open, pool = c.collectible) {
+  // [pool]: the items of a chosen crate target; the rarity weights hold among the rarities in it.
+  const present = c.rarities.filter(r => open.has(r.id) && pool.some(x => x.drawnBy.includes(r.id)));
   if (!present.length) return null;
   const tier = weightedPick(present, random);
-  const inTier = c.collectible.filter(x => x.drawnBy.includes(tier.id)), missing = inTier.filter(x => !owned.has(x.id));
+  const inTier = pool.filter(x => x.drawnBy.includes(tier.id)), missing = inTier.filter(x => !owned.has(x.id));
   return missing.length ? { tier, item: pickOne(missing, random), duplicate: false } : { tier, item: pickOne(inTier, random), duplicate: true };
 }
 
@@ -390,16 +548,23 @@ const credit = runnerUnlocks.creditPerRound;
 export function runnerProgress(t, personId) {
   const existing = t.store.get('runnerProgress', personId);
   if (existing) {
-    const moved = migrateToRoleFigures(catalog(t), existing, t.clock());
-    return moved ? t.store.put('runnerProgress', personId, moved) : existing;
+    // Each move once, whoever asks first: role figures, then crate points.
+    const roles = migrateToRoleFigures(catalog(t), existing, t.clock()) ?? existing;
+    const moved = migrateToCratePoints(roles, t.clock()) ?? roles;
+    return moved !== existing ? t.store.put('runnerProgress', personId, moved) : existing;
   }
   const rounds = t.store.get('runnerScores', personId)?.rounds ?? 0;
   const credited = rounds * credit;
-  return t.store.put('runnerProgress', personId, { personId, meters: credited, creditedMeters: credited, creditedRounds: rounds, opened: 0, owned: [], selected: {}, deaths: {}, createdAt: t.clock().toISOString(), ...(catalog(t).roleFigures ? { model: roleFiguresModel } : {}) });
+  // The credit for earlier runs is metres: it becomes crate points the same way as an old record.
+  const fresh = { personId, meters: credited, creditedMeters: credited, creditedRounds: rounds, opened: 0, owned: [], selected: {}, deaths: {}, createdAt: t.clock().toISOString(), ...(catalog(t).roleFigures ? { model: roleFiguresModel } : {}) };
+  return t.store.put('runnerProgress', personId, migrateToCratePoints(fresh, t.clock()));
 }
 
-/** The "Kistenstrecke" of [p]: real metres plus Tagesbonus metres; what the crates count. */
-export const crateMeters = p => (p.meters ?? 0) + (p.bonusMeters ?? 0) + (p.missionMeters ?? 0);
+/**
+ * The crate points of [p]: what the crates of the own runs count. The base moved over from the
+ * metres, the points of all runs since, the Tagesbonus points and the mission points.
+ */
+export const cratePoints = p => (p.basePoints ?? 0) + (p.points ?? 0) + (p.bonusPoints ?? 0) + (p.missionPoints ?? 0);
 /** Missionskisten (all three Tagesmissionen of a day) [p] has waiting. */
 export const missionCrates = p => Math.max(0, (p.missionCrates ?? 0) - (p.missionOpened ?? 0));
 /** Whether [p]'s Tagesbonus of the Berlin calendar day of [at] is still open. */
@@ -453,17 +618,23 @@ const pool = (t, p, owned = ownedIds(t, p)) => {
 };
 
 export function progressView(t, p) {
-  const meters = crateMeters(p), earned = cratesEarned(meters), poolSize = pool(t, p).items.length;
+  const points = cratePoints(p), earned = cratesEarned(points), poolSize = pool(t, p).items.length;
   // `complete`: nothing new left. Apps with duplicates open crates anyway (`dupes`).
-  // `meters` is the Kistenstrecke (with Tagesbonus), so older apps draw the bar to `nextAt` right;
-  // `runMeters`, `bonusMeters` and `bonusOpen` came with `runnerDailyBonus`.
+  // `meters`, `previousAt` and `nextAt` are crate points since `runnerCratePoints` (`unit`), so older
+  // apps still draw their bar and count their crates right (only their texts say "m");
+  // `runMeters` stays the real metres, `bonusMeters` and `missionMeters` what was earned in metres
+  // before (they grow no more).
   return {
-    meters, earned, opened: p.opened, crates: Math.max(0, earned - p.opened), previousAt: crateMilestone(earned), nextAt: crateMilestone(earned + 1), poolSize, complete: poolSize === 0, ensembleCrates: ensembleCrates(p), dupes: true,
+    meters: points, earned, opened: p.opened, crates: Math.max(0, earned - p.opened), previousAt: crateMilestone(earned), nextAt: crateMilestone(earned + 1), poolSize, complete: poolSize === 0, ensembleCrates: ensembleCrates(p), dupes: true,
     runMeters: p.meters, bonusMeters: p.bonusMeters ?? 0, bonusOpen: bonusOpen(p, t.clock()),
-    // Added with `runnerMissions`: crate metres from missions and Missionskisten waiting.
+    // Added with `runnerMissions`: Missionskisten waiting.
     missionMeters: p.missionMeters ?? 0, missionCrates: missionCrates(p),
     // Added with `runnerEventCrates`: Termin-Kisten waiting.
     eventCrates: waitingEventCrates(t, p.personId).length,
+    // Added with `runnerCratePoints`: the crate points and where they come from (`base`: moved over
+    // from the metres before; `runs`: the points of every run since; `bonus`: Tagesbonus; `missions`).
+    unit: 'points',
+    points: { total: points, base: p.basePoints ?? 0, runs: p.points ?? 0, bonus: p.bonusPoints ?? 0, missions: p.missionPoints ?? 0 },
   };
 }
 
@@ -501,8 +672,12 @@ export function statsView(t, p) {
   const score = t.store.get('runnerScores', p.personId), rounds = score?.rounds ?? 0;
   const deaths = runnerObstacleKinds.map(kind => ({ kind, count: p.deaths?.[kind] ?? 0 })).filter(x => x.count > 0).sort((x, y) => y.count - x.count || runnerObstacleKinds.indexOf(x.kind) - runnerObstacleKinds.indexOf(y.kind));
   const counted = Object.values(p.deaths ?? {}).reduce((a, b) => a + b, 0);
-  // `meters`: real metres only; the Tagesbonus is listed apart (`bonusMeters`).
-  return { rounds, best: score?.best ?? 0, meters: p.meters, creditedMeters: p.creditedMeters ?? 0, bonusMeters: p.bonusMeters ?? 0, missionMeters: p.missionMeters ?? 0, deaths, unknown: p.deaths?.unknown ?? 0, untracked: Math.max(0, rounds - counted) };
+  // `meters`: real metres only; the Tagesbonus is listed apart (`bonusMeters`). The crate points
+  // (`runnerCratePoints`) apart as well: `basePoints` moved over from `crateMeters` before.
+  return {
+    rounds, best: score?.best ?? 0, meters: p.meters, creditedMeters: p.creditedMeters ?? 0, bonusMeters: p.bonusMeters ?? 0, missionMeters: p.missionMeters ?? 0, deaths, unknown: p.deaths?.unknown ?? 0, untracked: Math.max(0, rounds - counted),
+    points: p.points ?? 0, bonusPoints: p.bonusPoints ?? 0, missionPoints: p.missionPoints ?? 0, basePoints: p.basePoints ?? 0, crateMeters: p.crateMetersBefore?.meters ?? 0,
+  };
 }
 
 // Ensemble rewards come apart from `items`, so older apps neither count nor show them; only those
@@ -540,6 +715,8 @@ function view(t, p, roles = false, unique = false) {
     ...(c.roleFigures ? { roleFigures: true } : {}),
     // Added with `runnerUniqueFigures`: per play the progress towards its unique figure.
     ...(unique ? { uniqueFigures: uniqueView(c, p, all) } : {}),
+    // Added with `runnerCrateTargets`: what a crate of the own runs can be opened as.
+    crateTargets: crateTargetsView(c, owned, open),
   };
   return roles ? plain : olderAppView(c, plain, p, owned);
 }
@@ -561,27 +738,33 @@ export function runMeters(b, elapsedMs, maxMeters, { slackSeconds, tolerance }) 
 
 /**
  * Adds a finished run to the person's progress and to the ensemble (inside runnerScore's transaction).
- * The first run of the Berlin calendar day of [at] with more than 0 m also brings its metres again as
- * Tagesbonus, for the crates only; the ensemble gets the real metres.
+ * Its points ([run].points, checked by `runPoints`; else its score) count for the crates, its metres
+ * for the statistics and the ensemble. The first run of the Berlin calendar day of [at] with more
+ * than 0 m also brings its points again as Tagesbonus, for the crates only.
  */
 export function recordRun(t, personId, meters, hitBy, at = t.clock(), run = {}) {
   // First: on its first use the shared distance counts what was run before, without this run.
   ensembleState(t, credit);
-  const p = countSection(t, runnerProgress(t, personId), meters, credit), before = cratesEarned(crateMeters(p));
+  const p = countSection(t, runnerProgress(t, personId), meters, credit), before = cratesEarned(cratePoints(p));
+  const points = run.points ?? run.score ?? meters;
   const kind = runnerObstacleKinds.includes(hitBy) ? hitBy : 'unknown';
-  const bonus = meters > 0 && bonusOpen(p, at) ? meters : 0;
+  const daily = meters > 0 && bonusOpen(p, at), bonus = daily ? points : 0;
   const reachedNow = addEnsembleMeters(t, meters, credit);
-  // Tagesmissionen (runner-missions.mjs): their crate metres and the Missionskiste, never the ensemble's.
+  // Tagesmissionen (runner-missions.mjs): their crate points and the Missionskiste, never the ensemble's.
   const mission = recordMissionRun(t, personId, { meters, score: run.score ?? meters, stats: run.stats ?? null, statsSent: run.statsSent === true, at });
   const next = grantEnsembleCrates(t, t.store.put('runnerProgress', personId, {
-    ...p, meters: p.meters + meters, deaths: { ...p.deaths, [kind]: (p.deaths?.[kind] ?? 0) + 1 },
-    ...(bonus ? { bonusMeters: (p.bonusMeters ?? 0) + bonus, bonusDay: berlinDay(at.toISOString()) } : {}),
-    ...(mission.rewardMeters ? { missionMeters: (p.missionMeters ?? 0) + mission.rewardMeters } : {}),
+    ...p, meters: p.meters + meters, points: (p.points ?? 0) + points, deaths: { ...p.deaths, [kind]: (p.deaths?.[kind] ?? 0) + 1 },
+    ...(daily ? { bonusPoints: (p.bonusPoints ?? 0) + bonus, bonusDay: berlinDay(at.toISOString()) } : {}),
+    ...(mission.rewardPoints ? { missionPoints: (p.missionPoints ?? 0) + mission.rewardPoints } : {}),
     ...(mission.crate ? { missionCrates: (p.missionCrates ?? 0) + mission.crate } : {}),
   }), credit);
   const progress = progressView(t, next), ensemble = ensembleRunView(t, meters, reachedNow, credit);
+  // `gained` and `bonus` stay metres for older apps ("+812 m · Tagesbonus +812 m"); `missionBonus`
+  // and `gainedPoints` are crate points.
   return {
-    ...progress, gained: meters, bonus, missionBonus: mission.rewardMeters, newCrates: progress.earned - before, ...(ensemble ? { ensemble } : {}),
+    ...progress, gained: meters, bonus: daily ? meters : 0, missionBonus: mission.rewardPoints, newCrates: progress.earned - before,
+    gainedPoints: { run: points, bonus, missions: mission.rewardPoints },
+    ...(ensemble ? { ensemble } : {}),
     ...(mission.record ? { missions: missionsView(t, mission.record, mission.completed) } : {}),
   };
 }
@@ -618,16 +801,29 @@ function duplicate(p, draw, shiny) {
  * one of `eventId`, else the earliest waiting; see runner-event-crates.mjs). Each kind shines with
  * its own chance (`shinyChanceOf`). `roles: true`: the app knows role figures; for older apps a won
  * role figure shows as a role of the person's figure (runner-role-figures.mjs).
+ *
+ * `target` (`runnerCrateTargets`, only for a crate of the own runs and with `dupes`): `'random'` or
+ * none is the Zufallskiste as before (all items; shine chance `costume`), a play's id or `'tech'`
+ * draws only from that pool (shine chance `targeted`), the rarity weights among the rarities in it.
+ * A complete pool still opens and brings a duplicate (shine or gage), like a complete rarity.
  */
 export function openCrate(t, uid, requestId, b = {}) {
   const dupes = b?.dupes === true, ensemble = b?.crate === 'ensemble', mission = b?.crate === 'mission', event = b?.crate === 'event', roles = b?.roles === true, unique = b?.unique === true;
+  const targetId = b?.target ?? null;
   if (event && !dupes) fail(400, 'Termin-Kisten gibt es nur in der neuen App.');
   if (mission && !dupes) fail(400, 'Missionskisten gibt es nur in der neuen App.');
   if (ensemble && !dupes) fail(400, 'Ensemble-Kisten gibt es nur in der neuen App.');
+  if (targetId !== null) {
+    if (typeof targetId !== 'string') fail(400, 'Diese Kiste gibt es nicht.', 'unknown_target');
+    if (event || mission || ensemble) fail(400, 'Nur Kostümkisten lassen sich gezielt wählen.', 'unknown_target');
+    if (!dupes && targetId !== 'random') fail(400, 'Gezielte Kisten gibt es nur in der neuen App.');
+  }
   return once(t, uid, crateRequestPrefix, requestId, 'runner.crate', a => {
     const c = catalog(t), p = progressOf(t, a.personId);
+    const target = targetId && targetId !== 'random' ? c.crateTargets.find(x => x.id === targetId && x.kind !== 'random') : null;
+    if (targetId && targetId !== 'random' && !target) fail(400, 'Diese Kiste gibt es nicht.', 'unknown_target');
     const eventCrate = event ? nextEventCrate(t, a.personId, b.eventId ?? null) : null;
-    if (event ? !eventCrate : mission ? missionCrates(p) <= 0 : ensemble ? ensembleCrates(p) <= 0 : cratesEarned(crateMeters(p)) - p.opened <= 0) fail(409, event ? 'Gerade ist keine Termin-Kiste da.' : mission ? 'Gerade ist keine Missionskiste da.' : ensemble ? 'Gerade ist keine Ensemble-Kiste da.' : 'Gerade ist keine Kostümkiste da. Lauf weiter!', 'no_crate');
+    if (event ? !eventCrate : mission ? missionCrates(p) <= 0 : ensemble ? ensembleCrates(p) <= 0 : cratesEarned(cratePoints(p)) - p.opened <= 0) fail(409, event ? 'Gerade ist keine Termin-Kiste da.' : mission ? 'Gerade ist keine Missionskiste da.' : ensemble ? 'Gerade ist keine Ensemble-Kiste da.' : 'Gerade ist keine Kostümkiste da. Lauf weiter!', 'no_crate');
     if (!dupes) {
       // Older apps: only what is still missing; with nothing left the crates stay closed.
       const { items: candidates, open } = pool(t, p);
@@ -638,17 +834,24 @@ export function openCrate(t, uid, requestId, b = {}) {
       return { result: roles ? result : olderAppOpening(c, result), subject: item.id };
     }
     const owned = ownedIds(t, p), open = openFor(c, p, owned);
-    const draw = drawWithDupes(c, owned, t.random, open);
+    const items = target ? c.targetItems.get(target.id) : c.collectible;
+    if (target && !items.some(x => x.drawnBy.some(r => open.has(r)))) {
+      // Everything of it still locked (e.g. only Legacy figures): the rarity's hint.
+      fail(409, c.rarity.get(items[0]?.rarity)?.hint ?? 'Diese Kiste ist noch gesperrt.', 'target_locked');
+    }
+    const draw = drawWithDupes(c, owned, t.random, open, items);
     if (!draw) fail(409, 'Im Fundus ist noch nichts.', 'wardrobe_complete');
     const crate = event ? 'event' : mission ? 'mission' : ensemble ? 'ensemble' : 'costume';
-    const shiny = t.random() < shinyChanceOf(c, crate);
+    // The Zufallskiste keeps the shine chance of the own crates (`costume`); an aimed one has `targeted`.
+    const shiny = t.random() < shinyChanceOf(c, target ? 'targeted' : crate);
     const { next, outcome } = draw.duplicate ? duplicate(p, draw, shiny)
       : { next: { ...p, owned: [...list(p.owned), draw.item.id], ...(shiny ? { shiny: [...list(p.shiny), draw.item.id] } : {}) }, outcome: { type: 'new' } };
     const counted = event ? {} : mission ? { missionOpened: (p.missionOpened ?? 0) + 1 } : ensemble ? { ensembleOpened: (p.ensembleOpened ?? 0) + 1 } : { opened: p.opened + 1 };
     if (eventCrate) markEventCrateOpened(t, eventCrate, draw.item.id);
     const saved = t.store.put('runnerProgress', a.personId, settleUnlocks(t, { ...next, ...counted }));
-    const result = { item: draw.item, ...reel(t, draw.item, open), outcome: { ...outcome, duplicate: draw.duplicate, shiny, rarity: draw.tier.id, crate, ...(eventCrate ? { event: crateView(eventCrate) } : {}) }, wardrobe: view(t, saved, roles, unique) };
-    return { result: roles ? result : olderAppOpening(c, result), subject: `${draw.item.id}${draw.duplicate ? ` ${outcome.type}` : ''}${shiny ? ' shiny' : ''}` };
+    const aim = crate === 'costume' ? { target: target?.id ?? 'random' } : {};
+    const result = { item: draw.item, ...reel(t, draw.item, open, items), outcome: { ...outcome, duplicate: draw.duplicate, shiny, rarity: draw.tier.id, crate, ...aim, ...(eventCrate ? { event: crateView(eventCrate) } : {}) }, wardrobe: view(t, saved, roles, unique) };
+    return { result: roles ? result : olderAppOpening(c, result), subject: `${draw.item.id}${draw.duplicate ? ` ${outcome.type}` : ''}${shiny ? ' shiny' : ''}${target ? ` ${target.id}` : ''}` };
   });
 }
 
@@ -709,10 +912,10 @@ export function uniqueSeen(t, uid, b) {
 }
 
 /** Cards for the opening animation; only the one at `winnerIndex` was drawn, the rest is show. */
-function reel(t, item, open) {
+function reel(t, item, open, pool = catalog(t).collectible) {
   const { reelLength, reelWinner, fillerFlatten, nearMissChance } = runnerUnlocks, c = catalog(t);
-  // Only what could be won: locked rarities are not teased.
-  const all = c.collectible.filter(x => x.drawnBy.some(r => open.has(r)));
+  // Only what could be won (from this crate's pool): locked rarities are not teased.
+  const all = pool.filter(x => x.drawnBy.some(r => open.has(r)));
   const cards = Array.from({ length: reelLength }, () => drawItem(c, all, t.random, fillerFlatten, open).id);
   cards[reelWinner] = item.id;
   const rarest = all.filter(x => x.id !== item.id).sort((x, y) => c.rarity.get(y.rarity).rank - c.rarity.get(x.rarity).rank)[0];

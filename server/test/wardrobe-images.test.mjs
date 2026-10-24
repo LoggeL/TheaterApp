@@ -15,6 +15,10 @@ const kinds = [
   { name: 'obstacle set', test: /^obstacles-.+\.webp$/, ...atlas, budget: 120 << 10 },
   { name: 'collectible set', test: /^collectibles-.+\.webp$/, ...atlas, budget: 40 << 10 },
   { name: 'backdrop', test: /^backdrop-.+\.webp$/, width: 1024, height: 603, alpha: false, budget: 64 << 10 },
+  // The crate choice (`runnerCrateTargets`): closed and open crate on the same canvas, the open one
+  // with its lid above, and a small sprite of the particles they throw.
+  { name: 'crate particles', test: /^crate-.+-fx\.webp$/, width: 96, height: 96, alpha: true, budget: 8 << 10 },
+  { name: 'crate', test: /^crate-.+\.webp$/, width: 512, height: 512, alpha: true, budget: 72 << 10 },
 ];
 
 /** The chunks of a WebP file by tag and its canvas size. */

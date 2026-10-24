@@ -63,7 +63,9 @@ test('the shared distance starts with everything run before, credit included, an
   store.put('runnerScores', kim, { personId: kim, best: 10, bestAt: null, rounds: 4, lastPlayedAt: null });
   assert.equal(app.runnerWardrobe('sam').ensemble.meters, 500 + 4 * 150);
   // Kim's first wardrobe credits Kim, but the ensemble had those metres already.
-  assert.equal(app.runnerWardrobe('kim').progress.meters, 600);
+  assert.equal(app.runnerWardrobe('kim').progress.runMeters, 600);
+  // As crate points: 600 of the 2000 m to the first crate are the same share of its 3000 points.
+  assert.equal(app.runnerWardrobe('kim').progress.points.base, 900);
   assert.equal(app.runnerWardrobe('kim').ensemble.meters, 1100);
   const run = play('kim', 700);
   assert.equal(run.progress.ensemble.gained, 700);
@@ -112,7 +114,9 @@ test('the chance of a shine is set per crate kind', t => {
   const sure = loadCatalog({ rarities, items: items(), ensemble, dupes: { shinyChance: { costume: 0, ensemble: 1 } } }, fixtures);
   assert.equal(shinyChanceOf(sure, 'ensemble'), 1);
   assert.equal(shinyChanceOf(sure, 'mission'), 0, 'a kind not listed has the chance of costume');
-  assert.equal(shinyChanceOf(bundledCatalog(), 'costume'), 0.03);
+  // The Zufallskiste of the own runs shines more often than an aimed crate (runnerCrateTargets).
+  assert.equal(shinyChanceOf(bundledCatalog(), 'costume'), 0.05);
+  assert.equal(shinyChanceOf(bundledCatalog(), 'targeted'), 0.03);
   assert.equal(shinyChanceOf(bundledCatalog(), 'ensemble'), 0.03);
   const { app, store, sam, play } = setup(t, { catalog: sure });
   play('sam', 1200);

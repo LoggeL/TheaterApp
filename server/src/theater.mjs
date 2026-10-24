@@ -7,7 +7,7 @@ import { feedbackList, feedbackTicketsMigrationId, forgetFeedbackAccount, forget
 import { checkRunStats, missions, rerollMission } from './runner-missions.mjs';
 import { findRound, finishRound, startRound } from './runner-rounds.mjs';
 import { autoCheckins, eventCrateNotice, forgetEventCrates, settleCheckinCrate } from './runner-event-crates.mjs';
-import { buyItem, bundledCatalog, ensembleSeen, openCrate, recordRun, runMeters, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
+import { buyItem, bundledCatalog, ensembleSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 
 // Machine-readable reasons next to the German message; clients branch on `code`, never on the text.
@@ -39,7 +39,7 @@ export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
 export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -57,8 +57,9 @@ export { feedbackMaxLength, feedbackPerHour } from './feedback-tickets.mjs';
 // "Bühnenlauf", an endless runner: one best score per person, shared with all members.
 // The run gets faster until failing is unavoidable. Points are metres plus pickups; the client
 // places at most `pickupPointsPerMeter` per metre. A score needs a run the server started and may
-// not exceed what the measured run time allows (see `runnerMaxScore`). Metres count towards
-// costume crates (`runnerUnlocks`, see runner-wardrobe.mjs).
+// not exceed what the measured run time allows (see `runnerMaxScore`) nor what its metres can hold
+// (`maxRunPoints`). Points count towards costume crates (`runnerUnlocks`, see runner-wardrobe.mjs),
+// metres towards the statistics and the Ensemble-Strecke.
 export const stageRunner = Object.freeze({ startSpeed: 0.55, acceleration: 0.01, maxSpeed: 2.4, metersPerUnit: 10, pickupPointsPerMeter: 6, tolerance: 1.15, slackSeconds: 5, slackPoints: 60, roundTtlMs: 30 * 60000, leaderboardSize: 10,
   // No cooldown, no daily cap, no diminishing returns: grinding is fine. Only a spam guard no person
   // reaches: the quickest crash comes after 2.6 s (the first obstacle stands 1.5 stage widths
@@ -438,12 +439,12 @@ export class Theater {
       const { repeat, elapsed } = findRound(this, a.personId, b.roundId, b, at, stageRunner);
       if (repeat) return { score: b.score, improved: repeat.improved, leaderboard: this.runnerBoard(a), progress: repeat.progress };
       if (b.score > runnerMaxScore(elapsed)) fail(400, 'So viele Punkte sind in dieser Zeit nicht möglich.', 'implausible');
-      const meters = runMeters(b, elapsed, runnerMaxMeters, stageRunner);
+      const meters = runMeters(b, elapsed, runnerMaxMeters, stageRunner), points = runPoints(b, meters);
       // Before the round is counted: a first progress record credits only the earlier runs.
       // Tagesmissionen: the run's statistics only count if they are plausible; the run counts anyway.
       const statsSent = b.missionStats !== undefined && b.missionStats !== null;
       const stats = checkRunStats(b.missionStats, { meters, score: b.score, metersSent: Number.isInteger(b.meters) });
-      const progress = recordRun(this, a.personId, meters, b.hitBy, new Date(at), { score: b.score, stats, statsSent });
+      const progress = recordRun(this, a.personId, meters, b.hitBy, new Date(at), { score: b.score, points, stats, statsSent });
       const old = this.store.get('runnerScores', a.personId), improved = b.score > (old?.best ?? 0);
       const when = new Date(at).toISOString();
       this.store.put('runnerScores', a.personId, { personId: a.personId, best: improved ? b.score : old?.best ?? 0, bestAt: improved ? when : old?.bestAt ?? null, rounds: (old?.rounds ?? 0) + 1, lastPlayedAt: when });

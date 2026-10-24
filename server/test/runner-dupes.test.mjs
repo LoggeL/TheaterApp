@@ -36,7 +36,7 @@ function setup(t, { catalog = catalogOf(), fallback = 0.99 } = {}) {
   app.session({ uid: 'sam', name: 'Sam', email: 'sam@example.invalid', email_verified: true });
   app.action('admin', { action: 'account.approve', uid: 'sam', personId, version: 1, role: 'member' }, 'm2');
   const patch = change => { app.runnerWardrobe('sam'); const p = store.get('runnerProgress', personId); store.put('runnerProgress', personId, { ...p, ...change(p) }); };
-  patch(() => ({ meters: crateMilestone(30) }));
+  patch(() => ({ points: crateMilestone(30) }));
   let key = 0;
   const open = (...roll) => { dice.push(...roll); return app.runnerOpenCrate('sam', `k${++key}`, { dupes: true }); };
   const own = (...ids) => patch(p => ({ owned: [...p.owned, ...ids] }));
@@ -49,7 +49,7 @@ test('a rarity with something missing never gives a duplicate; a complete one do
   assert.deepEqual([open(0.1, 0), open(0.1, 0)].map(r => [r.item.id, r.outcome.type, r.outcome.duplicate]), [['h1', 'new', false], ['h2', 'new', false]]);
   // Hell is complete: the same die now brings a duplicate of h1, worth hell's gage.
   const dupe = open(0.1, 0);
-  assert.deepEqual([dupe.item.id, dupe.outcome], ['h1', { type: 'gage', gage: 10, duplicate: true, shiny: false, rarity: 'hell', crate: 'costume' }]);
+  assert.deepEqual([dupe.item.id, dupe.outcome], ['h1', { type: 'gage', gage: 10, duplicate: true, shiny: false, rarity: 'hell', crate: 'costume', target: 'random' }]);
   assert.equal(dupe.reel[dupe.winnerIndex], 'h1');
   const w = view();
   assert.deepEqual(w.gage, { balance: 10, earned: 10 });
@@ -209,8 +209,8 @@ test('the bundled catalog pays gage in every rarity and keeps gold out of the sh
   const c = bundledCatalog();
   assert.deepEqual(c.rarities.map(r => r.gage), [10, 20, 30, 40, 50, 80, 200]);
   assert.deepEqual(c.rarities.filter(r => !r.buyable).map(r => r.id), ['gold']);
-  // Missionskisten (Tagesmissionen) shine a bit more often.
-  assert.deepEqual(c.dupes, { shinyChance: { costume: 0.03, ensemble: 0.03, event: 0.03, mission: 0.05 }, tradeDupes: 5, buyDupes: 10 });
+  // Missionskisten (Tagesmissionen) and the Zufallskiste shine a bit more often than an aimed crate.
+  assert.deepEqual(c.dupes, { shinyChance: { costume: 0.05, targeted: 0.03, ensemble: 0.03, event: 0.03, mission: 0.05 }, tradeDupes: 5, buyDupes: 10 });
 });
 
 test('the HTTP API opens with duplicates, trades and buys once per key', async t => {

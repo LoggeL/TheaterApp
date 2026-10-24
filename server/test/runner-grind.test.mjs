@@ -36,16 +36,16 @@ function setup(t) {
   return { store, app, personId, tick };
 }
 
-test('100 runs in a row all count in full: crate metres, statistics and the Ensemble-Strecke', t => {
+test('100 runs in a row all count in full: crate points, statistics and the Ensemble-Strecke', t => {
   const { store, app, personId, tick } = setup(t);
-  const runs = 100, meters = 400, runMs = 50000;
+  const runs = 100, meters = 400, score = 600, runMs = 50000;
   const replies = [];
   // A real session: a 400 m run takes about 47 s, then 1 s curtain and "Nochmal". Every other
   // time the next run starts before the last result has arrived.
   let round = app.runnerStart('sam').roundId;
   for (let i = 0; i < runs; i++) {
     tick(runMs);
-    const body = { roundId: round, score: meters, meters, hitBy: 'crate' };
+    const body = { roundId: round, score, meters, hitBy: 'crate' };
     if (i % 2 === 0 && i < runs - 1) {
       round = app.runnerStart('sam').roundId;
       replies.push(app.runnerScore('sam', body));
@@ -54,11 +54,13 @@ test('100 runs in a row all count in full: crate metres, statistics and the Ense
       if (i < runs - 1) { tick(1000); round = app.runnerStart('sam').roundId; }
     }
   }
-  // No diminishing returns: the 100th run brings as much as the first, for the own metres and the ensemble.
+  // No diminishing returns: the 100th run brings as much as the first, for the own points and the ensemble.
   assert.deepEqual(replies.map(r => r.progress.gained), Array(runs).fill(meters));
+  assert.deepEqual(replies.map(r => r.progress.gainedPoints.run), Array(runs).fill(score));
   assert.deepEqual(replies.map(r => r.progress.ensemble.gained), Array(runs).fill(meters));
   // The Tagesbonus only adds, on the first run of the day.
   assert.deepEqual(replies.map(r => r.progress.bonus), [meters, ...Array(runs - 1).fill(0)]);
+  assert.deepEqual(replies.map(r => r.progress.gainedPoints.bonus), [score, ...Array(runs - 1).fill(0)]);
 
   const w = app.runnerWardrobe('sam'), real = runs * meters;
   assert.equal(store.get('runnerScores', personId).rounds, runs);
@@ -67,10 +69,12 @@ test('100 runs in a row all count in full: crate metres, statistics and the Ense
   assert.deepEqual(w.stats.deaths, [{ kind: 'crate', count: runs }]);
   assert.equal(w.stats.untracked, 0);
   assert.equal(w.progress.runMeters, real);
-  // Kistenstrecke: every real metre plus the bonuses, nothing capped.
-  assert.equal(w.progress.meters, real + meters + w.progress.missionMeters);
-  assert.equal(w.progress.earned, cratesEarned(real + meters + w.progress.missionMeters));
-  assert.ok(w.progress.earned >= cratesEarned(real));
+  // Crate points: every run's points plus the bonuses, nothing capped.
+  const points = runs * score;
+  assert.equal(w.progress.points.runs, points);
+  assert.equal(w.progress.meters, points + score + w.progress.points.missions);
+  assert.equal(w.progress.earned, cratesEarned(points + score + w.progress.points.missions));
+  assert.ok(w.progress.earned >= cratesEarned(points));
   // The ensemble got every metre: 40 km reach 1, 2, 5, 15, 25 and 35 km, each with its crate.
   assert.equal(w.ensemble.meters, real);
   assert.equal(w.ensemble.crates, 6);

@@ -45,7 +45,7 @@ function setup(t, { start = '2026-10-24T08:00:00Z', random = 0.5 } = {}) {
   const give = (personId, missions, extra = {}) => {
     app.runnerMissions('sam');
     const rec = store.get('runnerMissions', personId);
-    store.put('runnerMissions', personId, { ...rec, missions: missions.map((m, i) => ({ slot: missionSlots[i], reward: missionRules.slots[missionSlots[i]].reward, progress: 0, done: false, ...m })), ...extra });
+    store.put('runnerMissions', personId, { ...rec, missions: missions.map((m, i) => ({ slot: missionSlots[i], reward: missionRules.slots[missionSlots[i]].reward, unit: 'points', progress: 0, done: false, ...m })), ...extra });
   };
   return { store, app, clock, sam, play, give };
 }
@@ -70,7 +70,8 @@ test('three missions a day, easy to hard, never two of a type, the same for the 
   assert.equal(view.day, '2026-10-24');
   assert.deepEqual(view.missions.map(m => m.slot), ['easy', 'medium', 'hard']);
   assert.equal(new Set(view.missions.map(m => m.type)).size, 3);
-  assert.deepEqual(view.missions.map(m => m.reward), [300, 600, 1000]);
+  // Crate points: the 300, 600 and 1000 crate metres of before at 1.5 points per metre.
+  assert.deepEqual(view.missions.map(m => [m.reward, m.rewardUnit]), [[450, 'points'], [900, 'points'], [1500, 'points']]);
   assert.ok(view.missions.every(m => m.text && m.unit && m.progress === 0 && !m.done));
   assert.equal(view.rerollAvailable, true);
   assert.deepEqual(app.runnerMissions('sam'), view);
@@ -220,35 +221,46 @@ test('implausible statistics count for no mission, the run counts as before', t 
   assert.deepEqual(next.missions.missions.map(m => m.done), [true, true, true]);
 });
 
-test('rewards: crate metres once per mission, the Missionskiste for all three, not for the ensemble', t => {
+test('rewards: crate points once per mission, the Missionskiste for all three, not for the ensemble', t => {
   const { app, store, sam, play, give } = setup(t);
   give(sam, [{ type: 'distance', target: 100 }, { type: 'dailyDistance', target: 500 }, { type: 'collect', kind: 'star', target: 1 }]);
   const first = play(300);
-  assert.equal(first.missionBonus, 300);
+  assert.equal(first.missionBonus, 450);
+  assert.deepEqual(first.gainedPoints, { run: 300, bonus: 300, missions: 450 });
   assert.deepEqual(first.missions.completed, ['easy']);
   assert.equal(first.missions.missions[0].justDone, true);
   assert.equal(first.missions.missions[1].progress, 300);
   // Again over 100 m: no second reward.
   const second = play(250);
-  assert.equal(second.missionBonus, 600);
+  assert.equal(second.missionBonus, 900);
   assert.deepEqual(second.missions.completed, ['medium']);
-  assert.equal(second.missionMeters, 900);
+  assert.equal(second.points.missions, 1350);
+  assert.equal(second.missionMeters, 0, 'no more crate metres');
   assert.equal(second.missionCrates, 0);
   const third = play(200, { stats: { star: 1, ground: 0, ceiling: 0 } });
-  assert.equal(third.missionBonus, 1000);
+  assert.equal(third.missionBonus, 1500);
   assert.equal(third.missions.allDone, true);
   assert.equal(third.missions.crate.earned, true);
   assert.equal(third.missionCrates, 1);
   assert.equal(third.missions.crate.shinyChance, 0.05);
-  // More runs today bring neither metres nor a second crate.
+  // More runs today bring neither points nor a second crate.
   const more = play(900, { stats: { star: 2, ground: 0, ceiling: 0 } });
-  assert.deepEqual([more.missionBonus, more.missionMeters, more.missionCrates], [0, 1900, 1]);
-  // Crate metres: real + Tagesbonus (300) + missions; statistics and ensemble: real metres only.
+  assert.deepEqual([more.missionBonus, more.points.missions, more.missionCrates], [0, 2850, 1]);
+  // Crate points: the runs' points + Tagesbonus (300) + missions; statistics and ensemble: real metres only.
   const w = app.runnerWardrobe('sam');
-  assert.equal(w.progress.meters, 1650 + 300 + 1900);
-  assert.deepEqual([w.stats.meters, w.stats.missionMeters], [1650, 1900]);
+  assert.equal(w.progress.meters, (300 + 250 + 225 + 950) + 300 + 2850);
+  assert.deepEqual([w.stats.meters, w.stats.missionPoints], [1650, 2850]);
   assert.equal(w.ensemble.meters, 1650);
-  assert.equal(store.get('runnerProgress', sam).missionMeters, 1900);
+  assert.equal(store.get('runnerProgress', sam).missionPoints, 2850);
+});
+
+test('a mission made before crate points pays its metres at 1.5 points per metre', t => {
+  const { app, sam, play, give } = setup(t);
+  // Made on the day of the update, before it: the reward was crate metres and has no unit.
+  give(sam, [{ type: 'distance', target: 100, reward: 300, unit: undefined }, { type: 'distance', target: 5000, reward: 600, unit: undefined }]);
+  assert.deepEqual(app.runnerMissions('sam').missions.map(m => m.reward), [450, 900]);
+  assert.equal(play(300).missionBonus, 450);
+  assert.equal(app.runnerWardrobe('sam').progress.points.missions, 450);
 });
 
 test('the Missionskiste opens like a crate, with the shine chance of its kind', t => {
