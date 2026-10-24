@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Store } from '../src/store.mjs';
 import { Theater } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
-import { bundledCatalog, loadCatalog } from '../src/runner-wardrobe.mjs';
+import { bundledCatalog, loadCatalog, shinyChanceOf } from '../src/runner-wardrobe.mjs';
 import { milestoneAt, reachedMilestones } from '../src/runner-ensemble.mjs';
 
 const rarities = [
@@ -94,17 +94,34 @@ test('a reached milestone gives every active member one Ensemble-Kiste, once', t
   assert.equal(sam > 0, true);
 });
 
-test('Ensemble-Kisten always shine and are counted apart from the own crates', t => {
+test('Ensemble-Kisten shine with their own chance and are counted apart from the own crates', t => {
   const { app, play } = setup(t);
   play('sam', 1200);
   assert.throws(() => app.runnerOpenCrate('sam', 'e0', { crate: 'ensemble' }), { status: 400 });
+  // The dice show 0.99: above the 3 % of an Ensemble-Kiste, no shine.
   const opened = app.runnerOpenCrate('sam', 'e1', { dupes: true, crate: 'ensemble' });
-  assert.deepEqual([opened.outcome.shiny, opened.outcome.crate, opened.outcome.type], [true, 'ensemble', 'new']);
-  assert.deepEqual(opened.wardrobe.shiny, [opened.item.id]);
+  assert.deepEqual([opened.outcome.shiny, opened.outcome.crate, opened.outcome.type], [false, 'ensemble', 'new']);
+  assert.deepEqual(opened.wardrobe.shiny, []);
   assert.equal(opened.wardrobe.ensemble.crates, 0);
   assert.equal(opened.wardrobe.progress.opened, 0, 'the own crates are untouched');
   assert.deepEqual(app.runnerOpenCrate('sam', 'e1', { dupes: true, crate: 'ensemble' }), opened);
   assert.throws(() => app.runnerOpenCrate('sam', 'e2', { dupes: true, crate: 'ensemble' }), { status: 409, code: 'no_crate' });
+});
+
+test('the chance of a shine is set per crate kind', t => {
+  const sure = loadCatalog({ rarities, items: items(), ensemble, dupes: { shinyChance: { costume: 0, ensemble: 1 } } }, fixtures);
+  assert.equal(shinyChanceOf(sure, 'ensemble'), 1);
+  assert.equal(shinyChanceOf(sure, 'mission'), 0, 'a kind not listed has the chance of costume');
+  assert.equal(shinyChanceOf(bundledCatalog(), 'costume'), 0.03);
+  assert.equal(shinyChanceOf(bundledCatalog(), 'ensemble'), 0.03);
+  const { app, store, sam, play } = setup(t, { catalog: sure });
+  play('sam', 1200);
+  assert.equal(app.runnerOpenCrate('sam', 'e1', { dupes: true, crate: 'ensemble' }).outcome.shiny, true);
+  store.put('runnerProgress', sam, { ...store.get('runnerProgress', sam), meters: 100000 });
+  assert.equal(app.runnerOpenCrate('sam', 'c1', { dupes: true }).outcome.shiny, false);
+  // Shiny items won before (when Ensemble-Kisten always shone) stay shiny.
+  app.runnerCatalog = catalogOf();
+  assert.ok(app.runnerWardrobe('sam').shiny.length === 1);
 });
 
 test('a reward is everybody\'s once reached, as soon as its picture is there', t => {

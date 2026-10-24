@@ -4,6 +4,9 @@ import { compareProductionsNewestFirst } from './production-order.mjs';
 import { leadPushKinds, memberPushKinds } from './push-kinds.mjs';
 import { migrateSharedSpeakers, sharedSpeakersMigrationId, splitSharedSpeakers } from './shared-speakers.mjs';
 import { feedbackList, feedbackTicketsMigrationId, forgetFeedbackAccount, forgetFeedbackPerson, migrateFeedbackTickets, setFeedbackStatus, submitFeedback } from './feedback-tickets.mjs';
+import { checkRunStats, missions, rerollMission } from './runner-missions.mjs';
+import { findRound, finishRound, startRound } from './runner-rounds.mjs';
+import { autoCheckins, eventCrateNotice, forgetEventCrates, settleCheckinCrate } from './runner-event-crates.mjs';
 import { buyItem, bundledCatalog, ensembleSeen, openCrate, recordRun, runMeters, secureRandom, selectOutfit, skinFile, tradeGage, wardrobe } from './runner-wardrobe.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -36,7 +39,7 @@ export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
 export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -56,7 +59,12 @@ export { feedbackMaxLength, feedbackPerHour } from './feedback-tickets.mjs';
 // places at most `pickupPointsPerMeter` per metre. A score needs a run the server started and may
 // not exceed what the measured run time allows (see `runnerMaxScore`). Metres count towards
 // costume crates (`runnerUnlocks`, see runner-wardrobe.mjs).
-export const stageRunner = Object.freeze({ startSpeed: 0.55, acceleration: 0.01, maxSpeed: 2.4, metersPerUnit: 10, pickupPointsPerMeter: 6, tolerance: 1.15, slackSeconds: 5, slackPoints: 60, roundTtlMs: 30 * 60000, roundsPerHour: 60, leaderboardSize: 10 });
+export const stageRunner = Object.freeze({ startSpeed: 0.55, acceleration: 0.01, maxSpeed: 2.4, metersPerUnit: 10, pickupPointsPerMeter: 6, tolerance: 1.15, slackSeconds: 5, slackPoints: 60, roundTtlMs: 30 * 60000, leaderboardSize: 10,
+  // No cooldown, no daily cap, no diminishing returns: grinding is fine. Only a spam guard no person
+  // reaches: the quickest crash comes after 2.6 s (the first obstacle stands 1.5 stage widths
+  // ahead), then the curtain takes 1 s and "Nochmal" a tap, so a player starts at most 3 runs in
+  // 10 s. The start history keeps just this window.
+  startBurst: 20, startWindowMs: 10000 });
 /** Metres a run can cover in `seconds`: the speed (stage heights per second) grows linearly up to its maximum. */
 export const runnerMaxMeters = seconds => {
   const { startSpeed: v0, acceleration: a, maxSpeed: v1, metersPerUnit } = stageRunner, t = Math.max(0, seconds), tc = (v1 - v0) / a;
@@ -140,9 +148,13 @@ const initials = name => name.split(/\s+/).filter(Boolean).slice(0, 2).map(n => 
 export class Theater {
   // `runnerCatalog` (see runner-wardrobe.mjs `loadCatalog`) and `random` replace the bundled
   // wardrobe and the secure random numbers of crate openings in tests.
-  constructor(store, { bootstrapEmail = '', pushEnabled = false, emailEnabled = false, clock = () => new Date(), runnerCatalog = null, random = secureRandom } = {}) {
+  constructor(store, { bootstrapEmail = '', pushEnabled = false, emailEnabled = false, clock = () => new Date(), runnerCatalog = null, random = secureRandom, missionRules, attendanceRules } = {}) {
     this.store = store; this.bootstrapEmail = bootstrapEmail.trim().toLowerCase(); this.pushEnabled = pushEnabled; this.emailEnabled = emailEnabled; this.clock = clock;
     this.runnerCatalog = runnerCatalog ?? bundledCatalog(); this.random = random;
+    // Tagesmissionen (runner-missions.mjs); tests of other parts may switch them off with null.
+    this.missionRules = missionRules;
+    // Termin-Kisten: when attendance is adopted and the recorders reminded (runner-event-crates.mjs).
+    this.attendanceRules = attendanceRules;
     if (!store.get('settings', 'personRolesInitialized')) store.transaction(() => {
       for (const [i, name] of initialRoles.entries()) store.put('personRoles', `role-${i + 1}`, { id: `role-${i + 1}`, name, version: 1 });
       store.put('settings', 'personRolesInitialized', { at: now() });
@@ -243,6 +255,8 @@ export class Theater {
     });
     const own = responses.filter(r => r.personId === a.personId);
     const checkinsByEvent = {}, memberAttendanceByEvent = {}, arrivalsByEvent = {};
+    // Attendance adopted from the own commitments (Termin-Kisten), for the check-in view.
+    const autoCheckinsByEvent = events ? autoCheckins(this.store) : {};
     if (events) {
       for (const c of this.store.all('checkins')) (checkinsByEvent[c.eventId] ??= {})[c.personId] = c.present;
       for (const r of responses) {
@@ -251,7 +265,7 @@ export class Theater {
       }
     }
     const receipts = this.store.all('receipts').filter(r => r.personId === a.personId);
-    return { apiVersion: 1, user: this.profile(a), events: visibleEvents, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a, admin ? nudges : null), slotPools: this.slotPools(a, nudges), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, memberAttendanceByEvent, implicitAttendanceByEvent, arrivalsByEvent, checkinVersions: events ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) || m.authorId === a.personId, addressedToMe: this.messageAddresses(member, m), ...(admin ? { ...this.messageReach(m), ...this.reminded(nudges, 'message', m.id) } : {}) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true, features: [...apiFeatures] }, serverTime: now() };
+    return { apiVersion: 1, user: this.profile(a), events: visibleEvents, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a, admin ? nudges : null), slotPools: this.slotPools(a, nudges), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, autoCheckinsByEvent, memberAttendanceByEvent, implicitAttendanceByEvent, arrivalsByEvent, checkinVersions: events ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) || m.authorId === a.personId, addressedToMe: this.messageAddresses(member, m), ...(admin ? { ...this.messageReach(m), ...this.reminded(nudges, 'message', m.id) } : {}) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true, features: [...apiFeatures] }, serverTime: now() };
   }
   /** Slot pools ("Terminfinder"): invited people book one time slot each. */
   slotPools(a, nudges = can(a, 'events') ? this.nudges() : null) {
@@ -402,46 +416,53 @@ export class Theater {
   submitFeedback(uid, b) { return submitFeedback(this, uid, b); }
   feedbackList(uid) { return feedbackList(this, uid); }
   feedbackStatus(uid, feedbackId, b) { return setFeedbackStatus(this, uid, feedbackId, b); }
-  /** Starts a run of the stage runner for the caller; at most `roundsPerHour` per person. */
+  /**
+   * Starts a run of the stage runner for the caller. No cooldown: only a spam guard of `startBurst`
+   * starts per `startWindowMs`; the start history keeps no more than that window. Earlier runs stay
+   * open (see runner-rounds.mjs), so a quick "Nochmal" does not lose the last result.
+   */
   runnerStart(uid) {
     return this.store.transaction(() => {
-      const a = this.account(uid), at = this.clock(), since = +at - 3600000;
-      const previous = this.store.get('runnerRounds', a.personId);
-      const starts = list(previous?.starts).filter(x => Date.parse(x) > since);
-      if (starts.length >= stageRunner.roundsPerHour) fail(429, 'Gerade wurde sehr oft gespielt. Bitte später noch einmal versuchen.', 'rate_limited');
-      const round = { personId: a.personId, roundId: id(), startedAt: at.toISOString(), starts: [...starts, at.toISOString()] };
-      this.store.put('runnerRounds', a.personId, round);
-      return { roundId: round.roundId, startedAt: round.startedAt };
+      const a = this.account(uid), { roundId, startedAt } = startRound(this, a.personId, this.clock(), stageRunner);
+      return { roundId, startedAt };
     });
   }
-  /** Ends the caller's open run with its score and keeps the person's best score. */
+  /**
+   * Ends one of the caller's open runs with its score and keeps the person's best score. The same
+   * result sent again gets the first answer and counts no second time.
+   */
   runnerScore(uid, b) {
     return this.store.transaction(() => {
       const a = this.account(uid), at = +this.clock();
       if (!Number.isInteger(b.score) || b.score < 0) fail(400, 'Ungültiger Punktestand.', 'implausible');
-      const round = this.store.get('runnerRounds', a.personId);
-      if (typeof b.roundId !== 'string' || !round?.roundId || round.roundId !== b.roundId) fail(409, 'Dieser Lauf ist nicht bekannt.', 'round_unknown');
-      const elapsed = at - Date.parse(round.startedAt);
-      if (elapsed > stageRunner.roundTtlMs) fail(409, 'Der Lauf ist abgelaufen.', 'round_expired');
+      const { repeat, elapsed } = findRound(this, a.personId, b.roundId, b, at, stageRunner);
+      if (repeat) return { score: b.score, improved: repeat.improved, leaderboard: this.runnerBoard(a), progress: repeat.progress };
       if (b.score > runnerMaxScore(elapsed)) fail(400, 'So viele Punkte sind in dieser Zeit nicht möglich.', 'implausible');
       const meters = runMeters(b, elapsed, runnerMaxMeters, stageRunner);
-      // Each run counts once; the start history stays for the hourly limit.
-      this.store.put('runnerRounds', a.personId, { ...round, roundId: null });
       // Before the round is counted: a first progress record credits only the earlier runs.
-      const progress = recordRun(this, a.personId, meters, b.hitBy);
+      // Tagesmissionen: the run's statistics only count if they are plausible; the run counts anyway.
+      const statsSent = b.missionStats !== undefined && b.missionStats !== null;
+      const stats = checkRunStats(b.missionStats, { meters, score: b.score, metersSent: Number.isInteger(b.meters) });
+      const progress = recordRun(this, a.personId, meters, b.hitBy, new Date(at), { score: b.score, stats, statsSent });
       const old = this.store.get('runnerScores', a.personId), improved = b.score > (old?.best ?? 0);
       const when = new Date(at).toISOString();
       this.store.put('runnerScores', a.personId, { personId: a.personId, best: improved ? b.score : old?.best ?? 0, bestAt: improved ? when : old?.bestAt ?? null, rounds: (old?.rounds ?? 0) + 1, lastPlayedAt: when });
+      // Each run counts once; a repeat of this result gets this answer (see runner-rounds.mjs).
+      finishRound(this, a.personId, b.roundId, b, { improved, progress });
       return { score: b.score, improved, leaderboard: this.runnerBoard(a), progress };
     });
   }
   runnerLeaderboard(uid) { return this.runnerBoard(this.account(uid)); }
   // The wardrobe (costume crates) lives in runner-wardrobe.mjs.
-  runnerWardrobe(uid) { return wardrobe(this, uid); }
+  // `roles`: the app knows role figures (`runnerRoleFigures`); older apps get role variants.
+  runnerWardrobe(uid, options = {}) { return wardrobe(this, uid, options); }
   runnerOpenCrate(uid, requestId, b = {}) { return openCrate(this, uid, requestId, b); }
   runnerTrade(uid, requestId, b) { return tradeGage(this, uid, requestId, b); }
   runnerBuy(uid, requestId, b) { return buyItem(this, uid, requestId, b); }
   runnerEnsembleSeen(uid, b) { return ensembleSeen(this, uid, b); }
+  // Tagesmissionen live in runner-missions.mjs.
+  runnerMissions(uid) { return missions(this, uid); }
+  runnerMissionReroll(uid, requestId, b) { return rerollMission(this, uid, requestId, b); }
   runnerOutfit(uid, b) { return selectOutfit(this, uid, b); }
   runnerSkin(uid, name) { return skinFile(this, uid, name); }
   /** Top list of active people with a score above zero; equal scores share a rank, the earlier best comes first. */
@@ -481,7 +502,8 @@ export class Theater {
     const a = this.account(uid), at = +this.clock(), since = at - participationWindowDays * 86400000;
     const events = this.store.all('events').filter(e => !voluntaryEventTypes.includes(e.type) && Date.parse(e.endsAt) < at && Date.parse(e.startsAt) >= since);
     const responses = new Map(this.store.all('responses').map(r => [`${r.eventId}:${r.personId}`, r.status]));
-    const checkins = new Map(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.present]));
+    // Attendance adopted from the own commitments (Termin-Kisten) is no recorded attendance here.
+    const checkins = new Map(this.store.all('checkins').filter(c => c.source !== 'auto').map(c => [`${c.eventId}:${c.personId}`, c.present]));
     const linkedSince = new Map(this.store.accounts().filter(x => x.status === 'approved' && x.personId != null).map(x => [x.personId, Date.parse(x.approvedAt ?? x.createdAt)]));
     const absences = this.store.all('absences');
     const summary = member => {
@@ -538,7 +560,9 @@ export class Theater {
         const r = { eventId: e.id, personId: a.personId, status: b.status, expectedArrivalAt, reason: b.status === 'no' ? text(b.reason, 600) : '', updatedAt: now() };
         s.put('responses', `${e.id}:${a.personId}`, r);
         if (b.status === 'no' && previous !== 'no') this.notifyLateDecline(e, a.personId);
-        return { response: r };
+        // A commitment: a private Termin-Kiste waits once the attendance is confirmed (runner-event-crates.mjs); older apps ignore the field.
+        const eventCrate = eventCrateNotice(this, a.personId, e, previous, b.status);
+        return { response: r, ...(eventCrate ? { eventCrate } : {}) };
       }
       case 'absence.create': {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(b.from ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(b.to ?? '') || b.from > b.to || day(`${b.from}T12:00:00Z`) !== b.from || day(`${b.to}T12:00:00Z`) !== b.to) fail(400, 'Bitte einen gültigen Zeitraum angeben.');
@@ -857,13 +881,15 @@ export class Theater {
         return { ids: doomed.map(x => x.id) };
       }
       case 'checkin.save': {
-        events(); if (!s.get('events', b.eventId)) fail(404, 'Termin nicht gefunden.');
+        events(); const e = s.get('events', b.eventId); if (!e) fail(404, 'Termin nicht gefunden.');
         for (const c of list(b.members)) {
           const memberId = Number(c.id), key = `${b.eventId}:${memberId}`, old = s.get('checkins', key);
           if (!s.get('members', memberId)?.active) fail(400, 'Person nicht verfügbar.');
           if (c.present !== null && typeof c.present !== 'boolean') fail(400, 'Anwesenheit muss da, fehlt oder nicht erfasst sein.');
           if ((old?.version ?? 0) !== (c.version ?? 0)) fail(409, 'Ein Anwesenheitseintrag wurde gleichzeitig geändert. Bitte neu laden.', 'version_conflict');
           s.put('checkins', key, { eventId: b.eventId, personId: memberId, present: c.present, version: (old?.version ?? 0) + 1, updatedAt: now() });
+          // Recorded as there: a Termin-Kiste; recorded as missing: a waiting one lapses (runner-event-crates.mjs).
+          settleCheckinCrate(this, memberId, e, c.present);
         }
         return {};
       }
@@ -1384,7 +1410,8 @@ export class Theater {
     // Feedback is personal data of its author and goes with the person (deleting only the login keeps it).
     // Their answers in other people's tickets stay, without their name.
     forgetFeedbackPerson(s, personId);
-    s.delete('runnerScores', personId); s.delete('runnerRounds', personId); s.delete('runnerProgress', personId);
+    s.delete('runnerScores', personId); s.delete('runnerRounds', personId); s.delete('runnerProgress', personId); s.delete('runnerMissions', personId);
+    forgetEventCrates(s, personId);
     // Reminder keys are `${eventId}:${startsAt}:${personId}:${kind}`; startsAt contains colons itself.
     for (const { id: key } of s.db.prepare("SELECT id FROM entities WHERE kind = 'reminderSent'").all()) if (key.split(':').at(-2) === String(personId)) s.delete('reminderSent', key);
     s.delete('reminders', personId);

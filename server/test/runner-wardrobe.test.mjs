@@ -23,7 +23,7 @@ function setup(t, { items = [{ id: 'c1', kind: 'character', name: 'Blau 1', rari
   const store = new Store(); t.after(() => store.close());
   const clock = { now: new Date('2026-10-18T10:00:00Z') };
   const tick = (ms = 60000) => { clock.now = new Date(+clock.now + ms); };
-  const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', clock: () => clock.now, runnerCatalog: catalogOf(items), random: () => random() });
+  const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', clock: () => clock.now, runnerCatalog: catalogOf(items), random: () => random(), missionRules: null });
   app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
   let n = 0;
   const action = (body, uid = 'admin') => app.action(uid, body, `wardrobe-${++n}`);
@@ -61,10 +61,12 @@ test('crates come at linearly growing distances', () => {
 
 test('runs add their metres; the reply tells how far the next crate is', t => {
   const { app, play } = setup(t);
-  const first = play({ score: 1500, meters: 1200 });
-  assert.deepEqual(first.progress, { meters: 1200, earned: 0, opened: 0, crates: 0, previousAt: 0, nextAt: 2000, poolSize: 3, complete: false, ensembleCrates: 0, dupes: true, gained: 1200, newCrates: 0 });
+  // The first run of the day counts twice for the crates (Tagesbonus).
+  const first = play({ score: 1500, meters: 700 });
+  assert.deepEqual(first.progress, { meters: 1400, earned: 0, opened: 0, crates: 0, previousAt: 0, nextAt: 2000, poolSize: 3, complete: false, ensembleCrates: 0, dupes: true, runMeters: 700, bonusMeters: 700, bonusOpen: false, missionMeters: 0, missionCrates: 0, eventCrates: 0, gained: 700, bonus: 700, missionBonus: 0, newCrates: 0 });
   const second = play({ score: 1200, meters: 900 });
-  assert.equal(second.progress.meters, 2100);
+  assert.equal(second.progress.meters, 2300);
+  assert.equal(second.progress.bonus, 0);
   assert.equal(second.progress.newCrates, 1);
   assert.equal(second.progress.crates, 1);
   assert.equal(second.progress.nextAt, 4100);
@@ -97,11 +99,13 @@ test('earlier runs are credited once, on first use', t => {
   const { app, store, personId, play } = setup(t);
   store.put('runnerScores', personId, { personId, best: 500, bestAt: null, rounds: 14, lastPlayedAt: null });
   const result = play({ score: 400, meters: 300 });
-  assert.equal(result.progress.meters, 14 * runnerUnlocks.creditPerRound + 300);
+  // The credit is no run: it brings no Tagesbonus, the run after it does.
+  assert.equal(result.progress.runMeters, 14 * runnerUnlocks.creditPerRound + 300);
+  assert.equal(result.progress.meters, 14 * runnerUnlocks.creditPerRound + 300 + 300);
   assert.equal(store.get('runnerScores', personId).rounds, 15);
   // Neither another run nor reading credits again.
-  assert.equal(app.runnerWardrobe('sam').progress.meters, 14 * 150 + 300);
-  assert.equal(play({ score: 10, meters: 10 }).progress.meters, 14 * 150 + 310);
+  assert.equal(app.runnerWardrobe('sam').progress.runMeters, 14 * 150 + 300);
+  assert.equal(play({ score: 10, meters: 10 }).progress.runMeters, 14 * 150 + 310);
   // Someone without earlier runs starts at zero.
   const fresh = setup(t);
   assert.equal(fresh.app.runnerWardrobe('sam').progress.meters, 0);
@@ -327,11 +331,16 @@ test('the bundled catalog is valid and ships only finished costumes', () => {
   assert.deepEqual(drawable.filter(x => x.placeholder).map(x => x.id), []);
   assert.ok(drawable.filter(x => x.kind !== 'fx').every(x => x.image), 'every costume has its picture');
   assert.ok(drawable.filter(x => x.kind === 'character').every(x => x.portrait && x.harness), 'characters have a portrait and their wire points');
-  const variants = c.items.flatMap(x => x.variants ?? []);
-  assert.equal(variants.length, 34, 'the role variants of Anno 1146 and Schicksalsfäden');
-  assert.ok(variants.every(v => v.portrait && v.harness && / \(.+, \d{4}\)$/.test(v.name)), 'variants have a portrait, wire points and "Rolle (Stück, Jahr)"');
+  // Role figures: every role is an item of its own, none carries variants any more.
+  assert.equal(c.roleFigures, true);
+  assert.deepEqual(c.items.filter(x => x.variants).map(x => x.id), []);
   assert.ok(drawable.filter(x => x.kind === 'fx').every(x => x.effect?.colors.length));
   assert.equal(c.byId.get('backdrop.creepshow').kind, 'backdrop');
+  // Every stage set brings obstacles to match and the colour of its border; obstacle sets are no
+  // costume of their own, so that kind keeps only its default.
+  assert.ok(drawable.filter(x => x.kind === 'backdrop').every(x => x.obstacles && /^#[0-9A-F]{6}$/i.test(x.borderColor)), 'backdrops have obstacles and a border colour');
+  assert.ok(drawable.filter(x => x.kind === 'backdrop').every(x => x.collectibles && ['rose', 'mask', 'star'].every(k => x.collectibleNames?.[k])), 'backdrops have collectibles with names');
+  assert.deepEqual(c.items.filter(x => x.kind === 'obstacles').map(x => x.id), ['obstacles.standard']);
   assert.equal(c.rarities.at(-1).id, 'gold');
   assert.ok(c.rarities.some(r => r.id === 'technik'));
   assert.ok(c.items.every(x => (x.departments ?? []).every(id => c.departments.some(d => d.id === id))));
@@ -342,8 +351,8 @@ test('the bundled catalog is valid and ships only finished costumes', () => {
 test('the bundled pictures have the sizes the app accepts', () => {
   const c = bundledCatalog(), sizes = { character: [1124, 577], obstacles: [1124, 577], backdrop: [1024, 603] };
   const named = new Set();
-  // Role variants are characters too: same atlas, same square portrait.
-  const pictured = c.items.flatMap(x => [x, ...(x.variants ?? []).map(v => ({ ...v, kind: x.kind }))]);
+  // Role figures are characters like any other: same atlas, same square portrait.
+  const pictured = c.items;
   for (const x of pictured) {
     const file = path => path && decodeURIComponent(path.slice(path.lastIndexOf('/') + 1).split('?')[0]);
     if (x.image) {
@@ -355,6 +364,16 @@ test('the bundled pictures have the sizes the app accepts', () => {
       const [w, h] = pictureSize(c.files.get(file(x.portrait)).bytes);
       assert.ok(w === h && w >= 256, `${x.portrait} is square`);
     }
+    // A backdrop's own obstacle set is an atlas like the obstacles' one.
+    if (x.obstacles) {
+      named.add(file(x.obstacles));
+      assert.deepEqual(pictureSize(c.files.get(file(x.obstacles)).bytes), sizes.obstacles, x.obstacles);
+    }
+    // So are its collectibles.
+    if (x.collectibles) {
+      named.add(file(x.collectibles));
+      assert.deepEqual(pictureSize(c.files.get(file(x.collectibles)).bytes), sizes.obstacles, x.collectibles);
+    }
   }
   // Every picture in the folder is used, and together they stay light. Disabled entries keep their
   // pictures so they can simply be switched on again.
@@ -362,9 +381,57 @@ test('the bundled pictures have the sizes the app accepts', () => {
   const parked = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url))).items
     .filter(x => x.disabled === true).flatMap(x => [x.image, x.portrait]).filter(Boolean);
   assert.deepEqual(readdirSync(folder).filter(f => !named.has(f) && !parked.includes(f)), []);
-  const bytes = [...c.files.values()].reduce((sum, f) => sum + f.bytes.length, 0);
-  // 0.11.2: 159 pictures in use (42 characters, 34 role variants, 7 backdrops) are about 16 MB.
+  const bytes = [...c.files.values()].filter(f => f.mime.startsWith('image/')).reduce((sum, f) => sum + f.bytes.length, 0);
+  // 0.11.2: 159 pictures in use (42 characters, 34 role variants, 7 backdrops) were about 16 MB;
+  // with role figures the same pictures plus Raphael's Hades.
   assert.ok(bytes < 20e6, `${bytes} bytes of pictures`);
+});
+
+test('every backdrop brings its own music, as light AAC in M4A', () => {
+  const c = bundledCatalog();
+  const file = path => decodeURIComponent(path.slice(path.lastIndexOf('/') + 1).split('?')[0]);
+  const backdrops = c.items.filter(x => x.kind === 'backdrop');
+  assert.deepEqual(backdrops.filter(x => !x.music).map(x => x.id), [], 'every backdrop, the default one too, has music');
+  const named = new Set(backdrops.map(x => file(x.music)));
+  for (const name of named) {
+    const { bytes, mime } = c.files.get(name);
+    assert.equal(mime, 'audio/mp4', name);
+    // An MP4 file starts with its `ftyp` box; M4A is AAC in it.
+    assert.equal(bytes.subarray(4, 8).toString('latin1'), 'ftyp', name);
+    // About 60–100 s at 96 kbit/s: the app loads the worn backdrop's music before a run.
+    assert.ok(bytes.length < 1.5e6, `${name} has ${bytes.length} bytes`);
+  }
+  // Every file in the folder is used.
+  assert.deepEqual(readdirSync(new URL('../src/wardrobe/music/', import.meta.url)).filter(f => !named.has(f)), []);
+});
+
+test('a backdrop names its music, served like the pictures with its own type', async t => {
+  const dir = new URL('./fixtures/wardrobe/', import.meta.url);
+  const catalog = loadCatalog({ rarities, items: [...defaults,
+    { id: 'b1', kind: 'backdrop', name: 'Gruft', rarity: 'blau', music: 'tune.m4a' },
+    { id: 'b2', kind: 'backdrop', name: 'Still', rarity: 'blau', music: 'missing.m4a' }] }, dir);
+  const music = catalog.byId.get('b1').music;
+  assert.match(music, /^\/games\/runner\/skins\/tune\.m4a\?v=[0-9a-f]{16}$/);
+  assert.equal(catalog.byId.get('b2').music, undefined, 'a missing file is left out');
+  // Pictures and music each keep to their own folder and file types.
+  assert.equal(loadCatalog({ rarities, items: [...defaults, { id: 'b1', kind: 'backdrop', name: 'Gruft', rarity: 'blau', music: 'tune.m4a' }] }, dir, null).byId.get('b1').music, undefined);
+  assert.throws(() => catalogOf([{ id: 'x', kind: 'fx', name: 'X', rarity: 'blau', music: 'tune.m4a' }]), /music of x/);
+  assert.throws(() => catalogOf([{ id: 'x', kind: 'backdrop', name: 'X', rarity: 'blau', music: 'tune.wav' }]), /invalid file name/);
+  assert.throws(() => catalogOf([{ id: 'x', kind: 'backdrop', name: 'X', rarity: 'blau', music: '../catalog.m4a' }]), /invalid file name/);
+  assert.throws(() => catalogOf([{ id: 'x', kind: 'backdrop', name: 'X', rarity: 'blau', image: 'tune.m4a' }]), /invalid file name/);
+  const store = new Store(); t.after(() => store.close());
+  const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', runnerCatalog: catalog });
+  app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
+  const view = app.runnerWardrobe('admin');
+  assert.equal(view.catalog.items.find(x => x.id === 'b1').music, music);
+  const server = createHttpServer({ theater: app, verifyToken: async token => ({ uid: token }) });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/mobile/v1${music}`, { headers: { Authorization: 'Bearer admin' } });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'audio/mp4');
+  assert.match(response.headers.get('cache-control'), /immutable/);
+  assert.equal((await response.arrayBuffer()).byteLength, catalog.files.get('tune.m4a').bytes.length);
 });
 
 test('disabled entries are left out until their picture is done', () => {
@@ -412,6 +479,20 @@ test('pictures come from the catalog folder, only to members, with their hash', 
   assert.equal(item.portrait, undefined, 'a missing picture is left out');
   assert.deepEqual(item.harness, { fly: [100, 40], cheer: [44, 70] });
   assert.throws(() => loadCatalog({ rarities, items: [...defaults, { id: 'x', kind: 'character', name: 'X', rarity: 'blau', harness: { wing: [1, 2] } }] }), /harness/);
+  // A backdrop's obstacle set and border colour; a missing set is left out like any picture.
+  const stage = loadCatalog({ rarities, items: [...defaults,
+    { id: 'b1', kind: 'backdrop', name: 'Gruft', rarity: 'blau', obstacles: 'figure.webp', borderColor: '#3E2A5C', collectibles: 'figure.webp', collectibleNames: { rose: 'Bonbon', star: 'Mond' } },
+    { id: 'b2', kind: 'backdrop', name: 'Leer', rarity: 'blau', obstacles: 'missing.webp' }] }, dir);
+  assert.match(stage.byId.get('b1').obstacles, /^\/games\/runner\/skins\/figure\.webp\?v=[0-9a-f]{16}$/);
+  assert.equal(stage.byId.get('b1').borderColor, '#3E2A5C');
+  assert.match(stage.byId.get('b1').collectibles, /^\/games\/runner\/skins\/figure\.webp\?v=/);
+  assert.deepEqual(stage.byId.get('b1').collectibleNames, { rose: 'Bonbon', star: 'Mond' });
+  assert.throws(() => catalogOf([{ id: 'x', kind: 'backdrop', name: 'X', rarity: 'blau', collectibleNames: { coin: 'Münze' } }]), /collectibleNames of x/);
+  assert.throws(() => catalogOf([{ id: 'x', kind: 'fx', name: 'X', rarity: 'blau', collectibles: 'figure.webp' }]), /collectibles of x/);
+  assert.equal(stage.byId.get('b2').obstacles, undefined);
+  assert.equal(stage.collectible.some(x => x.kind === 'obstacles'), false, 'an obstacle set is never drawn');
+  assert.throws(() => catalogOf([{ id: 'x', kind: 'fx', name: 'X', rarity: 'blau', obstacles: 'figure.webp' }]), /obstacles of x/);
+  assert.throws(() => catalogOf([{ id: 'x', kind: 'backdrop', name: 'X', rarity: 'blau', borderColor: 'red' }]), /borderColor of x/);
   const store = new Store(); t.after(() => store.close());
   const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', runnerCatalog: catalog });
   app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });

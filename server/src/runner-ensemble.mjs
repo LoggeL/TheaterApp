@@ -1,7 +1,7 @@
 // "Ensemble-Strecke" of the stage runner: the metres of all players add up to one shared distance.
 // Every milestone of the catalog (`ensemble.milestones`, then one every `ensemble.every` km) unlocks
 // its reward for everyone and gives every active member one "Ensemble-Kiste" (a crate with a
-// guaranteed shine), credited on their next request and never twice (by the milestone's km).
+// shine chance of its own, `dupes.shinyChance.ensemble`), credited on their next request and never twice (by the milestone's km).
 //
 // - The shared distance starts with everything run before it existed, the one-time credit of early
 //   runs included (the same metres the players see as their own total), so nobody's runs are lost

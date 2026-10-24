@@ -99,21 +99,95 @@ test('scores above what the measured time allows and invalid runs are rejected',
   assert.throws(() => app.runnerScore('sam', { roundId, score: 30 }), { status: 409, code: 'round_unknown' });
   assert.throws(() => app.runnerScore('sam', { score: 20 }), { status: 409, code: 'round_unknown' });
   assert.throws(() => app.runnerScore('sam', { roundId: 'erfunden', score: 20 }), { status: 409, code: 'round_unknown' });
-  // A new start replaces the open run; runs expire after a generous time.
+  // A new start keeps the open run, but its measured time ends there; runs expire after a generous time.
   const old = app.runnerStart('sam').roundId; ({ roundId } = app.runnerStart('sam')); tick();
-  assert.throws(() => app.runnerScore('sam', { roundId: old, score: 30 }), { status: 409, code: 'round_unknown' });
+  assert.throws(() => app.runnerScore('sam', { roundId: old, score: runnerMaxScore(0) + 1 }), { status: 400, code: 'implausible' });
+  assert.equal(app.runnerScore('sam', { roundId: old, score: 30 }).improved, false);
   tick(stageRunner.roundTtlMs);
   assert.throws(() => app.runnerScore('sam', { roundId, score: 30 }), { status: 409, code: 'round_expired' });
   assert.equal(store.get('runnerScores', sam).best, runnerMaxScore(3000));
 });
 
-test('runs are rate-limited per person and hour', t => {
+test('a quick "Nochmal" does not lose the last run: it counts after the next start', t => {
+  const { app, store, sam, tick } = setup(t);
+  const a = app.runnerStart('sam').roundId; tick(20000);
+  // The player taps "Nochmal" before the result of run A reached the server.
+  const b = app.runnerStart('sam').roundId; tick(500);
+  const first = app.runnerScore('sam', { roundId: a, score: 150, meters: 100 });
+  assert.equal(first.improved, true);
+  assert.equal(first.leaderboard.own.score, 150);
+  tick(10000);
+  assert.equal(app.runnerScore('sam', { roundId: b, score: 60, meters: 50 }).improved, false);
+  const scores = store.get('runnerScores', sam);
+  assert.equal(scores.best, 150); assert.equal(scores.rounds, 2);
+  assert.equal(store.get('runnerProgress', sam).meters, 150);
+  // Several runs may be open at once, within the spam guard.
+  const open = [app.runnerStart('sam').roundId, app.runnerStart('sam').roundId, app.runnerStart('sam').roundId]; tick(2000);
+  for (const roundId of open.reverse()) app.runnerScore('sam', { roundId, score: 1, meters: 1 });
+  assert.equal(store.get('runnerScores', sam).rounds, 5);
+});
+
+test('open runs in parallel do not multiply the plausible time', t => {
   const { app, tick } = setup(t);
-  for (let i = 0; i < stageRunner.roundsPerHour; i++) { app.runnerStart('sam'); tick(1000); }
+  // Run A ends where run B starts: B started at once, so A had no time at all.
+  const a = app.runnerStart('sam').roundId; tick(1000);
+  const b = app.runnerStart('sam').roundId; tick(10 * 60000);
+  assert.throws(() => app.runnerScore('sam', { roundId: a, score: runnerMaxScore(1000) + 1 }), { status: 400, code: 'implausible' });
+  assert.throws(() => app.runnerScore('sam', { roundId: a, score: 10, meters: Math.ceil(runnerMaxMeters(6) * 1.15) + 1 }), { status: 400, code: 'implausible' });
+  assert.equal(app.runnerScore('sam', { roundId: a, score: runnerMaxScore(1000) }).improved, true);
+  // B, the last one started, keeps its whole time.
+  assert.equal(app.runnerScore('sam', { roundId: b, score: runnerMaxScore(10 * 60000) }).improved, true);
+});
+
+test('the same result sent twice counts once and gets the same answer', t => {
+  const { app, store, sam, tick } = setup(t);
+  const { roundId } = app.runnerStart('sam'); tick(30000);
+  const body = { roundId, score: 200, meters: 120, hitBy: 'crate' };
+  const first = app.runnerScore('sam', body);
+  const again = app.runnerScore('sam', { ...body });
+  assert.deepEqual(again, first);
+  assert.equal(store.get('runnerScores', sam).rounds, 1);
+  assert.equal(store.get('runnerProgress', sam).meters, 120);
+  // Also after the run's time to live, and after later runs.
+  tick(stageRunner.roundTtlMs + 1);
+  const later = app.runnerStart('sam').roundId; tick(5000); app.runnerScore('sam', { roundId: later, score: 5, meters: 5 });
+  assert.equal(app.runnerScore('sam', body).improved, first.improved);
+  assert.equal(store.get('runnerScores', sam).rounds, 2);
+  // Another result for the same run is not taken.
+  assert.throws(() => app.runnerScore('sam', { ...body, score: 999 }), { status: 409, code: 'round_unknown' });
+  assert.throws(() => app.runnerScore('sam', { ...body, meters: 121 }), { status: 409, code: 'round_unknown' });
+});
+
+test('an open run of the older record shape can still be finished', t => {
+  const { app, store, sam, tick } = setup(t);
+  const startedAt = app.clock().toISOString();
+  store.put('runnerRounds', sam, { personId: sam, roundId: 'alt', startedAt, starts: [startedAt] });
+  tick(30000);
+  assert.equal(app.runnerScore('sam', { roundId: 'alt', score: 50, meters: 40 }).improved, true);
+  assert.throws(() => app.runnerScore('sam', { roundId: 'alt', score: 51, meters: 40 }), { status: 409, code: 'round_unknown' });
+});
+
+test('there is no cooldown: hundreds of quick runs an hour are fine', t => {
+  const { app, store, sam, tick } = setup(t);
+  // A run that crashes at once: about 2 s, plus curtain and tap. 300 of them in well under an hour.
+  for (let i = 0; i < 300; i++) {
+    const { roundId } = app.runnerStart('sam'); tick(2000);
+    app.runnerScore('sam', { roundId, score: 1, meters: 1 });
+  }
+  assert.equal(store.get('runnerScores', sam).rounds, 300);
+  // The start history stays small instead of growing with every run.
+  assert.ok(store.get('runnerRounds', sam).starts.length <= stageRunner.startBurst);
+});
+
+test('only a spam guard no person reaches limits starts', t => {
+  const { app, store, sam, tick } = setup(t);
+  for (let i = 0; i < stageRunner.startBurst; i++) { app.runnerStart('sam'); tick(100); }
   assert.throws(() => app.runnerStart('sam'), { status: 429, code: 'rate_limited' });
+  // Others are not affected, and a few seconds later it goes on.
   assert.ok(app.runnerStart('kim').roundId);
-  tick(3600000 - (stageRunner.roundsPerHour - 1) * 1000);
+  tick(stageRunner.startWindowMs);
   assert.ok(app.runnerStart('sam').roundId);
+  assert.ok(store.get('runnerRounds', sam).starts.length <= stageRunner.startBurst);
 });
 
 test('only approved members play and see the list; inactive and deleted people leave it', async t => {

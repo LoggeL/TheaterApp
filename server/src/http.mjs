@@ -154,10 +154,12 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (route === '/games/runner/leaderboard' && req.method === 'GET') return json(res, 200, theater.runnerLeaderboard(identity.uid));
       if (route === '/games/runner/rounds' && req.method === 'POST') return json(res, 200, theater.runnerStart(identity.uid));
       if (route === '/games/runner/scores' && req.method === 'POST') return json(res, 200, theater.runnerScore(identity.uid, body));
-      if (route === '/games/runner/wardrobe' && req.method === 'GET') return json(res, 200, theater.runnerWardrobe(identity.uid));
+      if (route === '/games/runner/wardrobe' && req.method === 'GET') return json(res, 200, theater.runnerWardrobe(identity.uid, { roles: requestUrl.searchParams.get('roles') === '1' }));
       if (route === '/games/runner/crates' && req.method === 'POST') return json(res, 200, theater.runnerOpenCrate(identity.uid, req.headers['idempotency-key'], body));
       if (route === '/games/runner/trade' && req.method === 'POST') return json(res, 200, theater.runnerTrade(identity.uid, req.headers['idempotency-key'], body));
       if (route === '/games/runner/buy' && req.method === 'POST') return json(res, 200, theater.runnerBuy(identity.uid, req.headers['idempotency-key'], body));
+      if (route === '/games/runner/missions' && req.method === 'GET') return json(res, 200, theater.runnerMissions(identity.uid));
+      if (route === '/games/runner/missions/reroll' && req.method === 'POST') return json(res, 200, theater.runnerMissionReroll(identity.uid, req.headers['idempotency-key'], body));
       if (route === '/games/runner/ensemble/seen' && req.method === 'PUT') return json(res, 200, theater.runnerEnsembleSeen(identity.uid, body));
       if (route === '/games/runner/outfit' && req.method === 'PUT') return json(res, 200, theater.runnerOutfit(identity.uid, body));
       const skin = route.match(/^\/games\/runner\/skins\/([^/]+)$/);

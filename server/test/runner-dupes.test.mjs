@@ -112,32 +112,26 @@ test('a shine comes with the new item, or upgrades a plain one instead of paying
   // Shiny already: the duplicate pays as usual.
   assert.deepEqual(open(0.1, 0, 0.01).outcome.type, 'gage');
   assert.equal(view().gage.balance, 10);
-  assert.equal(dupeDefaults.shinyChance, 0.03);
+  assert.deepEqual(dupeDefaults.shinyChance, { costume: 0.03, ensemble: 0.03 });
 });
 
-test('a duplicate brings a missing role variant first; one without its picture is not available', t => {
-  const items = [{ ...basic[0], variants: [
-    { id: 'h1.romeo', name: 'Romeo (Romeo und Julia, 2026)', image: 'figure.webp', harness: { fly: [100, 40] } },
-    { id: 'h1.later', name: 'Später (Neues Stück, 2027)', image: 'not-there-yet.webp' },
-  ] }, ...basic.slice(1)];
-  const { app, open, own, view } = setup(t, { catalog: catalogOf(items) });
-  const h1 = view().catalog.items.find(x => x.id === 'h1');
-  assert.deepEqual(h1.variants.map(v => v.id), ['h1.romeo'], 'only variants with a picture');
-  assert.match(h1.variants[0].image, /figure\.webp\?v=/);
+test('a duplicate brings shine or gage, never a role: roles are figures drawn like any other item', t => {
+  // h1 and its role h1.romeo are two figures of the same person, each with its own rarity.
+  const items = [basic[0], { id: 'h1.romeo', kind: 'character', name: 'Hell 1', role: 'Romeo', play: 'Romeo und Julia', year: 2026, rarity: 'blau', variantOf: 'h1', image: 'figure.webp' }, ...basic.slice(1)];
+  const { app, dice, open, own, view } = setup(t, { catalog: catalogOf(items) });
   own('h1', 'h2');
-  const role = open(0.1, 0, 0.5, 0);
-  assert.deepEqual([role.outcome.type, role.outcome.variant], ['variant', { id: 'h1.romeo', name: 'Romeo (Romeo und Julia, 2026)' }]);
-  assert.deepEqual(view().variants, ['h1.romeo']);
-  // The other one has no picture: the next duplicate pays.
-  assert.equal(open(0.1, 0).outcome.type, 'gage');
-  // Wearing it: the variant is chosen with the item; null goes back to the own look.
-  assert.throws(() => app.runnerOutfit('sam', { kind: 'character', itemId: 'h1', variant: 'h1.later' }), { status: 404 });
-  assert.throws(() => app.runnerOutfit('sam', { kind: 'character', itemId: 'b1', variant: 'h1.romeo' }), { status: 409, code: 'not_owned' });
-  const worn = app.runnerOutfit('sam', { kind: 'character', itemId: 'h1', variant: 'h1.romeo' });
-  assert.deepEqual([worn.selected.character, worn.selectedVariants], ['h1', { h1: 'h1.romeo' }]);
-  assert.deepEqual(app.runnerOutfit('sam', { kind: 'character', itemId: 'h1' }).selectedVariants, { h1: 'h1.romeo' }, 'kept when not named');
-  assert.deepEqual(app.runnerOutfit('sam', { kind: 'character', itemId: 'h1', variant: null }).selectedVariants, {});
-  assert.throws(() => catalogOf([{ ...basic[0], variants: [{ id: 'h2', name: 'X', image: 'figure.webp' }] }, basic[1]]), /variant/);
+  // Hellblau is complete: a duplicate of h1 pays, even though the person has a role still missing.
+  const dupe = open(0.1, 0, 0.5, 0);
+  assert.deepEqual([dupe.item.id, dupe.outcome.type, dupe.outcome.gage], ['h1', 'gage', 10]);
+  // The role comes as a new item of its own rarity (blau: 0.7), drawn like b1.
+  dice.push(0.7, 0);
+  const role = app.runnerOpenCrate('sam', 'role', { dupes: true, roles: true });
+  assert.deepEqual([role.item.id, role.item.rarity, role.outcome.type], ['h1.romeo', 'blau', 'new']);
+  assert.equal(view().gage.balance, 10);
+  // A shiny duplicate still upgrades the plain item instead of paying.
+  assert.deepEqual(open(0.1, 0, 0.01).outcome.type, 'shine');
+  // Catalogs with role variants are refused: a role is an item with `variantOf` now.
+  assert.throws(() => catalogOf([{ ...basic[0], variants: [{ id: 'h2', name: 'X', image: 'figure.webp' }] }, basic[1]]), /variants of h1/);
 });
 
 test('a trade turns five duplicates into a random missing item of the next rarity up', t => {
@@ -204,14 +198,19 @@ test('broken duplicate settings are refused', () => {
   assert.throws(() => catalogOf(basic, { dupes: { tradeDupes: 0 } }), /dupes.tradeDupes/);
   assert.throws(() => catalogOf(basic, { dupes: { jackpot: 1 } }), /dupes.jackpot/);
   assert.throws(() => loadCatalog({ rarities: [{ ...rarities[0], gage: -1 }], items: defaults }), /gage/);
-  assert.equal(catalogOf(basic, { dupes: { shinyChance: 0.05 } }).dupes.shinyChance, 0.05);
+  assert.throws(() => catalogOf(basic, { dupes: { shinyChance: { mission: 1.5 } } }), /dupes.shinyChance.mission/);
+  assert.throws(() => catalogOf(basic, { dupes: { shinyChance: [0.1] } }), /dupes.shinyChance/);
+  // One number for all kinds, or one per kind; new kinds such as missions just get an entry.
+  assert.deepEqual(catalogOf(basic, { dupes: { shinyChance: 0.05 } }).dupes.shinyChance, { costume: 0.05, ensemble: 0.05 });
+  assert.deepEqual(catalogOf(basic, { dupes: { shinyChance: { mission: 0.05 } } }).dupes.shinyChance, { costume: 0.03, ensemble: 0.03, mission: 0.05 });
 });
 
 test('the bundled catalog pays gage in every rarity and keeps gold out of the shop', () => {
   const c = bundledCatalog();
   assert.deepEqual(c.rarities.map(r => r.gage), [10, 20, 30, 40, 50, 80, 200]);
   assert.deepEqual(c.rarities.filter(r => !r.buyable).map(r => r.id), ['gold']);
-  assert.deepEqual(c.dupes, { shinyChance: 0.03, tradeDupes: 5, buyDupes: 10 });
+  // Missionskisten (Tagesmissionen) shine a bit more often.
+  assert.deepEqual(c.dupes, { shinyChance: { costume: 0.03, ensemble: 0.03, event: 0.03, mission: 0.05 }, tradeDupes: 5, buyDupes: 10 });
 });
 
 test('the HTTP API opens with duplicates, trades and buys once per key', async t => {
