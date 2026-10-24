@@ -2,9 +2,19 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 
 import '../domain/stage_runner.dart';
+
+/// A trail behind the flying runner, from a worn effect.
+class RunnerEffectStyle {
+  const RunnerEffectStyle(this.trail, this.colors);
+
+  /// `sparkle`, `confetti`, `smoke` or `stars`; anything else sparkles.
+  final String trail;
+  final List<ui.Color> colors;
+}
 
 /// Where each picture sits in `assets/games/stage_runner/atlas.webp`.
 enum RunnerSprite {
@@ -61,14 +71,128 @@ enum RunnerSprite {
     PickupKind.mask => mask,
     PickupKind.star => star,
   };
+
+  /// Which picture of a costume holds it: the runner's poses come from the
+  /// worn character, the obstacles from the worn obstacle set, the pickups
+  /// always from the game's own atlas.
+  RunnerLayer get layer => switch (this) {
+    fly ||
+    dangle ||
+    runA ||
+    passA ||
+    runB ||
+    passB ||
+    cheer ||
+    crash => RunnerLayer.runner,
+    rose || mask || star => RunnerLayer.pickups,
+    _ => RunnerLayer.obstacles,
+  };
+
+  /// The sprite that shows an obstacle kind, e.g. in the statistics; null
+  /// for the velvet border, which is drawn.
+  static RunnerSprite? ofObstacle(ObstacleKind kind) => switch (kind) {
+    ObstacleKind.crate => crate,
+    ObstacleKind.flat => flat,
+    ObstacleKind.lamp => lamp,
+    ObstacleKind.border => null,
+    ObstacleKind.sandbag => sandbag,
+    ObstacleKind.drum => drum,
+    ObstacleKind.pile => crate,
+    ObstacleKind.truss => truss,
+    ObstacleKind.drop => drop,
+  };
 }
+
+enum RunnerLayer { runner, obstacles, pickups }
+
+/// Sprites are scaled down from the atlas; mipmapped sampling keeps them
+/// smooth without any blur filter.
+Paint _paint([ColorFilter? filter]) => Paint()
+  ..filterQuality = FilterQuality.medium
+  ..colorFilter = filter;
 
 /// The decoded pictures of the game. They are loaded when the game opens,
 /// not with the app, and stay decoded for the rest of the session. Offline
 /// on the web they may be missing; the stage then draws simple shapes.
 class RunnerArt {
-  RunnerArt._(this.atlas, this.backdrop);
+  RunnerArt._(this.atlas, this.backdrop)
+    : runnerAtlas = atlas,
+      obstacleAtlas = atlas,
+      runnerPaint = _paint(),
+      obstaclePaint = _paint(),
+      backdropPaint = _paint(),
+      harness = const {},
+      effect = null;
+
+  /// Art from already decoded pictures, for tests.
+  @visibleForTesting
+  RunnerArt.test(ui.Image atlas, ui.Image backdrop) : this._(atlas, backdrop);
+
+  RunnerArt._dressed(
+    this.atlas,
+    this.backdrop, {
+    required this.runnerAtlas,
+    required this.obstacleAtlas,
+    required this.runnerPaint,
+    required this.obstaclePaint,
+    required this.backdropPaint,
+    this.harness = const {},
+    this.effect,
+  });
+
+  /// The game's own atlas (always the pickups) and the shown backdrop.
   final ui.Image atlas, backdrop;
+
+  /// The atlases of the worn character and obstacle set, in the layout of
+  /// [atlas]; the default ones are [atlas] itself.
+  final ui.Image runnerAtlas, obstacleAtlas;
+
+  /// How each layer is drawn; a stand-in costume tints the default art.
+  final Paint runnerPaint, obstaclePaint, backdropPaint;
+  static final pickupPaint = _paint();
+
+  /// The worn effect, if any.
+  final RunnerEffectStyle? effect;
+
+  /// Wire points of the worn character's own atlas that differ from
+  /// [RunnerSprite.harness].
+  final Map<RunnerSprite, ui.Offset> harness;
+
+  ui.Offset harnessOf(RunnerSprite sprite) => harness[sprite] ?? sprite.harness;
+
+  /// This art in another costume: what is left out stays as it is.
+  RunnerArt dressed({
+    ui.Image? runner,
+    ui.Image? obstacles,
+    ui.Image? backdrop,
+    ColorFilter? runnerFilter,
+    ColorFilter? obstacleFilter,
+    ColorFilter? backdropFilter,
+    Map<RunnerSprite, ui.Offset> harness = const {},
+    RunnerEffectStyle? effect,
+  }) => RunnerArt._dressed(
+    atlas,
+    backdrop ?? this.backdrop,
+    runnerAtlas: runner ?? atlas,
+    obstacleAtlas: obstacles ?? atlas,
+    runnerPaint: _paint(runnerFilter),
+    obstaclePaint: _paint(obstacleFilter),
+    backdropPaint: _paint(backdropFilter),
+    harness: runner == null ? const {} : harness,
+    effect: effect,
+  );
+
+  ui.Image imageOf(RunnerSprite sprite) => switch (sprite.layer) {
+    RunnerLayer.runner => runnerAtlas,
+    RunnerLayer.obstacles => obstacleAtlas,
+    RunnerLayer.pickups => atlas,
+  };
+
+  Paint paintOf(RunnerSprite sprite) => switch (sprite.layer) {
+    RunnerLayer.runner => runnerPaint,
+    RunnerLayer.obstacles => obstaclePaint,
+    RunnerLayer.pickups => pickupPaint,
+  };
 
   static const _dir = 'assets/games/stage_runner';
   static RunnerArt? _loaded;

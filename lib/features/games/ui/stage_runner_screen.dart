@@ -13,10 +13,13 @@ import '../../../shared/layout/content_width.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../data/leaderboard_api.dart';
+import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart';
+import 'stage_runner_look.dart';
 import 'stage_runner_sound.dart';
+import 'wardrobe_screen.dart';
 
 /// Opens the stage runner.
 Future<void> openStageRunner(BuildContext context, AppController controller) =>
@@ -58,8 +61,17 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   _Phase _phase = _Phase.intro;
   StageRunner _game = StageRunner();
   RunnerFx _fx = RunnerFx();
+
+  /// The art in the worn costume (see [dressArt]); the default art until
+  /// the wardrobe is known.
   RunnerArt? _art = RunnerArt.loaded;
+  RunnerTrail _trail = RunnerTrail();
   late final RunnerSound _sound = widget.sound ?? RunnerSound();
+
+  /// The wardrobe, if the server offers it, and the progress after the last
+  /// run.
+  Wardrobe? _wardrobe;
+  RunnerProgress? _progress;
 
   /// The closing line of the last run; its own dice, so courses stay
   /// reproducible.
@@ -82,6 +94,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   AppController get controller => widget.controller;
   bool get _ranked => leaderboardAvailable(controller);
+  bool get _dressable => wardrobeAvailable(controller);
 
   @override
   void initState() {
@@ -91,9 +104,45 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     if (_art == null) {
       RunnerArt.load().then((art) {
         if (mounted && art != null) setState(() => _art = art);
+        _dress();
       });
     }
+    if (_dressable) _loadWardrobe();
   }
+
+  /// Only the worn costume is loaded; without it the default one plays.
+  Future<void> _loadWardrobe() async {
+    try {
+      final w = await loadWardrobe(controller);
+      if (!mounted) return;
+      setState(() => _wardrobe = w);
+      await _dress();
+    } catch (e) {
+      if (kDebugMode) debugPrint('Bühnenlauf: Garderobe nicht geladen: $e');
+    }
+  }
+
+  Future<void> _dress() async {
+    final base = RunnerArt.loaded, w = _wardrobe;
+    if (base == null || w == null) return;
+    final art = await dressArt(base, w, controller);
+    if (mounted && identical(w, _wardrobe)) setState(() => _art = art);
+  }
+
+  Future<void> _openWardrobe() => openWardrobe(
+    context,
+    controller,
+    wardrobe: _wardrobe,
+    sound: _sound,
+    onChanged: (w) {
+      if (!mounted) return;
+      setState(() {
+        _wardrobe = w;
+        if (_progress != null) _progress = w.progress;
+      });
+      _dress();
+    },
+  );
 
   @override
   void dispose() {
@@ -124,6 +173,9 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     final run = ++_run;
     final game = _game = StageRunner(random: widget.random);
     final fx = _fx = RunnerFx(best: _board?.own?.score, onSound: _sound.play);
+    // Its own dice, so courses stay reproducible.
+    _trail = RunnerTrail();
+    _progress = null;
     game.onPickup = (kind, x, y) => fx.pickup(kind, x - game.distance, y);
     // Called from the tap on "Vorhang auf", so browsers allow the sound.
     _sound
@@ -168,6 +220,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       ..holding = _pointers > 0 || keys.any(_holdKeys.contains)
       ..update(dt);
     _fx.update(dt, _game);
+    _trail.update(dt, _game, _art?.effect);
     _frame.value++;
     final hud = (_game.score, _game.meters);
     if (hud != _hud.value) _hud.value = hud;
@@ -194,12 +247,19 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         controller,
         roundId: roundId,
         score: _game.score,
+        meters: _game.meters,
+        hitBy: _game.hitBy,
       );
       if (!mounted || run != _run) return;
       // The fanfare, unless it already played when the record fell.
-      if (result.improved && !_fx.recordBroken) _sound.play(RunnerSfx.record);
+      if (result.improved && !_fx.recordBroken) {
+        _sound.play(RunnerSfx.record);
+      } else if ((result.progress?.newCrates ?? 0) > 0) {
+        _sound.play(RunnerSfx.reveal);
+      }
       setState(() {
         _improved = result.improved;
+        _progress = result.progress;
         _board = result.leaderboard;
         _boardError = null;
       });
@@ -271,11 +331,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       ),
     );
     return [
-      const PageHeader(
+      PageHeader(
         'Bühnenlauf',
         eyebrow: 'Hinter der Bühne',
+        // Names whoever is worn, as the picture below shows them.
         subtitle:
-            'Engel Logge hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt. Vorbei an Kisten, Kulissen, Scheinwerfern und Sandsäcken, immer schneller, bis der Vorhang fällt.',
+            '${_wardrobe?.worn(WardrobeKind.character)?.name ?? 'Engel Logge'} hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt. Vorbei an Kisten, Kulissen, Scheinwerfern und Sandsäcken, immer schneller, bis der Vorhang fällt.',
       ),
       if (_art case final art?)
         Center(
@@ -314,7 +375,53 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
           label: const Text('Vorhang auf'),
         ),
       ),
+      if (_dressable) ...[
+        const SizedBox(height: 12),
+        Center(
+          child: WardrobeButton(
+            crates: _wardrobe?.progress.crates ?? 0,
+            onPressed: _openWardrobe,
+          ),
+        ),
+      ],
     ];
+  }
+
+  /// The way to the next costume crate after a run.
+  Widget _crateProgress(BuildContext context, RunnerProgress p) {
+    final theme = Theme.of(context);
+    return Column(
+      key: const ValueKey('runner-progress'),
+      children: [
+        const SizedBox(height: 16),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            value: p.complete ? 1 : p.fraction,
+            minHeight: 8,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '+${metersText(p.gained)} · ${nextCrateText(p)}',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall,
+        ),
+        if (p.newCrates > 0) ...[
+          const SizedBox(height: 8),
+          Text(
+            p.newCrates == 1
+                ? 'Neue Kostümkiste! Ab in die Garderobe.'
+                : '${p.newCrates} neue Kostümkisten! Ab in die Garderobe.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: StageTheme.orange,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ],
+    );
   }
 
   Widget _result(BuildContext context) {
@@ -386,6 +493,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                 ),
               ),
             ],
+            if (_progress case final p?) _crateProgress(context, p),
             const SizedBox(height: 20),
             Wrap(
               spacing: 12,
@@ -398,6 +506,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                   icon: const Icon(Icons.replay),
                   label: const Text('Nochmal'),
                 ),
+                if (_dressable)
+                  WardrobeButton(
+                    crates:
+                        _progress?.crates ?? _wardrobe?.progress.crates ?? 0,
+                    onPressed: _openWardrobe,
+                  ),
                 OutlinedButton(
                   onPressed: () => Navigator.maybePop(context),
                   child: const Text('Zurück in die App'),
@@ -561,6 +675,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                               () => _fx,
                               () => _art,
                               _frame,
+                              () => _trail,
                             ),
                           ),
                         ),
@@ -613,12 +728,15 @@ Paint _stroke(Color color, double width) => Paint()
   ..strokeWidth = width
   ..style = PaintingStyle.stroke;
 
-/// Sprites are scaled down from the atlas; mipmapped sampling keeps them
-/// smooth without any blur filter.
-final _imagePaint = Paint()..filterQuality = FilterQuality.medium;
-
+/// Each sprite comes from the atlas of its layer in the worn costume (see
+/// [RunnerArt.imageOf]), with that layer's paint.
 void _sprite(Canvas canvas, RunnerArt art, RunnerSprite sprite, Rect dst) =>
-    canvas.drawImageRect(art.atlas, sprite.rect, dst, _imagePaint);
+    canvas.drawImageRect(
+      art.imageOf(sprite),
+      sprite.rect,
+      dst,
+      art.paintOf(sprite),
+    );
 
 /// [sprite] centred in [size], as large as it fits.
 Rect _fit(RunnerSprite sprite, Size size) {
@@ -784,11 +902,14 @@ class _LegendPainter extends CustomPainter {
 /// issues a few dozen rectangles, circles and sprite copies from one atlas.
 /// Without the pictures (offline on the web) it draws simple shapes.
 class _StagePainter extends CustomPainter {
-  _StagePainter(this.game, this.fx, this.art, Listenable repaint)
+  _StagePainter(this.game, this.fx, this.art, Listenable repaint, this.trail)
     : super(repaint: repaint);
   final StageRunner Function() game;
   final RunnerFx Function() fx;
   final RunnerArt? Function() art;
+
+  /// The trail of the worn effect.
+  final RunnerTrail Function() trail;
 
   static final _bg = _fill(_stageDark), _wallPaint = _fill(_wall);
   static final _velvetPaint = _fill(_velvet);
@@ -859,6 +980,7 @@ class _StagePainter extends CustomPainter {
     }
 
     _pickups(canvas, g, a, s, w);
+    trail().paint(canvas, s, a?.effect);
     if (a == null) {
       _plainRunner(canvas, g, s);
     } else {
@@ -898,13 +1020,18 @@ class _StagePainter extends CustomPainter {
         image,
         src,
         Rect.fromLTWH(x, top, tile, h),
-        _imagePaint,
+        a.backdropPaint,
       );
       canvas
         ..save()
         ..translate(x + 2 * tile, top)
         ..scale(-1, 1)
-        ..drawImageRect(image, src, Rect.fromLTWH(0, 0, tile, h), _imagePaint)
+        ..drawImageRect(
+          image,
+          src,
+          Rect.fromLTWH(0, 0, tile, h),
+          a.backdropPaint,
+        )
         ..restore();
     }
   }
@@ -1153,10 +1280,10 @@ class _StagePainter extends CustomPainter {
       double dstTop,
       double dstBottom,
     ) => canvas.drawImageRect(
-      a.atlas,
+      a.imageOf(sprite),
       Rect.fromLTRB(src.left, src.top + srcTop, src.right, src.top + srcBottom),
       Rect.fromLTRB(left, dstTop, left + width, dstBottom),
-      _imagePaint,
+      a.paintOf(sprite),
     );
     slice(0, topCap, rect.top, rect.top + top);
     slice(topCap, sprite.height - footCap, rect.top + top, rect.bottom - foot);
@@ -1265,7 +1392,7 @@ class _StagePainter extends CustomPainter {
     if (sprite == RunnerSprite.fly) feet = g.y + height / s / 2;
     final cx = StageRunner.runnerX * s, bottom = feet * s;
     final dst = Rect.fromLTWH(cx - width / 2, bottom - height, width, height);
-    final harness = dst.topLeft + sprite.harness * scale;
+    final harness = dst.topLeft + a.harnessOf(sprite) * scale;
     if (!g.over) {
       canvas.drawLine(Offset(harness.dx, 0), harness, _ropePaint);
     } else if (wireTop > 0) {

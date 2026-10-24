@@ -667,7 +667,12 @@ void main() {
 
       expect(game.over, isTrue);
       expect(calls, ['GET leaderboard', 'POST rounds', 'POST scores']);
-      expect(submitted, {'roundId': 'r-1', 'score': game.score});
+      expect(submitted, {
+        'roundId': 'r-1',
+        'score': game.score,
+        'meters': game.meters,
+        'hitBy': game.hitBy!.name,
+      });
       expect(find.text('Der Vorhang fällt!'), findsOneWidget);
       expect(find.text('Neuer persönlicher Bestwert!'), findsOneWidget);
       expect(find.text('Testmitglied'), findsOneWidget);

@@ -25,7 +25,16 @@ enum RunnerSfx {
   record(.8),
 
   /// Applause at a milestone.
-  bravo(.6);
+  bravo(.6),
+
+  /// A card of the crate reel passes the marker.
+  tick(.45),
+
+  /// The crate reel stops on its card.
+  reveal(.7),
+
+  /// The crate held a gold item.
+  jackpot(.85);
 
   const RunnerSfx(this.volume);
   final double volume;

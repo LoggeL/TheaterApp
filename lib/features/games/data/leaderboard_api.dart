@@ -1,5 +1,7 @@
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
+import '../domain/stage_runner.dart';
+import 'wardrobe_api.dart';
 
 /// Whether rounds count for the shared leaderboard: the server must offer it,
 /// and the demo has no server.
@@ -47,9 +49,17 @@ class Leaderboard {
 
 /// The result of a submitted run.
 class RoundResult {
-  const RoundResult({required this.improved, required this.leaderboard});
+  const RoundResult({
+    required this.improved,
+    required this.leaderboard,
+    this.progress,
+  });
   final bool improved;
   final Leaderboard leaderboard;
+
+  /// The metres towards the next costume crate; only from servers with
+  /// `runnerUnlocks`.
+  final RunnerProgress? progress;
 }
 
 Future<Leaderboard> loadLeaderboard(AppController controller) async =>
@@ -69,14 +79,25 @@ Future<RoundResult> submitRound(
   AppController controller, {
   required String roundId,
   required int score,
+  required int meters,
+  ObstacleKind? hitBy,
 }) async {
   final data = await controller.remote(
     '/games/runner/scores',
     method: 'POST',
-    body: {'roundId': roundId, 'score': score},
+    // Older servers ignore metres and the obstacle.
+    body: {
+      'roundId': roundId,
+      'score': score,
+      'meters': meters,
+      if (hitBy != null) 'hitBy': hitBy.name,
+    },
   );
   return RoundResult(
     improved: data['improved'] == true,
     leaderboard: Leaderboard.fromJson(jsonMap(data['leaderboard'])),
+    progress: data['progress'] is Map
+        ? RunnerProgress.fromJson(jsonMap(data['progress']))
+        : null,
   );
 }
