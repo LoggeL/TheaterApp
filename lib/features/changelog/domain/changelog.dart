@@ -27,6 +27,17 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.11.3',
+    date: '24. Oktober 2026',
+    items: [
+      'Für die Theaterleitung: Nach einem Termin erinnert eine Benachrichtigung '
+          'daran, die Anwesenheit zu erfassen. Erfasst niemand, werden nach '
+          '24 Stunden die eigenen Zusagen als „da“ übernommen; korrigieren geht '
+          'jederzeit.',
+      'Kleinere Verbesserungen und Feinschliff.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.11.2',
     date: '24. Oktober 2026',
     items: [
