@@ -1,10 +1,16 @@
+import 'dart:convert';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/app_controller.dart';
+import '../../../core/models.dart';
 import '../../../shared/audience/recipients.dart';
 import '../../../shared/feedback.dart';
+import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/page_header.dart';
+import '../../forms/ui/forms_admin_screen.dart';
 
 /// Writes a message that stays in the Mitteilungen tab. Pops `true` once
 /// it was published or queued.
@@ -28,9 +34,30 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
       _body = TextEditingController(text: widget.initialBody);
   final _link = TextEditingController(), _linkLabel = TextEditingController();
   bool _push = true, _busy = false;
+  JsonMap? _selectedForm;
+  String? _publicationKey, _publicationBody;
+  late final String? _owner;
   Recipients _to = const Recipients();
   @override
+  void initState() {
+    super.initState();
+    _owner = widget.controller.user?.id;
+    widget.controller.addListener(_sessionChanged);
+  }
+
+  void _sessionChanged() {
+    if (_selectedForm != null &&
+        (widget.controller.user?.id != _owner ||
+            !widget.controller.hasAccess ||
+            widget.controller.user?.isAdmin != true)) {
+      setState(() => _selectedForm = null);
+      _publicationBody = _publicationKey = null;
+    }
+  }
+
+  @override
   void dispose() {
+    widget.controller.removeListener(_sessionChanged);
     _title.dispose();
     _body.dispose();
     _link.dispose();
@@ -66,6 +93,7 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
       _body.text != widget.initialBody ||
       _link.text.isNotEmpty ||
       _linkLabel.text.isNotEmpty ||
+      _selectedForm != null ||
       !_to.everyone;
 
   bool get _withPush => _push && widget.controller.pushConfigured;
@@ -90,7 +118,7 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
     if (!mounted) return;
     setState(() => _busy = true);
     try {
-      final result = await widget.controller.performActionWithResult({
+      final body = <String, dynamic>{
         'action': 'message.send',
         'title': _title.text,
         'body': _body.text,
@@ -98,7 +126,35 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
         'linkLabel': _linkLabel.text.trim(),
         ..._to.toJson(),
         'push': _withPush,
-      });
+        if (_selectedForm != null) ...{
+          'formId': _selectedForm!['id'],
+          'formVersion': _selectedForm!['version'],
+        },
+      };
+      // Freeze the selected template only after the server accepts its version.
+      // Do not queue a publication that may later use an outdated form.
+      final ActionResult result;
+      if (_selectedForm != null) {
+        final encoded = jsonEncode(body);
+        if (_publicationBody != encoded) {
+          _publicationBody = encoded;
+          final random = Random.secure();
+          _publicationKey = List.generate(
+            16,
+            (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+          ).join();
+        }
+        final data = await widget.controller.remote(
+          '/actions',
+          method: 'POST',
+          body: body,
+          idempotencyKey: _publicationKey,
+        );
+        result = ActionResult(ActionOutcome.synced, data);
+        await widget.controller.refresh();
+      } else {
+        result = await widget.controller.performActionWithResult(body);
+      }
       if (mounted) {
         final recipients = result.data?['recipients'];
         showDone(
@@ -120,6 +176,14 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _chooseForm() async {
+    final selected = await openPage<JsonMap>(
+      context,
+      FormsAdminScreen(controller: widget.controller, selectMode: true),
+    );
+    if (mounted && selected != null) setState(() => _selectedForm = selected);
   }
 
   @override
@@ -178,6 +242,38 @@ class _MessageComposerScreenState extends State<MessageComposerScreen> {
             textCapitalization: TextCapitalization.sentences,
             onChanged: (_) => setState(() {}),
           ),
+        ],
+        if (!widget.controller.isDemo &&
+            widget.controller.supports('forms')) ...[
+          const SectionTitle('Formular'),
+          if (_selectedForm case final selected?) ...[
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: Text(textValue(selected['title'])),
+                subtitle: const Text('Direkt in der App ausfüllen und abgeben'),
+                trailing: IconButton(
+                  tooltip: 'Formular entfernen',
+                  onPressed: _busy
+                      ? null
+                      : () => setState(() => _selectedForm = null),
+                  icon: const Icon(Icons.close),
+                ),
+                onTap: _busy ? null : _chooseForm,
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(top: 6, bottom: 6),
+              child: Text(
+                'Mit Formular wird die Mitteilung mit Verbindung veröffentlicht.',
+              ),
+            ),
+          ] else
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _chooseForm,
+              icon: const Icon(Icons.note_add_outlined),
+              label: const Text('Formular auswählen'),
+            ),
         ],
         const SectionTitle('Empfänger'),
         RecipientSelector(

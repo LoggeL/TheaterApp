@@ -8,6 +8,7 @@ import { linkWebsiteProfile, websiteProfilesView } from './website-team.mjs';
 import { adminTicketView, closeOwnFeedback, markFeedbackRead, ownFeedback, ownTicketView, replyAsAdmin, replyAsMember } from './feedback-tickets.mjs';
 import { CalendarFeedLimiter, calendarFeed, calendarFeedLink, resetCalendarFeed } from './calendar-feed.mjs';
 import { PerfTelemetry, perfTelemetry } from './perf-telemetry.mjs';
+import { formTemplates, messageForm, formSubmissions } from './forms.mjs';
 
 // Content-addressed web files from tool/version-web.mjs never change under their name.
 // Entry points (index.html, workers, manifests) and unhashed files must stay revalidated.
@@ -131,6 +132,9 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       }
       if (route === '/snapshot' && req.method === 'GET') return json(res, 200, theater.snapshot(identity.uid));
       if (route === '/actions' && req.method === 'POST') return json(res, 200, theater.action(identity.uid, body, req.headers['idempotency-key']));
+      if (route === '/forms/templates' && req.method === 'GET') return json(res, 200, formTemplates(theater, identity.uid));
+      const formMessage = route.match(/^\/forms\/messages\/([^/]+)(\/submissions)?$/);
+      if (formMessage && req.method === 'GET') return json(res, 200, formMessage[2] ? formSubmissions(theater, identity.uid, formMessage[1]) : messageForm(theater, identity.uid, formMessage[1]));
       if (route === '/calendar-feed' && req.method === 'GET') return json(res, 200, calendarFeedLink(theater, identity.uid, appOrigin));
       if (route === '/calendar-feed/reset' && req.method === 'POST') return json(res, 200, resetCalendarFeed(theater, identity.uid, appOrigin));
       if (route === '/participation' && req.method === 'GET') return json(res, 200, theater.participation(identity.uid));

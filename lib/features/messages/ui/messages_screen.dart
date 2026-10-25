@@ -320,6 +320,18 @@ class _MessageCard extends StatelessWidget {
                             semanticLabel: 'Mit Link',
                             color: theme.colorScheme.outline,
                           ),
+                        if (jsonMap(m['form']).isNotEmpty)
+                          StatePill(
+                            m['formClosed'] == true
+                                ? 'Formular geschlossen'
+                                : textValue(m['myFormSubmittedAt']).isNotEmpty
+                                ? 'Formular abgegeben'
+                                : 'Mit Formular',
+                            icon: Icons.description_outlined,
+                            color: textValue(m['myFormSubmittedAt']).isNotEmpty
+                                ? StageTheme.green
+                                : StageTheme.violet,
+                          ),
                         if (forOthers)
                           StatePill(
                             'Nicht an dich',

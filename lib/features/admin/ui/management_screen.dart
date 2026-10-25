@@ -14,6 +14,7 @@ import '../../events/admin/events_admin_screen.dart';
 import '../../events/domain/event_format.dart';
 import '../../events/domain/event_selectors.dart';
 import '../../feedback/feedback.dart';
+import '../../forms/ui/forms_admin_screen.dart';
 import '../../galleries/ui/gallery_list_screen.dart';
 import '../../messages/ui/message_composer_screen.dart';
 import '../../messages/ui/push_admin_screen.dart';
@@ -159,6 +160,13 @@ class ManagementScreen extends StatelessWidget {
                 PollsScreen(controller: controller),
                 'Fragen stellen und auswerten',
               ),
+              if (!controller.isDemo && controller.supports('forms'))
+                tile(
+                  Icons.description_outlined,
+                  'Formulare',
+                  FormsAdminScreen(controller: controller),
+                  'Erstellen und an Mitteilungen anhängen',
+                ),
               tile(
                 Icons.notifications_outlined,
                 'Push senden',

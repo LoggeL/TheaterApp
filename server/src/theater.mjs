@@ -9,6 +9,7 @@ import { findRound, finishRound, startRound } from './runner-rounds.mjs';
 import { autoCheckins, eventCrateNotice, forgetEventCrates, settleCheckinCrate } from './runner-event-crates.mjs';
 import { buyItem, bundledCatalog, ensembleSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
 import { createHash, randomUUID } from 'node:crypto';
+import { archiveForm, attachForm, checkFormSubmissionOpen, forgetFormGenerations, forgetFormSubmissions, formStatus, saveForm, submitForm, withdrawForm } from './forms.mjs';
 
 // Machine-readable reasons next to the German message; clients branch on `code`, never on the text.
 const defaultCodes = { 400: 'invalid', 401: 'unauthenticated', 403: 'forbidden', 404: 'not_found', 409: 'conflict', 413: 'too_large' };
@@ -39,7 +40,7 @@ export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
 export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'forms']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -265,8 +266,8 @@ export class Theater {
         (arrivalsByEvent[r.eventId] ??= {})[r.personId] = r.expectedArrivalAt;
       }
     }
-    const receipts = this.store.all('receipts').filter(r => r.personId === a.personId);
-    return { apiVersion: 1, user: this.profile(a), events: visibleEvents, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a, admin ? nudges : null), slotPools: this.slotPools(a, nudges), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, autoCheckinsByEvent, memberAttendanceByEvent, implicitAttendanceByEvent, arrivalsByEvent, checkinVersions: events ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) || m.authorId === a.personId, addressedToMe: this.messageAddresses(member, m), ...(admin ? { ...this.messageReach(m), ...this.reminded(nudges, 'message', m.id) } : {}) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true, features: [...apiFeatures] }, serverTime: now() };
+    const receipts = this.store.all('receipts').filter(r => r.personId === a.personId), formSubmissions = this.store.all('formSubmissions');
+    return { apiVersion: 1, user: this.profile(a), events: visibleEvents, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a, admin ? nudges : null), slotPools: this.slotPools(a, nudges), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, autoCheckinsByEvent, memberAttendanceByEvent, implicitAttendanceByEvent, arrivalsByEvent, checkinVersions: events ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) || m.authorId === a.personId, addressedToMe: this.messageAddresses(member, m), ...formStatus(a, m, formSubmissions, this.clock()), ...(admin ? { ...this.messageReach(m), ...this.reminded(nudges, 'message', m.id) } : {}) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true, features: [...apiFeatures] }, serverTime: now() };
   }
   /** Slot pools ("Terminfinder"): invited people book one time slot each. */
   slotPools(a, nudges = can(a, 'events') ? this.nudges() : null) {
@@ -322,7 +323,9 @@ export class Theater {
     return rest;
   }
   // Roles are resolved when reading, so later role members see the message too.
-  canReadMessage(a, m) { return a.role === 'admin' || this.messageAddresses(this.store.get('members', a.personId), m); }
+  // A submitted form remains readable by its owner after an audience change.
+  // Submission eligibility still uses messageAddresses without this exception.
+  canReadMessage(a, m) { return a.role === 'admin' || this.messageAddresses(this.store.get('members', a.personId), m) || (!!m.form && !!this.store.get('formSubmissions', `${m.id}:${a.personId}`)); }
   /** Whether a message is addressed to the member, without the admin bypass. */
   messageAddresses(member, m) {
     if (m.audience === 'all' || (member?.id != null && list(m.recipientPersonIds).includes(member.id))) return true;
@@ -497,6 +500,7 @@ export class Theater {
     this.store.db.prepare('DELETE FROM requests WHERE uid = ?').run(targetUid);
     // Feedback stays with the person; only the deleted login is removed from it.
     forgetFeedbackAccount(this.store, targetUid);
+    forgetFormSubmissions(this.store, submission => submission.accountUid === targetUid);
     this.store.deleteAccount(targetUid);
     this.store.audit(actor, 'account.delete', targetUid);
   }
@@ -538,18 +542,27 @@ export class Theater {
     const hash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
     return this.store.transaction(() => {
       const a = this.account(uid);
+      if (body.action === 'form.submit') checkFormSubmissionOpen(this, a, body.messageId, body.submissionGeneration);
       const previous = this.store.db.prepare('SELECT hash,result FROM requests WHERE uid=? AND request_id=?').get(uid, requestId);
-      if (previous) { if (previous.hash !== hash) fail(409, 'Dieser Änderungsschlüssel wurde bereits für andere Daten benutzt.', 'request_reused'); return JSON.parse(previous.result); }
+      if (previous) {
+        if (previous.hash !== hash) fail(409, 'Dieser Änderungsschlüssel wurde bereits für andere Daten benutzt.', 'request_reused');
+        const result = JSON.parse(previous.result);
+        return result;
+      }
       const result = { ok: true, ...this.apply(a, body) };
       this.store.db.prepare('INSERT INTO requests VALUES(?,?,?,?,?)').run(uid, requestId, hash, JSON.stringify(result), now());
       // A dry run only counts; it changes nothing worth an audit entry.
-      if (result.dryRun !== true) this.store.audit(uid, text(body.action), body.eventId ?? body.uid ?? body.id ?? result.id ?? body.productionId ?? '');
+      if (result.dryRun !== true) this.store.audit(uid, text(body.action), body.eventId ?? body.messageId ?? body.uid ?? body.id ?? result.id ?? body.productionId ?? '');
       return result;
     });
   }
   apply(a, b) {
     const s = this.store, admin = () => this.account(a.uid, true), events = () => this.permitted(a.uid, 'events');
     switch (b.action) {
+      case 'form.save': return saveForm(this, a, b);
+      case 'form.archive': return archiveForm(this, a, b);
+      case 'form.submit': return submitForm(this, a, b);
+      case 'form.withdraw': return withdrawForm(this, a, b);
       case 'attendance': {
         const e = s.get('events', b.eventId);
         if (!e || !this.canSee(a, e)) fail(404, 'Termin nicht gefunden.');
@@ -1008,9 +1021,10 @@ export class Theater {
       case 'message.send': {
         // A targeted message reaches everyone with one of the roles, in one of the ensembles, plus the people chosen by name.
         admin(); const { target, recipients } = this.messageTarget(b);
+        const form = attachForm(this, b);
         const link = text(b.link, 2000);
         if (link && !/^https?:\/\/[^\s]+$/i.test(link)) fail(400, 'Bitte einen gültigen Link mit https:// angeben.');
-        const m = { id: id(), title: required(b.title, 'Betreff'), body: required(b.body, 'Nachricht', 10000), ...(link ? { link, linkLabel: text(b.linkLabel, 80) } : {}), ...target, authorId: a.personId, authorName: s.get('members', a.personId).name, createdAt: now() };
+        const m = { id: id(), title: required(b.title, 'Betreff'), body: required(b.body, 'Nachricht', 10000), ...(link ? { link, linkLabel: text(b.linkLabel, 80) } : {}), ...(form ? { form } : {}), ...target, authorId: a.personId, authorName: s.get('members', a.personId).name, createdAt: now() };
         s.put('messages', m.id, m);
         if (b.push === true) this.enqueuePush({ title: m.title, body: m.body.slice(0, 200), data: { messageId: m.id }, recipientPersonIds: recipients });
         return { id: m.id, pushQueued: b.push === true && this.pushEnabled, recipients: recipients.length };
@@ -1043,6 +1057,8 @@ export class Theater {
         // A message that is already gone counts as deleted.
         admin(); const m = s.get('messages', b.id); if (!m) return {};
         for (const r of s.all('receipts').filter(r => r.messageId === m.id)) s.delete('receipts', `${r.messageId}:${r.personId}`);
+        forgetFormSubmissions(s, submission => submission.messageId === m.id);
+        forgetFormGenerations(s, marker => marker.messageId === m.id);
         s.delete('messages', m.id); s.delete('nudges', `message:${m.id}`); return {};
       }
       case 'message.readAll': {
@@ -1398,6 +1414,8 @@ export class Theater {
       const next = { ...m, recipientPersonIds: others(m.recipientPersonIds), ...(author ? { authorId: null, authorName: 'Ehemaliges Mitglied' } : {}) };
       if (m.audience === 'all' || !onlyThem({ ...next, personIds: next.recipientPersonIds })) { s.put('messages', m.id, next); continue; }
       for (const r of s.all('receipts').filter(r => r.messageId === m.id)) s.delete('receipts', `${r.messageId}:${r.personId}`);
+      forgetFormSubmissions(s, submission => submission.messageId === m.id);
+      forgetFormGenerations(s, marker => marker.messageId === m.id);
       s.delete('messages', m.id); s.delete('nudges', `message:${m.id}`);
     }
     for (const p of s.all('productions')) {
@@ -1413,6 +1431,8 @@ export class Theater {
     // Feedback is personal data of its author and goes with the person (deleting only the login keeps it).
     // Their answers in other people's tickets stay, without their name.
     forgetFeedbackPerson(s, personId);
+    forgetFormSubmissions(s, submission => submission.personId === personId);
+    forgetFormGenerations(s, marker => marker.personId === personId);
     s.delete('runnerScores', personId); s.delete('runnerRounds', personId); s.delete('runnerProgress', personId); s.delete('runnerMissions', personId);
     forgetEventCrates(s, personId);
     // Reminder keys are `${eventId}:${startsAt}:${personId}:${kind}`; startsAt contains colons itself.

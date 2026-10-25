@@ -6,8 +6,12 @@ import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/nudges.dart';
+import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/member_avatar.dart';
+import '../../forms/ui/form_response_screen.dart';
+import '../../forms/ui/form_submissions_screen.dart';
+import '../domain/message_selectors.dart';
 import 'widgets/message_audience.dart';
 
 class MessageTargetScreen extends StatefulWidget {
@@ -252,6 +256,10 @@ class _MessageDetailScreenState extends State<MessageDetailScreen> {
                     label: textValue(m['linkLabel']),
                   ),
                 ],
+                if (jsonMap(m['form']).isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  _AttachedForm(controller: c, message: m),
+                ],
                 if (admin && jsonList(m['recipientIds']).isNotEmpty) ...[
                   const SizedBox(height: 32),
                   _ReadStatus(
@@ -274,6 +282,93 @@ class _MessageDetailScreenState extends State<MessageDetailScreen> {
       );
     },
   );
+}
+
+class _AttachedForm extends StatelessWidget {
+  const _AttachedForm({required this.controller, required this.message});
+
+  final AppController controller;
+  final JsonMap message;
+
+  @override
+  Widget build(BuildContext context) {
+    final form = jsonMap(message['form']);
+    final submitted = textValue(message['myFormSubmittedAt']).isNotEmpty;
+    final closed = message['formClosed'] == true;
+    final addressed = messageAddressedTo(controller.user, message);
+    final admin = controller.user?.isAdmin == true;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Formular'),
+            const SizedBox(height: 6),
+            Text(
+              textValue(form['title']),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              closed
+                  ? 'Dieses Formular ist geschlossen. Die Aufbewahrungsfrist ist abgelaufen.'
+                  : submitted
+                  ? 'Deine Angaben wurden abgegeben. Du kannst die Bestätigung ansehen und als PDF speichern.'
+                  : addressed
+                  ? 'Direkt in der App ausfüllen und abgeben. Eine PDF-Kopie kannst du jederzeit exportieren.'
+                  : 'Dieses Formular ist an die Empfänger der Mitteilung gerichtet.',
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  icon: Icon(submitted ? Icons.task_alt : Icons.edit_note),
+                  label: Text(
+                    closed
+                        ? 'Formular ansehen'
+                        : submitted
+                        ? 'Meine Abgabe'
+                        : addressed
+                        ? 'Formular ausfüllen'
+                        : 'Formular ansehen',
+                  ),
+                  onPressed: () async {
+                    await openPage(
+                      context,
+                      FormResponseScreen(
+                        controller: controller,
+                        messageId: textValue(message['id']),
+                      ),
+                    );
+                    if (context.mounted) {
+                      await refreshWithFeedback(context, controller);
+                    }
+                  },
+                ),
+                if (admin)
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.fact_check_outlined),
+                    label: Text(
+                      'Abgaben (${intValue(message['formSubmissionCount'])})',
+                    ),
+                    onPressed: () => openPage(
+                      context,
+                      FormSubmissionsScreen(
+                        controller: controller,
+                        messageId: textValue(message['id']),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Opens the message's web link outside the app.

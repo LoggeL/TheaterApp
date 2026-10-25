@@ -27,6 +27,15 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.12.0',
+    date: '25. Oktober 2026',
+    items: [
+      'Formulare in Mitteilungen kannst du direkt ausfüllen, unterschreiben und abgeben oder als PDF exportieren.',
+      'Deine abgegebenen Antworten kannst du nachlesen und bei Bedarf löschen. Gesundheitsangaben bleiben freiwillig und werden gesondert bestätigt.',
+      'Für die Theaterleitung: Eigene Formulare erstellen, als Vorlage speichern und an Mitteilungen anhängen. Eine bearbeitbare Vorlage für die Probenfreizeit ist dabei.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.11.7',
     date: '25. Oktober 2026',
     items: ['Weitere Verbesserungen im Hintergrund.'],
