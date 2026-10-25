@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -986,6 +987,70 @@ void main() {
       expect(find.text('Anlegen'), findsOneWidget);
       expect(find.text('Nächste Kiste (1)'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the previous reveal stops while the next crate opens', (
+      tester,
+    ) async {
+      final controller = await _signedIn(tester, (_) => null);
+      final w = Wardrobe.fromJson(_wardrobeJson());
+      final won = w.catalog.item('funken')!;
+      final opening = CrateOpening(
+        item: won,
+        reel: List.filled(56, won),
+        winnerIndex: 48,
+        wardrobe: w,
+      );
+      final next = Completer<CrateOpening>();
+      var requests = 0;
+      final sound = _Sound();
+      await _pump(
+        tester,
+        CrateOpeningPage(
+          controller: controller,
+          wardrobe: w,
+          sound: sound,
+          open: () => ++requests == 2 ? next.future : Future.value(opening),
+          random: Random(4),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tapAt(const Offset(400, 200));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(sound.played.last, RunnerSfx.reveal);
+
+      // Leave before the reveal's pop animation has finished as well.
+      await tester.tap(find.text('Nächste Kiste (1)'));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(requests, 2);
+      // Only the closed crate's wobble still needs frames while loading.
+      expect(tester.binding.transientCallbackCount, 1);
+
+      next.completeError(StateError('offline'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(find.text('Erneut versuchen'), findsOneWidget);
+      expect(tester.binding.transientCallbackCount, 0);
+
+      // Retrying must still spin, reveal the same item and restart its glow.
+      await tester.tap(find.text('Erneut versuchen'));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.byKey(const ValueKey('crate-reel')), findsOneWidget);
+      expect(tester.binding.transientCallbackCount, 1);
+      await tester.tapAt(const Offset(400, 200));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(sound.played.where((s) => s == RunnerSfx.reveal), hasLength(2));
+      expect(find.text('Anlegen'), findsOneWidget);
+      expect(tester.binding.transientCallbackCount, 1);
+      await tester.pumpWidget(const SizedBox());
+      sound.dispose();
+      expect(tester.binding.transientCallbackCount, 0);
     });
 
     testWidgets('after a run the way to the next crate shows', (tester) async {

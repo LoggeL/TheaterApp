@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -257,6 +259,71 @@ void main() {
   });
 
   group('screen', () {
+    testWidgets('muted backdrop music waits for unmute and ignores a late '
+        'reply while muted', (tester) async {
+      var loads = 0;
+      final reply = Completer<http.Response>();
+      final controller = await _signedIn((request) {
+        final path = request.url.path.replaceFirst(RegExp(r'/$'), '');
+        if (path.endsWith('/wardrobe')) {
+          return Future.value(jsonResponse(_wardrobeJson()));
+        }
+        if (path.endsWith('/games/runner/skins/music-gruft.m4a')) {
+          loads++;
+          return reply.future;
+        }
+        return null;
+      });
+      final sound = _MusicSound()..setEnabled(false);
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StageTheme.build(Brightness.light),
+          home: StageRunnerScreen(controller: controller, sound: sound),
+        ),
+      );
+      // Let both wardrobe and bundled graphics finish arriving.
+      for (var i = 0; i < 10; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(loads, 0);
+      expect(sound.tunes, isEmpty);
+
+      sound.setEnabled(true);
+      await tester.pump();
+      expect(loads, 1);
+      sound.setEnabled(false);
+      reply.complete(
+        http.Response.bytes(_m4a, 200, headers: {'content-type': 'audio/mp4'}),
+      );
+      for (var i = 0; i < 10 && RunnerTunes.cached(_music) == null; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+      }
+      expect(RunnerTunes.cached(_music), _m4a);
+      expect(sound.tunes, isEmpty);
+
+      // Re-enabling reuses those bytes and finally selects the worn tune.
+      sound.setEnabled(true);
+      await tester.pump();
+      expect(loads, 1);
+      expect(sound.tunes, [_m4a]);
+      await tester.pumpWidget(const SizedBox());
+      sound.log.clear();
+      sound.setEnabled(false);
+      sound.setEnabled(true);
+      await tester.pump();
+      expect(sound.log, isEmpty, reason: 'the screen removed its listener');
+      sound.dispose();
+    });
+
     testWidgets(
       'the worn backdrop\'s music is loaded once and handed to the sound; '
       'it holds in the background',

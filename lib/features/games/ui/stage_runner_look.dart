@@ -666,6 +666,61 @@ void paintRim(Canvas canvas, ui.Image image, Rect src, Rect dst, double time) {
     ..restore();
 }
 
+/// Records the rim once per pose, size and pulse opacity. Replaying a picture
+/// keeps the four overlapping, separately translucent sprite copies intact:
+/// flattening them and then applying opacity would change their overlap.
+///
+/// These are drawing commands, not raster snapshots, so scaling, rotation and
+/// the atlas's mipmapped sampling stay with the renderer. The animated sheen
+/// remains separate. A stage owns this cache and disposes it with its painter.
+class RunnerRimCache {
+  /// Eight poses and fourteen pulse opacities fit, with a little spare room.
+  /// Resizing cannot retain an unbounded collection of old sizes.
+  static const maxEntries = 128;
+  final _pictures = <(Rect, Size, int), ui.Picture>{};
+  ui.Image? _image;
+
+  @visibleForTesting
+  int get entries => _pictures.length;
+
+  @visibleForTesting
+  int get recordings => _recordings;
+  int _recordings = 0;
+
+  void paint(Canvas canvas, ui.Image image, Rect src, Rect dst, double time) {
+    if (!identical(image, _image)) {
+      dispose();
+      _image = image;
+    }
+    final opacity = ((.45 + .2 * sin(time * 2.4)) * 32).round();
+    final key = (src, dst.size, opacity);
+    var picture = _pictures.remove(key);
+    if (picture == null) {
+      final recorder = ui.PictureRecorder();
+      paintRim(Canvas(recorder), image, src, Offset.zero & dst.size, time);
+      picture = recorder.endRecording();
+      _recordings++;
+      if (_pictures.length >= maxEntries) {
+        _pictures.remove(_pictures.keys.first)!.dispose();
+      }
+    }
+    _pictures[key] = picture;
+    canvas
+      ..save()
+      ..translate(dst.left, dst.top)
+      ..drawPicture(picture)
+      ..restore();
+  }
+
+  void dispose() {
+    for (final picture in _pictures.values) {
+      picture.dispose();
+    }
+    _pictures.clear();
+    _image = null;
+  }
+}
+
 /// A slanted band of light sweeping over the figure every [sheenPeriod]
 /// seconds, only on its own pixels; drawn just after the figure. Between
 /// sweeps it costs nothing.

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -176,12 +177,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       });
     }
     if (_dressable) _loadWardrobe();
-    // Outside browsers nothing waits for a tap: the players are made and
-    // loaded now, while the intro shows, and not in the first frames of the
-    // run (since Flutter 3.29 every plugin call runs on the UI thread).
-    if (!kIsWeb) {
-      if (_sound case final RunnerMusic music) music.warmUp();
-    }
+    // Native players load during the intro; browsers preload only bytes.
+    // The browser's audio context still opens in the start gesture.
+    _sound.enabled.addListener(_soundChanged);
+    if (_sound case final RunnerMusic music) music.warmUp();
   }
 
   /// Only the worn costume is loaded; without it the default one plays.
@@ -208,13 +207,27 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     }
   }
 
+  int _tuneRequest = 0;
+
+  void _soundChanged() {
+    if (_sound.enabled.value) unawaited(_tune());
+  }
+
   /// Gives the sound the worn backdrop's music; without one (or until it
   /// is loaded) the game's own tune plays.
   Future<void> _tune() async {
     if (_sound is! RunnerMusic) return;
+    final request = ++_tuneRequest;
+    await runnerSoundSettingsReady(_sound);
+    if (!mounted || !_sound.enabled.value || request != _tuneRequest) return;
     final path = RunnerTunes.of(_wardrobe);
     final tune = await RunnerTunes.load(controller, path);
-    if (!mounted || path != RunnerTunes.of(_wardrobe)) return;
+    if (!mounted ||
+        !_sound.enabled.value ||
+        request != _tuneRequest ||
+        path != RunnerTunes.of(_wardrobe)) {
+      return;
+    }
     if (_sound case final RunnerMusic music) music.useTune(tune);
   }
 
@@ -245,6 +258,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       }
     }
     _lifecycle.dispose();
+    _sound.enabled.removeListener(_soundChanged);
+    _painter?.dispose();
     _sound.stopMusic();
     if (widget.sound == null) _sound.dispose();
     _ticker.dispose();
@@ -838,6 +853,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   _StagePainter _stagePainter(double ratio) {
     final kept = _painter;
     if (kept != null && kept.pixelRatio == ratio) return kept;
+    kept?.dispose();
     return _painter = _StagePainter(
       () => _game,
       () => _fx,
@@ -1346,6 +1362,13 @@ class _StagePainter extends CustomPainter {
   ];
   final _glyphs = RunnerGlyphs();
   final _path = Path();
+  final _decoration = _DecorationPictures();
+  final _rim = RunnerRimCache();
+
+  void dispose() {
+    _decoration.dispose();
+    _rim.dispose();
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1354,6 +1377,7 @@ class _StagePainter extends CustomPainter {
     // and starts [top] pixels down (see [stageLayout]).
     final (:s, :top, view: _) = stageLayout(size, pixelRatio);
     if (s <= 0) return;
+    _decoration.resize(size);
     final w = size.width, below = size.height - top - s;
     final floorY = s * StageRunner.floor;
     _glyphs.stage(s);
@@ -1883,7 +1907,7 @@ class _StagePainter extends CustomPainter {
   ) {
     if (!shine) return _sprite(canvas, a, sprite, dst);
     final image = a.imageOf(sprite), time = trail().time;
-    paintRim(canvas, image, sprite.rect, dst, time);
+    _rim.paint(canvas, image, sprite.rect, dst, time);
     _sprite(canvas, a, sprite, dst);
     paintSheen(canvas, image, sprite.rect, dst, time);
   }
@@ -1915,28 +1939,36 @@ class _StagePainter extends CustomPainter {
   /// while a banner celebrates.
   void _audience(Canvas canvas, double s, double w, double scroll) {
     final spacing = s * .11;
-    for (
-      var i = (scroll / spacing).floor() - 1;
-      i * spacing - scroll < w + spacing;
-      i++
-    ) {
-      final h = (i * 7919) % 13;
-      final r = s * (.034 + (h % 3) * .004);
-      final x = i * spacing - scroll + (h % 5) * s * .004;
-      final y = s * (.985 - (h % 4) * .006);
-      canvas.drawCircle(Offset(x, y - r * .6), r, _crowdPaint);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(
-            center: Offset(x, y + r * 1.2),
-            width: r * 3.2,
-            height: r * 2.2,
-          ),
-          Radius.circular(r),
-        ),
-        _crowdPaint,
-      );
+    final first = (scroll / spacing).floor() - 1;
+    var count = 0;
+    while ((first + count) * spacing - scroll < w + spacing) {
+      count++;
     }
+    _decoration.paint(
+      canvas,
+      ('audience', first % 13, count),
+      first * spacing - scroll,
+      (recording) {
+        for (var i = 0; i < count; i++) {
+          final h = ((first + i) * 7919) % 13;
+          final r = s * (.034 + (h % 3) * .004);
+          final x = i * spacing + (h % 5) * s * .004;
+          final y = s * (.985 - (h % 4) * .006);
+          recording.drawCircle(Offset(x, y - r * .6), r, _crowdPaint);
+          recording.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromCenter(
+                center: Offset(x, y + r * 1.2),
+                width: r * 3.2,
+                height: r * 2.2,
+              ),
+              Radius.circular(r),
+            ),
+            _crowdPaint,
+          );
+        }
+      },
+    );
   }
 
   /// Tall pictures: above the playing field the house's velvet drape,
@@ -1946,17 +1978,25 @@ class _StagePainter extends CustomPainter {
     final from = -top - s * .05;
     canvas.drawRect(Rect.fromLTRB(0, from, w, 0), _velvetPaint);
     final period = s * .09;
-    for (var x = -(scroll % period); x < w; x += period) {
-      canvas
-        ..drawRect(
-          Rect.fromLTRB(x + period * .12, from, x + period * .3, 0),
-          _sheenPaint,
-        )
-        ..drawRect(
-          Rect.fromLTRB(x + period * .55, from, x + period * .85, 0),
-          _foldPaint,
-        );
+    final shift = -(scroll % period);
+    var count = 0;
+    for (var x = shift; x < w; x += period) {
+      count++;
     }
+    _decoration.paint(canvas, ('drapes', count), shift, (recording) {
+      for (var i = 0; i < count; i++) {
+        final x = i * period;
+        recording
+          ..drawRect(
+            Rect.fromLTRB(x + period * .12, from, x + period * .3, 0),
+            _sheenPaint,
+          )
+          ..drawRect(
+            Rect.fromLTRB(x + period * .55, from, x + period * .85, 0),
+            _foldPaint,
+          );
+      }
+    });
     // The drape fades into the dark of the fly loft; the shader is made
     // again only when the picture changes its size.
     if (_shadeTop != top) {
@@ -1984,30 +2024,38 @@ class _StagePainter extends CustomPainter {
     for (var row = 1; s + (row - 1) * gap < bottom; row++) {
       final grow = 1 + row * .05, y = s + (row - .65) * gap;
       final spacing = s * .16 * grow, shift = scroll + row * spacing * .5;
-      for (
-        var i = (shift / spacing).floor() - 1;
-        i * spacing - shift < w + spacing;
-        i++
-      ) {
-        final h = (i * 7919 + row * 104729) % 13;
-        // Now and then a seat stays empty.
-        if (h == 4) continue;
-        final r = s * (.03 + (h % 3) * .004) * grow;
-        final x = i * spacing - shift + (h % 5) * s * .006;
-        final head = y - r * (1.9 + (h % 4) * .1);
-        canvas.drawCircle(Offset(x, head), r, _crowdPaint);
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromCenter(
-              center: Offset(x, head + r * 1.8),
-              width: r * 3.1,
-              height: r * 2.2,
-            ),
-            Radius.circular(r),
-          ),
-          _crowdPaint,
-        );
+      final first = (shift / spacing).floor() - 1;
+      var count = 0;
+      while ((first + count) * spacing - shift < w + spacing) {
+        count++;
       }
+      _decoration.paint(
+        canvas,
+        ('stalls', row, first % 13, count),
+        first * spacing - shift,
+        (recording) {
+          for (var i = 0; i < count; i++) {
+            final h = ((first + i) * 7919 + row * 104729) % 13;
+            // Now and then a seat stays empty.
+            if (h == 4) continue;
+            final r = s * (.03 + (h % 3) * .004) * grow;
+            final x = i * spacing + (h % 5) * s * .006;
+            final head = y - r * (1.9 + (h % 4) * .1);
+            recording.drawCircle(Offset(x, head), r, _crowdPaint);
+            recording.drawRRect(
+              RRect.fromRectAndRadius(
+                Rect.fromCenter(
+                  center: Offset(x, head + r * 1.8),
+                  width: r * 3.1,
+                  height: r * 2.2,
+                ),
+                Radius.circular(r),
+              ),
+              _crowdPaint,
+            );
+          }
+        },
+      );
       // The backs of the seats in front hide the shoulders.
       canvas.drawRRect(
         RRect.fromRectAndRadius(
@@ -2056,9 +2104,16 @@ class _StagePainter extends CustomPainter {
     // Valance of the stage portal with a scalloped edge.
     final bottom = s * StageRunner.ceiling * .7, r = s * .03;
     canvas.drawRect(Rect.fromLTRB(0, 0, w, bottom), _velvetPaint);
-    for (var x = r - scroll % (r * 2); x < w + r; x += r * 2) {
-      canvas.drawCircle(Offset(x, bottom), r, _velvetPaint);
+    final shift = r - scroll % (r * 2);
+    var count = 0;
+    for (var x = shift; x < w + r; x += r * 2) {
+      count++;
     }
+    _decoration.paint(canvas, ('valance', count), shift, (recording) {
+      for (var i = 0; i < count; i++) {
+        recording.drawCircle(Offset(i * r * 2, bottom), r, _velvetPaint);
+      }
+    });
     canvas.drawRect(
       Rect.fromLTRB(0, bottom - s * .01, w, bottom - s * .004),
       _goldPaint,
@@ -2215,4 +2270,51 @@ class _StagePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_StagePainter old) => old.pixelRatio != pixelRatio;
+}
+
+/// Small recorded strips preserve the vector edges at every pixel ratio.
+/// Their thirteen audience variations repeat along the course. Only the
+/// strip's translation changes each frame; its paths and rounded rectangles
+/// are recorded again only for a new variation or a resized stage.
+class _DecorationPictures {
+  static const _limit = 256;
+  final _pictures = <Object, ui.Picture>{};
+  Size? _size;
+
+  void resize(Size size) {
+    if (_size == size) return;
+    dispose();
+    _size = size;
+  }
+
+  void paint(
+    Canvas canvas,
+    Object key,
+    double shift,
+    void Function(Canvas) record,
+  ) {
+    var picture = _pictures.remove(key);
+    if (picture == null) {
+      final recorder = ui.PictureRecorder();
+      record(Canvas(recorder));
+      picture = recorder.endRecording();
+      if (_pictures.length >= _limit) {
+        _pictures.remove(_pictures.keys.first)!.dispose();
+      }
+    }
+    _pictures[key] = picture;
+    canvas
+      ..save()
+      ..translate(shift, 0)
+      ..drawPicture(picture)
+      ..restore();
+  }
+
+  void dispose() {
+    for (final picture in _pictures.values) {
+      picture.dispose();
+    }
+    _pictures.clear();
+    _size = null;
+  }
 }

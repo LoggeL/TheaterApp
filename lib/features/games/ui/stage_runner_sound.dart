@@ -75,9 +75,9 @@ abstract interface class RunnerMusic {
   /// game's own in its place. Changed during a run, it takes over at once.
   void useTune(Uint8List? tune);
 
-  /// Gets effects and music ready before the first run, where no tap is
-  /// needed for it (outside browsers): the game screen calls it when it
-  /// opens, so a run's first frames make no platform calls for loading.
+  /// Gets sounds ready while the intro shows. Native players load after
+  /// the saved mute setting is known; browsers only fetch compressed bytes,
+  /// leaving their audio context and decoding for the starting tap.
   void warmUp();
 
   /// Holds the music where it is while the app is in the background, and
@@ -109,7 +109,8 @@ void _silent(Object e) {
 mixin _RememberedSwitch {
   static const _key = 'stageRunner.sound';
   final _enabled = ValueNotifier(true);
-  bool _disposed = false;
+  bool _disposed = false, _switchChanged = false;
+  late final Future<void> _settingsReady;
 
   ValueListenable<bool> get enabled => _enabled;
 
@@ -117,11 +118,12 @@ mixin _RememberedSwitch {
     try {
       final prefs = await SharedPreferences.getInstance();
       final on = prefs.getBool(_key);
-      if (on != null && !_disposed) _enabled.value = on;
+      if (on != null && !_disposed && !_switchChanged) _enabled.value = on;
     } catch (_) {}
   }
 
   void _remember(bool on) {
+    _switchChanged = true;
     _enabled.value = on;
     unawaited(
       SharedPreferences.getInstance()
@@ -131,9 +133,15 @@ mixin _RememberedSwitch {
   }
 }
 
+/// Waits for this platform's saved mute setting. Stand-ins without saved
+/// settings are ready immediately.
+Future<void> runnerSoundSettingsReady(RunnerSound sound) =>
+    sound is _RememberedSwitch
+    ? (sound as _RememberedSwitch)._settingsReady
+    : Future<void>.value();
+
 /// [RunnerSound] with the `audioplayers` plugin, for the native platforms.
-/// Nothing is loaded before the game starts a run, and every failure only
-/// means silence.
+/// Sounds load during the intro; every failure only means silence.
 ///
 /// Every effect has its own player, so a run never loads a sound (on iOS a
 /// new AVPlayerItem on the UI thread) while it is played.
@@ -152,7 +160,8 @@ class PluginRunnerSound
            (newPlayer == null
                ? (ctx) => AudioPlayer.global.setAudioContext(ctx)
                : (_) async {}) {
-    _restore();
+    _settingsReady = _restore();
+    _queue = _settingsReady;
   }
 
   final AudioPlayer Function() _newPlayer;
@@ -277,21 +286,29 @@ class PluginRunnerSound
         for (final p in _players.values) {
           await p.stop();
         }
-      });
+      }, needsSound: false);
     }
   }
 
-  void _run(Future<void> Function() task) {
-    // Once, ahead of the first task with the sound on: only those create
-    // players. A muted game makes no platform call.
-    if (_enabled.value && !_contextQueued) {
-      _contextQueued = true;
-      _queue = _queue
-          .then((_) => _disposed ? null : _setAudioContext(effectsAudioContext))
-          .catchError((Object e) => _silent(e));
-    }
+  bool get _canSound => !_disposed && _enabled.value;
+
+  void _run(Future<void> Function() task, {bool needsSound = true}) {
+    // The queue starts with the saved setting. Check again when a task
+    // actually runs: mute may have changed while a platform call waited.
     _queue = _queue
-        .then((_) => _disposed ? null : task())
+        .then<void>((_) async {
+          if (_disposed || (needsSound && !_enabled.value)) return;
+          if (needsSound && !_contextQueued) {
+            _contextQueued = true;
+            try {
+              await _setAudioContext(effectsAudioContext);
+            } catch (e) {
+              _silent(e);
+            }
+          }
+          if (_disposed || (needsSound && !_enabled.value)) return;
+          await task();
+        })
         .catchError((Object e) => _silent(e));
   }
 
@@ -330,14 +347,19 @@ class PluginRunnerSound
     _run(() async {
       // Each effect is loaded once, so the first play starts at once.
       for (final sfx in RunnerSfx.values) {
+        if (!_canSound) return;
         if (_loaded.contains(sfx)) continue;
-        await _load(await _player(sfx), sfx);
+        final player = await _player(sfx);
+        if (!_canSound) return;
+        await _load(player, sfx);
       }
     });
   }
 
   Future<void> _load(AudioPlayer player, RunnerSfx sfx) async {
+    if (!_canSound) return;
     await player.setSource(AssetSource(sfx.asset));
+    if (!_canSound) return;
     await player.setVolume(sfx.volume);
     _loaded.add(sfx);
     if (_endsEarly) {
@@ -351,6 +373,7 @@ class PluginRunnerSound
     if (!_enabled.value) return;
     _run(() async {
       final player = await _player(sfx);
+      if (!_canSound) return;
       final count = _plays[sfx] = (_plays[sfx] ?? 0) + 1;
       _ends.remove(sfx)?.cancel();
       if (!_loaded.contains(sfx)) {
@@ -360,6 +383,7 @@ class PluginRunnerSound
         // Still sounding: start it over, as before.
         await player.stop();
       }
+      if (!_canSound) return;
       await player.resume();
       _heardOwnSound();
       final length = _lengths[sfx];
@@ -371,21 +395,24 @@ class PluginRunnerSound
           if (_plays[sfx] == count && player.state == PlayerState.playing) {
             await player.stop();
           }
-        });
+        }, needsSound: false);
       });
     });
   }
 
   Future<void> _resumeMusic() async {
     // Stopped again before its turn came.
-    if (!_musicWanted) return;
+    if (!_musicWanted || !_canSound || _hidden) return;
     // Another app's music goes on alone; the game's own never stops it.
     if (_musicPlayer?.state != PlayerState.playing &&
         await _othersPlayingNow()) {
       return;
     }
+    if (!_musicWanted || !_canSound || _hidden) return;
     final player = await _readyMusic();
+    if (!_musicWanted || !_canSound || _hidden) return;
     await player.setVolume(_musicVolume * _musicLevel);
+    if (!_musicWanted || !_canSound || _hidden) return;
     await player.resume();
   }
 
@@ -408,7 +435,7 @@ class PluginRunnerSound
       }
     }
     // First, or the worn tune changed (then it takes over at once).
-    if (!_musicLoaded || !identical(_loadedTune, _tune)) {
+    if (_canSound && (!_musicLoaded || !identical(_loadedTune, _tune))) {
       await _loadMusic(player);
     }
     return player;
@@ -425,19 +452,24 @@ class PluginRunnerSound
   }
 
   Future<void> _loadMusic(AudioPlayer player) async {
-    final tune = _loadedTune = _tune;
-    _musicLoaded = true;
+    final tune = _tune;
+    _musicLoaded = false;
     if (tune != null) {
       try {
         await player.setSource(
           BytesSource(tune, mimeType: musicMimeType(tune)),
         );
+        _loadedTune = tune;
+        _musicLoaded = true;
         return;
       } catch (e) {
         _silent(e);
       }
     }
+    if (!_canSound) return;
     await player.setSource(AssetSource(_music));
+    _loadedTune = tune;
+    _musicLoaded = true;
   }
 
   /// Moves the music's volume to [to] (a share of its full volume) in small
@@ -454,7 +486,7 @@ class PluginRunnerSound
       if (step < steps) return;
       timer.cancel();
       _fade = null;
-      if (then != null) _run(then);
+      if (then != null) _run(then, needsSound: false);
     });
   }
 
@@ -479,7 +511,7 @@ class PluginRunnerSound
       _fadeMusic(0, musicFadeOut, then: stop);
     } else {
       _fade?.cancel();
-      _run(stop);
+      _run(stop, needsSound: false);
     }
   }
 
@@ -501,7 +533,7 @@ class PluginRunnerSound
   @override
   void pauseMusic() {
     _hidden = true;
-    _run(() async => _musicPlayer?.pause());
+    _run(() async => _musicPlayer?.pause(), needsSound: false);
   }
 
   @override
@@ -559,9 +591,9 @@ abstract class WebAudioVoice {
 }
 
 /// [RunnerSound] for browsers, on the Web Audio API: one audio context for
-/// all sounds. Each sound is fetched and decoded once, from the tap that
-/// starts a run; a play then only starts a buffer source on the decoded
-/// sound. That needs no media element, loads nothing and sends no events
+/// all sounds. Compressed bytes can be fetched during the intro; the tap
+/// starts the context and decoding. A play only starts a buffer source on
+/// the decoded sound. That needs no media element, loads nothing and sends no events
 /// back, so a pickup costs the browser's single thread next to nothing.
 ///
 /// (audioplayers_web gives every player its own audio context and media
@@ -570,12 +602,18 @@ abstract class WebAudioVoice {
 class WebRunnerSound
     with _RememberedSwitch
     implements RunnerSound, RunnerMusic {
-  WebRunnerSound({@visibleForTesting WebAudio Function()? open})
-    : _open = open ?? platform.openWebAudio {
-    _restore();
+  WebRunnerSound({
+    @visibleForTesting WebAudio Function()? open,
+    @visibleForTesting AssetBundle? bundle,
+  }) : _open = open ?? platform.openWebAudio,
+       _bundle = bundle ?? rootBundle {
+    _settingsReady = _restore();
   }
 
   final WebAudio Function() _open;
+  final AssetBundle _bundle;
+  final Map<String, Future<Uint8List?>> _bytes = {};
+  final Map<(Uint8List, double), Future<WebAudioClip?>> _decoding = {};
   WebAudio? _audio;
   Future<void>? _loading;
   final Map<RunnerSfx, WebAudioClip> _clips = {};
@@ -590,6 +628,8 @@ class WebRunnerSound
   /// no backdrop brings one.
   Uint8List? _tune;
   WebAudioClip? _ownTune;
+  Uint8List? _musicTune;
+  bool _musicReady = false;
 
   /// Counts the tunes asked for, so a late decode of an older one is
   /// dropped.
@@ -631,7 +671,12 @@ class WebRunnerSound
       final audio = _audio ??= _open();
       // Still within the tap: Safari only starts audio in a user gesture.
       audio.resume();
-      _loading ??= _load(audio);
+      _loading ??= _settingsReady
+          .then((_) async {
+            if (_disposed || !_enabled.value) return;
+            await _load(audio);
+          })
+          .whenComplete(() => _loading = null);
     });
   }
 
@@ -639,21 +684,28 @@ class WebRunnerSound
   /// silent.
   Future<void> _load(WebAudio audio) => Future.wait([
     for (final sfx in RunnerSfx.values)
-      _decode(audio, sfx.asset, sfx.volume).then((clip) {
-        if (clip != null) _clips[sfx] = clip;
-      }),
+      if (!_clips.containsKey(sfx))
+        _decode(audio, sfx.asset, sfx.volume).then((clip) {
+          if (clip != null) _clips[sfx] = clip;
+        }),
     _loadMusic(audio),
   ]);
 
   /// Decodes the worn tune, else the game's own, and plays it in place of
   /// the one before if the music is on.
   Future<void> _loadMusic(WebAudio audio) async {
+    if (_disposed || !_enabled.value) return;
     final asked = ++_tunes, tune = _tune;
+    if (_musicReady && identical(_musicTune, tune)) return;
     var clip = tune == null
         ? null
         : await _decodeBytes(audio, tune, _musicVolume);
+    if (asked != _tunes || _disposed || !_enabled.value) return;
     clip ??= _ownTune ??= await _decode(audio, _music, _musicVolume);
-    if (asked != _tunes || _disposed || identical(clip, _musicClip)) return;
+    if (asked != _tunes || _disposed) return;
+    _musicReady = clip != null;
+    _musicTune = tune;
+    if (identical(clip, _musicClip)) return;
     _musicClip = clip;
     final before = _musicVoice;
     if (before != null) {
@@ -671,15 +723,35 @@ class WebRunnerSound
     double volume,
   ) async {
     try {
-      final data = await rootBundle.load('assets/$asset');
-      return await _decodeBytes(audio, Uint8List.sublistView(data), volume);
+      final bytes = await _fetch(asset);
+      if (bytes == null || _disposed || !_enabled.value) return null;
+      final clip = await _decodeBytes(audio, bytes, volume);
+      // Decoded clips are retained, compressed copies no longer needed.
+      if (clip != null) _bytes.remove(asset);
+      return clip;
     } catch (e) {
       _silent(e);
       return null;
     }
   }
 
+  /// A new run may prepare while a wardrobe tune is still decoding.
+  /// Share that work; each caller still checks its own tune generation.
   Future<WebAudioClip?> _decodeBytes(
+    WebAudio audio,
+    Uint8List bytes,
+    double volume,
+  ) {
+    if (_disposed || !_enabled.value) return Future.value();
+    final key = (bytes, volume);
+    return _decoding.putIfAbsent(key, () {
+      return _decodeNow(audio, bytes, volume).whenComplete(() {
+        _decoding.remove(key);
+      });
+    });
+  }
+
+  Future<WebAudioClip?> _decodeNow(
     WebAudio audio,
     Uint8List bytes,
     double volume,
@@ -727,9 +799,38 @@ class WebRunnerSound
     if (voice != null) _safely(() => voice.stop(fadeOut: musicFadeOut));
   }
 
-  /// Browsers start audio only from a tap: everything waits for [prepare].
+  /// Fetch only compressed bytes. Opening or resuming the context must
+  /// remain synchronous in [prepare], inside the user's starting tap.
   @override
-  void warmUp() {}
+  void warmUp() {
+    unawaited(
+      _settingsReady.then((_) async {
+        if (_disposed || !_enabled.value) return;
+        await Future.wait([
+          for (final sfx in RunnerSfx.values)
+            if (!_clips.containsKey(sfx)) _fetch(sfx.asset),
+          if (_ownTune == null) _fetch(_music),
+        ]);
+      }),
+    );
+  }
+
+  /// Shares preloads with the first decode; a failed request can be tried
+  /// again on the next starting tap.
+  Future<Uint8List?> _fetch(String asset) => _bytes.putIfAbsent(asset, () {
+    return _bundle
+        .load('assets/$asset')
+        .then<Uint8List?>(
+          (data) {
+            return _disposed ? null : Uint8List.sublistView(data);
+          },
+          onError: (Object e) {
+            _bytes.remove(asset);
+            _silent(e);
+            return null;
+          },
+        );
+  });
 
   @override
   void useTune(Uint8List? tune) {
@@ -737,7 +838,7 @@ class WebRunnerSound
     _tune = tune;
     final audio = _audio;
     // Before the first [prepare] it is decoded with the other sounds.
-    if (audio != null && _loading != null && !_disposed) {
+    if (audio != null && _enabled.value && !_disposed) {
       unawaited(_loadMusic(audio));
     }
   }
@@ -765,6 +866,8 @@ class WebRunnerSound
     final audio = _audio;
     _audio = null;
     _clips.clear();
+    _bytes.clear();
+    _decoding.clear();
     _voices.clear();
     _musicClip = null;
     _ownTune = null;

@@ -162,6 +162,10 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   }
 
   Future<void> _start() async {
+    // The previous reveal is no longer visible while the next crate loads
+    // or rolls. A failed request must also leave no reveal ticker running.
+    _glow.stop();
+    _pop.stop();
     setState(() {
       _phase = _Phase.opening;
       _error = null;
