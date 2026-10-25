@@ -460,8 +460,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
-                              unique?.allCharacters == true
-                                  ? 'Freigeschaltet: alle Figuren einschließlich Technik gesammelt.'
+                              unique?.allTechnicians == true
+                                  ? 'Freigeschaltet: alle Techniker gesammelt.'
                                   : 'Freigeschaltet: alle Rollen aus ${unique?.play ?? item.role?.play ?? 'dem Stück'} gesammelt.',
                             ),
                           ),
@@ -472,8 +472,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                               item.reward && milestone?.reached != true
                                   ? '$hint: für alle, sobald das Ensemble so weit gelaufen ist.'
                                   : item.unique
-                                  ? unique?.allCharacters == true
-                                        ? '$hint. Wer alle Figuren einschließlich Technik hat, bekommt die Unique-Figur dazu. Sie kommt nicht aus Kisten.'
+                                  ? unique?.allTechnicians == true
+                                        ? '$hint. Wer alle Techniker hat, bekommt die Unique-Figur dazu. Sie kommt nicht aus Kisten.'
                                         : '$hint. Wer alle Rollen ${unique?.several == true ? 'dieser Stücke' : 'des Stücks'} hat, bekommt die Unique-Figur dazu – nicht aus Kisten.'
                                   : hint,
                             ),

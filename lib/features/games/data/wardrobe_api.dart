@@ -1219,15 +1219,15 @@ class UniqueFigureProgress {
     this.itemId,
     this.name = '???',
     this.parts = const [],
-    this.allCharacters = false,
+    this.allTechnicians = false,
   });
   final String play, name;
   final int? year;
   final int have, total;
   final bool unlocked;
 
-  /// All collectible figures, including technicians and legacy figures.
-  final bool allCharacters;
+  /// All active collectible technicians, independent of the actors' roles.
+  final bool allTechnicians;
   final String? itemId;
 
   /// Per play of a figure across plays; empty for a single play.
@@ -1238,11 +1238,11 @@ class UniqueFigureProgress {
 
   /// "Creepshow 2026", or "Creepshow und Nexus" across plays.
   String get production =>
-      allCharacters ? 'Alle Figuren' : [play, ?year?.toString()].join(' ');
+      allTechnicians ? 'Technik' : [play, ?year?.toString()].join(' ');
 
   /// "9/14 Rollen aus Creepshow", "23/52 Rollen aus Creepshow und Nexus".
-  String get line => allCharacters
-      ? '$have/$total Figuren gesammelt'
+  String get line => allTechnicians
+      ? '$have/$total Techniker gesammelt'
       : '$have/$total Rollen aus $play';
 
   static UniqueFigureProgress? fromJson(JsonMap json) {
@@ -1258,7 +1258,7 @@ class UniqueFigureProgress {
       unlocked: unlocked && id.isNotEmpty,
       itemId: unlocked && id.isNotEmpty ? id : null,
       name: unlocked ? textValue(json['name'], '???') : '???',
-      allCharacters: json['allCharacters'] == true,
+      allTechnicians: json['allTechnicians'] == true,
       parts: [
         for (final p in jsonList(json['plays']))
           if (p is Map) ?UniqueFigurePart.fromJson(jsonMap(p)),

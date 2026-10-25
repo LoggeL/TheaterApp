@@ -1,8 +1,8 @@
 // Unique figures of the stage runner's wardrobe (`runnerUniqueFigures`, from 0.11.4): every play has
 // at most one, a non-human character of the play that no actor has as a role figure (Beatrice in
 // Creepshow, the AI in Nexus, …), and a few belong to several plays (Captain Kuschel, in Creepshow and
-// Nexus). A collection-wide figure (Adolph Kolping) instead needs all collectible characters,
-// including technicians and legacy figures (`unlock: { allCharacters: true }`). It is played like
+// Nexus). Adolph Kolping instead needs all collectible technicians
+// (`unlock: { allTechnicians: true }`). It is played like
 // the role figures (atlas, harness, portrait).
 //
 // - Catalog: an item with `rarity: "unique"` (the look of `uniqueFigures.rarity`, apart from the
@@ -69,12 +69,12 @@ export function checkUniqueEntry(x, rarity, raw, bad) {
   if (!text(x.role)) bad(`${what}: a unique figure needs a role`);
   const u = x.unlock;
   if (!u || typeof u !== 'object') bad(`unlock of ${what}`);
-  if (u.allCharacters !== undefined) {
-    if (u.allCharacters !== true || u.play !== undefined || u.plays !== undefined || u.year !== undefined
-      || x.play !== undefined || x.year !== undefined) bad(`unlock of ${what}: allCharacters has no play or year`);
-    const same = raw.filter(o => isUniqueEntry(o, rarity) && o?.unlock?.allCharacters === true);
-    if (same.length > 1) bad(`${what}: one unique figure for all characters`);
-    return { allCharacters: true };
+  if (u.allTechnicians !== undefined) {
+    if (u.allTechnicians !== true || u.play !== undefined || u.plays !== undefined || u.year !== undefined
+      || x.play !== undefined || x.year !== undefined) bad(`unlock of ${what}: allTechnicians has no play or year`);
+    const same = raw.filter(o => isUniqueEntry(o, rarity) && o?.unlock?.allTechnicians === true);
+    if (same.length > 1) bad(`${what}: one unique figure for all technicians`);
+    return { allTechnicians: true };
   }
   if (!text(x.play) || !Number.isInteger(x.year)) bad(`${what}: a unique figure needs role, play and year`);
   // `{ play }` or (across plays) `{ plays }`, never both; `plays` names two or more different plays.
@@ -85,7 +85,7 @@ export function checkUniqueEntry(x, rarity, raw, bad) {
   if (new Set(plays.map(p => playsKey([p]))).size !== plays.length) bad(`unlock of ${what}: a play twice`);
   for (const p of plays) if (!raw.some(o => isRoleOf(o, p))) bad(`unlock of ${what}: no role figure of ${p.play}`);
   const key = playsKey(plays);
-  const same = raw.filter(o => o?.unlock && !o.unlock.allCharacters && typeof o.unlock === 'object' && isUniqueEntry(o, rarity) && playsKey(unlockPlays(o.unlock)) === key);
+  const same = raw.filter(o => o?.unlock && !o.unlock.allTechnicians && typeof o.unlock === 'object' && isUniqueEntry(o, rarity) && playsKey(unlockPlays(o.unlock)) === key);
   if (same.length > 1) bad(`${what}: one unique figure per play (${same.map(o => o.id).join(', ')})`);
   if (several) return { plays: plays.map(p => p.year !== undefined ? { ...p } : p.play) };
   return { play: u.play, ...(u.year !== undefined ? { year: u.year } : {}) };
@@ -95,23 +95,17 @@ const required = new WeakMap();
 /**
  * Per play of [u] (`{ play, year?, ids }`) its active role figures: owning all of them, of every
  * play, unlocks [u]. The year is the one named in `unlock`, else (one play) the figure's own, else
- * (across plays) the one all the play's role figures share. A collection-wide figure groups every
- * collectible character by play, with technicians in their own group.
+ * (across plays) the one all the play's role figures share. A technician unique requires
+ * every active collectible character in a crew rarity, independent of the actors' roles.
  */
 export function uniqueRequirement(c, u) {
   let byUnique = required.get(c);
   if (!byUnique) required.set(c, byUnique = new Map());
   if (!byUnique.has(u.id)) {
-    if (u.unlock.allCharacters) {
-      const parts = new Map();
-      for (const x of c.items) {
-        if (x.kind !== 'character' || x.default || x.reward || x.unique) continue;
-        const crew = list(x.rarities).some(id => c.rarities.some(r => r.id === id && r.crew));
-        const p = { play: x.play ?? (crew ? 'Technik' : 'Weitere Figuren'), ...(x.year !== undefined ? { year: x.year } : {}) }, key = playsKey([p]);
-        if (!parts.has(key)) parts.set(key, { ...p, ids: [] });
-        parts.get(key).ids.push(x.id);
-      }
-      byUnique.set(u.id, [...parts.values()]);
+    if (u.unlock.allTechnicians) {
+      const ids = c.items.filter(x => x.kind === 'character' && !x.default && !x.reward && !x.unique
+        && list(x.rarities).some(id => c.rarities.some(r => r.id === id && r.crew))).map(x => x.id);
+      byUnique.set(u.id, [{ play: 'Technik', ids }]);
       return byUnique.get(u.id);
     }
     const plays = unlockPlays(u.unlock), several = Array.isArray(u.unlock?.plays);
@@ -169,8 +163,8 @@ export function uniqueView(c, p, owned) {
   const plays = c.uniques.map(u => {
     const { have, total, ready, plays: parts } = uniqueCount(c, u, owned), unlocked = mine.has(u.id);
     if (!ready && !unlocked) return null;
-    const where = u.unlock.allCharacters
-      ? { play: 'allen Stücken und der Technik', allCharacters: true, plays: parts }
+    const where = u.unlock.allTechnicians
+      ? { play: 'Technik', allTechnicians: true, plays: parts }
       : Array.isArray(u.unlock.plays)
       ? { play: playsText(parts.map(x => x.play)), plays: parts }
       : { play: u.unlock.play, ...(parts[0].year !== undefined ? { year: parts[0].year } : {}) };

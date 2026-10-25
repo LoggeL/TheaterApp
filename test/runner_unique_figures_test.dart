@@ -305,27 +305,26 @@ void main() {
     expect(uniqueHint(w, standIn), '2/3 Rollen aus Creepshow');
   });
 
-  test('the whole character collection has its own progress and label', () {
+  test('the technician collection has its own progress and label', () {
     final p = UniqueFigureProgress.fromJson({
-      'play': 'allen Stücken und der Technik',
-      'allCharacters': true,
-      'have': 51,
-      'total': 94,
+      'play': 'Technik',
+      'allTechnicians': true,
+      'have': 5,
+      'total': 8,
       'unlocked': false,
       'plays': [
-        {'play': 'Creepshow', 'year': 2026, 'have': 28, 'total': 28},
-        {'play': 'Nexus', 'year': 2024, 'have': 23, 'total': 24},
+        {'play': 'Technik', 'have': 5, 'total': 8},
       ],
     })!;
-    expect(p.allCharacters, isTrue);
-    expect(p.production, 'Alle Figuren');
-    expect(p.line, '51/94 Figuren gesammelt');
+    expect(p.allTechnicians, isTrue);
+    expect(p.production, 'Technik');
+    expect(p.line, '5/8 Techniker gesammelt');
     expect(
       uniqueRoleLine(const WardrobeRole('Adolph Kolping'), p),
-      'Unique · Alle Figuren',
+      'Unique · Technik',
     );
     expect(
-      UniqueFigureProgress.fromJson({'play': 'Creepshow'})!.allCharacters,
+      UniqueFigureProgress.fromJson({'play': 'Creepshow'})!.allTechnicians,
       isFalse,
     );
   });
@@ -551,72 +550,63 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('all figures: progress and details include the technicians', (
-      tester,
-    ) async {
-      await open(tester, () {
-        final json = _json();
-        final p = jsonMap(
-          jsonList(jsonMap(json['uniqueFigures'])['plays']).single,
-        );
-        p.addAll({
-          'allCharacters': true,
-          'play': 'allen Stücken und der Technik',
-          'year': null,
-          'total': 4,
-          'plays': [
-            {'play': 'Creepshow', 'year': 2026, 'have': 2, 'total': 3},
-            {'play': 'Technik', 'have': 0, 'total': 1},
-          ],
+    testWidgets(
+      'all technicians: progress and details explain the collection',
+      (tester) async {
+        await open(tester, () {
+          final json = _json();
+          final p = jsonMap(
+            jsonList(jsonMap(json['uniqueFigures'])['plays']).single,
+          );
+          p.addAll({
+            'allTechnicians': true,
+            'play': 'Technik',
+            'year': null,
+            'total': 4,
+            'plays': [
+              {'play': 'Technik', 'have': 2, 'total': 4},
+            ],
+          });
+          json['uniqueFigures'] = {
+            ...jsonMap(json['uniqueFigures']),
+            'plays': [p],
+          };
+          return json;
         });
-        json['uniqueFigures'] = {
-          ...jsonMap(json['uniqueFigures']),
-          'plays': [p],
-        };
-        return json;
-      });
-      final card = find.byKey(
-        const ValueKey('wardrobe-unique-hidden:Alle Figuren'),
-      );
-      expect(card, findsOneWidget);
-      expect(find.text('2/4 Figuren gesammelt'), findsOneWidget);
-      await tester.tap(card);
-      await _settle(tester);
-      expect(
-        find.textContaining('alle Figuren einschließlich Technik'),
-        findsOneWidget,
-      );
-      expect(find.text('Creepshow 2026: 2/3 · Technik: 0/1'), findsOneWidget);
-      expect(find.byKey(const ValueKey('wardrobe-buy')), findsNothing);
-      await tester.pumpWidget(const SizedBox());
-    });
+        final card = find.byKey(
+          const ValueKey('wardrobe-unique-hidden:Technik'),
+        );
+        expect(card, findsOneWidget);
+        expect(find.text('2/4 Techniker gesammelt'), findsOneWidget);
+        await tester.tap(card);
+        await _settle(tester);
+        expect(find.textContaining('alle Techniker'), findsOneWidget);
+        expect(find.textContaining('Rollen aus Creepshow'), findsNothing);
+        expect(find.byKey(const ValueKey('wardrobe-buy')), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
 
-    testWidgets('all figures: the celebration names the whole collection', (
-      tester,
-    ) async {
-      await open(tester, () {
-        final json = _json(unlocked: true);
-        final p = jsonMap(
-          jsonList(jsonMap(json['uniqueFigures'])['plays']).single,
-        );
-        p.addAll({
-          'allCharacters': true,
-          'play': 'allen Stücken und der Technik',
-          'year': null,
+    testWidgets(
+      'all technicians: the celebration names the technician collection',
+      (tester) async {
+        await open(tester, () {
+          final json = _json(unlocked: true);
+          final p = jsonMap(
+            jsonList(jsonMap(json['uniqueFigures'])['plays']).single,
+          );
+          p.addAll({'allTechnicians': true, 'play': 'Technik', 'year': null});
+          json['uniqueFigures'] = {
+            ...jsonMap(json['uniqueFigures']),
+            'plays': [p],
+          };
+          return json;
         });
-        json['uniqueFigures'] = {
-          ...jsonMap(json['uniqueFigures']),
-          'plays': [p],
-        };
-        return json;
-      });
-      expect(
-        find.text('Alle 3 Figuren einschließlich Technik gesammelt'),
-        findsOneWidget,
-      );
-      expect(find.text('Unique · Alle Figuren'), findsWidgets);
-      await tester.pumpWidget(const SizedBox());
-    });
+        expect(find.text('Alle 3 Techniker gesammelt'), findsOneWidget);
+        expect(find.text('Unique · Technik'), findsWidgets);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
 
     testWidgets('no group without a play that has one (all still waiting)', (
       tester,
