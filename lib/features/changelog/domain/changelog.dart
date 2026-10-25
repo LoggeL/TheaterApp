@@ -27,6 +27,14 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.12.2',
+    date: '25. Oktober 2026',
+    items: [
+      'Die Bewegung von Hintergrund und Dekoration lässt sich jetzt ausschalten. Deine Auswahl bleibt auf dem Gerät gespeichert.',
+      'Bei reduzierter Bewegung im System bleiben Hintergrund und Dekoration automatisch ruhig.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.12.1',
     date: '25. Oktober 2026',
     items: [

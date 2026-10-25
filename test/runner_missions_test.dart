@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
@@ -232,6 +233,7 @@ const _all = ['stageRunner', 'runnerUnlocks', 'runnerDupes', 'runnerMissions'];
 
 void main() {
   setUpAll(() => initializeDateFormatting('de'));
+  setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('counting in the run', () {
     test('letting go runs along the floor, holding flies below the loft', () {

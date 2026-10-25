@@ -15,6 +15,7 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../data/leaderboard_api.dart';
 import '../data/missions_api.dart';
+import '../data/runner_motion_preferences.dart';
 import '../data/score_outbox.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
@@ -60,12 +61,16 @@ class StageRunnerScreen extends StatefulWidget {
     this.random,
     this.onRun,
     this.sound,
+    this.motionPreferences,
   });
   final AppController controller;
 
   /// Replaced in tests; by default the [RunnerSound] of this platform.
   @visibleForTesting
   final RunnerSound? sound;
+
+  @visibleForTesting
+  final RunnerMotionPreferences? motionPreferences;
 
   /// Fixed in tests for reproducible courses.
   final Random? random;
@@ -94,6 +99,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   RunnerArt? _art = RunnerArt.loaded;
   RunnerTrail _trail = RunnerTrail();
   late final RunnerSound _sound = widget.sound ?? RunnerSound();
+  late final RunnerMotionPreferences _motion =
+      widget.motionPreferences ?? RunnerMotionPreferences();
+  bool _systemReducedMotion = false, _settingsOpen = false;
+
+  bool get _sceneryMotion =>
+      _motion.ready && _motion.sceneryMotion && !_systemReducedMotion;
 
   /// The wardrobe, if the server offers it, and the progress after the last
   /// run.
@@ -180,7 +191,122 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     // Native players load during the intro; browsers preload only bytes.
     // The browser's audio context still opens in the start gesture.
     _sound.enabled.addListener(_soundChanged);
+    _motion.addListener(_motionChanged);
     if (_sound case final RunnerMusic music) music.warmUp();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduced = MediaQuery.disableAnimationsOf(context);
+    if (_systemReducedMotion != reduced) {
+      _systemReducedMotion = reduced;
+      _frame.value++;
+    }
+  }
+
+  void _motionChanged() {
+    if (!mounted) return;
+    setState(() {});
+    // The painter is kept across builds; a paused stage needs a repaint too.
+    _frame.value++;
+  }
+
+  Future<void> _showSettings() async {
+    if (_settingsOpen) return;
+    _settingsOpen = true;
+    if (_phase == _Phase.playing && !_paused) {
+      setState(() => _paused = true);
+      _pointers = 0;
+      _ticker.stop();
+      if (_sound case final RunnerMusic music) music.pauseMusic();
+    }
+    String? saveError;
+    var saveRequest = 0;
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, updateDialog) => ListenableBuilder(
+            listenable: _motion,
+            builder: (context, _) {
+              final reduced = MediaQuery.disableAnimationsOf(context);
+              return AlertDialog(
+                scrollable: true,
+                insetPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 24,
+                ),
+                title: const Text('Bewegung'),
+                content: SizedBox(
+                  width: 420,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SwitchListTile(
+                        key: const ValueKey('runner-scenery-motion'),
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Bühne bewegen'),
+                        value:
+                            _motion.ready && _motion.sceneryMotion && !reduced,
+                        onChanged: !_motion.ready || reduced
+                            ? null
+                            : (value) async {
+                                final request = ++saveRequest;
+                                updateDialog(() => saveError = null);
+                                try {
+                                  await _motion.setSceneryMotion(value);
+                                } catch (_) {
+                                  if (!dialogContext.mounted ||
+                                      request != saveRequest) {
+                                    return;
+                                  }
+                                  updateDialog(
+                                    () => saveError =
+                                        'Die Auswahl gilt für jetzt, konnte aber nicht auf diesem Gerät gespeichert werden.',
+                                  );
+                                }
+                              },
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Gilt für Hintergrund, Vorhänge, Licht und Publikum. Hindernisse und Sammelobjekte bewegen sich weiter.',
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        reduced
+                            ? 'Auf deinem Gerät ist „Bewegung reduzieren“ aktiv.'
+                            : 'Deine Auswahl wird auf diesem Gerät gespeichert.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      if (saveError != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          saveError!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('Fertig'),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      );
+    } finally {
+      _settingsOpen = false;
+    }
+    // An interrupted run stays paused until the player taps the stage.
   }
 
   /// Only the worn costume is loaded; without it the default one plays.
@@ -259,6 +385,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     }
     _lifecycle.dispose();
     _sound.enabled.removeListener(_soundChanged);
+    _motion.removeListener(_motionChanged);
+    if (widget.motionPreferences == null) _motion.dispose();
     _painter?.dispose();
     _sound.stopMusic();
     if (widget.sound == null) _sound.dispose();
@@ -285,6 +413,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   }
 
   void _play() {
+    if (!_motion.ready) return;
     final run = ++_run;
     final game = _game = StageRunner(random: widget.random);
     final perf = _perf = RunnerPerf(game, curtainStart: _curtainStart);
@@ -440,6 +569,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     appBar: AppBar(
       title: const Text('Bühnenlauf'),
       actions: [
+        IconButton(
+          key: const ValueKey('runner-settings'),
+          tooltip: 'Spieleinstellungen',
+          icon: const Icon(Icons.settings_outlined),
+          onPressed: _showSettings,
+        ),
         ValueListenableBuilder(
           valueListenable: _sound.enabled,
           builder: (context, on, _) => IconButton(
@@ -549,7 +684,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       if (_bonusOpen) ...[_dailyBonusHint(context), const SizedBox(height: 12)],
       Center(
         child: FilledButton.icon(
-          onPressed: _play,
+          onPressed: _motion.ready ? _play : null,
           icon: const Icon(Icons.play_arrow),
           label: const Text('Vorhang auf'),
         ),
@@ -861,6 +996,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       _frame,
       () => _trail,
       pixelRatio: ratio,
+      sceneryMotion: () => _sceneryMotion,
     );
   }
 
@@ -1030,7 +1166,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   /// Runs on after a pause, from the first fresh frame.
   void _resume() {
-    if (!_paused) return;
+    if (!_paused || _settingsOpen) return;
     setState(() => _paused = false);
     _lastFrame = Duration.zero;
     _ticker.start();
@@ -1269,6 +1405,7 @@ CustomPainter stagePainterFor(
   RunnerFx? fx,
   RunnerTrail? trail,
   double pixelRatio = 1,
+  bool sceneryMotion = true,
 }) {
   final f = fx ?? RunnerFx(), t = trail ?? RunnerTrail();
   return _StagePainter(
@@ -1278,6 +1415,7 @@ CustomPainter stagePainterFor(
     _never,
     () => t,
     pixelRatio: pixelRatio,
+    sceneryMotion: () => sceneryMotion,
   );
 }
 
@@ -1311,10 +1449,15 @@ class _StagePainter extends CustomPainter {
     Listenable repaint,
     this.trail, {
     this.pixelRatio = 1,
+    required this.sceneryMotion,
   }) : super(repaint: repaint);
   final StageRunner Function() game;
   final RunnerFx Function() fx;
   final RunnerArt? Function() art;
+
+  /// Only decorative movement; the course and the player's hitboxes keep
+  /// moving at the same speed in either setting.
+  final bool Function() sceneryMotion;
 
   /// The trail of the worn effect.
   final RunnerTrail Function() trail;
@@ -1373,6 +1516,7 @@ class _StagePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final g = game(), f = fx(), a = art();
+    final movingScenery = sceneryMotion();
     // One stage height in pixels; the playing field is [view] heights wide
     // and starts [top] pixels down (see [stageLayout]).
     final (:s, :top, view: _) = stageLayout(size, pixelRatio);
@@ -1390,28 +1534,27 @@ class _StagePainter extends CustomPainter {
       ..save()
       ..clipRect(Offset.zero & size, doAntiAlias: false)
       ..drawRect((Offset.zero & size).inflate(s * .05), _bg);
-    final (dx, dy) = f.shake(g);
+    final (dx, dy) = movingScenery ? f.shake(g) : (0.0, 0.0);
     canvas.save();
     canvas.translate(dx * s, dy * s + top);
 
-    // The whole stage passes as one, exactly at the running pace, like the
-    // world in a side-scroller: backdrop, lights, wings, floor, course,
-    // audience and valance, and in tall pictures the drapes and stalls.
-    // Nothing moves at its own pace (parallax made players feel sick). The
-    // shift is rounded to whole device pixels, so each frame is the last one
-    // moved by whole pixels and nothing shimmers.
+    // Moving scenery passes at the running pace, without a separate
+    // parallax speed. With it off only obstacles and pickups travel; the
+    // backdrop and house stay still. Round the course to device pixels so
+    // consecutive frames do not shimmer.
     final course = (g.distance * s * pixelRatio).round() / pixelRatio;
+    final sceneryScroll = movingScenery ? course : 0.0;
     // The house around a tall picture's playing field; the field itself
     // ends at its edges, as on a picture of its own shape.
-    if (top > 0) _drapes(canvas, s, w, top, course);
-    if (below > 0) _stalls(canvas, s, w, below, course);
+    if (top > 0) _drapes(canvas, s, w, top, sceneryScroll);
+    if (below > 0) _stalls(canvas, s, w, below, sceneryScroll);
     canvas
       ..save()
       ..clipRect(Rect.fromLTRB(-s, 0, w + s, s));
-    _backdrop(canvas, a, s, w, floorY, course);
-    _spotlights(canvas, s, w, floorY, course);
-    _wings(canvas, s, w, course);
-    _floor(canvas, s, w, floorY, course);
+    _backdrop(canvas, a, s, w, floorY, sceneryScroll);
+    _spotlights(canvas, s, w, floorY, sceneryScroll);
+    _wings(canvas, s, w, sceneryScroll);
+    _floor(canvas, s, w, floorY, sceneryScroll);
 
     for (final o in g.obstacles) {
       final rect = Rect.fromLTRB(
@@ -1436,13 +1579,13 @@ class _StagePainter extends CustomPainter {
       _runner(canvas, g, f, a, s);
     }
     _particles(canvas, f, s);
-    _audience(canvas, s, w, course);
-    _bannerAndValance(canvas, f, s, w, course);
+    _audience(canvas, s, w, sceneryScroll);
+    _bannerAndValance(canvas, f, s, w, sceneryScroll, movingScenery);
     canvas
       ..restore()
       ..restore();
 
-    if (g.over) _curtain(canvas, g, s, w, size.height);
+    if (g.over) _curtain(canvas, g, s, w, size.height, movingScenery);
     canvas.restore();
   }
 
@@ -2076,12 +2219,17 @@ class _StagePainter extends CustomPainter {
     double s,
     double w,
     double scroll,
+    bool movingScenery,
   ) {
     final text = f.banner;
     if (text != null && f.showsBanner) {
       final t = f.bannerAge;
-      final pop = t < .18 ? Curves.easeOutBack.transform(t / .18) : 1.0;
-      final leave = max(0.0, t - (RunnerFx.bannerLife - .3)) / .3;
+      final pop = movingScenery && t < .18
+          ? Curves.easeOutBack.transform(t / .18)
+          : 1.0;
+      final leave = movingScenery
+          ? max(0.0, t - (RunnerFx.bannerLife - .3)) / .3
+          : 0.0;
       final label = _glyphs.label(text, s * .055);
       final center = Offset(w / 2, s * (.2 - leave * .2));
       final plate = Rect.fromCenter(
@@ -2128,12 +2276,18 @@ class _StagePainter extends CustomPainter {
     double s,
     double w,
     double height,
+    bool movingScenery,
   ) {
-    final t = Curves.easeIn.transform(
-      ((g.sinceOver - _curtainStart) / (_curtainEnd - _curtainStart - .05))
-          .clamp(0, 1)
-          .toDouble(),
-    );
+    final t = movingScenery
+        ? Curves.easeIn.transform(
+            ((g.sinceOver - _curtainStart) /
+                    (_curtainEnd - _curtainStart - .05))
+                .clamp(0, 1)
+                .toDouble(),
+          )
+        : g.sinceOver < _curtainStart
+        ? 0.0
+        : 1.0;
     if (t == 0) return;
     final half = w * .5 * t, fold = s * .06;
     for (final left in [true, false]) {
@@ -2269,7 +2423,8 @@ class _StagePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_StagePainter old) => old.pixelRatio != pixelRatio;
+  bool shouldRepaint(_StagePainter old) =>
+      old.pixelRatio != pixelRatio || old.sceneryMotion() != sceneryMotion();
 }
 
 /// Small recorded strips preserve the vector edges at every pixel ratio.

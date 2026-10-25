@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/games/data/score_outbox.dart';
@@ -87,6 +88,7 @@ TestServer _server() => TestServer()
 
 void main() {
   setUpAll(() => initializeDateFormatting('de'));
+  setUp(() => SharedPreferences.setMockInitialValues({}));
 
   testWidgets('"Nochmal" before the run started on the server still sends '
       'that run with its own round and numbers', (tester) async {

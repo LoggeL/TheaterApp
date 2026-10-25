@@ -327,6 +327,7 @@ Future<void> _runUntilOver(WidgetTester tester) async {
 
 void main() {
   setUpAll(() => initializeDateFormatting('de'));
+  setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('run', () {
     test('the speed grows to a limit, as the server assumes', () {
@@ -1784,12 +1785,14 @@ void main() {
       int w,
       int h, {
       RunnerFx? fx,
+      bool sceneryMotion = true,
     }) async => (await tester.runAsync(() async {
       final recorder = ui.PictureRecorder();
       stagePainterFor(
         game,
         art,
         fx: fx,
+        sceneryMotion: sceneryMotion,
       ).paint(Canvas(recorder), Size(w.toDouble(), h.toDouble()));
       final image = await recorder.endRecording().toImage(w, h);
       final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
@@ -1874,6 +1877,253 @@ void main() {
           final c = await shot(start + .4, crateAt: crate);
           expect(moved(a, c, 0, -top / s, (h - top) / s), 0);
         }
+      }
+    });
+
+    testWidgets('calm scenery stays fixed as the run advances', (tester) async {
+      final loaded = await decodeArt(tester);
+      for (final art in [loaded, null]) {
+        for (final (w, h) in [(640, 400), (390, 844)]) {
+          final s = stageLayout(Size(w.toDouble(), h.toDouble())).s;
+          bool sameScenery(Uint8List a, Uint8List b) {
+            for (var y = 0; y < h; y++) {
+              for (var x = 0; x < w; x++) {
+                // The runner's stride deliberately follows distance in
+                // both renderers; leave the figure and its wire out.
+                if (x > s * .2 && x < s * .7) continue;
+                final i = (y * w + x) * 4;
+                if (a[i] != b[i] ||
+                    a[i + 1] != b[i + 1] ||
+                    a[i + 2] != b[i + 2] ||
+                    a[i + 3] != b[i + 3]) {
+                  return false;
+                }
+              }
+            }
+            return true;
+          }
+
+          final game = StageRunner(random: Random(1))
+            ..time = .5
+            ..obstacles.clear()
+            ..pickups.clear();
+          final start = await render(
+            tester,
+            game,
+            art,
+            w,
+            h,
+            sceneryMotion: false,
+          );
+          for (final distance in [.13, 1.7, 1000.02]) {
+            game.distance = distance;
+            final later = await render(
+              tester,
+              game,
+              art,
+              w,
+              h,
+              sceneryMotion: false,
+            );
+            expect(
+              sameScenery(start, later),
+              isTrue,
+              reason: '${w}x$h, distance $distance, art ${art != null}',
+            );
+          }
+          final moving = await render(tester, game, art, w, h);
+          expect(sameScenery(start, moving), isFalse);
+        }
+      }
+    });
+
+    testWidgets('calm scenery still lets obstacles and pickups approach', (
+      tester,
+    ) async {
+      final loaded = await decodeArt(tester);
+      const w = 640, h = 400;
+      final s = stageLayout(const Size(640, 400)).s;
+      (int, int) changedBounds(
+        Uint8List background,
+        Uint8List scene,
+        double from,
+        double to,
+      ) {
+        var left = w, right = -1;
+        for (var y = (from * s).floor(); y < (to * s).ceil(); y++) {
+          for (var x = (s * .7).ceil(); x < w; x++) {
+            final i = (y * w + x) * 4;
+            if ((background[i] - scene[i]).abs() > 6 ||
+                (background[i + 1] - scene[i + 1]).abs() > 6 ||
+                (background[i + 2] - scene[i + 2]).abs() > 6) {
+              left = min(left, x);
+              right = max(right, x);
+            }
+          }
+        }
+        expect(right, greaterThan(left), reason: 'a visible course item');
+        return (left, right);
+      }
+
+      for (final art in [loaded, null]) {
+        final game = StageRunner(random: Random(1))
+          ..distance = .5
+          ..time = .5
+          ..obstacles.clear()
+          ..pickups.clear();
+        final background = await render(
+          tester,
+          game,
+          art,
+          w,
+          h,
+          sceneryMotion: false,
+        );
+        final crate = Obstacle()
+          ..left = 1.75
+          ..width = .1
+          ..top = StageRunner.floor - .1
+          ..bottom = StageRunner.floor;
+        final pickup = Pickup()
+          ..x = 1.55
+          ..y = .35;
+        game.obstacles.add(crate);
+        game.pickups.add(pickup);
+        Future<Uint8List> shot() async {
+          final state = (
+            game.distance,
+            game.time,
+            game.score,
+            crate.left,
+            crate.right,
+            pickup.x,
+            pickup.y,
+            pickup.taken,
+          );
+          final pixels = await render(
+            tester,
+            game,
+            art,
+            w,
+            h,
+            sceneryMotion: false,
+          );
+          expect((
+            game.distance,
+            game.time,
+            game.score,
+            crate.left,
+            crate.right,
+            pickup.x,
+            pickup.y,
+            pickup.taken,
+          ), state);
+          return pixels;
+        }
+
+        final before = await shot();
+        game.distance += 40 / s;
+        final after = await shot();
+        for (final (from, to) in [
+          (.25, .45),
+          (StageRunner.floor - .12, StageRunner.floor),
+        ]) {
+          final first = changedBounds(background, before, from, to);
+          final later = changedBounds(background, after, from, to);
+          // Blended sprite edges may merge with a background pixel; their
+          // visible bounds still travel exactly with the course.
+          expect(later.$1, closeTo(first.$1 - 40, 1));
+          expect(later.$2, closeTo(first.$2 - 40, 1));
+        }
+      }
+    });
+
+    testWidgets('calm scenery suppresses shaking and sliding decorations', (
+      tester,
+    ) async {
+      final art = await decodeArt(tester);
+      const w = 390, h = 844;
+      final s = stageLayout(const Size(390, 844)).s;
+      final game = StageRunner(random: Random(1))
+        ..distance = .5
+        ..time = .5
+        ..obstacles.clear()
+        ..pickups.clear()
+        ..over = true
+        ..sinceOver = .05;
+      final before = await render(
+        tester,
+        game,
+        art,
+        w,
+        h,
+        sceneryMotion: false,
+      );
+      game.sinceOver = .15;
+      final after = await render(tester, game, art, w, h, sceneryMotion: false);
+      // The character can fall after a crash; the surrounding scene cannot
+      // shake. Both snapshots precede the closing curtain.
+      var changed = 0;
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          if (x > s * .2 && x < s * .7) continue;
+          final i = (y * w + x) * 4;
+          if (after[i] != before[i] ||
+              after[i + 1] != before[i + 1] ||
+              after[i + 2] != before[i + 2]) {
+            changed++;
+          }
+        }
+      }
+      expect(changed, 0);
+      // The end transition still happens, but its curtain is fully closed
+      // from the start rather than sweeping across the picture.
+      game.sinceOver = .21;
+      final curtainStart = await render(
+        tester,
+        game,
+        art,
+        w,
+        h,
+        sceneryMotion: false,
+      );
+      game.sinceOver = .8;
+      final curtainEnd = await render(
+        tester,
+        game,
+        art,
+        w,
+        h,
+        sceneryMotion: false,
+      );
+      expect(listEquals(curtainStart, curtainEnd), isTrue);
+      expect(listEquals(after, curtainStart), isFalse);
+
+      game.over = false;
+      final fx = RunnerFx()
+        ..banner = '100 m – Applaus!'
+        ..bannerAge = .05;
+      final bannerStart = await render(
+        tester,
+        game,
+        art,
+        w,
+        h,
+        fx: fx,
+        sceneryMotion: false,
+      );
+      for (final age in [.5, 1.5]) {
+        fx.bannerAge = age;
+        final bannerLater = await render(
+          tester,
+          game,
+          art,
+          w,
+          h,
+          fx: fx,
+          sceneryMotion: false,
+        );
+        expect(listEquals(bannerStart, bannerLater), isTrue);
       }
     });
 
