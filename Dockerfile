@@ -7,7 +7,8 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY server/src ./src
 COPY server/scripts ./scripts
 COPY build/web /app/web
-RUN mkdir -p /data && chown node:node /data
+RUN find /app/server/src /app/server/scripts /app/web -type d -exec chmod 755 {} + \
+    && mkdir -p /data && chown node:node /data
 USER node
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8787 DATABASE_PATH=/data/theater.sqlite WEB_APP_DIR=/app/web
 EXPOSE 8787
