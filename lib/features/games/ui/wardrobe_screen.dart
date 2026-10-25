@@ -460,7 +460,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
-                              'Freigeschaltet: alle Rollen aus ${unique?.play ?? item.role?.play ?? 'dem Stück'} gesammelt.',
+                              unique?.allCharacters == true
+                                  ? 'Freigeschaltet: alle Figuren einschließlich Technik gesammelt.'
+                                  : 'Freigeschaltet: alle Rollen aus ${unique?.play ?? item.role?.play ?? 'dem Stück'} gesammelt.',
                             ),
                           ),
                         if (hint != null)
@@ -470,7 +472,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                               item.reward && milestone?.reached != true
                                   ? '$hint: für alle, sobald das Ensemble so weit gelaufen ist.'
                                   : item.unique
-                                  ? '$hint. Wer alle Rollen ${unique?.several == true ? 'dieser Stücke' : 'des Stücks'} hat, bekommt die Unique-Figur dazu – nicht aus Kisten.'
+                                  ? unique?.allCharacters == true
+                                        ? '$hint. Wer alle Figuren einschließlich Technik hat, bekommt die Unique-Figur dazu. Sie kommt nicht aus Kisten.'
+                                        : '$hint. Wer alle Rollen ${unique?.several == true ? 'dieser Stücke' : 'des Stücks'} hat, bekommt die Unique-Figur dazu – nicht aus Kisten.'
                                   : hint,
                             ),
                           )
@@ -1341,7 +1345,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${catalog.uniqueRarity?.name ?? 'Unique'} · alle Rollen eines Stücks',
+                    '${catalog.uniqueRarity?.name ?? 'Unique'} · vollständige Sammlungen',
                     style: theme.textTheme.titleSmall,
                   ),
                 ),

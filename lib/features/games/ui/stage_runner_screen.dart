@@ -505,7 +505,11 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   Future<void> _finish(int run) async {
     setState(() {
       _phase = _Phase.finished;
-      _line = curtainLine(_game.hitBy, _lines);
+      _line = curtainLine(
+        _game.hitBy,
+        _lines,
+        obstacleCrashLines: _art?.obstacleCrashLines ?? const {},
+      );
     });
     final start = _start;
     if (start == null) return;
@@ -640,7 +644,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         // Names whoever is worn in the worn role ("Elena als Lucy"), as the
         // picture below shows them.
         subtitle:
-            '${_wardrobe?.wornCharacterName() ?? 'Engel Logge'} hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt. Vorbei an Kisten, Kulissen, Scheinwerfern und Sandsäcken, immer schneller, bis der Vorhang fällt.',
+            '${_wardrobe?.wornCharacterName() ?? 'Engel Logge'} hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt. Vorbei an Kisten, Kulissen, Scheinwerfern und fallenden Requisiten, immer schneller, bis der Vorhang fällt.',
       ),
       if (_art case final art?)
         Center(

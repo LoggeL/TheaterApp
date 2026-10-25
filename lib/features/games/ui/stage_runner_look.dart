@@ -347,6 +347,11 @@ Future<RunnerArt> dressArt(
           sprite: ui.Offset(x, y),
     },
     border: backdrop?.borderColor,
+    obstacleCrashLines: {
+      if (stageSet != null)
+        for (final kind in ObstacleKind.values)
+          kind: ?backdrop?.obstacleCrashLines[kind.name],
+    },
     pickupNames: {
       for (final kind in PickupKind.values)
         kind: ?backdrop?.collectibleNames[kind.name],

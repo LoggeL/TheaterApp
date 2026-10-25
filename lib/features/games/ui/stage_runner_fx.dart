@@ -207,7 +207,11 @@ String obstacleName(ObstacleKind kind) => switch (kind) {
 };
 
 /// A line for the falling curtain, now and then about what was hit.
-String curtainLine(ObstacleKind? hitBy, Random random) {
+String curtainLine(
+  ObstacleKind? hitBy,
+  Random random, {
+  Map<ObstacleKind, String> obstacleCrashLines = const {},
+}) {
   const general = [
     'Text vergessen!',
     'Der Souffleur ist eingeschlafen.',
@@ -221,18 +225,20 @@ String curtainLine(ObstacleKind? hitBy, Random random) {
     'Kein Beinbruch – nur ein Flügelbruch.',
     'Bühnenreif. Nur die Landung nicht.',
   ];
-  final specific = switch (hitBy) {
-    ObstacleKind.crate => 'Über die Requisitenkiste gestolpert.',
-    ObstacleKind.flat => 'Die Kulisse stand genau da, wo sie hingehört.',
-    ObstacleKind.border => 'Mitten in den Soffitten hängen geblieben.',
-    ObstacleKind.lamp => 'Ins Scheinwerferlicht geflogen. Wörtlich.',
-    ObstacleKind.sandbag => 'Der Sandsack hatte Vorfahrt.',
-    ObstacleKind.drum => 'Von der Kabeltrommel überrollt.',
-    ObstacleKind.pile => 'Der Kistenstapel war höher als gedacht.',
-    ObstacleKind.truss => 'An der Lichttraverse hängen geblieben.',
-    ObstacleKind.drop => 'Der Prospekt kam von oben. Wie geprobt.',
-    null => null,
-  };
+  final specific =
+      obstacleCrashLines[hitBy] ??
+      switch (hitBy) {
+        ObstacleKind.crate => 'Über die Requisitenkiste gestolpert.',
+        ObstacleKind.flat => 'Die Kulisse stand genau da, wo sie hingehört.',
+        ObstacleKind.border => 'Mitten in den Soffitten hängen geblieben.',
+        ObstacleKind.lamp => 'Ins Scheinwerferlicht geflogen. Wörtlich.',
+        ObstacleKind.sandbag => 'Der Sandsack hatte Vorfahrt.',
+        ObstacleKind.drum => 'Von der Kabeltrommel überrollt.',
+        ObstacleKind.pile => 'Der Kistenstapel war höher als gedacht.',
+        ObstacleKind.truss => 'An der Lichttraverse hängen geblieben.',
+        ObstacleKind.drop => 'Der Prospekt kam von oben. Wie geprobt.',
+        null => null,
+      };
   if (specific != null && random.nextBool()) return specific;
   return general[random.nextInt(general.length)];
 }

@@ -209,6 +209,7 @@ class WardrobeItem {
     this.variants = const [],
     this.role,
     this.obstacles,
+    this.obstacleCrashLines = const {},
     this.collectibles,
     this.collectibleNames = const {},
     this.borderColor,
@@ -261,6 +262,9 @@ class WardrobeItem {
   final String? obstacles;
   final Color? borderColor;
 
+  /// Closing lines for this backdrop's own obstacles, by obstacle kind.
+  final Map<String, String> obstacleCrashLines;
+
   /// A backdrop's own music (API path of AAC in M4A or MP3), looped during
   /// a run while it is worn; null for older servers and other kinds (the
   /// game's own tune plays).
@@ -307,6 +311,7 @@ class WardrobeItem {
           variants: variants,
           role: variant.role,
           obstacles: obstacles,
+          obstacleCrashLines: obstacleCrashLines,
           collectibles: collectibles,
           collectibleNames: collectibleNames,
           borderColor: borderColor,
@@ -350,6 +355,12 @@ class WardrobeItem {
           ? WardrobeEffect.fromJson(jsonMap(json['effect']))
           : null,
       obstacles: path(json['obstacles']),
+      obstacleCrashLines: {
+        for (final MapEntry(:key, :value) in jsonMap(
+          json['obstacleCrashLines'],
+        ).entries)
+          if (value is String && value.trim().isNotEmpty) key: value,
+      },
       collectibles: path(json['collectibles']),
       collectibleNames: {
         for (final MapEntry(:key, :value) in jsonMap(
@@ -1208,11 +1219,15 @@ class UniqueFigureProgress {
     this.itemId,
     this.name = '???',
     this.parts = const [],
+    this.allCharacters = false,
   });
   final String play, name;
   final int? year;
   final int have, total;
   final bool unlocked;
+
+  /// All collectible figures, including technicians and legacy figures.
+  final bool allCharacters;
   final String? itemId;
 
   /// Per play of a figure across plays; empty for a single play.
@@ -1222,10 +1237,13 @@ class UniqueFigureProgress {
   bool get several => parts.length > 1;
 
   /// "Creepshow 2026", or "Creepshow und Nexus" across plays.
-  String get production => [play, ?year?.toString()].join(' ');
+  String get production =>
+      allCharacters ? 'Alle Figuren' : [play, ?year?.toString()].join(' ');
 
   /// "9/14 Rollen aus Creepshow", "23/52 Rollen aus Creepshow und Nexus".
-  String get line => '$have/$total Rollen aus $play';
+  String get line => allCharacters
+      ? '$have/$total Figuren gesammelt'
+      : '$have/$total Rollen aus $play';
 
   static UniqueFigureProgress? fromJson(JsonMap json) {
     final play = textValue(json['play']).trim();
@@ -1240,6 +1258,7 @@ class UniqueFigureProgress {
       unlocked: unlocked && id.isNotEmpty,
       itemId: unlocked && id.isNotEmpty ? id : null,
       name: unlocked ? textValue(json['name'], '???') : '???',
+      allCharacters: json['allCharacters'] == true,
       parts: [
         for (final p in jsonList(json['plays']))
           if (p is Map) ?UniqueFigurePart.fromJson(jsonMap(p)),

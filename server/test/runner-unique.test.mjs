@@ -299,7 +299,47 @@ test('across plays: a play without active role figures unlocks nothing and shows
   assert.deepEqual(other.runnerWardrobe('sam', now).uniqueFigures.plays[0].plays[1], { play: 'Gruft', have: 0, total: 3 });
 });
 
-test('the bundled catalog: Beatrice for Creepshow, the AI for Nexus, Captain Kuschel for both', t => {
+test('all characters: roles and technicians, hidden until complete, permanent after new plays arrive', t => {
+  const kolping = { id: 'u.kolping', kind: 'character', name: 'Adolph Kolping', role: 'Adolph Kolping', rarity: 'unique', unlock: { allCharacters: true }, image: 'figure.webp' };
+  const items = [...defaults, ...figures, { id: 'tech', kind: 'character', name: 'Technik', role: 'Ton', rarity: 'crew', personId: 910 }, kolping];
+  const collectionCatalog = entries => catalogOf(entries, { rarities: [...rarities, { id: 'crew', name: 'Technik', color: '#4A8B6D', weight: 1, crew: true }] });
+  const c = collectionCatalog(items);
+  const { app, give, saved } = setup(t, { catalog: c });
+  give(['r1', 'r2', 'r3']);
+  let w = app.runnerWardrobe('sam', now);
+  assert.deepEqual(w.uniqueFigures.plays[0], {
+    play: 'allen Stücken und der Technik', allCharacters: true,
+    plays: [{ play: 'Spuk', year: 2026, have: 3, total: 3 }, { play: 'Alt', year: 2020, have: 0, total: 1 }, { play: 'Technik', have: 0, total: 1 }],
+    have: 3, total: 5, unlocked: false, hidden: true, name: '???',
+  });
+  assert.deepEqual(leaks(w, ['u.kolping', 'Adolph Kolping', 'figure.webp']), []);
+  assert.throws(() => app.runnerSkin('sam', 'figure.webp'), { status: 404 });
+  give(['r1', 'r2', 'r3', 'a1']);
+  assert.equal(app.runnerWardrobe('sam', now).uniqueFigures.plays[0].unlocked, false, 'the technician is still missing');
+  give(['r1', 'r2', 'r3', 'a1', 'tech']);
+  w = app.runnerWardrobe('sam', now);
+  assert.equal(w.uniqueFigures.plays[0].unlocked, true);
+  assert.equal(w.catalog.uniques[0].name, 'Adolph Kolping');
+  assert.deepEqual(saved().uniques, ['u.kolping']);
+  assert.ok(!c.collectible.some(x => x.id === kolping.id));
+  assert.equal(app.runnerOutfit('sam', { kind: 'character', itemId: kolping.id, ...now }).selected.character, kolping.id);
+  assert.equal(app.runnerSkin('sam', 'figure.webp').mime, 'image/webp');
+  assert.deepEqual(leaks(app.runnerWardrobe('sam', { roles: true }), ['u.kolping', 'Adolph Kolping']), []);
+  app.runnerCatalog = collectionCatalog([...items, role('new', 911, 'Neues Stück', 2027)]);
+  w = app.runnerWardrobe('sam', now);
+  assert.deepEqual([w.uniqueFigures.plays[0].have, w.uniqueFigures.plays[0].total, w.uniqueFigures.plays[0].unlocked], [5, 6, true]);
+  give(['r1', 'r2', 'r3', 'a1', 'tech']);
+  assert.equal(app.runnerWardrobe('sam', now).uniqueFigures.plays[0].unlocked, false, 'new collectors also need the newly added role');
+  // An empty collection must not unlock a figure for free.
+  const empty = setup(t, { catalog: catalogOf([...defaults, kolping]) });
+  assert.deepEqual(empty.app.runnerWardrobe('sam', now).uniqueFigures.plays, []);
+  for (const unlock of [{ allCharacters: false }, { allCharacters: true, play: 'Spuk' }, { allCharacters: true, plays: ['Spuk', 'Alt'] }, { allCharacters: true, year: 2026 }]) {
+    assert.throws(() => catalogOf([...defaults, ...figures, { ...kolping, unlock }]), /allCharacters/);
+  }
+  assert.throws(() => collectionCatalog([...items, { ...kolping, id: 'u.duplicate', disabled: true }]), /one unique figure for all characters/);
+});
+
+test('the bundled catalog: play-specific uniques and Kolping for the complete character collection', t => {
   const c = bundledCatalog();
   assert.equal(c.uniqueRarity.id, 'unique');
   assert.equal(c.uniqueRarity.style, 'holo');
@@ -309,8 +349,9 @@ test('the bundled catalog: Beatrice for Creepshow, the AI for Nexus, Captain Kus
     ['character.unique-beatrice', '{"play":"Creepshow"}'],
     ['character.unique-ki-nexus', '{"play":"Nexus"}'],
     ['character.unique-captain-kuschel', '{"plays":["Creepshow","Nexus"]}'],
+    ['character.unique-adolph-kolping', '{"allCharacters":true}'],
   ]);
-  assert.deepEqual([...c.uniqueFiles.keys()].sort(), ['character-unique-beatrice-portrait.webp', 'character-unique-beatrice.webp', 'character-unique-captain-kuschel-portrait.webp', 'character-unique-captain-kuschel.webp', 'character-unique-ki-nexus-portrait.webp', 'character-unique-ki-nexus.webp']);
+  assert.deepEqual([...c.uniqueFiles.keys()].sort(), ['character-unique-adolph-kolping-portrait.webp', 'character-unique-adolph-kolping.webp', 'character-unique-beatrice-portrait.webp', 'character-unique-beatrice.webp', 'character-unique-captain-kuschel-portrait.webp', 'character-unique-captain-kuschel.webp', 'character-unique-ki-nexus-portrait.webp', 'character-unique-ki-nexus.webp']);
   const raw = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url), 'utf8')).items;
   const beatrice = c.byId.get('character.unique-beatrice');
   assert.deepEqual([beatrice.name, beatrice.play, beatrice.year, beatrice.unlock], ['Beatrice', 'Creepshow', 2026, { play: 'Creepshow' }]);
@@ -323,7 +364,7 @@ test('the bundled catalog: Beatrice for Creepshow, the AI for Nexus, Captain Kus
   const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', clock });
   app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
   const w = app.runnerWardrobe('admin', now);
-  assert.deepEqual(w.uniqueFigures.plays.map(x => [x.play, x.year]), [['Creepshow', 2026], ['Nexus', 2024], ['Creepshow und Nexus', undefined]]);
+  assert.deepEqual(w.uniqueFigures.plays.map(x => [x.play, x.year]), [['Creepshow', 2026], ['Nexus', 2024], ['Creepshow und Nexus', undefined], ['allen Stücken und der Technik', undefined]]);
   const [creepshow, nexus, across] = w.uniqueFigures.plays;
   assert.deepEqual(across.plays.map(x => [x.play, x.year]), [['Creepshow', 2026], ['Nexus', 2024]]);
   // Kuschel needs exactly the role figures of Beatrice and of the AI together.
@@ -331,7 +372,10 @@ test('the bundled catalog: Beatrice for Creepshow, the AI for Nexus, Captain Kus
   assert.equal(across.total, creepshow.total + nexus.total);
   for (const p of w.uniqueFigures.plays) assert.ok(p.total > 0 && p.hidden, p.play);
   assert.deepEqual(w.catalog.uniques, []);
-  assert.deepEqual(leaks(w, ['Kuschel', 'KI Nexus', 'unique-', 'Beatrice']), []);
+  const all = w.uniqueFigures.plays[3];
+  assert.equal(all.allCharacters, true);
+  assert.equal(all.total, c.items.filter(x => x.kind === 'character' && !x.default && !x.reward && !x.unique).length);
+  assert.deepEqual(leaks(w, ['Kuschel', 'KI Nexus', 'unique-', 'Beatrice', 'Adolph Kolping']), []);
 });
 
 test('over HTTP: the flag in the query and the body, the seen route, and the picture a 404 until unlocked', async t => {

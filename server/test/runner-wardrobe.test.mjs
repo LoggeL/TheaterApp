@@ -401,6 +401,7 @@ test('the bundled catalog is valid and ships only finished costumes', () => {
 
 test('the bundled pictures have the sizes the app accepts', () => {
   const c = bundledCatalog(), sizes = { character: [1124, 577], obstacles: [1124, 577], backdrop: [1024, 603] };
+  assert.deepEqual(c.byId.get('backdrop.creepshow').obstacleCrashLines, { sandbag: 'Der Kronleuchter hatte Vorfahrt.' });
   const named = new Set();
   // Role figures are characters like any other: same atlas, same square portrait.
   const pictured = c.items;
@@ -544,10 +545,15 @@ test('pictures come from the catalog folder, only to members, with their hash', 
   assert.throws(() => loadCatalog({ rarities, items: [...defaults, { id: 'x', kind: 'character', name: 'X', rarity: 'blau', harness: { wing: [1, 2] } }] }), /harness/);
   // A backdrop's obstacle set and border colour; a missing set is left out like any picture.
   const stage = loadCatalog({ rarities, items: [...defaults,
-    { id: 'b1', kind: 'backdrop', name: 'Gruft', rarity: 'blau', obstacles: 'figure.webp', borderColor: '#3E2A5C', collectibles: 'figure.webp', collectibleNames: { rose: 'Bonbon', star: 'Mond' } },
+    { id: 'b1', kind: 'backdrop', name: 'Gruft', rarity: 'blau', obstacles: 'figure.webp', obstacleCrashLines: { sandbag: 'Der Kronleuchter hatte Vorfahrt.' }, borderColor: '#3E2A5C', collectibles: 'figure.webp', collectibleNames: { rose: 'Bonbon', star: 'Mond' } },
     { id: 'b2', kind: 'backdrop', name: 'Leer', rarity: 'blau', obstacles: 'missing.webp' }] }, dir);
   assert.match(stage.byId.get('b1').obstacles, /^\/games\/runner\/skins\/figure\.webp\?v=[0-9a-f]{16}$/);
   assert.equal(stage.byId.get('b1').borderColor, '#3E2A5C');
+  assert.deepEqual(stage.byId.get('b1').obstacleCrashLines, { sandbag: 'Der Kronleuchter hatte Vorfahrt.' });
+  for (const invalid of [{ unknown: 'Text' }, { sandbag: '' }, { sandbag: 3 }, []]) {
+    assert.throws(() => catalogOf([{ id: 'x', kind: 'backdrop', name: 'X', rarity: 'blau', obstacleCrashLines: invalid }]), /obstacleCrashLines of x/);
+  }
+  assert.throws(() => catalogOf([{ id: 'x', kind: 'fx', name: 'X', rarity: 'blau', obstacleCrashLines: { sandbag: 'Text' } }]), /obstacleCrashLines of x/);
   assert.match(stage.byId.get('b1').collectibles, /^\/games\/runner\/skins\/figure\.webp\?v=/);
   assert.deepEqual(stage.byId.get('b1').collectibleNames, { rose: 'Bonbon', star: 'Mond' });
   assert.throws(() => catalogOf([{ id: 'x', kind: 'backdrop', name: 'X', rarity: 'blau', collectibleNames: { coin: 'Münze' } }]), /collectibleNames of x/);

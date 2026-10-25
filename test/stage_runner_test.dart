@@ -1747,6 +1747,19 @@ void main() {
       expect(lines.length, greaterThan(5));
       expect(lines, contains('Der Sandsack hatte Vorfahrt.'));
       expect(lines, contains('Text vergessen!'));
+      final themed = {
+        for (var i = 0; i < 80; i++)
+          curtainLine(
+            ObstacleKind.sandbag,
+            random,
+            obstacleCrashLines: {
+              ObstacleKind.sandbag: 'Der Kronleuchter hatte Vorfahrt.',
+            },
+          ),
+      };
+      expect(themed, contains('Der Kronleuchter hatte Vorfahrt.'));
+      expect(themed, isNot(contains('Der Sandsack hatte Vorfahrt.')));
+      expect(themed, contains('Text vergessen!'));
       for (final kind in ObstacleKind.values) {
         expect(obstacleName(kind), isNotEmpty);
         expect(

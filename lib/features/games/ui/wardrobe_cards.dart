@@ -656,7 +656,9 @@ String? uniqueHint(Wardrobe wardrobe, WardrobeItem item) {
 /// role is the character itself, so not "als Captain Kuschel"); across
 /// plays ([progress]) "Unique · Creepshow und Nexus".
 String uniqueRoleLine(WardrobeRole role, [UniqueFigureProgress? progress]) =>
-    progress != null && progress.several
+    progress?.allCharacters == true
+    ? 'Unique · Alle Figuren'
+    : progress != null && progress.several
     ? 'Unique · ${progress.play}'
     : ['Unique', ?role.production].join(' · ');
 

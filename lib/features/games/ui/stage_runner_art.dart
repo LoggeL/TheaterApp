@@ -131,6 +131,7 @@ class RunnerArt {
       harness = const {},
       effect = null,
       border = null,
+      obstacleCrashLines = const {},
       pickupNames = const {};
 
   /// Art from already decoded pictures, for tests.
@@ -149,6 +150,7 @@ class RunnerArt {
     this.harness = const {},
     this.effect,
     this.border,
+    this.obstacleCrashLines = const {},
     this.pickupNames = const {},
   });
 
@@ -174,6 +176,9 @@ class RunnerArt {
   /// own (and whenever its collectibles did not load).
   final Map<PickupKind, String> pickupNames;
 
+  /// Closing lines for the loaded obstacle set; empty for the default art.
+  final Map<ObstacleKind, String> obstacleCrashLines;
+
   /// Wire points of the worn character's own atlas that differ from
   /// [RunnerSprite.harness].
   final Map<RunnerSprite, ui.Offset> harness;
@@ -192,6 +197,7 @@ class RunnerArt {
     Map<RunnerSprite, ui.Offset> harness = const {},
     RunnerEffectStyle? effect,
     ui.Color? border,
+    Map<ObstacleKind, String> obstacleCrashLines = const {},
     Map<PickupKind, String> pickupNames = const {},
   }) => RunnerArt._dressed(
     atlas,
@@ -205,6 +211,7 @@ class RunnerArt {
     harness: runner == null ? const {} : harness,
     effect: effect,
     border: border,
+    obstacleCrashLines: obstacles == null ? const {} : obstacleCrashLines,
     pickupNames: pickups == null ? const {} : pickupNames,
   );
 

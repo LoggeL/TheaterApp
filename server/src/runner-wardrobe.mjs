@@ -337,6 +337,12 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
       const set = picture(x.obstacles);
       if (set) item.obstacles = set;
     }
+    if (x.obstacleCrashLines !== undefined) {
+      const lines = x.obstacleCrashLines;
+      if (x.kind !== 'backdrop' || !lines || typeof lines !== 'object' || Array.isArray(lines)
+        || Object.entries(lines).some(([k, v]) => !runnerObstacleKinds.includes(k) || typeof v !== 'string' || !v.trim())) bad(`obstacleCrashLines of ${x.id}`);
+      item.obstacleCrashLines = { ...lines };
+    }
     if (x.borderColor !== undefined) {
       if (x.kind !== 'backdrop' || !hex.test(x.borderColor)) bad(`borderColor of ${x.id}`);
       item.borderColor = x.borderColor;

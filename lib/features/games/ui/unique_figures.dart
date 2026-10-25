@@ -151,6 +151,8 @@ class _UniqueCelebrationState extends State<UniqueCelebration>
                             ),
                             Text(
                               switch (progressOf(item)) {
+                                final p? when p.allCharacters =>
+                                  'Alle ${p.total} Figuren einschließlich Technik gesammelt',
                                 final p? =>
                                   'Alle ${p.total} Rollen aus ${p.play} gesammelt',
                                 null => 'Alle Rollen des Stücks gesammelt',

@@ -778,6 +778,9 @@ void main() {
               extra: {
                 'image': '/games/runner/skins/backdrop-gruft.webp?v=1',
                 'obstacles': '/games/runner/skins/obstacles-gruft.webp?v=1',
+                'obstacleCrashLines': {
+                  'sandbag': 'Der Kronleuchter hatte Vorfahrt.',
+                },
                 'borderColor': '#3E2A5C',
                 'collectibles':
                     '/games/runner/skins/collectibles-gruft.webp?v=1',
@@ -800,6 +803,9 @@ void main() {
         expect(dressed.imageOf(RunnerSprite.crate), isNot(atlas));
         expect(dressed.imageOf(RunnerSprite.cheer), atlas);
         expect(dressed.border, const Color(0xFF3E2A5C));
+        expect(dressed.obstacleCrashLines, {
+          ObstacleKind.sandbag: 'Der Kronleuchter hatte Vorfahrt.',
+        });
         // Its collectibles replace rose, mask and star, with their names.
         expect(asked, contains(contains('collectibles-gruft.webp')));
         expect(dressed.imageOf(RunnerSprite.star), isNot(atlas));
@@ -817,12 +823,23 @@ void main() {
         expect(plain.border, isNull);
         expect(plain.imageOf(RunnerSprite.rose), atlas);
         expect(plain.pickupNames, isEmpty);
+        expect(plain.obstacleCrashLines, isEmpty);
+        // A failed or wrongly sized obstacle atlas also loses its lines.
+        final wrongSize = await createTestImage(width: 64, height: 32);
+        final fallback = await dressArt(
+          RunnerArt.test(wrongSize, backdrop),
+          Wardrobe.fromJson(wearing('gruft')),
+          controller,
+        );
+        expect(fallback.imageOf(RunnerSprite.sandbag), wrongSize);
+        expect(fallback.obstacleCrashLines, isEmpty);
         // Older servers send neither; a broken colour is no colour.
         final old = WardrobeItem.fromJson({
           ..._item('b1', 'backdrop', 'Alt', 'hellblau'),
           'borderColor': 'red',
         })!;
         expect(old.obstacles, isNull);
+        expect(old.obstacleCrashLines, isEmpty);
         expect(old.borderColor, isNull);
       },
     );

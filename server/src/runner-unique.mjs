@@ -1,7 +1,9 @@
 // Unique figures of the stage runner's wardrobe (`runnerUniqueFigures`, from 0.11.4): every play has
 // at most one, a non-human character of the play that no actor has as a role figure (Beatrice in
 // Creepshow, the AI in Nexus, …), and a few belong to several plays (Captain Kuschel, in Creepshow and
-// Nexus). It is played like the role figures (atlas, harness, portrait).
+// Nexus). A collection-wide figure (Adolph Kolping) instead needs all collectible characters,
+// including technicians and legacy figures (`unlock: { allCharacters: true }`). It is played like
+// the role figures (atlas, harness, portrait).
 //
 // - Catalog: an item with `rarity: "unique"` (the look of `uniqueFigures.rarity`, apart from the
 //   rarities of the draw), `kind: "character"`, `role` (the character's name), `play`, `year`, no
@@ -64,9 +66,17 @@ export function checkUniqueEntry(x, rarity, raw, bad) {
   if (x.kind !== 'character') bad(`${what}: a unique figure is a character`);
   if (x.rarities !== undefined && !(list(x.rarities).length === 1 && x.rarities[0] === rarity.id)) bad(`${what}: a unique figure has no other rarity`);
   if (x.personId !== undefined || x.default === true || x.reward === true || x.score !== undefined || x.variantOf !== undefined) bad(`${what}: a unique figure belongs to nobody and is no default, reward or variant`);
-  if (!text(x.role) || !text(x.play) || !Number.isInteger(x.year)) bad(`${what}: a unique figure needs role, play and year`);
+  if (!text(x.role)) bad(`${what}: a unique figure needs a role`);
   const u = x.unlock;
   if (!u || typeof u !== 'object') bad(`unlock of ${what}`);
+  if (u.allCharacters !== undefined) {
+    if (u.allCharacters !== true || u.play !== undefined || u.plays !== undefined || u.year !== undefined
+      || x.play !== undefined || x.year !== undefined) bad(`unlock of ${what}: allCharacters has no play or year`);
+    const same = raw.filter(o => isUniqueEntry(o, rarity) && o?.unlock?.allCharacters === true);
+    if (same.length > 1) bad(`${what}: one unique figure for all characters`);
+    return { allCharacters: true };
+  }
+  if (!text(x.play) || !Number.isInteger(x.year)) bad(`${what}: a unique figure needs role, play and year`);
   // `{ play }` or (across plays) `{ plays }`, never both; `plays` names two or more different plays.
   const several = u.plays !== undefined;
   if (several ? u.play !== undefined || u.year !== undefined || !Array.isArray(u.plays) || u.plays.length < 2 : !text(u.play)) bad(`unlock of ${what}`);
@@ -75,7 +85,7 @@ export function checkUniqueEntry(x, rarity, raw, bad) {
   if (new Set(plays.map(p => playsKey([p]))).size !== plays.length) bad(`unlock of ${what}: a play twice`);
   for (const p of plays) if (!raw.some(o => isRoleOf(o, p))) bad(`unlock of ${what}: no role figure of ${p.play}`);
   const key = playsKey(plays);
-  const same = raw.filter(o => o?.unlock && typeof o.unlock === 'object' && isUniqueEntry(o, rarity) && playsKey(unlockPlays(o.unlock)) === key);
+  const same = raw.filter(o => o?.unlock && !o.unlock.allCharacters && typeof o.unlock === 'object' && isUniqueEntry(o, rarity) && playsKey(unlockPlays(o.unlock)) === key);
   if (same.length > 1) bad(`${what}: one unique figure per play (${same.map(o => o.id).join(', ')})`);
   if (several) return { plays: plays.map(p => p.year !== undefined ? { ...p } : p.play) };
   return { play: u.play, ...(u.year !== undefined ? { year: u.year } : {}) };
@@ -85,12 +95,25 @@ const required = new WeakMap();
 /**
  * Per play of [u] (`{ play, year?, ids }`) its active role figures: owning all of them, of every
  * play, unlocks [u]. The year is the one named in `unlock`, else (one play) the figure's own, else
- * (across plays) the one all the play's role figures share.
+ * (across plays) the one all the play's role figures share. A collection-wide figure groups every
+ * collectible character by play, with technicians in their own group.
  */
 export function uniqueRequirement(c, u) {
   let byUnique = required.get(c);
   if (!byUnique) required.set(c, byUnique = new Map());
   if (!byUnique.has(u.id)) {
+    if (u.unlock.allCharacters) {
+      const parts = new Map();
+      for (const x of c.items) {
+        if (x.kind !== 'character' || x.default || x.reward || x.unique) continue;
+        const crew = list(x.rarities).some(id => c.rarities.some(r => r.id === id && r.crew));
+        const p = { play: x.play ?? (crew ? 'Technik' : 'Weitere Figuren'), ...(x.year !== undefined ? { year: x.year } : {}) }, key = playsKey([p]);
+        if (!parts.has(key)) parts.set(key, { ...p, ids: [] });
+        parts.get(key).ids.push(x.id);
+      }
+      byUnique.set(u.id, [...parts.values()]);
+      return byUnique.get(u.id);
+    }
     const plays = unlockPlays(u.unlock), several = Array.isArray(u.unlock?.plays);
     byUnique.set(u.id, plays.map(p => {
       const roles = c.items.filter(x => isRoleOf(x, p) && !x.default && !x.reward && !x.unique);
@@ -109,7 +132,7 @@ export function uniqueRequirement(c, u) {
 export function uniqueCount(c, u, owned) {
   const plays = uniqueRequirement(c, u).map(({ ids, ...p }) => ({ ...p, have: ids.filter(id => owned.has(id)).length, total: ids.length }));
   const sum = k => plays.reduce((n, p) => n + p[k], 0);
-  return { have: sum('have'), total: sum('total'), plays, ready: plays.every(p => p.total > 0) };
+  return { have: sum('have'), total: sum('total'), plays, ready: plays.length > 0 && plays.every(p => p.total > 0) };
 }
 
 /** Unique figures [p] has unlocked and the catalog has (with picture). */
@@ -146,7 +169,9 @@ export function uniqueView(c, p, owned) {
   const plays = c.uniques.map(u => {
     const { have, total, ready, plays: parts } = uniqueCount(c, u, owned), unlocked = mine.has(u.id);
     if (!ready && !unlocked) return null;
-    const where = Array.isArray(u.unlock.plays)
+    const where = u.unlock.allCharacters
+      ? { play: 'allen Stücken und der Technik', allCharacters: true, plays: parts }
+      : Array.isArray(u.unlock.plays)
       ? { play: playsText(parts.map(x => x.play)), plays: parts }
       : { play: u.unlock.play, ...(parts[0].year !== undefined ? { year: parts[0].year } : {}) };
     return unlocked
