@@ -591,7 +591,14 @@ void main() {
         WardrobeScreen(controller: controller, sound: _Sound()),
       );
       await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.byKey(const ValueKey('runner-missions')), findsNothing);
+      expect(
+        find.byKey(const PageStorageKey('wardrobe-missions-section')),
+        findsNothing,
+      );
       expect(calls.where((c) => c.startsWith('missions')), isEmpty);
       await tester.pumpWidget(const SizedBox());
     });
@@ -621,6 +628,14 @@ void main() {
         WardrobeScreen(controller: controller, sound: _Sound()),
       );
       await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(
+        find.byKey(const PageStorageKey('wardrobe-missions-section')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.byKey(const ValueKey('runner-missions')), findsOneWidget);
       expect(
         find.text('Alle drei geschafft – die Missionskiste ist verdient.'),

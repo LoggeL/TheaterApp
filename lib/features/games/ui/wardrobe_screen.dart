@@ -160,6 +160,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       _busy = false,
       _celebrating = false,
       _celebratingUnique = false;
+  WardrobeKind _selectedKind = WardrobeKind.character;
 
   AppController get controller => widget.controller;
   bool get _dupes => dupesAvailable(controller);
@@ -169,6 +170,15 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   bool get _eventCrates => eventCratesAvailable(controller);
   bool get _unique => uniqueFiguresAvailable(controller);
   bool get _targets => crateTargetsAvailable(controller);
+
+  int get _waitingCrates {
+    final w = _wardrobe;
+    if (w == null) return 0;
+    return w.progress.crates +
+        (_missions ? w.progress.missionCrates : 0) +
+        (_ensemble && w.ensemble != null ? w.progress.ensembleCrates : 0) +
+        (_eventCrates ? w.eventCrates.length : 0);
+  }
 
   @override
   void initState() {
@@ -718,99 +728,234 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => DefaultTabController(
-    length: 2,
-    child: Scaffold(
-      appBar: AppBar(
-        title: const Text('Garderobe'),
-        bottom: const TabBar(
-          tabs: [
-            Tab(text: 'Kostüme'),
-            Tab(text: 'Statistik'),
-          ],
-        ),
-      ),
-      body: _wardrobe == null
-          ? Center(
-              child: _loading
-                  ? const CircularProgressIndicator()
-                  : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _error ??
-                              'Die Garderobe konnte nicht geladen werden.',
-                        ),
-                        TextButton(
-                          onPressed: _load,
-                          child: const Text('Erneut laden'),
-                        ),
-                      ],
+  Widget build(BuildContext context) {
+    final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Garderobe'),
+          bottom: TabBar(
+            isScrollable: largeText,
+            tabAlignment: largeText ? TabAlignment.start : TabAlignment.fill,
+            tabs: [
+              Tab(
+                key: const ValueKey('wardrobe-tab-collection'),
+                height: largeText ? 64 : null,
+                text: 'Sammlung',
+              ),
+              Tab(
+                key: const ValueKey('wardrobe-tab-crates'),
+                height: largeText ? 64 : null,
+                child: Semantics(
+                  label: 'Kisten, $_waitingCrates wartend',
+                  excludeSemantics: true,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Badge.count(
+                      count: _waitingCrates,
+                      isLabelVisible: _waitingCrates > 0,
+                      child: const Text('Kisten'),
                     ),
-            )
-          : TabBarView(children: [_costumes(context), _statistics(context)]),
-    ),
-  );
+                  ),
+                ),
+              ),
+              Tab(height: largeText ? 64 : null, text: 'Statistik'),
+            ],
+          ),
+        ),
+        body: _wardrobe == null
+            ? Center(
+                child: _loading
+                    ? const CircularProgressIndicator()
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _error ??
+                                'Die Garderobe konnte nicht geladen werden.',
+                          ),
+                          TextButton(
+                            onPressed: _load,
+                            child: const Text('Erneut laden'),
+                          ),
+                        ],
+                      ),
+              )
+            : TabBarView(
+                children: [
+                  _costumes(context),
+                  _rewards(context),
+                  _statistics(context),
+                ],
+              ),
+      ),
+    );
+  }
 
   Widget _costumes(BuildContext context) {
     final w = _wardrobe!;
+    final theme = Theme.of(context);
     final padding = pagePadding(context, maxWidth: 960, top: 16);
+    final kinds = [
+      for (final kind in WardrobeKind.values)
+        if (w.catalog.items.any((i) => i.kind == kind && !i.isDefault)) kind,
+    ];
+    final selected = kinds.contains(_selectedKind)
+        ? _selectedKind
+        : kinds.firstOrNull;
     return CustomScrollView(
       key: const PageStorageKey('wardrobe-costumes'),
       slivers: [
-        // Termin-Kisten for own commitments, only while some wait.
-        if (_eventCrates && w.eventCrates.isNotEmpty)
-          SliverPadding(
-            padding: padding.copyWith(bottom: 12),
-            sliver: SliverToBoxAdapter(
-              child: EventCratesCard(
-                crates: w.eventCrates,
-                onOpen: _busy ? null : (e) => _open(event: e),
-              ),
-            ),
-          ),
-        // Tagesmissionen with the Missionskisten to open.
-        if (_missions)
-          SliverPadding(
-            padding: padding.copyWith(bottom: 12),
-            sliver: SliverToBoxAdapter(
-              child: DailyMissionsCard(
-                controller: controller,
-                crates: w.progress.missionCrates,
-                collectibleNames:
-                    w.worn(WardrobeKind.backdrop)?.collectibleNames ?? const {},
-                onOpenCrate: _busy ? null : () => _open(mission: true),
-              ),
-            ),
-          ),
-        if (_ensemble && w.ensemble != null)
-          SliverPadding(
-            padding: padding.copyWith(bottom: 12),
-            sliver: SliverToBoxAdapter(
-              child: EnsembleCard(
-                wardrobe: w,
-                controller: controller,
-                art: _base,
-                onOpen: _busy ? null : () => _open(ensemble: true),
-                onReward: _details,
-              ),
-            ),
-          ),
         SliverPadding(
-          padding: padding.copyWith(
-            bottom: 0,
-            top: _ensemble && w.ensemble != null ? 0 : null,
+          padding: padding.copyWith(bottom: 8),
+          sliver: SliverToBoxAdapter(
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(
+                  '${w.collected}/${w.collectible} gesammelt',
+                  key: const ValueKey('wardrobe-count'),
+                  style: theme.textTheme.bodyMedium,
+                ),
+                if (_dupes)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.payments_outlined, size: 18),
+                      const SizedBox(width: 6),
+                      Text(
+                        gageText(w.gage),
+                        key: const ValueKey('wardrobe-gage'),
+                        style: theme.textTheme.labelLarge,
+                      ),
+                    ],
+                  ),
+                if (_dupes)
+                  TextButton.icon(
+                    key: const ValueKey('wardrobe-trade'),
+                    onPressed: _busy ? null : _trade,
+                    icon: const Icon(Icons.handshake_outlined, size: 18),
+                    label: const Text('Tauschen'),
+                  ),
+              ],
+            ),
           ),
-          sliver: SliverToBoxAdapter(child: _crates(context, w)),
         ),
-        // A kind with nothing to collect yet (only its default) stays hidden.
-        for (final kind in WardrobeKind.values)
-          if (w.catalog.items.any((i) => i.kind == kind && !i.isDefault))
-            ..._kind(context, w, kind, padding),
+        if (kinds.length > 1)
+          SliverToBoxAdapter(
+            child: SingleChildScrollView(
+              key: const PageStorageKey('wardrobe-kind-selector'),
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.symmetric(horizontal: padding.left),
+              child: Row(
+                spacing: 8,
+                children: [
+                  for (final kind in kinds)
+                    ChoiceChip(
+                      key: ValueKey('wardrobe-kind-${kind.name}'),
+                      label: Text(kind.plural),
+                      selected: selected == kind,
+                      showCheckmark: false,
+                      onSelected: (_) => setState(() => _selectedKind = kind),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        if (selected != null)
+          ..._kind(context, w, selected, padding)
+        else
+          SliverPadding(
+            padding: padding,
+            sliver: const SliverToBoxAdapter(
+              child: Text('Im Fundus gibt es noch nichts zu sammeln.'),
+            ),
+          ),
         const SliverToBoxAdapter(child: SizedBox(height: 32)),
       ],
     );
   }
+
+  Widget _rewards(BuildContext context) {
+    final w = _wardrobe!;
+    return ListView(
+      key: const PageStorageKey('wardrobe-rewards'),
+      padding: pagePadding(context, maxWidth: 640, top: 16),
+      children: [
+        _crates(context, w),
+        if (_eventCrates && w.eventCrates.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          EventCratesCard(
+            crates: w.eventCrates,
+            onOpen: _busy ? null : (e) => _open(event: e),
+          ),
+        ],
+        if (_missions) ...[
+          const SizedBox(height: 12),
+          _goalSection(
+            id: 'missions',
+            icon: Icons.flag_outlined,
+            title: 'Tagesmissionen',
+            summary: w.progress.missionCrates > 0
+                ? w.progress.missionCrates == 1
+                      ? '1 Missionskiste bereit'
+                      : '${w.progress.missionCrates} Missionskisten bereit'
+                : 'Deine Aufgaben für heute',
+            child: DailyMissionsCard(
+              controller: controller,
+              crates: w.progress.missionCrates,
+              collectibleNames:
+                  w.worn(WardrobeKind.backdrop)?.collectibleNames ?? const {},
+              onOpenCrate: _busy ? null : () => _open(mission: true),
+            ),
+          ),
+        ],
+        if (_ensemble && w.ensemble != null) ...[
+          const SizedBox(height: 12),
+          _goalSection(
+            id: 'ensemble',
+            icon: Icons.groups_outlined,
+            title: 'Ensemble',
+            summary: w.progress.ensembleCrates > 0
+                ? w.progress.ensembleCrates == 1
+                      ? '1 Ensemble-Kiste bereit'
+                      : '${w.progress.ensembleCrates} Ensemble-Kisten bereit'
+                : 'Gemeinsam ${kmText(w.ensemble!.meters)} gelaufen',
+            child: EnsembleCard(
+              wardrobe: w,
+              controller: controller,
+              art: _base,
+              onOpen: _busy ? null : () => _open(ensemble: true),
+              onReward: _details,
+            ),
+          ),
+        ],
+        const SizedBox(height: 32),
+      ],
+    );
+  }
+
+  Widget _goalSection({
+    required String id,
+    required IconData icon,
+    required String title,
+    required String summary,
+    required Widget child,
+  }) => Card(
+    clipBehavior: Clip.antiAlias,
+    child: ExpansionTile(
+      key: PageStorageKey('wardrobe-$id-section'),
+      leading: Icon(icon),
+      title: Text(title),
+      subtitle: Text(summary),
+      shape: const Border(),
+      collapsedShape: const Border(),
+      children: [child],
+    ),
+  );
 
   /// A crate of the own runs: with crate targets first the choice
   /// (Zufallskiste, a play or the Technik-Kiste), else the Zufallskiste.
@@ -830,43 +975,29 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   Widget _crates(BuildContext context, Wardrobe w) {
     final theme = Theme.of(context);
     final p = w.progress;
-    final ready = p.crates > 0 && (_dupes || !p.complete);
+    final ready = !_busy && p.crates > 0 && (_dupes || !p.complete);
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
-                Badge(
-                  isLabelVisible: p.crates > 0,
-                  label: Text('${p.crates}'),
-                  child: const Icon(
-                    Icons.inventory_2_outlined,
-                    color: StageTheme.orange,
-                    size: 32,
-                  ),
+                const Icon(
+                  Icons.inventory_2_outlined,
+                  color: StageTheme.orange,
+                  size: 28,
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        p.crates == 0
-                            ? 'Keine Kostümkiste bereit'
-                            : p.crates == 1
-                            ? '1 Kostümkiste bereit'
-                            : '${p.crates} Kostümkisten bereit',
-                        style: theme.textTheme.titleMedium,
-                      ),
-                      Text(
-                        '${w.collected}/${w.collectible} gesammelt',
-                        key: const ValueKey('wardrobe-count'),
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ],
+                  child: Text(
+                    p.crates == 0
+                        ? 'Keine Kostümkiste bereit'
+                        : p.crates == 1
+                        ? '1 Kostümkiste bereit'
+                        : '${p.crates} Kostümkisten bereit',
+                    style: theme.textTheme.titleMedium,
                   ),
                 ),
               ],
@@ -876,92 +1007,78 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               borderRadius: BorderRadius.circular(6),
               child: LinearProgressIndicator(
                 value: p.complete ? 1 : p.fraction,
-                minHeight: 10,
+                minHeight: 6,
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              crateDistanceText(p, showBonus: _bonus),
-              style: theme.textTheme.bodyMedium,
-            ),
-            if (_bonus && p.bonusOpen)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  dailyBonusHint,
-                  key: const ValueKey('wardrobe-daily-bonus'),
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
-            if (p.complete && _dupes)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  roleFiguresAvailable(controller)
-                      ? 'Fundus komplett – Kisten bringen jetzt Glanz oder Gage.'
-                      : 'Fundus komplett – Kisten bringen jetzt Rollen, Glanz oder Gage.',
-                  style: theme.textTheme.bodySmall,
-                ),
-              )
-            else if (p.complete && p.crates > 0)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'Deine Kisten bleiben zu, bis es Neues im Fundus gibt.',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
+            Text(nextCrateText(p), style: theme.textTheme.bodyMedium),
             const SizedBox(height: 16),
-            if (_targets && w.crateTargets.length > 1)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'Beim Öffnen wählst du: Zufallskiste mit allem und mehr Glanz, oder gezielt ein Stück bzw. die Technik.',
-                  key: const ValueKey('wardrobe-targets-hint'),
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
             FilledButton.icon(
               key: const ValueKey('wardrobe-open'),
               onPressed: ready ? _openOwn : null,
               icon: const Icon(Icons.inventory_2),
               label: const Text('Kiste öffnen'),
             ),
-            if (_dupes) ...[
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  const Icon(Icons.payments_outlined, color: Color(0xFFE4AE39)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      gageText(w.gage),
-                      key: const ValueKey('wardrobe-gage'),
-                      style: theme.textTheme.titleSmall,
+            ExpansionTile(
+              key: const PageStorageKey('wardrobe-crate-details'),
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(bottom: 16),
+              title: Text(
+                'Chancen & Details',
+                style: theme.textTheme.bodyMedium,
+              ),
+              shape: const Border(),
+              collapsedShape: const Border(),
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  spacing: 10,
+                  children: [
+                    Text(
+                      crateDistanceText(p, showBonus: _bonus),
+                      style: theme.textTheme.bodySmall,
                     ),
-                  ),
-                  OutlinedButton.icon(
-                    key: const ValueKey('wardrobe-trade'),
-                    onPressed: _busy ? null : _trade,
-                    icon: const Icon(Icons.handshake_outlined),
-                    label: const Text('Tauschvertrag'),
-                  ),
-                ],
-              ),
-              Text(
-                'Duplikate einer kompletten Stufe bringen Gage. Fehlende Teile kannst du über ihre Karte gezielt holen.',
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
-            const SizedBox(height: 16),
-            _odds(context, w),
+                    if (_bonus && p.bonusOpen)
+                      Text(
+                        dailyBonusHint,
+                        key: const ValueKey('wardrobe-daily-bonus'),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    if (p.complete && _dupes)
+                      Text(
+                        roleFiguresAvailable(controller)
+                            ? 'Fundus komplett – Kisten bringen jetzt Glanz oder Gage.'
+                            : 'Fundus komplett – Kisten bringen jetzt Rollen, Glanz oder Gage.',
+                        style: theme.textTheme.bodySmall,
+                      )
+                    else if (p.complete && p.crates > 0)
+                      Text(
+                        'Deine Kisten bleiben zu, bis es Neues im Fundus gibt.',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    if (_targets && w.crateTargets.length > 1)
+                      Text(
+                        'Beim Öffnen wählst du: Zufallskiste mit allem und mehr Glanz, oder gezielt ein Stück bzw. die Technik.',
+                        key: const ValueKey('wardrobe-targets-hint'),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    if (_dupes)
+                      Text(
+                        'Duplikate einer kompletten Stufe bringen Gage. Fehlende Teile kannst du über ihre Karte gezielt holen.',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    _odds(context, w),
+                  ],
+                ),
+              ],
+            ),
           ],
         ),
       ),
     );
   }
 
-  /// The chance of each rarity, open like the odds of a loot box should be.
+  /// The chance of each rarity, available before opening a crate.
   Widget _odds(BuildContext context, Wardrobe w) {
     final theme = Theme.of(context);
     final catalog = w.catalog;
@@ -1023,20 +1140,11 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final worn = w.worn(kind)?.id;
     return [
       SliverPadding(
-        padding: EdgeInsets.fromLTRB(padding.left, 24, padding.right, 8),
+        padding: EdgeInsets.fromLTRB(padding.left, 16, padding.right, 8),
         sliver: SliverToBoxAdapter(
-          child: Row(
-            children: [
-              Icon(kindIcon(kind), size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  kind.plural,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              Text('$owned/${collectible.length}'),
-            ],
+          child: Text(
+            '$owned/${collectible.length} ${kind.plural} gesammelt',
+            style: Theme.of(context).textTheme.bodySmall,
           ),
         ),
       ),
@@ -1045,7 +1153,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         sliver: SliverGrid.builder(
           // Figures are a little taller: their role stands under the name.
           gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 132,
+            maxCrossAxisExtent: _cardWidth(context),
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
             childAspectRatio: kind == WardrobeKind.character ? .7 : .78,
@@ -1145,30 +1253,28 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       key: key,
       value: value,
       isDense: true,
+      isExpanded: true,
       underline: const SizedBox.shrink(),
       items: [
-        DropdownMenuItem<T?>(value: null, child: Text(all)),
+        DropdownMenuItem<T?>(
+          value: null,
+          child: Text(all, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
         for (final (v, label) in options)
-          DropdownMenuItem<T?>(value: v, child: Text(label)),
+          DropdownMenuItem<T?>(
+            value: v,
+            child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
       ],
       onChanged: onChanged,
     );
     return [
       SliverPadding(
-        padding: EdgeInsets.fromLTRB(padding.left, 24, padding.right, 4),
+        padding: EdgeInsets.fromLTRB(padding.left, 16, padding.right, 4),
         sliver: SliverToBoxAdapter(
-          child: Row(
-            children: [
-              Icon(kindIcon(WardrobeKind.character), size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  WardrobeKind.character.plural,
-                  style: theme.textTheme.titleMedium,
-                ),
-              ),
-              Text('$owned/${collectible.length}'),
-            ],
+          child: Text(
+            '$owned/${collectible.length} Figuren gesammelt',
+            style: theme.textTheme.bodySmall,
           ),
         ),
       ),
@@ -1176,26 +1282,43 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         SliverPadding(
           padding: EdgeInsets.fromLTRB(padding.left, 0, padding.right, 4),
           sliver: SliverToBoxAdapter(
-            child: Wrap(
-              spacing: 16,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                filter<String>(
-                  key: const ValueKey('wardrobe-filter-play'),
-                  value: play,
-                  all: 'Alle Stücke',
-                  options: [for (final p in plays) (p, p)],
-                  onChanged: (v) => setState(() => _play = v),
-                ),
-                filter<int>(
-                  key: const ValueKey('wardrobe-filter-person'),
-                  value: person,
-                  all: 'Alle Personen',
-                  options: [for (final e in persons) (e.key, e.value)],
-                  onChanged: (v) => setState(() => _person = v),
-                ),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final largeText =
+                    MediaQuery.textScalerOf(context).scale(14) > 20;
+                final width = largeText
+                    ? constraints.maxWidth
+                    : (constraints.maxWidth - 16) / 2;
+                return Wrap(
+                  spacing: 16,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: width,
+                      height: 48,
+                      child: filter<String>(
+                        key: const ValueKey('wardrobe-filter-play'),
+                        value: play,
+                        all: 'Alle Stücke',
+                        options: [for (final p in plays) (p, p)],
+                        onChanged: (v) => setState(() => _play = v),
+                      ),
+                    ),
+                    SizedBox(
+                      width: width,
+                      height: 48,
+                      child: filter<int>(
+                        key: const ValueKey('wardrobe-filter-person'),
+                        value: person,
+                        all: 'Alle Personen',
+                        options: [for (final e in persons) (e.key, e.value)],
+                        onChanged: (v) => setState(() => _person = v),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -1269,6 +1392,14 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     ];
   }
 
+  /// Larger system text gets wider cards so the picture still has room.
+  double _cardWidth(BuildContext context) =>
+      132 *
+      (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(
+        1,
+        double.infinity,
+      );
+
   /// A grid of figure cards.
   Widget _grid(
     List<WardrobeItem> items,
@@ -1280,8 +1411,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     padding: EdgeInsets.fromLTRB(padding.left, top, padding.left, 0),
     sliver: SliverGrid.builder(
       // Figures are a little taller: their role stands under the name.
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 132,
+      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: _cardWidth(context),
         mainAxisSpacing: 10,
         crossAxisSpacing: 10,
         childAspectRatio: .7,

@@ -477,6 +477,14 @@ void main() {
           WardrobeScreen(controller: controller, sound: sound),
         );
         await tester.pump(const Duration(milliseconds: 100));
+        await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.tap(
+          find.byKey(const PageStorageKey('wardrobe-crate-details')),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
         expect(
           find.byKey(const ValueKey('wardrobe-targets-hint')),
           findsOneWidget,
@@ -573,6 +581,14 @@ void main() {
           WardrobeScreen(controller: controller, sound: _Sound()),
         );
         await tester.pump(const Duration(milliseconds: 100));
+        await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.tap(
+          find.byKey(const PageStorageKey('wardrobe-crate-details')),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
         expect(
           find.byKey(const ValueKey('wardrobe-targets-hint')),
           findsNothing,

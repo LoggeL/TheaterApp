@@ -117,8 +117,8 @@ List<NavigationDestination> appNavigationDestinations(
       name: 'Drehbücher',
     ),
     _destination(
-      Icons.chat_bubble_outline,
-      Icons.chat_bubble,
+      Icons.mail_outline,
+      Icons.mail,
       label: 'Post',
       name: 'Mitteilungen',
       count: unread + polls,

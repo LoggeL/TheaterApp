@@ -27,6 +27,15 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.12.1',
+    date: '25. Oktober 2026',
+    items: [
+      'In der Garderobe siehst du direkt deine Sammlung und wählst die gewünschte Kategorie. Kisten, Tagesmissionen und Ensemble haben einen eigenen Reiter; längere Erklärungen klappst du bei Bedarf auf.',
+      'Mit großer Schrift bleiben die Reiter lesbar und die Figuren in den Karten gut sichtbar.',
+      'Den Post-Reiter erkennst du jetzt am Briefsymbol.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.12.0',
     date: '25. Oktober 2026',
     items: [

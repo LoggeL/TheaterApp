@@ -872,21 +872,43 @@ void main() {
         WardrobeScreen(controller: controller, sound: _Sound()),
       );
       await tester.pump(const Duration(milliseconds: 100));
-      expect(find.text('1 Kostümkiste bereit'), findsOneWidget);
       expect(find.text('1/4 gesammelt'), findsOneWidget);
+      expect(find.text('Sammle alle hellblauen Figuren'), findsOneWidget);
+      // Kinds with nothing to collect but their default stay hidden.
+      expect(
+        find.byKey(const ValueKey('wardrobe-kind-character')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('wardrobe-kind-fx')), findsOneWidget);
+      expect(find.text('Bühnenbilder'), findsNothing);
+      expect(find.text('Hindernisse'), findsNothing);
+      expect(find.byKey(const ValueKey('wardrobe-o0')), findsNothing);
+      expect(find.byKey(const ValueKey('wardrobe-funken')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('wardrobe-kind-fx')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('wardrobe-funken')), findsOneWidget);
+      expect(find.byKey(const ValueKey('wardrobe-maren')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('wardrobe-kind-character')));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('1 Kostümkiste bereit'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const PageStorageKey('wardrobe-crate-details')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(
         find.text('2.900 m gelaufen · noch 1.200 m bis zur nächsten Kiste'),
         findsOneWidget,
       );
       expect(find.text('Gold: 2,5 %'), findsOneWidget);
       expect(find.text('Legacy: gesperrt'), findsOneWidget);
-      expect(find.text('Sammle alle hellblauen Figuren'), findsOneWidget);
-      // Kinds with nothing to collect but their default stay hidden.
-      expect(find.text('Figuren'), findsOneWidget);
-      expect(find.text('Effekte'), findsOneWidget);
-      expect(find.text('Bühnenbilder'), findsNothing);
-      expect(find.text('Hindernisse'), findsNothing);
-      expect(find.byKey(const ValueKey('wardrobe-o0')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-collection')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
 
       await tester.tap(find.byKey(const ValueKey('wardrobe-maren')));
       await tester.pump();
@@ -1308,6 +1330,14 @@ void main() {
               WardrobeScreen(controller: controller, sound: _Sound()),
             );
             await tester.pump(const Duration(milliseconds: 100));
+            await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 400));
+            await tester.tap(
+              find.byKey(const PageStorageKey('wardrobe-crate-details')),
+            );
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 400));
             expect(
               find.text(
                 supported

@@ -343,6 +343,9 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('2 Termin-Kisten bereit'), findsOneWidget);
       expect(find.text('Probe Akt 2 · Sa. 31. Oktober'), findsOneWidget);
       expect(find.text('Premiere · Sa. 7. November'), findsOneWidget);
@@ -393,6 +396,9 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.byKey(const ValueKey('runner-event-crates')), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });

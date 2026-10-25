@@ -548,6 +548,22 @@ void main() {
         WardrobeScreen(controller: controller, sound: _Sound()),
       );
       await _settle(tester);
+      expect(find.text('420 Gage'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel(RegExp('Elena, Hellblau, Glanz')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      await _settle(tester);
+      await tester.tap(
+        find.byKey(const PageStorageKey('wardrobe-crate-details')),
+      );
+      await _settle(tester);
+      expect(find.text('Glanz: 3,0 %'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const PageStorageKey('wardrobe-ensemble-section')),
+      );
+      await _settle(tester);
       expect(find.byKey(const ValueKey('ensemble-card')), findsOneWidget);
       expect(find.text('6,8 km'), findsOneWidget);
       expect(
@@ -558,16 +574,12 @@ void main() {
         find.text('Dein Beitrag in diesem Abschnitt: 3,4 km · 7 Mitspielende'),
         findsOneWidget,
       );
-      expect(find.text('420 Gage'), findsOneWidget);
-      expect(find.text('Glanz: 3,0 %'), findsOneWidget);
       // The ensemble's reward is a surprise: no card, name or milestone.
       expect(find.byKey(const ValueKey('ensemble-surprise')), findsOneWidget);
       expect(find.byKey(const ValueKey('wardrobe-bd.anno')), findsNothing);
       expect(find.textContaining('Anno'), findsNothing);
-      expect(
-        find.bySemanticsLabel(RegExp('Elena, Hellblau, Glanz')),
-        findsOneWidget,
-      );
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-collection')));
+      await _settle(tester);
 
       // A missing pink item: ten pink duplicates.
       await tester.tap(find.byKey(const ValueKey('wardrobe-p1')));
@@ -682,6 +694,12 @@ void main() {
         {'km': 25},
       ]);
       expect(find.text('Ensemble-Ziel erreicht!'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      await _settle(tester);
+      await tester.tap(
+        find.byKey(const PageStorageKey('wardrobe-ensemble-section')),
+      );
+      await _settle(tester);
       expect(find.byKey(const ValueKey('ensemble-open')), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
@@ -722,9 +740,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    // "Von Statistik auf Kostüme: ein weißer Block": the goals' tile and the
-    // costumes' scroll view kept their state under the same storage id.
-    testWidgets('back from the statistics the costumes keep goals and scroll', (
+    // The goals' tile and their scroll view once shared a storage id,
+    // leaving a white error block on returning from the statistics.
+    testWidgets('back from the statistics the crates keep goals and scroll', (
       tester,
     ) async {
       final controller = await _signedIn(
@@ -738,14 +756,25 @@ void main() {
       );
       tester.view.physicalSize = const Size(400, 800);
       await _settle(tester);
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      await _settle(tester);
+      await tester.tap(
+        find.byKey(const PageStorageKey('wardrobe-ensemble-section')),
+      );
+      await _settle(tester);
+      await tester.ensureVisible(find.text('Alle Ziele'));
+      await _settle(tester);
       await tester.tap(find.text('Alle Ziele'));
       await _settle(tester);
       expect(find.text('1.000 km · ???'), findsOneWidget);
-      await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
+      await tester.drag(
+        find.byKey(const PageStorageKey('wardrobe-rewards')),
+        const Offset(0, -300),
+      );
       await _settle(tester);
       final scrolled = tester.getTopLeft(find.text('Alle Ziele')).dy;
 
-      for (final tab in ['Statistik', 'Kostüme', 'Statistik', 'Kostüme']) {
+      for (final tab in ['Statistik', 'Kisten', 'Sammlung', 'Kisten']) {
         await tester.tap(find.text(tab));
         await _settle(tester);
       }
@@ -774,6 +803,13 @@ void main() {
       expect(find.byKey(const ValueKey('ensemble-card')), findsNothing);
       expect(find.byKey(const ValueKey('wardrobe-trade')), findsNothing);
       expect(find.byKey(const ValueKey('wardrobe-gage')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      await _settle(tester);
+      expect(
+        find.byKey(const PageStorageKey('wardrobe-ensemble-section')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('ensemble-card')), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
 
