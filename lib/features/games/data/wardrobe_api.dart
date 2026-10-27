@@ -33,6 +33,10 @@ bool dailyBonusAvailable(AppController controller) =>
 bool eventCratesAvailable(AppController controller) =>
     dupesAvailable(controller) && controller.supports('runnerEventCrates');
 
+/// Set-specific crates earned by contributing to a released skin pack.
+bool packGoalsAvailable(AppController controller) =>
+    dupesAvailable(controller) && controller.supports('runnerPackGoals');
+
 /// Role figures (`runnerRoleFigures`): every stage role is a figure of its
 /// own with its own rarity, no role variants. The app asks for them with
 /// `roles`; older servers keep sending a figure per person with variants.
@@ -74,6 +78,50 @@ class EventCrate {
     eventId: textValue(json['eventId']),
     title: textValue(json['title']),
     startsAt: DateTime.tryParse(textValue(json['startsAt']))?.toLocal(),
+  );
+}
+
+/// An active skin pack's shared goal. Dates and eligibility come from the
+/// server; a device clock never reveals or awards a scheduled release.
+class PackGoal {
+  const PackGoal({
+    required this.releaseId,
+    required this.name,
+    this.startsAt,
+    this.goalMeters = 0,
+    this.meters = 0,
+    this.contributionMeters = 0,
+    this.contributors = 0,
+    this.reached = false,
+    this.reachedAt,
+    this.crateCount = 3,
+    this.crates = 0,
+    this.eligible = false,
+  });
+
+  final String releaseId, name;
+  final DateTime? startsAt, reachedAt;
+  final int goalMeters, meters, contributionMeters, contributors;
+  final int crateCount, crates;
+  final bool reached, eligible;
+
+  int get remaining => max(0, goalMeters - meters);
+  double get fraction =>
+      goalMeters <= 0 ? 0 : (meters / goalMeters).clamp(0, 1).toDouble();
+
+  factory PackGoal.fromJson(JsonMap json) => PackGoal(
+    releaseId: textValue(json['releaseId']),
+    name: textValue(json['name']),
+    startsAt: DateTime.tryParse(textValue(json['startsAt']))?.toLocal(),
+    goalMeters: max(0, intValue(json['goalMeters'])),
+    meters: max(0, intValue(json['meters'])),
+    contributionMeters: max(0, intValue(json['contributionMeters'])),
+    contributors: max(0, intValue(json['contributors'])),
+    reached: json['reached'] == true,
+    reachedAt: DateTime.tryParse(textValue(json['reachedAt']))?.toLocal(),
+    crateCount: max(0, intValue(json['crateCount'], 3)),
+    crates: max(0, intValue(json['crates'])),
+    eligible: json['eligible'] == true,
   );
 }
 
@@ -701,6 +749,7 @@ class RunnerProgress {
     this.missionBonus = 0,
     this.missions,
     this.eventCrates = 0,
+    this.packCrates = 0,
     this.points,
     this.gainedPoints,
   }) : runMeters = runMeters ?? meters;
@@ -718,6 +767,9 @@ class RunnerProgress {
 
   /// Termin-Kisten waiting (`runnerEventCrates`).
   final int eventCrates;
+
+  /// Set-Kisten earned through skin-pack goals (`runnerPackGoals`).
+  final int packCrates;
 
   /// Crate metres from Tagesmissionen in total (part of [meters]) and
   /// Missionskisten waiting (`runnerMissions`).
@@ -753,7 +805,8 @@ class RunnerProgress {
 
   /// All crates waiting: the own, the ensemble's, the missions' and the
   /// events'.
-  int get waiting => crates + ensembleCrates + missionCrates + eventCrates;
+  int get waiting =>
+      crates + ensembleCrates + missionCrates + eventCrates + packCrates;
 
   /// Whether a crate of the own metres can be opened now.
   bool get canOpen => crates > 0 && (dupes || !complete);
@@ -798,6 +851,7 @@ class RunnerProgress {
         ? DailyMissions.fromJson(jsonMap(json['missions']))
         : null,
     eventCrates: intValue(json['eventCrates']),
+    packCrates: intValue(json['packCrates']),
     points: json['unit'] == 'points' && json['points'] is Map
         ? CratePoints.fromJson(jsonMap(json['points']))
         : null,
@@ -985,8 +1039,8 @@ class EnsembleMilestone {
   final bool ready;
   final bool reached;
 
-  /// Not reached yet, and what it unlocks is a surprise: only [km] and the
-  /// Ensemble-Kiste are known, no name, picture or kind.
+  /// Its reward is still a surprise, either until the distance is reached
+  /// or until its scheduled release. No name, picture or kind is revealed.
   final bool hidden;
 
   int get meters => (km * 1000).round();
@@ -994,9 +1048,9 @@ class EnsembleMilestone {
   factory EnsembleMilestone.fromJson(JsonMap json) {
     final reached = json['reached'] == true;
     final reward = json['reward'] is Map ? jsonMap(json['reward']) : null;
-    // The server keeps a reward a surprise until it is reached
-    // (`hidden`); one from before names it, the app does not show it.
-    final hidden = !reached && (json['hidden'] == true || reward != null);
+    // An explicit gate still applies after the distance is reached. Older
+    // servers that name unreached rewards are also kept private here.
+    final hidden = json['hidden'] == true || (!reached && reward != null);
     return EnsembleMilestone(
       km: json['km'] is num ? json['km'] as num : 0,
       name: hidden ? ensembleSurpriseName : textValue(json['name']),
@@ -1301,6 +1355,7 @@ class Wardrobe {
     this.trades = const [],
     this.ensemble,
     this.eventCrates = const [],
+    this.packGoals = const [],
     this.uniqueFigures,
     this.crateTargets = const [],
   });
@@ -1319,6 +1374,14 @@ class Wardrobe {
 
   /// Termin-Kisten waiting, the earliest event first (`runnerEventCrates`).
   final List<EventCrate> eventCrates;
+
+  /// Only released packs, including completed goals and their waiting crates.
+  final List<PackGoal> packGoals;
+
+  PackGoal? packGoal(String releaseId) =>
+      packGoals.where((goal) => goal.releaseId == releaseId).firstOrNull;
+
+  int get packCrates => packGoals.fold(0, (sum, goal) => sum + goal.crates);
   final Set<String> owned;
   final Map<WardrobeKind, String> selected;
 
@@ -1432,6 +1495,10 @@ class Wardrobe {
         for (final e in jsonList(json['eventCrates']))
           if (e is Map) EventCrate.fromJson(jsonMap(e)),
       ],
+      packGoals: [
+        for (final goal in jsonList(json['packGoals']))
+          if (goal is Map) PackGoal.fromJson(jsonMap(goal)),
+      ],
       crateTargets: [
         for (final t in jsonList(json['crateTargets']))
           if (t is Map) CrateTarget.fromJson(jsonMap(t)),
@@ -1504,11 +1571,16 @@ class CrateOutcome {
     this.variantRole,
     this.event,
     this.target,
+    this.packId,
+    this.packName,
   });
 
   /// A crate of the own runs: what it was opened as (`random`, `tech`,
   /// `play:<slug>`); null from older servers and for other crates.
   final String? target;
+
+  /// The immutable set this contributor reward came from.
+  final String? packId, packName;
 
   /// From a Termin-Kiste: the event it came from.
   final EventCrate? event;
@@ -1565,6 +1637,8 @@ class CrateOutcome {
         ? EventCrate.fromJson(jsonMap(json['event']))
         : null,
     target: json['target'] is String ? json['target'] as String : null,
+    packId: json['crate'] == 'pack' ? textValue(json['packId']) : null,
+    packName: json['crate'] == 'pack' ? textValue(json['name']) : null,
   );
 }
 
@@ -1623,6 +1697,7 @@ Future<CrateOpening> openCrate(
   bool event = false,
   String? eventId,
   String? target,
+  String? packId,
 }) async => CrateOpening.fromJson(
   await controller.remote(
     '/games/runner/crates',
@@ -1632,8 +1707,11 @@ Future<CrateOpening> openCrate(
       if (ensemble) 'crate': 'ensemble',
       if (mission) 'crate': 'mission',
       if (event) 'crate': 'event',
+      if (packId != null) 'crate': 'pack',
+      'packId': ?packId,
       if (event && eventId != null) 'eventId': eventId,
-      if (target != null && !ensemble && !mission && !event) 'target': target,
+      if (target != null && !ensemble && !mission && !event && packId == null)
+        'target': target,
       ..._wardrobeFlags(controller),
     },
     idempotencyKey: key ?? crateKey(),

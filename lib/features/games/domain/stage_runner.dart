@@ -255,8 +255,9 @@ class StageRunner {
   static double reachFactor(double meters) =>
       meters < 2000 ? .7 : min(1.6, .7 + (meters - 2000) / 1000 * .9);
 
-  /// Height of a gap between a border and a flat.
-  static double gapHeight(double meters) => max(.25, .46 - meters / 6000);
+  /// Height of a gap between a border and a flat; even late in a run the
+  /// opening leaves room to correct the runner's height.
+  static double gapHeight(double meters) => max(.32, .52 - meters / 6000);
 
   /// Lower edge of a drop at [time].
   static double dropBottom(double middle, double phase, double time) =>

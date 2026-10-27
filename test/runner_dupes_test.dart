@@ -902,6 +902,67 @@ void main() {
   });
 
   group('ensemble rewards stay a surprise until reached', () {
+    test('a scheduled reward stays hidden after its distance was reached', () {
+      final goal = EnsembleMilestone.fromJson({
+        'km': 1000,
+        'name': 'Romeo und Julia',
+        'note': 'Noch nicht veröffentlicht',
+        'reward': {
+          'itemId': 'backdrop.romeo-julia',
+          'kind': 'backdrop',
+          'ready': true,
+        },
+        'reached': true,
+        'hidden': true,
+      });
+      expect(goal.reached, isTrue);
+      expect(goal.hidden, isTrue);
+      expect(goal.name, ensembleSurpriseName);
+      expect(goal.rewardId, isNull);
+      expect(goal.rewardKind, isNull);
+      expect(goal.note, isNull);
+      expect(goal.ready, isFalse);
+    });
+
+    testWidgets('a reached scheduled goal stays a pending surprise', (
+      tester,
+    ) async {
+      final controller = await _signedIn((_) => null);
+      final json = _json(ensembleMeters: 1000000);
+      final ensemble = jsonMap(json['ensemble']);
+      ensemble['next'] = {
+        'km': 1250,
+        'name': 'Ensemble-Kiste',
+        'reached': false,
+      };
+      ensemble['milestones'] = [
+        {..._hiddenGoal(1000), 'reached': true},
+        ensemble['next'],
+      ];
+      json['ensemble'] = ensemble;
+      await _pump(
+        tester,
+        Scaffold(
+          body: SingleChildScrollView(
+            child: EnsembleCard(
+              wardrobe: Wardrobe.fromJson(json),
+              controller: controller,
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Alle Ziele'));
+      await _settle(tester);
+      expect(find.text('1.000 km · ???'), findsOneWidget);
+      expect(
+        find.text('Ziel erreicht · Überraschung wird später freigeschaltet'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Romeo'), findsNothing);
+      expect(find.text('Überraschung + Ensemble-Kiste'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     test('a hidden goal has only its distance', () {
       final w = Wardrobe.fromJson(_json());
       final next = w.ensemble!.next;

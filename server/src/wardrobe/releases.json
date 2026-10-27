@@ -1,0 +1,311 @@
+[
+  {
+    "id": "halloween-2026",
+    "name": "Creepshow zu Halloween",
+    "startsAt": "2026-10-30T18:00:00+01:00",
+    "freeItemIds": [
+      "backdrop.creepshow"
+    ]
+  },
+  {
+    "id": "hell-2026",
+    "name": "Eine höllische Herausforderung",
+    "startsAt": "2026-11-08T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.jonas--hell",
+      "character.elena--hell",
+      "character.vanessa--hell",
+      "character.niko--hell",
+      "character.nora--hell",
+      "character.nele--hell",
+      "character.theresa--hell",
+      "character.fernanda--hell",
+      "character.lina--hell",
+      "character.nela--hell",
+      "character.hatice--hell"
+    ],
+    "gatedItemIds": [
+      "character.unique-willi"
+    ]
+  },
+  {
+    "id": "advent-2026",
+    "name": "Weihnachtsbühne",
+    "startsAt": "2026-11-29T18:00:00+01:00",
+    "gatedItemIds": [
+      "backdrop.christmas"
+    ],
+    "freeItemIds": [
+      "backdrop.christmas"
+    ]
+  },
+  {
+    "id": "romeo-julia-2026",
+    "name": "Romeo und Julia",
+    "startsAt": "2026-12-30T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.jule--romeo-julia",
+      "character.niko--romeo-julia",
+      "character.nela--romeo-julia",
+      "character.vanessa--romeo-julia",
+      "character.jakob--romeo-julia",
+      "character.hendrik--romeo-julia",
+      "character.linak--romeo-julia",
+      "character.marcella--romeo-julia",
+      "character.sophie--romeo-julia"
+    ],
+    "gatedItemIds": [
+      "backdrop.romeo-julia"
+    ]
+  },
+  {
+    "id": "traum-2026",
+    "name": "Traum von Freiheit",
+    "startsAt": "2026-11-22T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.lea--freiheit",
+      "character.fynn--freiheit",
+      "character.carina--freiheit",
+      "character.yunus--freiheit",
+      "character.louis--freiheit",
+      "character.sebastian--freiheit",
+      "character.anton--freiheit",
+      "character.maria--freiheit",
+      "character.magdalena--freiheit",
+      "character.nele--freiheit",
+      "character.nora--freiheit",
+      "character.elena--freiheit",
+      "character.fernanda--freiheit",
+      "character.jonas--freiheit",
+      "character.julian--freiheit",
+      "character.leon--freiheit",
+      "character.lina--freiheit",
+      "character.max--freiheit",
+      "character.maximilian--freiheit",
+      "character.nela--freiheit",
+      "character.niko--freiheit",
+      "character.theresa--freiheit",
+      "character.tobias--freiheit",
+      "character.logge--freiheit"
+    ],
+    "gatedItemIds": []
+  },
+  {
+    "id": "goldfieber-2026",
+    "name": "Goldfieber",
+    "startsAt": "2026-12-06T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.leon--goldfieber",
+      "character.louis--goldfieber",
+      "character.lea--goldfieber",
+      "character.anton--goldfieber",
+      "character.sebastian--goldfieber",
+      "character.carina--goldfieber",
+      "character.tobias--goldfieber",
+      "character.till--goldfieber",
+      "character.yunus--goldfieber",
+      "character.nele--goldfieber",
+      "character.jonas--goldfieber",
+      "character.fynn--goldfieber",
+      "character.maria--goldfieber",
+      "character.nora--goldfieber",
+      "character.lina--goldfieber",
+      "character.niko--goldfieber",
+      "character.julian--goldfieber",
+      "character.max--goldfieber",
+      "character.logge--goldfieber",
+      "character.maximilian--goldfieber",
+      "character.magdalena--goldfieber"
+    ],
+    "gatedItemIds": []
+  },
+  {
+    "id": "malleus-2026",
+    "name": "Malleus Maleficarum",
+    "startsAt": "2026-12-20T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.louis--maleficarum",
+      "character.lea--maleficarum",
+      "character.leon--maleficarum",
+      "character.anton--maleficarum",
+      "character.till--maleficarum",
+      "character.carina--maleficarum",
+      "character.nora--maleficarum",
+      "character.maria--maleficarum",
+      "character.jonas--maleficarum",
+      "character.julian--maleficarum",
+      "character.max--maleficarum",
+      "character.maximilian--maleficarum",
+      "character.nele--maleficarum",
+      "character.sebastian--maleficarum",
+      "character.tobias--maleficarum",
+      "character.logge--maleficarum"
+    ],
+    "gatedItemIds": []
+  },
+  {
+    "id": "kristall-2027",
+    "name": "Der Kristall der Träume",
+    "startsAt": "2027-01-17T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.anton--kristall",
+      "character.carina--kristall",
+      "character.till--kristall",
+      "character.louis--kristall",
+      "character.lea--kristall",
+      "character.julian--kristall",
+      "character.maria--kristall",
+      "character.maximilian--kristall",
+      "character.nora--kristall",
+      "character.sebastian--kristall",
+      "character.tobias--kristall",
+      "character.logge--kristall"
+    ],
+    "gatedItemIds": [
+      "character.unique-kristall"
+    ]
+  },
+  {
+    "id": "dystopia-2027",
+    "name": "Dystopia",
+    "startsAt": "2027-01-31T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.carina--dystopia",
+      "character.till--dystopia",
+      "character.anton--dystopia",
+      "character.leon--dystopia",
+      "character.julian--dystopia",
+      "character.maximilian--dystopia",
+      "character.nora--dystopia",
+      "character.sebastian--dystopia",
+      "character.logge--dystopia"
+    ],
+    "gatedItemIds": []
+  },
+  {
+    "id": "bluttribut-2027",
+    "name": "Bluttribut",
+    "startsAt": "2027-02-14T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.anton--bluttribut",
+      "character.till--bluttribut",
+      "character.carina--bluttribut",
+      "character.sebastian--bluttribut",
+      "character.leon--bluttribut",
+      "character.julian--bluttribut",
+      "character.maximilian--bluttribut",
+      "character.nora--bluttribut",
+      "character.logge--bluttribut"
+    ],
+    "gatedItemIds": []
+  },
+  {
+    "id": "verrat-2027",
+    "name": "Verrat im Kloster",
+    "startsAt": "2027-02-28T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.carina--kloster",
+      "character.till--kloster",
+      "character.anton--kloster",
+      "character.leon--kloster",
+      "character.julian--kloster",
+      "character.maximilian--kloster",
+      "character.sebastian--kloster",
+      "character.logge--kloster"
+    ],
+    "gatedItemIds": [
+      "character.unique-rabe"
+    ]
+  },
+  {
+    "id": "sagenhaft-2027",
+    "name": "Sagenhaft",
+    "startsAt": "2027-03-14T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.theresa--sagenhaft",
+      "character.jonas--sagenhaft",
+      "character.elena--sagenhaft",
+      "character.nele--sagenhaft",
+      "character.nora--sagenhaft",
+      "character.vanessa--sagenhaft",
+      "character.fernanda--sagenhaft",
+      "character.logge--sagenhaft",
+      "character.raphael--sagenhaft",
+      "character.tobias--sagenhaft",
+      "character.niko--sagenhaft",
+      "character.lina--sagenhaft",
+      "character.nela--sagenhaft"
+    ],
+    "gatedItemIds": []
+  },
+  {
+    "id": "black-swan-2027",
+    "name": "Die Geschichte der Black Swan",
+    "startsAt": "2027-03-28T18:00:00+02:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.anton--black-swan",
+      "character.carina--black-swan"
+    ],
+    "gatedItemIds": []
+  },
+  {
+    "id": "anno-2027",
+    "name": "Anno 1146",
+    "startsAt": "2027-04-11T18:00:00+02:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.carina--anno-maribel",
+      "character.logge--anno",
+      "character.lena--anno"
+    ],
+    "gatedItemIds": [
+      "character.unique-ritterpuppe"
+    ]
+  },
+  {
+    "id": "creepshow-2027",
+    "name": "Creepshow",
+    "startsAt": "2027-04-25T18:00:00+02:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.till--creepshow",
+      "character.logge--creepshow"
+    ],
+    "gatedItemIds": []
+  },
+  {
+    "id": "nexus-2027",
+    "name": "Nexus",
+    "startsAt": "2027-05-09T18:00:00+02:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.fynn--nexus"
+    ],
+    "gatedItemIds": []
+  }
+]

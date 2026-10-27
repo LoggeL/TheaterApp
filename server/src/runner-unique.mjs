@@ -55,7 +55,10 @@ export function unlockPlays(unlock) {
 const playsKey = plays => plays.map(p => `${p.play}\u0000${p.year ?? ''}`).sort().join('\u0001');
 /** "Creepshow", "Creepshow und Nexus", "A, B und C". */
 export const playsText = names => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} und ${names.at(-1)}`;
-const isRoleOf = (x, p) => x?.kind === 'character' && x.personId !== undefined && x.play === p.play && (p.year === undefined || x.year === p.year);
+// Historical cast members may have a documented role without a linked app account. Their
+// collectible roles still count towards the complete play; unique/default figures never do.
+const isRoleOf = (x, p) => x?.kind === 'character' && !x.default && !x.unlock && text(x.role)
+  && x.play === p.play && (p.year === undefined || x.year === p.year);
 
 /** Whether the raw catalog entry [x] is a unique figure. */
 export const isUniqueEntry = (x, rarity) => x?.rarity === rarity.id || list(x?.rarities).includes(rarity.id);

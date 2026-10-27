@@ -83,6 +83,7 @@ test('runs add their points; the reply tells how far the next crate is', t => {
   const first = play({ score: 1400, meters: 700 });
   assert.deepEqual(first.progress, {
     meters: 2800, earned: 0, opened: 0, crates: 0, previousAt: 0, nextAt: 3000, poolSize: 3, complete: false, ensembleCrates: 0, dupes: true, runMeters: 700, bonusMeters: 0, bonusOpen: false, missionMeters: 0, missionCrates: 0, eventCrates: 0,
+    packCrates: 0, packGoals: [],
     unit: 'points', points: { total: 2800, base: 0, runs: 1400, bonus: 1400, missions: 0 },
     gained: 700, bonus: 700, missionBonus: 0, newCrates: 0, gainedPoints: { run: 1400, bonus: 1400, missions: 0 },
   });
@@ -394,8 +395,11 @@ test('the bundled catalog is valid and ships only finished costumes', () => {
   assert.equal(c.rarities.at(-1).id, 'gold');
   assert.ok(c.rarities.some(r => r.id === 'technik'));
   assert.ok(c.items.every(x => (x.departments ?? []).every(id => c.departments.some(d => d.id === id))));
-  // People's characters belong to them; unique figures (never drawn) to nobody.
-  assert.ok(drawable.filter(x => x.kind === 'character' && !x.unique).every(x => Number.isInteger(x.personId)));
+  // Linked people's characters belong to them. Documented former cast members may have no app
+  // account; they remain collectible Legacy roles, never silently assigned to another person.
+  const unlinked = drawable.filter(x => x.kind === 'character' && !x.unique && !Number.isInteger(x.personId));
+  assert.deepEqual(unlinked.map(x => x.id), ['character.hatice--hell']);
+  assert.ok(unlinked.every(x => x.personId === undefined && x.rarity === 'legacy' && x.role && x.play && Number.isInteger(x.year)));
   assert.ok(c.uniques.every(x => x.personId === undefined && !c.collectible.includes(x)));
 });
 

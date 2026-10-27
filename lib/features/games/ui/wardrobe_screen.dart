@@ -14,6 +14,7 @@ import 'crate_opening.dart';
 import 'event_crates_card.dart';
 import 'ensemble_card.dart';
 import 'missions_card.dart';
+import 'pack_goals_card.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart' show obstacleName;
 import 'stage_runner_look.dart';
@@ -168,6 +169,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   bool get _bonus => dailyBonusAvailable(controller);
   bool get _missions => missionsAvailable(controller);
   bool get _eventCrates => eventCratesAvailable(controller);
+  bool get _packs => packGoalsAvailable(controller);
   bool get _unique => uniqueFiguresAvailable(controller);
   bool get _targets => crateTargetsAvailable(controller);
 
@@ -177,7 +179,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     return w.progress.crates +
         (_missions ? w.progress.missionCrates : 0) +
         (_ensemble && w.ensemble != null ? w.progress.ensembleCrates : 0) +
-        (_eventCrates ? w.eventCrates.length : 0);
+        (_eventCrates ? w.eventCrates.length : 0) +
+        (_packs ? w.packCrates : 0);
   }
 
   @override
@@ -230,6 +233,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     bool ensemble = false,
     bool mission = false,
     EventCrate? event,
+    PackGoal? packGoal,
     CrateTarget? target,
   }) async {
     final w = _wardrobe;
@@ -244,6 +248,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       mission: mission,
       event: event != null,
       eventCrate: event,
+      packGoal: packGoal,
       target: target,
       // The next crate of the own runs is chosen again.
       chooseTarget: target == null
@@ -890,6 +895,13 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       padding: pagePadding(context, maxWidth: 640, top: 16),
       children: [
         _crates(context, w),
+        if (_packs && w.packGoals.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          PackGoalsCard(
+            goals: w.packGoals,
+            onOpen: _busy ? null : (goal) => _open(packGoal: goal),
+          ),
+        ],
         if (_eventCrates && w.eventCrates.isNotEmpty) ...[
           const SizedBox(height: 12),
           EventCratesCard(
@@ -1657,7 +1669,8 @@ bool crateWaiting(Wardrobe? w) =>
     (w.progress.canOpen ||
         w.progress.ensembleCrates > 0 ||
         w.progress.missionCrates > 0 ||
-        w.eventCrates.isNotEmpty);
+        w.eventCrates.isNotEmpty ||
+        w.packCrates > 0);
 
 /// A small "Garderobe" button with the number of waiting crates.
 class WardrobeButton extends StatelessWidget {

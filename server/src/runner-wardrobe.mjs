@@ -5,8 +5,10 @@ import { berlinDay } from './event-series.mjs';
 import { missionsView, recordMissionRun } from './runner-missions.mjs';
 import { crateView, markEventCrateOpened, nextEventCrate, waitingEventCrates } from './runner-event-crates.mjs';
 import { migrateToRoleFigures, olderAppDeal, olderAppOpening, olderAppOutfit, olderAppView, roleFiguresModel } from './runner-role-figures.mjs';
-import { addEnsembleMeters, countSection, ensembleCrates, ensembleRunView, ensembleState, ensembleView, grantEnsembleCrates, ownedRewards, parseEnsemble, reachedMilestones, revealedRewards } from './runner-ensemble.mjs';
+import { addEnsembleMeters, countSection, ensembleCrates, ensembleRunView, ensembleState, ensembleView, grantEnsembleCrates, markEnsembleSeen, ownedRewards, parseEnsemble, revealedRewards } from './runner-ensemble.mjs';
 import { checkUniqueEntry, isUniqueEntry, markUniquesSeen, ownedUniques, parseUniqueRarity, settleUniques, uniqueView, withoutUniques } from './runner-unique.mjs';
+import { releasedFreeItems } from './runner-content-releases.mjs';
+import { recordPackRun, packGoalsView, nextPackCrate, markPackCrateOpened } from './runner-pack-goals.mjs';
 
 // "Garderobe" of the stage runner: every metre run counts towards costume crates; a crate holds one
 // item (a character, a backdrop, an obstacle set or an effect) that the person does not own yet.
@@ -591,7 +593,7 @@ const progressOf = (t, personId) => {
  */
 const ownedIds = (t, p) => {
   const c = catalog(t);
-  return new Set([...Object.values(c.defaults), ...list(p.owned).filter(id => c.byId.has(id)), ...c.items.filter(x => x.personId === p.personId).map(x => x.id), ...ownedRewards(t, credit), ...ownedUniques(c, p)]);
+  return new Set([...Object.values(c.defaults), ...list(p.owned).filter(id => c.byId.has(id)), ...c.items.filter(x => x.personId === p.personId).map(x => x.id), ...ownedRewards(t, credit), ...ownedUniques(c, p), ...releasedFreeItems(t)]);
 };
 /**
  * Whether [owned] meets a rarity's `requires`: `count` items of its rarity (and kind), or all of them
@@ -637,6 +639,7 @@ export function progressView(t, p) {
     missionMeters: p.missionMeters ?? 0, missionCrates: missionCrates(p),
     // Added with `runnerEventCrates`: Termin-Kisten waiting.
     eventCrates: waitingEventCrates(t, p.personId).length,
+    packCrates: packGoalsView(t, p.personId).reduce((sum, goal) => sum + goal.crates, 0),
     // Added with `runnerCratePoints`: the crate points and where they come from (`base`: moved over
     // from the metres before; `runs`: the points of every run since; `bonus`: Tagesbonus; `missions`).
     unit: 'points',
@@ -718,6 +721,7 @@ function view(t, p, roles = false, unique = false) {
     ...(ensemble ? { ensemble } : {}),
     // Added with `runnerEventCrates`: the Termin-Kisten waiting, the earliest event first.
     eventCrates: waitingEventCrates(t, p.personId).map(crateView),
+    packGoals: packGoalsView(t, p.personId),
     ...(c.roleFigures ? { roleFigures: true } : {}),
     // Added with `runnerUniqueFigures`: per play the progress towards its unique figure.
     ...(unique ? { uniqueFigures: uniqueView(c, p, all) } : {}),
@@ -756,6 +760,7 @@ export function recordRun(t, personId, meters, hitBy, at = t.clock(), run = {}) 
   const kind = runnerObstacleKinds.includes(hitBy) ? hitBy : 'unknown';
   const daily = meters > 0 && bonusOpen(p, at), bonus = daily ? points : 0;
   const reachedNow = addEnsembleMeters(t, meters, credit);
+  const packGoals = recordPackRun(t, personId, meters, run.startedAt ?? at);
   // Tagesmissionen (runner-missions.mjs): their crate points and the Missionskiste, never the ensemble's.
   const mission = recordMissionRun(t, personId, { meters, score: run.score ?? meters, stats: run.stats ?? null, statsSent: run.statsSent === true, at });
   const next = grantEnsembleCrates(t, t.store.put('runnerProgress', personId, {
@@ -772,6 +777,7 @@ export function recordRun(t, personId, meters, hitBy, at = t.clock(), run = {}) 
     gainedPoints: { run: points, bonus, missions: mission.rewardPoints },
     ...(ensemble ? { ensemble } : {}),
     ...(mission.record ? { missions: missionsView(t, mission.record, mission.completed) } : {}),
+    packGoals,
   };
 }
 
@@ -814,14 +820,16 @@ function duplicate(p, draw, shiny) {
  * A complete pool still opens and brings a duplicate (shine or gage), like a complete rarity.
  */
 export function openCrate(t, uid, requestId, b = {}) {
-  const dupes = b?.dupes === true, ensemble = b?.crate === 'ensemble', mission = b?.crate === 'mission', event = b?.crate === 'event', roles = b?.roles === true, unique = b?.unique === true;
+  const dupes = b?.dupes === true, ensemble = b?.crate === 'ensemble', mission = b?.crate === 'mission', event = b?.crate === 'event', pack = b?.crate === 'pack', roles = b?.roles === true, unique = b?.unique === true;
   const targetId = b?.target ?? null;
+  if (pack && (!dupes || !roles)) fail(400, 'Set-Kisten gibt es nur in der neuen App.');
+  if (pack && (typeof b.packId !== 'string' || !b.packId)) fail(400, 'Diese Set-Kiste gibt es nicht.', 'unknown_pack');
   if (event && !dupes) fail(400, 'Termin-Kisten gibt es nur in der neuen App.');
   if (mission && !dupes) fail(400, 'Missionskisten gibt es nur in der neuen App.');
   if (ensemble && !dupes) fail(400, 'Ensemble-Kisten gibt es nur in der neuen App.');
   if (targetId !== null) {
     if (typeof targetId !== 'string') fail(400, 'Diese Kiste gibt es nicht.', 'unknown_target');
-    if (event || mission || ensemble) fail(400, 'Nur Kostümkisten lassen sich gezielt wählen.', 'unknown_target');
+    if (event || mission || ensemble || pack) fail(400, 'Nur Kostümkisten lassen sich gezielt wählen.', 'unknown_target');
     if (!dupes && targetId !== 'random') fail(400, 'Gezielte Kisten gibt es nur in der neuen App.');
   }
   return once(t, uid, crateRequestPrefix, requestId, 'runner.crate', a => {
@@ -829,7 +837,8 @@ export function openCrate(t, uid, requestId, b = {}) {
     const target = targetId && targetId !== 'random' ? c.crateTargets.find(x => x.id === targetId && x.kind !== 'random') : null;
     if (targetId && targetId !== 'random' && !target) fail(400, 'Diese Kiste gibt es nicht.', 'unknown_target');
     const eventCrate = event ? nextEventCrate(t, a.personId, b.eventId ?? null) : null;
-    if (event ? !eventCrate : mission ? missionCrates(p) <= 0 : ensemble ? ensembleCrates(p) <= 0 : cratesEarned(cratePoints(p)) - p.opened <= 0) fail(409, event ? 'Gerade ist keine Termin-Kiste da.' : mission ? 'Gerade ist keine Missionskiste da.' : ensemble ? 'Gerade ist keine Ensemble-Kiste da.' : 'Gerade ist keine Kostümkiste da. Lauf weiter!', 'no_crate');
+    const packCrate = pack ? nextPackCrate(t, a.personId, b.packId) : null;
+    if (pack ? !packCrate : event ? !eventCrate : mission ? missionCrates(p) <= 0 : ensemble ? ensembleCrates(p) <= 0 : cratesEarned(cratePoints(p)) - p.opened <= 0) fail(409, pack ? 'Gerade ist keine Set-Kiste da.' : event ? 'Gerade ist keine Termin-Kiste da.' : mission ? 'Gerade ist keine Missionskiste da.' : ensemble ? 'Gerade ist keine Ensemble-Kiste da.' : 'Gerade ist keine Kostümkiste da. Lauf weiter!', 'no_crate');
     if (!dupes) {
       // Older apps: only what is still missing; with nothing left the crates stay closed.
       const { items: candidates, open } = pool(t, p);
@@ -840,23 +849,25 @@ export function openCrate(t, uid, requestId, b = {}) {
       return { result: roles ? result : olderAppOpening(c, result), subject: item.id };
     }
     const owned = ownedIds(t, p), open = openFor(c, p, owned);
-    const items = target ? c.targetItems.get(target.id) : c.collectible;
+    const items = packCrate ? packCrate.itemIds.map(id => c.byId.get(id)) : target ? c.targetItems.get(target.id) : c.collectible;
+    if (packCrate && items.some(x => !x || !c.collectible.includes(x))) fail(409, 'Dieses Set wird gerade vorbereitet. Deine Kisten bleiben erhalten.', 'pack_unavailable');
     if (target && !items.some(x => x.drawnBy.some(r => open.has(r)))) {
       // Everything of it still locked (e.g. only Legacy figures): the rarity's hint.
       fail(409, c.rarity.get(items[0]?.rarity)?.hint ?? 'Diese Kiste ist noch gesperrt.', 'target_locked');
     }
     const draw = drawWithDupes(c, owned, t.random, open, items);
     if (!draw) fail(409, 'Im Fundus ist noch nichts.', 'wardrobe_complete');
-    const crate = event ? 'event' : mission ? 'mission' : ensemble ? 'ensemble' : 'costume';
+    const crate = pack ? 'pack' : event ? 'event' : mission ? 'mission' : ensemble ? 'ensemble' : 'costume';
     // The Zufallskiste keeps the shine chance of the own crates (`costume`); an aimed one has `targeted`.
-    const shiny = t.random() < shinyChanceOf(c, target ? 'targeted' : crate);
+    const shiny = t.random() < shinyChanceOf(c, target || pack ? 'targeted' : crate);
     const { next, outcome } = draw.duplicate ? duplicate(p, draw, shiny)
       : { next: { ...p, owned: [...list(p.owned), draw.item.id], ...(shiny ? { shiny: [...list(p.shiny), draw.item.id] } : {}) }, outcome: { type: 'new' } };
-    const counted = event ? {} : mission ? { missionOpened: (p.missionOpened ?? 0) + 1 } : ensemble ? { ensembleOpened: (p.ensembleOpened ?? 0) + 1 } : { opened: p.opened + 1 };
+    const counted = event || pack ? {} : mission ? { missionOpened: (p.missionOpened ?? 0) + 1 } : ensemble ? { ensembleOpened: (p.ensembleOpened ?? 0) + 1 } : { opened: p.opened + 1 };
     if (eventCrate) markEventCrateOpened(t, eventCrate, draw.item.id);
+    if (packCrate && !markPackCrateOpened(t, a.personId, packCrate.releaseId)) fail(409, 'Gerade ist keine Set-Kiste da.', 'no_crate');
     const saved = t.store.put('runnerProgress', a.personId, settleUnlocks(t, { ...next, ...counted }));
     const aim = crate === 'costume' ? { target: target?.id ?? 'random' } : {};
-    const result = { item: draw.item, ...reel(t, draw.item, open, items), outcome: { ...outcome, duplicate: draw.duplicate, shiny, rarity: draw.tier.id, crate, ...aim, ...(eventCrate ? { event: crateView(eventCrate) } : {}) }, wardrobe: view(t, saved, roles, unique) };
+    const result = { item: draw.item, ...reel(t, draw.item, open, items), outcome: { ...outcome, duplicate: draw.duplicate, shiny, rarity: draw.tier.id, crate, ...aim, ...(eventCrate ? { event: crateView(eventCrate) } : {}), ...(packCrate ? { packId: packCrate.releaseId, name: packCrate.name } : {}) }, wardrobe: view(t, saved, roles, unique) };
     return { result: roles ? result : olderAppOpening(c, result), subject: `${draw.item.id}${draw.duplicate ? ` ${outcome.type}` : ''}${shiny ? ' shiny' : ''}${target ? ` ${target.id}` : ''}` };
   });
 }
@@ -901,10 +912,8 @@ export function buyItem(t, uid, requestId, b) {
 export function ensembleSeen(t, uid, b) {
   if (!(typeof b?.km === 'number' && b.km >= 0)) fail(400, 'Ungültiger Meilenstein.');
   return t.store.transaction(() => {
-    const a = t.account(uid), c = catalog(t), p = progressOf(t, a.personId);
-    const highest = c.ensemble ? reachedMilestones(c.ensemble, ensembleState(t, credit).meters).at(-1)?.km ?? 0 : 0;
-    const seen = Math.max(p.ensembleSeen ?? 0, Math.min(b.km, highest));
-    return view(t, seen === (p.ensembleSeen ?? 0) ? p : t.store.put('runnerProgress', a.personId, { ...p, ensembleSeen: seen }), b.roles === true, b.unique === true);
+    const a = t.account(uid), p = progressOf(t, a.personId), next = markEnsembleSeen(t, p, b.km, credit);
+    return view(t, next === p ? p : t.store.put('runnerProgress', a.personId, next), b.roles === true, b.unique === true);
   });
 }
 

@@ -5,6 +5,7 @@ import { Theater, apiFeatures } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
 import { bundledCatalog, crateMilestone, drawWithDupes, loadCatalog, openRarities } from '../src/runner-wardrobe.mjs';
 import { legacyOpenedBy, roleFiguresModel } from '../src/runner-role-figures.mjs';
+import { bundledContentReleases, releasedCatalog } from '../src/runner-content-releases.mjs';
 
 // Role figures (`runnerRoleFigures`): the move of progress records from role variants, the view of
 // apps from before, Legacy from 10 light blue figures on (and open for good) and the new weights.
@@ -97,7 +98,7 @@ test('Legacy open under the old rule stays open; otherwise it opens from 10 ligh
 test('Legacy opens with the 10th light blue figure, and once open it stays open', t => {
   const c = bundledCatalog();
   const light = c.collectible.filter(x => x.kind === 'character' && x.rarity === 'hellblau').map(x => x.id);
-  assert.equal(light.length, 31);
+  assert.equal(light.length, 33);
   const base = Object.values(c.defaults);
   assert.ok(!openRarities(c, new Set([...base, ...light.slice(0, 9)])).has('legacy'));
   assert.ok(openRarities(c, new Set([...base, ...light.slice(0, 10)])).has('legacy'));
@@ -129,7 +130,7 @@ test('a crate draws the rarity by the new weights (seeded, 30 000 draws)', () =>
   // Mulberry32: the same numbers every run.
   let seed = 20261024;
   const random = () => { seed = (seed + 0x6D2B79F5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
-  assert.deepEqual(c.rarities.map(r => [r.id, r.weight]), [['hellblau', 45], ['blau', 21], ['technik', 11], ['pink', 12], ['legacy', 6], ['rot', 3.5], ['gold', 1.5]]);
+  assert.deepEqual(c.rarities.map(r => [r.id, r.weight]), [['hellblau', 45], ['blau', 22], ['technik', 10], ['pink', 12], ['legacy', 6], ['rot', 3.5], ['gold', 1.5]]);
   const owned = new Set(Object.values(c.defaults));
   const count = (open, n = 30000) => {
     const seen = {};
@@ -144,9 +145,18 @@ test('a crate draws the rarity by the new weights (seeded, 30 000 draws)', () =>
   const locked = count(openRarities(c, owned));
   assert.equal(locked.legacy, undefined);
   for (const r of c.rarities.filter(r => r.id !== 'legacy')) near(locked[r.id], r.weight / 94, r.id);
-  // Per figure the rarer rarity is the rarer one, all the way up.
-  const perItem = c.rarities.map(r => r.weight / c.collectible.filter(x => x.drawnBy.includes(r.id)).length);
-  assert.ok(perItem.every((v, i) => i === 0 || v <= perItem[i - 1] + 1e-9), JSON.stringify(perItem));
+  // New packs change pool sizes. Per-item chances must stay in rarity order both before and
+  // after every scheduled release, as well as in the complete bundled catalog. Tuning only for
+  // the final catalog could make a blue figure rarer than a technician before a later launch.
+  const releases = bundledContentReleases();
+  const stages = [['bundled', c], ...releases.flatMap(release => [-1, 0].map(offset => {
+    const at = new Date(Date.parse(release.startsAt) + offset);
+    return [at.toISOString(), releasedCatalog(c, releases, at)];
+  }))];
+  for (const [stage, catalog] of stages) {
+    const perItem = catalog.rarities.map(r => r.weight / catalog.collectible.filter(x => x.drawnBy.includes(r.id)).length);
+    assert.ok(perItem.every((v, i) => i === 0 || v <= perItem[i - 1] + 1e-9), `${stage}: ${JSON.stringify(perItem)}`);
+  }
 });
 
 // A small catalog: the person's figure p1 and its role p1r (an own rarity), like Elena and Johanna.

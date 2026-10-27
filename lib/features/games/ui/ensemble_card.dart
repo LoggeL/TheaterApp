@@ -234,7 +234,11 @@ class EnsembleCard extends StatelessWidget {
 
   /// The line under a goal: a surprise, what it unlocked, or its note.
   String? _goalNote(EnsembleMilestone m) {
-    if (m.hidden) return 'Überraschung + Ensemble-Kiste';
+    if (m.hidden) {
+      return m.reached
+          ? 'Ziel erreicht · Überraschung wird später freigeschaltet'
+          : 'Überraschung + Ensemble-Kiste';
+    }
     final unlocked = m.rewardId == null
         ? null
         : wardrobe.catalog.item(m.rewardId!);

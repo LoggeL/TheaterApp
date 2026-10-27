@@ -22,6 +22,11 @@ def host_transport(config):
     """Run on HomeBox only after explicit opt-in; SSH remains the default."""
     if os.environ.get('THEATER_DEPLOY_LOCAL') == '1':
         return ['sh', '-c']
+    transport = os.environ.get('THEATER_DEPLOY_TRANSPORT', 'ssh')
+    if transport == 'dokploy':
+        return ['node', str(pathlib.Path(__file__).with_name('dokploy-transport.mjs'))]
+    if transport != 'ssh':
+        raise RuntimeError('THEATER_DEPLOY_TRANSPORT must be ssh or dokploy.')
     return ['ssh', '-i', str(pathlib.Path(config['sshKey']).expanduser()), '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes', config['sshHost']]
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CFG = ROOT / 'config/dokploy.json'
@@ -69,7 +74,11 @@ def main():
     with tarfile.open(archive, 'w:gz') as tar:
         for f in files: tar.add(f, arcname=str(f.relative_to(ROOT)), recursive=False)
     ssh = host_transport(c)
-    remote = c['remotePath']; context = f'{remote}/releases/{release}'
+    remote = c['remotePath']
+    # The optional Dokploy transport runs inside the existing manager container. Its /etc/dokploy
+    # mount persists build contexts; the production data/secrets still use their host paths below.
+    context_root = '/etc/dokploy/theater-app' if os.environ.get('THEATER_DEPLOY_TRANSPORT') == 'dokploy' and os.environ.get('THEATER_DEPLOY_LOCAL') != '1' else remote
+    context = f'{context_root}/releases/{release}'
     command = f'mkdir -p {shlex.quote(context)} && tar xzf - -C {shlex.quote(context)} && docker build --build-arg RELEASE_SHA={release} -t theater-app:{release} {shlex.quote(context)}'
     with archive.open('rb') as stream: run(ssh+[command], stdin=stream)
     email = c.get('email', {})

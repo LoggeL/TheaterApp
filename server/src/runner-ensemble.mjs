@@ -144,6 +144,8 @@ export function revealedRewards(t, creditPerRound) {
 
 function milestoneView(c, m, s) {
   const reached = s.meters >= m.km * kmToMeters;
+  // A scheduled reward remains a surprise even if its distance was reached before launch.
+  if (m.releasePending) return { km: m.km, name: hiddenName, hidden: true, reward: null, reached };
   // Not reached yet: only the distance; name, note, item, kind and picture stay a surprise.
   // `name` and `reward: null` keep apps from before working (they show "???" and the crate).
   if (!reached && m.item) return { km: m.km, name: hiddenName, hidden: true, reward: null, reached: false };
@@ -159,6 +161,21 @@ function milestoneView(c, m, s) {
   };
 }
 
+const scheduledRewardIds = t => new Set((t.runnerReleases ?? []).flatMap(r => [...(r.itemIds ?? []), ...(r.gatedItemIds ?? [])]));
+const releaseRewardVisible = (c, m, scheduled) => !m.releasePending && (!scheduled.has(m.item) || rewardReady(c.byId.get(m.item)));
+
+/** Base crates use the old distance marker; delayed rewards have their own acknowledgment. */
+export function markEnsembleSeen(t, p, km, creditPerRound) {
+  const c = t.runnerCatalog, e = c.ensemble;
+  const reached = e ? reachedMilestones(e, ensembleState(t, creditPerRound).meters) : [];
+  const seen = Math.max(p.ensembleSeen ?? 0, Math.min(km, reached.at(-1)?.km ?? 0));
+  const scheduled = scheduledRewardIds(t), previous = list(p.ensembleReleaseSeen);
+  const revealed = reached.filter(m => m.km <= km && scheduled.has(m.item) && releaseRewardVisible(c, m, scheduled)).map(m => m.item);
+  const releaseSeen = [...new Set([...previous, ...revealed])];
+  return seen === (p.ensembleSeen ?? 0) && releaseSeen.length === previous.length ? p
+    : { ...p, ensembleSeen: seen, ...(releaseSeen.length ? { ensembleReleaseSeen: releaseSeen } : {}) };
+}
+
 /** What the app shows of the shared distance for [p]. */
 export function ensembleView(t, p, creditPerRound) {
   const c = t.runnerCatalog, e = c.ensemble;
@@ -169,13 +186,15 @@ export function ensembleView(t, p, creditPerRound) {
   const shown = Array.from({ length: Math.max(e.milestones.length, reached.length + 2) }, (_, i) => milestoneAt(e, i));
   const from = reached.at(-1)?.km ?? 0;
   const players = t.store.all('runnerProgress').filter(x => x.section?.from === from && x.section.meters > 0).length;
+  const scheduled = scheduledRewardIds(t), releaseSeen = new Set(list(p.ensembleReleaseSeen));
   return {
     meters: s.meters,
     previousKm: from,
     next: milestoneView(c, next, s),
     milestones: shown.map(m => milestoneView(c, m, s)),
     crates: ensembleCrates(p),
-    unseen: reached.map(m => m.km).filter(km => km > (p.ensembleSeen ?? 0)),
+    unseen: reached.filter(m => releaseRewardVisible(c, m, scheduled)
+      && (scheduled.has(m.item) ? !releaseSeen.has(m.item) : m.km > (p.ensembleSeen ?? 0))).map(m => m.km),
     section: { from, own: p.section?.from === from ? p.section.meters : 0, players },
   };
 }
@@ -185,5 +204,6 @@ export function ensembleRunView(t, gained, reachedNow, creditPerRound) {
   const c = t.runnerCatalog, e = c.ensemble;
   if (!e) return null;
   const s = ensembleState(t, creditPerRound);
-  return { gained, meters: s.meters, next: milestoneView(c, nextMilestone(e, s.meters), s), reached: reachedNow.map(m => milestoneView(c, m, s)) };
+  const scheduled = scheduledRewardIds(t);
+  return { gained, meters: s.meters, next: milestoneView(c, nextMilestone(e, s.meters), s), reached: reachedNow.filter(m => releaseRewardVisible(c, m, scheduled)).map(m => milestoneView(c, m, s)) };
 }

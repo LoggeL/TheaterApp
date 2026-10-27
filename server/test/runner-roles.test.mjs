@@ -53,7 +53,7 @@ test('every actor figure of the bundled catalog has role, play and year; technic
   // Figures with a picture take part; the others wait for it (Romeo und Julia, earlier plays).
   // Nexus (2024) came in with 24 figures: 10 light blue, 2 blue, 3 pink, 6 legacy, 2 red, 1 gold.
   const count = id => c.collectible.filter(x => x.kind === 'character' && x.rarity === id).length;
-  assert.deepEqual(['hellblau', 'blau', 'technik', 'pink', 'legacy', 'rot', 'gold'].map(count), [31, 15, 8, 15, 15, 11, 7]);
+  assert.deepEqual(['hellblau', 'blau', 'technik', 'pink', 'legacy', 'rot', 'gold'].map(count), [33, 18, 8, 17, 16, 13, 8]);
   assert.ok(raw.filter(x => x.id.endsWith('--romeo-julia')).every(x => x.disabled === true));
   const nexus = raw.filter(x => x.id.endsWith('--nexus'));
   // Logge's role "KI" is gone: the AI is a unique figure (character.unique-ki-nexus).
@@ -65,8 +65,9 @@ test('every actor figure of the bundled catalog has role, play and year; technic
   assert.deepEqual(nexus.filter(x => x.rarity === 'legacy').map(x => x.name), ['Lea', 'Anton', 'Maria', 'Leon', 'Magdalena', 'Theo']);
   assert.deepEqual(['louis', 'sebastian', 'theresa', 'vanessa'].map(id => at(`character.${id}--nexus`).rarity), ['gold', 'rot', 'rot', 'hellblau']);
   // The 34 former role variants are figures of their own, still shown as variants to older apps,
-  // like Raphael in Anno 1146 on his Hades, and so are the 24 Nexus roles.
-  assert.equal(c.baseOf.size, 59);
+  // like Raphael in Anno 1146 on his Hades, and so are the Nexus and ten linked Hölle roles.
+  // Hatice's historical role has no linked app account or base figure.
+  assert.equal(c.baseOf.size, 69);
   assert.equal(c.baseOf.get('character.raphael--anno'), 'character.raphael--schicksal');
 });
 

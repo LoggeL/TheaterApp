@@ -423,7 +423,7 @@ void main() {
       );
       expect(StageRunner.reactionTime(3000), .3);
       expect(StageRunner.gapHeight(0), greaterThan(.4));
-      expect(StageRunner.gapHeight(5000), .25);
+      expect(StageRunner.gapHeight(5000), .32);
       expect(
         StageRunner.gapHeight(5000),
         greaterThan(StageRunner.runnerHeight * 2),

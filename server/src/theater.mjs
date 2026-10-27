@@ -8,6 +8,8 @@ import { checkRunStats, missions, rerollMission } from './runner-missions.mjs';
 import { findRound, finishRound, startRound } from './runner-rounds.mjs';
 import { autoCheckins, eventCrateNotice, forgetEventCrates, settleCheckinCrate } from './runner-event-crates.mjs';
 import { buyItem, bundledCatalog, ensembleSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
+import { bundledContentReleases, parseContentReleases, releasedCatalog, releaseIsActive } from './runner-content-releases.mjs';
+import { packGoalsView } from './runner-pack-goals.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { archiveForm, attachForm, checkFormSubmissionOpen, forgetFormGenerations, forgetFormSubmissions, formStatus, saveForm, submitForm, withdrawForm } from './forms.mjs';
 
@@ -40,7 +42,7 @@ export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
 export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'forms']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -148,10 +150,21 @@ const cancelledEvent = e => ({ id: e.id, title: e.title, startsAt: e.startsAt, e
 const initials = name => name.split(/\s+/).filter(Boolean).slice(0, 2).map(n => n[0]).join('').toUpperCase();
 
 export class Theater {
+  // The next request after a launch instant sees the new catalog, without restarting the server.
+  get runnerCatalog() {
+    const at = this.clock(), phase = this.runnerReleases.map(r => releaseIsActive(r, at) ? '1' : '0').join('');
+    if (!this._releasedRunnerCatalog || this._runnerReleasePhase !== phase) {
+      this._releasedRunnerCatalog = releasedCatalog(this._runnerCatalog, this.runnerReleases, at);
+      this._runnerReleasePhase = phase;
+    }
+    return this._releasedRunnerCatalog;
+  }
+  set runnerCatalog(value) { this._runnerCatalog = value; this._releasedRunnerCatalog = null; }
   // `runnerCatalog` (see runner-wardrobe.mjs `loadCatalog`) and `random` replace the bundled
   // wardrobe and the secure random numbers of crate openings in tests.
-  constructor(store, { bootstrapEmail = '', pushEnabled = false, emailEnabled = false, clock = () => new Date(), runnerCatalog = null, random = secureRandom, missionRules, attendanceRules } = {}) {
+  constructor(store, { bootstrapEmail = '', pushEnabled = false, emailEnabled = false, clock = () => new Date(), runnerCatalog = null, runnerReleases = null, random = secureRandom, missionRules, attendanceRules } = {}) {
     this.store = store; this.bootstrapEmail = bootstrapEmail.trim().toLowerCase(); this.pushEnabled = pushEnabled; this.emailEnabled = emailEnabled; this.clock = clock;
+    this.runnerReleases = runnerReleases === null ? (runnerCatalog ? [] : bundledContentReleases()) : parseContentReleases(runnerReleases);
     this.runnerCatalog = runnerCatalog ?? bundledCatalog(); this.random = random;
     // Tagesmissionen (runner-missions.mjs); tests of other parts may switch them off with null.
     this.missionRules = missionRules;
@@ -427,7 +440,10 @@ export class Theater {
    */
   runnerStart(uid) {
     return this.store.transaction(() => {
-      const a = this.account(uid), { roundId, startedAt } = startRound(this, a.personId, this.clock(), stageRunner);
+      const a = this.account(uid);
+      // Observe readiness before this round starts, so delayed artwork never credits an older run.
+      packGoalsView(this, a.personId);
+      const { roundId, startedAt } = startRound(this, a.personId, this.clock(), stageRunner);
       return { roundId, startedAt };
     });
   }
@@ -439,7 +455,7 @@ export class Theater {
     return this.store.transaction(() => {
       const a = this.account(uid), at = +this.clock();
       if (!Number.isInteger(b.score) || b.score < 0) fail(400, 'Ungültiger Punktestand.', 'implausible');
-      const { repeat, elapsed } = findRound(this, a.personId, b.roundId, b, at, stageRunner);
+      const { repeat, elapsed, round } = findRound(this, a.personId, b.roundId, b, at, stageRunner);
       if (repeat) return { score: b.score, improved: repeat.improved, leaderboard: this.runnerBoard(a), progress: repeat.progress };
       if (b.score > runnerMaxScore(elapsed)) fail(400, 'So viele Punkte sind in dieser Zeit nicht möglich.', 'implausible');
       const meters = runMeters(b, elapsed, runnerMaxMeters, stageRunner), points = runPoints(b, meters);
@@ -447,7 +463,7 @@ export class Theater {
       // Tagesmissionen: the run's statistics only count if they are plausible; the run counts anyway.
       const statsSent = b.missionStats !== undefined && b.missionStats !== null;
       const stats = checkRunStats(b.missionStats, { meters, score: b.score, metersSent: Number.isInteger(b.meters) });
-      const progress = recordRun(this, a.personId, meters, b.hitBy, new Date(at), { score: b.score, points, stats, statsSent });
+      const progress = recordRun(this, a.personId, meters, b.hitBy, new Date(at), { score: b.score, points, stats, statsSent, startedAt: new Date(round.startedAt) });
       const old = this.store.get('runnerScores', a.personId), improved = b.score > (old?.best ?? 0);
       const when = new Date(at).toISOString();
       this.store.put('runnerScores', a.personId, { personId: a.personId, best: improved ? b.score : old?.best ?? 0, bestAt: improved ? when : old?.bestAt ?? null, rounds: (old?.rounds ?? 0) + 1, lastPlayedAt: when });
@@ -1434,6 +1450,8 @@ export class Theater {
     forgetFormSubmissions(s, submission => submission.personId === personId);
     forgetFormGenerations(s, marker => marker.personId === personId);
     s.delete('runnerScores', personId); s.delete('runnerRounds', personId); s.delete('runnerProgress', personId); s.delete('runnerMissions', personId);
+    // Keep anonymous shared progress, remove the deleted member's personal set-goal records.
+    for (const x of s.all('runnerPackContributions').filter(x => x.personId === personId)) s.delete('runnerPackContributions', `${x.releaseId}:${personId}`);
     forgetEventCrates(s, personId);
     // Reminder keys are `${eventId}:${startsAt}:${personId}:${kind}`; startsAt contains colons itself.
     for (const { id: key } of s.db.prepare("SELECT id FROM entities WHERE kind = 'reminderSent'").all()) if (key.split(':').at(-2) === String(personId)) s.delete('reminderSent', key);

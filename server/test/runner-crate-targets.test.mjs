@@ -107,11 +107,16 @@ test('a crate brings its pictures by name and its animation from the catalog', t
 test('the bundled catalog aims at the plays with role figures and the technicians, each with its animation', () => {
   const c = bundledCatalog();
   assert.deepEqual(c.crateTargets.map(x => [x.id, x.animation]), [
-    ['random', 'burst'], ['tech', 'flightcase'], ['play:creepshow', 'maw'], ['play:anno-1146', 'heavy'], ['play:schicksalsfaeden', 'threads'], ['play:nexus', 'glitch'],
+    ['random', 'burst'], ['tech', 'flightcase'], ['play:creepshow', 'maw'], ['play:anno-1146', 'heavy'], ['play:schicksalsfaeden', 'threads'], ['play:eine-hoellische-herausforderung', 'generic'], ['play:nexus', 'glitch'],
   ]);
   assert.ok(c.crateTargets.every(x => crateAnimations.includes(x.animation)));
-  // Every crate has its three pictures and where it stands on them.
+  // Existing themed crates keep their full artwork. The new Hölle set uses the supported generic
+  // animation until bespoke crate artwork is supplied, without borrowing another play's picture.
   for (const x of c.crateTargets) {
+    if (x.id === 'play:eine-hoellische-herausforderung') {
+      assert.deepEqual([x.animation, x.image, x.openImage, x.fxImage, x.imageBox], ['generic', undefined, undefined, undefined, undefined]);
+      continue;
+    }
     const file = x.id.replace(':', '-');
     for (const [field, name] of [['image', ''], ['openImage', '-open'], ['fxImage', '-fx']]) assert.match(x[field] ?? '', new RegExp(`^/games/runner/skins/crate-${file}${name}\\.webp\\?v=`), `${x.id} ${field}`);
     const [x0, y0, x1, y1] = x.imageBox;

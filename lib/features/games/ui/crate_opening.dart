@@ -29,6 +29,7 @@ Future<Wardrobe?> showCrateOpening(
   bool mission = false,
   bool event = false,
   EventCrate? eventCrate,
+  PackGoal? packGoal,
   CrateTarget? target,
   Future<CrateTarget?> Function(Wardrobe wardrobe)? chooseTarget,
 }) => Navigator.of(context).push<Wardrobe>(
@@ -44,6 +45,7 @@ Future<Wardrobe?> showCrateOpening(
       mission: mission,
       event: event,
       eventCrate: eventCrate,
+      packGoal: packGoal,
       target: target,
       chooseTarget: chooseTarget,
     ),
@@ -70,6 +72,7 @@ class CrateOpeningPage extends StatefulWidget {
     this.mission = false,
     this.event = false,
     this.eventCrate,
+    this.packGoal,
     this.target,
     this.chooseTarget,
   });
@@ -95,6 +98,9 @@ class CrateOpeningPage extends StatefulWidget {
   /// A Termin-Kiste: [eventCrate] if one was chosen, else the earliest.
   final bool event;
   final EventCrate? eventCrate;
+
+  /// A contributor reward restricted to this release's skin set.
+  final PackGoal? packGoal;
 
   /// Replaces the server call in tests.
   @visibleForTesting
@@ -136,10 +142,18 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   /// The target of the crate opening now; "Nächste Kiste" may choose another.
   late CrateTarget? _target = _own ? widget.target : null;
 
+  // Keep the key after a failed reply: retrying must return this opening,
+  // even if the server already consumed its crate before the connection failed.
+  String _openingKey = crateKey();
+
   /// An opening that waits for its crate's animation before the reel.
   CrateOpening? _pending;
 
-  bool get _own => !widget.ensemble && !widget.mission && !widget.event;
+  bool get _own =>
+      !widget.ensemble &&
+      !widget.mission &&
+      !widget.event &&
+      widget.packGoal == null;
   bool _changed = false, _wearing = false;
   String? _error;
   int _card = 0;
@@ -180,12 +194,14 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
           await (widget.open ??
               () => openCrate(
                 widget.controller,
+                key: _openingKey,
                 dupes: dupesAvailable(widget.controller),
                 ensemble: widget.ensemble,
                 mission: widget.mission,
                 event: widget.event,
                 eventId: _eventCrate?.eventId,
                 target: _target?.id,
+                packId: widget.packGoal?.releaseId,
               ))();
       // The cards' portraits, so the reel never shows an empty card; a slow
       // connection waits a moment at most.
@@ -256,6 +272,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
       if (next == null || !mounted) return;
       _target = next;
     }
+    _openingKey = crateKey();
     await _start();
   }
 
@@ -351,7 +368,9 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         _ShakingCrate(vsync: this),
         const SizedBox(height: 24),
         Text(
-          widget.event
+          widget.packGoal != null
+              ? 'Die Set-Kiste geht auf …'
+              : widget.event
               ? 'Die Termin-Kiste geht auf …'
               : widget.mission
               ? 'Die Missionskiste geht auf …'
@@ -447,6 +466,8 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                 Text(
                   revealed
                       ? 'Aus der Kiste:'
+                      : widget.packGoal != null
+                      ? 'Set-Kiste · ${result.outcome.packName ?? widget.packGoal!.name}'
                       : widget.event
                       ? eventCrateTitle(result.outcome.event ?? _eventCrate)
                       : widget.mission
@@ -512,7 +533,9 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         _wardrobe.worn(item.kind)?.id == item.id &&
         (role == null || _wardrobe.variantOf(item)?.id == role.id);
     final p = _wardrobe.progress;
-    final left = widget.event
+    final left = widget.packGoal != null
+        ? _wardrobe.packGoal(widget.packGoal!.releaseId)?.crates ?? 0
+        : widget.event
         ? _wardrobe.eventCrates.length
         : widget.mission
         ? p.missionCrates
@@ -521,7 +544,8 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         : p.crates;
     final more =
         left > 0 &&
-        (widget.ensemble ||
+        (widget.packGoal != null ||
+            widget.ensemble ||
             widget.mission ||
             widget.event ||
             p.dupes ||

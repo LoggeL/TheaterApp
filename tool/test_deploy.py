@@ -52,5 +52,14 @@ class DeploymentPortabilityTests(unittest.TestCase):
         with patch.dict(os.environ, {'THEATER_DEPLOY_LOCAL': '1'}, clear=True):
             self.assertEqual(deploy.host_transport(config), ['sh', '-c'])
 
+    def test_dokploy_transport_requires_explicit_opt_in(self):
+        with patch.dict(os.environ, {'THEATER_DEPLOY_TRANSPORT': 'dokploy'}, clear=True):
+            command = deploy.host_transport({})
+            self.assertEqual(command[0], 'node')
+            self.assertEqual(pathlib.Path(command[1]).name, 'dokploy-transport.mjs')
+        with patch.dict(os.environ, {'THEATER_DEPLOY_TRANSPORT': 'unknown'}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, 'must be ssh or dokploy'):
+                deploy.host_transport({})
+
 if __name__ == '__main__':
     unittest.main()

@@ -27,6 +27,15 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.13.0',
+    date: '27. Oktober 2026',
+    items: [
+      'Neue Kostümsets kommen nach und nach in die Garderobe. Jedes Set bringt ein eigenes gemeinsames Laufziel mit.',
+      'Wer zum neuen Ziel beiträgt, bekommt beim Erreichen drei Kisten nur aus diesem Kostümset.',
+      'Am 30. Oktober wird die Creepshow-Bühne für alle freigeschaltet, am 29. November folgt die Weihnachtsbühne.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.12.3',
     date: '25. Oktober 2026',
     items: ['Weitere Verbesserungen an Darstellung und Sammlung.'],

@@ -5,6 +5,7 @@ import { Store } from '../src/store.mjs';
 import { Theater, apiFeatures } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
 import { bundledCatalog, crateMilestone, drawWithDupes, loadCatalog, openRarities } from '../src/runner-wardrobe.mjs';
+import { uniqueCount, uniqueRequirement } from '../src/runner-unique.mjs';
 
 // Unique figures (`runnerUniqueFigures`): one non-human character per play, unlocked for good by
 // owning all of the play's active role figures; a secret until then, never in crates or the shop,
@@ -355,14 +356,20 @@ test('the bundled catalog: play-specific uniques and Kolping for the complete te
     ['character.unique-ki-nexus', '{"play":"Nexus"}'],
     ['character.unique-captain-kuschel', '{"plays":["Creepshow","Nexus"]}'],
     ['character.unique-adolph-kolping', '{"allTechnicians":true}'],
+    ['character.unique-willi', '{"play":"Eine höllische Herausforderung"}'],
   ]);
-  assert.deepEqual([...c.uniqueFiles.keys()].sort(), ['character-unique-adolph-kolping-portrait.webp', 'character-unique-adolph-kolping.webp', 'character-unique-beatrice-portrait.webp', 'character-unique-beatrice.webp', 'character-unique-captain-kuschel-portrait.webp', 'character-unique-captain-kuschel.webp', 'character-unique-ki-nexus-portrait.webp', 'character-unique-ki-nexus.webp']);
+  assert.deepEqual([...c.uniqueFiles.keys()].sort(), ['character-unique-adolph-kolping-portrait.webp', 'character-unique-adolph-kolping.webp', 'character-unique-beatrice-portrait.webp', 'character-unique-beatrice.webp', 'character-unique-captain-kuschel-portrait.webp', 'character-unique-captain-kuschel.webp', 'character-unique-ki-nexus-portrait.webp', 'character-unique-ki-nexus.webp', 'character-unique-willi-portrait.webp', 'character-unique-willi.webp']);
   const raw = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url), 'utf8')).items;
   const beatrice = c.byId.get('character.unique-beatrice');
   assert.deepEqual([beatrice.name, beatrice.play, beatrice.year, beatrice.unlock], ['Beatrice', 'Creepshow', 2026, { play: 'Creepshow' }]);
   // The others still wait for their pictures.
   assert.deepEqual(raw.filter(x => x.rarity === 'unique' && x.disabled).map(x => x.id),
-    ['character.unique-ritterpuppe', 'character.unique-willi', 'character.unique-kristall', 'character.unique-rabe']);
+    ['character.unique-ritterpuppe', 'character.unique-kristall', 'character.unique-rabe']);
+  // Willi requires the whole Hölle cast, including Hatice's documented role without an app account.
+  const willi = c.byId.get('character.unique-willi'), hell = uniqueRequirement(c, willi)[0].ids;
+  assert.equal(hell.length, 11);
+  assert.ok(hell.includes('character.hatice--hell'));
+  assert.deepEqual([uniqueCount(c, willi, new Set(hell.filter(id => id !== 'character.hatice--hell'))).have, uniqueCount(c, willi, new Set(hell)).total], [10, 11]);
   // Logge's role "KI" in Nexus is gone: the AI is a unique figure.
   assert.ok(!raw.some(x => x.id === 'character.logge--nexus'));
   const store = new Store(); t.after(() => store.close());
