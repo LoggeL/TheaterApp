@@ -27,6 +27,16 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.13.1',
+    date: '29. Oktober 2026',
+    items: [
+      'Der Bühnenlauf hat ein neues Hauptmenü mit deinem Stand, der Ensemble-Strecke und einer Monatsrangliste, die jeden Monat neu beginnt.',
+      'Eine zweite Rangliste zeigt, wer die vollständigste Sammlung hat.',
+      'Die Garderobe zeigt übersichtlich, was dir je Stufe und Stück noch fehlt. Jede gefundene Figur hat eine eigene Seite mit Animation.',
+      'Jede Person bekommt eine eigene Figur geschenkt. Weitere eigene Rollen gibt es in Kisten.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.13.0',
     date: '27. Oktober 2026',
     items: [
