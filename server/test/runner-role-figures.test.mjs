@@ -64,8 +64,9 @@ test('a record owning or wearing figures no longer in the catalog loads, moves o
   const w = app.runnerWardrobe('sam', { roles: true });
   assert.ok(w.owned.includes('character.elena'));
   assert.deepEqual(gone.filter(id => w.owned.includes(id) || w.shiny.includes(id)), []);
-  // Worn but gone: the default; an fx not owned: the default too.
-  assert.deepEqual([w.selected.character, w.selected.fx], [c.defaults.character, c.defaults.fx]);
+  // Worn but gone: Sam's gift figure (Yunus' most common role) instead of Engel Logge; an fx not owned: the default.
+  assert.deepEqual([w.selected.character, w.selected.fx], ['character.yunus--nexus', c.defaults.fx]);
+  assert.equal(w.gift, 'character.yunus--nexus');
   assert.equal(saved().model, roleFiguresModel);
   // Older apps see the same, and crates still open.
   const older = app.runnerWardrobe('sam');

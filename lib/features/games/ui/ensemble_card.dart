@@ -259,6 +259,111 @@ extension on String {
   String? get nullIfEmpty => isEmpty ? null : this;
 }
 
+/// The Ensemble-Strecke in a few lines for the Bühnenlauf menu: all metres
+/// together, the bar to the next goal and what it brings. A run's reply
+/// ([run]) is newer than the wardrobe's [ensemble] and wins. The full card
+/// with every goal lives in the wardrobe ([onOpen]).
+class EnsembleStrip extends StatelessWidget {
+  const EnsembleStrip({
+    super.key,
+    required this.ensemble,
+    this.run,
+    this.onOpen,
+  });
+  final EnsembleProgress ensemble;
+  final EnsembleRun? run;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final e = ensemble;
+    final meters = run?.meters ?? e.meters;
+    final next = run?.next ?? e.next;
+    // The goal before the next one: where the bar starts.
+    final from = next.km == e.next.km
+        ? (e.previousKm * 1000).round()
+        : e.milestones
+              .where((m) => m.km < next.km)
+              .map((m) => m.meters)
+              .fold(0, max);
+    final to = next.meters;
+    final fraction = to <= from
+        ? 1.0
+        : ((meters - from) / (to - from)).clamp(0, 1).toDouble();
+    final remaining = max(0, to - meters);
+    final crates = e.crates;
+    return Card(
+      key: const ValueKey('ensemble-strip'),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onOpen,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.groups, color: StageTheme.orange),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Ensemble-Strecke',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                  ),
+                  Text(
+                    kmText(meters),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (onOpen != null) ...[
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right, color: theme.hintColor),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: fraction,
+                  minHeight: 10,
+                  color: StageTheme.orange,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                next.hidden
+                    ? 'Nächstes Ziel: noch ${kmText(remaining)} bis zur nächsten Überraschung'
+                    : 'Nächstes Ziel: noch ${kmText(remaining)} bis ${next.name}',
+                key: const ValueKey('ensemble-strip-next'),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                crates > 0
+                    ? crates == 1
+                          ? '1 Ensemble-Kiste wartet in der Garderobe.'
+                          : '$crates Ensemble-Kisten warten in der Garderobe.'
+                    : 'Bei ${kmText(to)} gibt es eine Ensemble-Kiste für alle.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: crates > 0 ? StageTheme.orange : null,
+                  fontWeight: crates > 0 ? FontWeight.w700 : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// A reward that is still a surprise: a closed curtain with a question
 /// mark, never its name or picture.
 class EnsembleSurprise extends StatelessWidget {

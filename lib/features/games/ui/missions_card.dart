@@ -5,6 +5,7 @@ import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
 import '../../../shared/feedback.dart';
 import '../data/missions_api.dart';
+import '../data/runner_menu_preferences.dart';
 
 final _number = NumberFormat.decimalPattern('de');
 
@@ -22,7 +23,10 @@ String missionRewardText(DailyMission m) =>
     '+${_number.format(m.reward)} ${m.rewardInPoints ? 'Punkte' : 'm'} für die Kisten';
 
 /// "Tagesmissionen": the day's three missions with progress, reward and a
-/// free reroll. Loads them itself when [missions] is not given.
+/// free reroll. Loads them itself when [missions] is not given. Open
+/// missions show in full; finished ones fold into one short line ("2
+/// geschafft"), which opens them again; that choice is remembered on the
+/// device ([RunnerMenuPreferences]).
 class DailyMissionsCard extends StatefulWidget {
   const DailyMissionsCard({
     super.key,
@@ -32,8 +36,12 @@ class DailyMissionsCard extends StatefulWidget {
     this.crates = 0,
     this.onOpenCrate,
     this.collectibleNames = const {},
+    this.preferences,
   });
   final AppController controller;
+
+  /// Where the folding is remembered; by default this device's storage.
+  final RunnerMenuPreferences? preferences;
 
   /// What the worn backdrop calls the pickups (`collectibleNames`).
   final Map<String, String> collectibleNames;
@@ -55,10 +63,25 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
 
   DailyMissions? get _missions => widget.missions ?? _loaded;
 
+  late final RunnerMenuPreferences _preferences =
+      widget.preferences ?? RunnerMenuPreferences();
+
   @override
   void initState() {
     super.initState();
+    _preferences.addListener(_preferencesChanged);
     if (widget.missions == null) _load();
+  }
+
+  void _preferencesChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _preferences.removeListener(_preferencesChanged);
+    if (widget.preferences == null) _preferences.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -97,6 +120,8 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
     final theme = Theme.of(context);
     final m = _missions;
     final done = m?.missions.where((x) => x.done).length ?? 0;
+    final all = m != null && m.missions.isNotEmpty && done == m.missions.length;
+    final open = _preferences.doneMissionsOpen;
     return Card(
       key: const ValueKey('runner-missions'),
       child: Padding(
@@ -117,9 +142,25 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
                 if (m != null)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
-                    child: Text(
-                      '$done/${m.missions.length} geschafft',
-                      style: theme.textTheme.bodySmall,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (all) ...[
+                          const Icon(
+                            Icons.check_circle,
+                            size: 16,
+                            color: StageTheme.green,
+                          ),
+                          const SizedBox(width: 4),
+                        ],
+                        Text(
+                          '$done/${m.missions.length} geschafft',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: all ? StageTheme.green : null,
+                            fontWeight: all ? FontWeight.w700 : null,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
               ],
@@ -130,15 +171,28 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Center(child: CircularProgressIndicator()),
               ),
-            if (m != null)
+            if (m != null) ...[
               for (final mission in m.missions)
-                _MissionRow(
-                  mission,
-                  names: widget.collectibleNames,
-                  onReroll: m.rerollAvailable && !mission.done && !_busy
-                      ? () => _reroll(mission)
-                      : null,
+                if (!mission.done)
+                  _MissionRow(
+                    mission,
+                    names: widget.collectibleNames,
+                    onReroll: m.rerollAvailable && !_busy
+                        ? () => _reroll(mission)
+                        : null,
+                  ),
+              if (done > 0)
+                _DoneToggle(
+                  done: done,
+                  all: all,
+                  open: open,
+                  onPressed: () => _preferences.setDoneMissionsOpen(!open),
                 ),
+              if (done > 0 && open)
+                for (final mission in m.missions)
+                  if (mission.done)
+                    _MissionRow(mission, names: widget.collectibleNames),
+            ],
             if (_error case final error?)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
@@ -175,6 +229,61 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The one line the finished missions fold into: "2 geschafft" or "Alle 3
+/// geschafft"; a tap shows or hides them.
+class _DoneToggle extends StatelessWidget {
+  const _DoneToggle({
+    required this.done,
+    required this.all,
+    required this.open,
+    required this.onPressed,
+  });
+  final int done;
+  final bool all, open;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      key: const ValueKey('missions-done-toggle'),
+      borderRadius: BorderRadius.circular(12),
+      onTap: onPressed,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle, size: 20, color: StageTheme.green),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                all
+                    ? 'Alle $done geschafft'
+                    : done == 1
+                    ? '1 Mission geschafft'
+                    : '$done Missionen geschafft',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: StageTheme.green,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Text(
+              open ? 'Ausblenden' : 'Anzeigen',
+              style: theme.textTheme.bodySmall,
+            ),
+            Icon(
+              open ? Icons.expand_less : Icons.expand_more,
+              size: 20,
+              color: theme.hintColor,
+            ),
           ],
         ),
       ),

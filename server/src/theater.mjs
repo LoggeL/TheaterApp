@@ -7,9 +7,10 @@ import { feedbackList, feedbackTicketsMigrationId, forgetFeedbackAccount, forget
 import { checkRunStats, missions, rerollMission } from './runner-missions.mjs';
 import { findRound, finishRound, startRound } from './runner-rounds.mjs';
 import { autoCheckins, eventCrateNotice, forgetEventCrates, settleCheckinCrate } from './runner-event-crates.mjs';
-import { buyItem, bundledCatalog, ensembleSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
+import { buyItem, bundledCatalog, collectionBoard, ensembleSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
 import { bundledContentReleases, parseContentReleases, releasedCatalog, releaseIsActive } from './runner-content-releases.mjs';
 import { packGoalsView } from './runner-pack-goals.mjs';
+import { forgetMonthScores, periodBoard, rankedBoard, recordMonthRun } from './runner-monthly.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { archiveForm, attachForm, checkFormSubmissionOpen, forgetFormGenerations, forgetFormSubmissions, formStatus, saveForm, submitForm, withdrawForm } from './forms.mjs';
 
@@ -42,7 +43,7 @@ export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
 export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -466,13 +467,22 @@ export class Theater {
       const progress = recordRun(this, a.personId, meters, b.hitBy, new Date(at), { score: b.score, points, stats, statsSent, startedAt: new Date(round.startedAt) });
       const old = this.store.get('runnerScores', a.personId), improved = b.score > (old?.best ?? 0);
       const when = new Date(at).toISOString();
+      // The Monatsrangliste (runner-monthly.mjs) keeps the best of the Berlin month beside it.
+      recordMonthRun(this, a.personId, b.score, when, old);
       this.store.put('runnerScores', a.personId, { personId: a.personId, best: improved ? b.score : old?.best ?? 0, bestAt: improved ? when : old?.bestAt ?? null, rounds: (old?.rounds ?? 0) + 1, lastPlayedAt: when });
       // Each run counts once; a repeat of this result gets this answer (see runner-rounds.mjs).
       finishRound(this, a.personId, b.roundId, b, { improved, progress });
       return { score: b.score, improved, leaderboard: this.runnerBoard(a), progress };
     });
   }
-  runnerLeaderboard(uid) { return this.runnerBoard(this.account(uid)); }
+  // `period: 'month'` (`runnerMonthlyLeaderboard`) gives the Monatsrangliste (runner-monthly.mjs);
+  // without a period the all-time list as before.
+  runnerLeaderboard(uid, { period, month } = {}) {
+    const a = this.account(uid);
+    return period ? periodBoard(this, a, period, month) : this.runnerBoard(a);
+  }
+  // The Sammel-Rangliste (most complete collection) lives in runner-wardrobe.mjs.
+  runnerCollection(uid) { return collectionBoard(this, uid); }
   // The wardrobe (costume crates) lives in runner-wardrobe.mjs.
   // `roles`: the app knows role figures (`runnerRoleFigures`); older apps get role variants.
   // `unique`: the app knows unique figures (`runnerUniqueFigures`); older apps never see them.
@@ -489,12 +499,7 @@ export class Theater {
   runnerSkin(uid, name) { return skinFile(this, uid, name); }
   /** Top list of active people with a score above zero; equal scores share a rank, the earlier best comes first. */
   runnerBoard(a) {
-    const members = new Map(this.store.all('members').filter(m => m.active === true).map(m => [m.id, m]));
-    const ranked = this.store.all('runnerScores').filter(x => x.best > 0 && members.has(x.personId))
-      .sort((x, y) => y.best - x.best || String(x.bestAt).localeCompare(String(y.bestAt)) || x.personId - y.personId)
-      .map((x, i, all) => ({ rank: all.findIndex(o => o.best === x.best) + 1, personId: x.personId, name: members.get(x.personId).name, score: x.best, achievedAt: x.bestAt }));
-    const own = ranked.find(x => x.personId === a.personId) ?? null;
-    return { players: ranked.length, top: ranked.slice(0, stageRunner.leaderboardSize), own };
+    return rankedBoard(this, a, this.store.all('runnerScores').map(x => ({ personId: x.personId, score: x.best, at: x.bestAt })));
   }
   /** Deletes a login and its link; the person and their theater data stay. `deleteIdentity` removes the Firebase user. */
   async deleteAccount(uid, targetUid, version, deleteIdentity = null) {
@@ -1450,6 +1455,7 @@ export class Theater {
     forgetFormSubmissions(s, submission => submission.personId === personId);
     forgetFormGenerations(s, marker => marker.personId === personId);
     s.delete('runnerScores', personId); s.delete('runnerRounds', personId); s.delete('runnerProgress', personId); s.delete('runnerMissions', personId);
+    forgetMonthScores(s, personId);
     // Keep anonymous shared progress, remove the deleted member's personal set-goal records.
     for (const x of s.all('runnerPackContributions').filter(x => x.personId === personId)) s.delete('runnerPackContributions', `${x.releaseId}:${personId}`);
     forgetEventCrates(s, personId);

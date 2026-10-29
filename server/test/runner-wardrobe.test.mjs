@@ -322,7 +322,7 @@ test('opening again with the same key returns the same crate', t => {
   assert.throws(() => app.runnerOpenCrate('sam', ''), { status: 400 });
 });
 
-test('only owned items can be worn; the own character is owned', t => {
+test('only owned items can be worn; an own character without a picture is no gift', t => {
   const { app, personId, grant, open } = setup(t);
   assert.deepEqual(app.runnerWardrobe('sam').selected, { character: 'c0', backdrop: 'b0', obstacles: 'o0', fx: 'f0' });
   assert.throws(() => app.runnerOutfit('sam', { kind: 'character', itemId: 'c1' }), { status: 409, code: 'not_owned' });
@@ -334,11 +334,13 @@ test('only owned items can be worn; the own character is owned', t => {
   assert.equal(app.runnerOutfit('sam', { kind: won.kind, itemId: won.id }).selected[won.kind], won.id);
   // Back to the default is always possible.
   assert.equal(app.runnerOutfit('sam', { kind: 'character', itemId: 'c0' }).selected.character, 'c0');
-  // A person's own character needs no crate and is not drawn for them.
+  // A person's own character added after the switch to gift figures: without a picture it is no
+  // gift (Engel Logge stays), it is collected like any other figure.
   app.runnerCatalog = catalogOf([{ id: 'c1', kind: 'character', name: 'Blau 1', rarity: 'blau' }, { id: 'sam', kind: 'character', name: 'Sam', rarity: 'gold', personId }]);
   const view = app.runnerWardrobe('sam');
-  assert.ok(view.owned.includes('sam'));
-  assert.equal(app.runnerOutfit('sam', { kind: 'character', itemId: 'sam' }).selected.character, 'sam');
+  assert.ok(!view.owned.includes('sam') && view.owned.includes('c0'));
+  assert.deepEqual([view.gift, view.hiddenDefaults], [null, []]);
+  assert.throws(() => app.runnerOutfit('sam', { kind: 'character', itemId: 'sam' }), { status: 409, code: 'not_owned' });
   // An item that left the catalog falls back to the default.
   app.runnerCatalog = catalogOf([]);
   assert.equal(app.runnerWardrobe('sam').selected.character, 'c0');

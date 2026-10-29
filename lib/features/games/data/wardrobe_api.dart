@@ -1178,8 +1178,12 @@ class RunnerStats {
     this.missionPoints = 0,
     this.basePoints = 0,
     this.crateMeters = 0,
+    this.duplicates,
   });
   final int rounds, best, meters;
+
+  /// Duplicates drawn in all, if the server says (`duplicates`).
+  final int? duplicates;
 
   /// Crate points (`runnerCratePoints`): of all runs since, Tagesbonus,
   /// missions, and the base moved over from the [crateMeters] of before.
@@ -1227,6 +1231,7 @@ class RunnerStats {
     missionPoints: intValue(json['missionPoints']),
     basePoints: intValue(json['basePoints']),
     crateMeters: intValue(json['crateMeters']),
+    duplicates: json['duplicates'] is num ? intValue(json['duplicates']) : null,
   );
 }
 
@@ -1337,6 +1342,39 @@ class UniqueFigures {
   );
 }
 
+/// The person's own numbers of the Sammel-Rangliste (`collection` of the
+/// wardrobe): [owned] of the [total] items that can be collected now, [shiny]
+/// of those. The server counts crate items and unique figures with their
+/// picture (a placeholder or, for effects, an effect does too), without the
+/// defaults, the ensemble rewards and the items a release gives everybody
+/// ([free]). Null for older servers.
+class WardrobeCollection {
+  const WardrobeCollection({
+    required this.owned,
+    required this.total,
+    this.shiny = 0,
+    this.free = const {},
+  });
+  final int owned, total, shiny;
+  final Set<String> free;
+
+  static WardrobeCollection? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final map = jsonMap(json);
+    if (map['owned'] is! num || map['total'] is! num) return null;
+    final total = max(0, intValue(map['total']));
+    return WardrobeCollection(
+      owned: intValue(map['owned']).clamp(0, total),
+      total: total,
+      shiny: max(0, intValue(map['shiny'])),
+      free: {
+        for (final id in jsonList(map['free']))
+          if (id is String) id,
+      },
+    );
+  }
+}
+
 /// The person's wardrobe: catalog, what they own and wear, progress and
 /// statistics.
 class Wardrobe {
@@ -1358,8 +1396,39 @@ class Wardrobe {
     this.packGoals = const [],
     this.uniqueFigures,
     this.crateTargets = const [],
+    this.gift,
+    this.hiddenDefaults = const {},
+    this.dupeCounts = const {},
+    this.collection,
   });
   final WardrobeCatalog catalog;
+
+  /// The numbers of the Sammel-Rangliste; null for older servers, which
+  /// leave [collected] and [collectible] to the app's own count.
+  final WardrobeCollection? collection;
+
+  /// The figure the person got as a present: their own figure in its
+  /// lowest rarity; further own roles come from crates. Null for older
+  /// servers and for accounts without a figure of their own, who keep Engel
+  /// Logge (see [owns]). The server sends `gift` as an item id
+  /// (`runnerGiftFigure`); a map with `itemId`/`id`, `giftItemId` or an item
+  /// marked `gift: true` are read as well.
+  final String? gift;
+
+  /// Defaults the person does not own (`hiddenDefaults`, with
+  /// `runnerGiftFigure`): with a present, Engel Logge. They are neither in
+  /// the collection nor offered to wear; older servers send none.
+  final Set<String> hiddenDefaults;
+
+  /// Duplicates won per item, if the server sends them (`dupeCounts`, item
+  /// id to count); empty otherwise.
+  final Map<String, int> dupeCounts;
+
+  /// Whether [item] is the person's present ([gift]).
+  bool isGift(WardrobeItem item) => gift != null && gift == item.id;
+
+  /// The duplicates of [item] won so far; null if the server does not say.
+  int? dupesOf(WardrobeItem item) => dupeCounts[item.id];
 
   /// What a crate of the own runs can be opened as (`runnerCrateTargets`):
   /// the Zufallskiste first; empty for older servers.
@@ -1432,7 +1501,14 @@ class Wardrobe {
   final RunnerProgress progress;
   final RunnerStats stats;
 
-  bool owns(WardrobeItem item) => item.isDefault || owned.contains(item.id);
+  /// The default outfit is everybody's, except [hiddenDefaults]: Engel
+  /// Logge only stands in for accounts without a figure of their own, so
+  /// with a [gift] the default figure is not owned either.
+  bool owns(WardrobeItem item) =>
+      owned.contains(item.id) ||
+      (item.isDefault &&
+          !hiddenDefaults.contains(item.id) &&
+          (item.kind != WardrobeKind.character || gift == null));
 
   /// What unlocks [item] while it cannot come from a crate yet; null if it
   /// can.
@@ -1446,12 +1522,38 @@ class Wardrobe {
   }
 
   /// The worn item of [kind]; the default if the server named none.
-  WardrobeItem? worn(WardrobeKind kind) =>
-      catalog.item(selected[kind] ?? '') ??
-      catalog.items.where((i) => i.kind == kind && i.isDefault).firstOrNull;
+  /// Without a default figure of their own a person wears their [gift].
+  WardrobeItem? worn(WardrobeKind kind) {
+    final chosen = catalog.item(selected[kind] ?? '');
+    if (chosen != null) return chosen;
+    final fallback = catalog.items
+        .where((i) => i.kind == kind && i.isDefault)
+        .firstOrNull;
+    if (kind == WardrobeKind.character &&
+        (fallback == null || !owns(fallback))) {
+      return catalog.item(gift ?? '') ?? fallback;
+    }
+    return fallback;
+  }
 
-  int get collected => catalog.collectible.where(owns).length;
-  int get collectible => catalog.collectible.length;
+  /// Whether [item] counts for the collection as the server counts it
+  /// ([collection]): with its picture (a placeholder, or an effect for
+  /// effects) and not given to everybody by a release. Without
+  /// [collection] (older servers) everything counts, as before.
+  bool counts(WardrobeItem item) {
+    final c = collection;
+    if (c == null) return true;
+    return !c.free.contains(item.id) &&
+        (item.image != null ||
+            item.placeholder ||
+            (item.kind == WardrobeKind.fx && item.effect != null));
+  }
+
+  /// The collection's numbers: the server's ([collection]) if it sends
+  /// them, else the crate items of the catalog.
+  int get collected =>
+      collection?.owned ?? catalog.collectible.where(owns).length;
+  int get collectible => collection?.total ?? catalog.collectible.length;
 
   factory Wardrobe.fromJson(JsonMap json) {
     final selected = jsonMap(json['selected']);
@@ -1469,6 +1571,18 @@ class Wardrobe {
           ensemble?.rewardOf(i)?.reached == true,
     );
     return Wardrobe(
+      collection: WardrobeCollection.fromJson(json['collection']),
+      gift: _giftOf(json, catalog),
+      hiddenDefaults: {
+        for (final id in jsonList(json['hiddenDefaults']))
+          if (id is String) id,
+      },
+      dupeCounts: {
+        for (final MapEntry(:key, :value) in jsonMap(
+          json['dupeCounts'],
+        ).entries)
+          if (value is num && value > 0) key: value.round(),
+      },
       shiny: {for (final id in jsonList(json['shiny'])) '$id'},
       variants: {for (final id in jsonList(json['variants'])) '$id'},
       selectedVariants: {
@@ -1516,6 +1630,23 @@ class Wardrobe {
       stats: RunnerStats.fromJson(jsonMap(json['stats'])),
     );
   }
+}
+
+/// The id of the present figure ([Wardrobe.gift]), tolerant of how the
+/// server names it; only an item of [catalog].
+String? _giftOf(JsonMap json, WardrobeCatalog catalog) {
+  String? id(Object? v) => switch (v) {
+    final String s when s.trim().isNotEmpty => s.trim(),
+    final Map<dynamic, dynamic> m => id(m['itemId']) ?? id(m['id']),
+    _ => null,
+  };
+  final named = id(json['gift']) ?? id(json['giftItemId']);
+  final marked = [
+    for (final i in jsonList(jsonMap(json['catalog'])['items']))
+      if (i is Map && i['gift'] == true) ?id(i['id']),
+  ].firstOrNull;
+  final gift = named ?? marked;
+  return gift != null && catalog.item(gift) != null ? gift : null;
 }
 
 /// An opened crate: the won item and the cards of the reel, with the won one

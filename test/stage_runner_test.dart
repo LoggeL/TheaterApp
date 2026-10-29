@@ -1055,7 +1055,12 @@ void main() {
         return data!.buffer.asUint8List().toList();
       }))!;
       final before = await left();
-      await tester.scrollUntilVisible(find.text('Vorhang auf'), 200);
+      // Wide, the start stands in its own column beside the list.
+      await tester.scrollUntilVisible(
+        find.text('Vorhang auf'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.text('Vorhang auf'));
       for (var i = 0; i < 90; i++) {
         await tester.pump(const Duration(milliseconds: 16));
@@ -2265,7 +2270,12 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('Vorhang auf'), 200);
+      // Wide, the start stands in its own column beside the list.
+      await tester.scrollUntilVisible(
+        find.text('Vorhang auf'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.text('Vorhang auf'));
       for (var i = 0; i < 40; i++) {
         await tester.pump(const Duration(milliseconds: 16));
@@ -2533,7 +2543,12 @@ void main() {
       bool? veil() =>
           SystemChrome.latestStyle?.systemNavigationBarContrastEnforced;
       expect(veil(), isTrue);
-      await tester.scrollUntilVisible(find.text('Vorhang auf'), 200);
+      // Wide, the start stands in its own column beside the list.
+      await tester.scrollUntilVisible(
+        find.text('Vorhang auf'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.text('Vorhang auf'));
       for (var i = 0; i < 10; i++) {
         await tester.pump(const Duration(milliseconds: 16));

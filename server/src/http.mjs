@@ -155,7 +155,8 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (ownTicket && !ownTicket[2] && req.method === 'PUT') return json(res, 200, closeOwnFeedback(theater, identity.uid, ownTicket[1], body));
       if (ownTicket?.[2] === '/messages' && req.method === 'POST') return json(res, 200, replyAsMember(theater, identity.uid, ownTicket[1], body));
       if (ownTicket?.[2] === '/read' && req.method === 'PUT') return json(res, 200, markFeedbackRead(theater, identity.uid, ownTicket[1]));
-      if (route === '/games/runner/leaderboard' && req.method === 'GET') return json(res, 200, theater.runnerLeaderboard(identity.uid));
+      if (route === '/games/runner/leaderboard' && req.method === 'GET') return json(res, 200, theater.runnerLeaderboard(identity.uid, { period: requestUrl.searchParams.get('period'), month: requestUrl.searchParams.get('month') }));
+      if (route === '/games/runner/collection' && req.method === 'GET') return json(res, 200, theater.runnerCollection(identity.uid));
       if (route === '/games/runner/rounds' && req.method === 'POST') return json(res, 200, theater.runnerStart(identity.uid));
       if (route === '/games/runner/scores' && req.method === 'POST') return json(res, 200, theater.runnerScore(identity.uid, body));
       if (route === '/games/runner/wardrobe' && req.method === 'GET') return json(res, 200, theater.runnerWardrobe(identity.uid, { roles: requestUrl.searchParams.get('roles') === '1', unique: requestUrl.searchParams.get('unique') === '1' }));

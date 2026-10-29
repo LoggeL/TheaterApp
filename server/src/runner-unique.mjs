@@ -13,7 +13,9 @@
 //   Without its picture it stays `disabled` and is left out entirely, like any entry.
 // - Unlock: whoever owns all active role figures of the play (actors' figures with `personId` and
 //   that play, waiting ones not counted), across plays of every one of them, gets it at once, for
-//   good (`uniques` in the progress record): a role figure added later does not take it away. Never
+//   good (`uniques` in the progress record): a role figure added later does not take it away, nor
+//   does the switch to gift figures (`runnerGiftFigure`: only the gift and the own figures kept
+//   from before are owned without a crate, runner-own-figures.mjs). Never
 //   in crates, trades or purchases, never shiny, no duplicates.
 // - Secret until unlocked: the catalog lists only the person's own unique figures; before, the view
 //   shows the play's progress with `name: '???'`, without id, name or picture, and its pictures are

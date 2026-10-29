@@ -9,6 +9,7 @@ import { addEnsembleMeters, countSection, ensembleCrates, ensembleRunView, ensem
 import { checkUniqueEntry, isUniqueEntry, markUniquesSeen, ownedUniques, parseUniqueRarity, settleUniques, uniqueView, withoutUniques } from './runner-unique.mjs';
 import { releasedFreeItems } from './runner-content-releases.mjs';
 import { recordPackRun, packGoalsView, nextPackCrate, markPackCrateOpened } from './runner-pack-goals.mjs';
+import { giftOf, ownFiguresCutover, settleOwnFigures } from './runner-own-figures.mjs';
 
 // "Garderobe" of the stage runner: every metre run counts towards costume crates; a crate holds one
 // item (a character, a backdrop, an obstacle set or an effect) that the person does not own yet.
@@ -34,7 +35,8 @@ import { recordPackRun, packGoalsView, nextPackCrate, markPackCrateOpened } from
 // - Rarities, departments and which item has which rarity are pure catalog data
 //   (server/src/wardrobe/catalog.json); pictures live next to it in server/src/wardrobe/images (the
 //   backdrops' music in server/src/wardrobe/music) and are served to signed-in members, so new costumes come with a server deployment, not an app release.
-//   Entries with `disabled: true` (a costume whose picture is not done yet) are left out entirely.
+//   Entries with `disabled: true` (a costume whose picture is not done yet) are left out entirely;
+//   one owned and worn before falls back to the default (for characters: the gift figure, if any).
 // - Per person (`runnerProgress`): metres, opened crates, owned and selected items and how runs
 //   ended. Runs from before this existed are credited once with `creditPerRound` metres each.
 // - Duplicates (`runnerDupes`, only for apps that ask with `{ dupes: true }`): the rarity is drawn by
@@ -55,6 +57,12 @@ import { recordPackRun, packGoalsView, nextPackCrate, markPackCrateOpened } from
 // - Unique figures (`runnerUniqueFigures`, `rarity: "unique"`): one non-human character per play,
 //   unlocked by owning all of the play's active role figures, a secret until then; see
 //   runner-unique.mjs. Apps ask for them with `unique`; apps from before never see them.
+// - Own figures (`runnerGiftFigure`): of the role figures with the person's `personId` only one is a
+//   gift (the most common one with a picture); the others are collected like anyone else's, figures
+//   owned under the old rule (all own ones) stay. Engel Logge, the default character, is only the
+//   stand-in for people without a gift. See runner-own-figures.mjs.
+// - Sammel-Rangliste (`runnerCollection`): who has collected most of what can be collected now
+//   (`collectionBoard`, GET /games/runner/collection).
 
 export const runnerUnlocks = Object.freeze({
   // Crates of the own runs count points (`runnerCratePoints`): the n-th crate needs
@@ -282,7 +290,7 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
   const picture = name => asset(name, imageDir, fileName, imageTypes);
   const tune = name => asset(name, musicDir, musicName, musicTypes);
   // `disabled` entries wait for their pictures: they are not part of the catalog at all, so nobody
-  // draws, sees or wears them; one owned before falls back to the default when worn.
+  // draws, sees or wears them; one owned before falls back to the default (or gift figure) when worn.
   const items = list(data?.items).filter(x => x?.disabled !== true).map(x => {
     if (typeof x?.id !== 'string' || !x.id || byId.has(x.id)) bad(`invalid or duplicate item id ${JSON.stringify(x?.id)}`);
     if (!wardrobeKinds.includes(x.kind)) bad(`unknown kind of ${x.id}`);
@@ -550,22 +558,32 @@ const catalog = t => t.runnerCatalog;
 const credit = runnerUnlocks.creditPerRound;
 
 /**
- * The person's progress record; created on first use with the credit for earlier runs. A record
- * from before role figures is moved over once (runner-role-figures.mjs), whoever asks first.
+ * [existing] with every move done that it still needs, in memory (each once, whoever asks first):
+ * role figures, then crate points, then own figures (gift and kept figures, runner-own-figures.mjs).
+ */
+const migrated = (t, existing, cutover = ownFiguresCutover(t)) => {
+  const roles = migrateToRoleFigures(catalog(t), existing, t.clock()) ?? existing;
+  const moved = migrateToCratePoints(roles, t.clock()) ?? roles;
+  return settleOwnFigures(catalog(t), moved, cutover, t.clock()) ?? moved;
+};
+
+/**
+ * The person's progress record; created on first use with the credit for earlier runs and the gift
+ * figure. A record from before is moved over once (`migrated`), whoever asks first.
  */
 export function runnerProgress(t, personId) {
-  const existing = t.store.get('runnerProgress', personId);
+  // Noted before any record is created: the own figures everybody owned under the old rule.
+  const cutover = ownFiguresCutover(t), existing = t.store.get('runnerProgress', personId);
   if (existing) {
-    // Each move once, whoever asks first: role figures, then crate points.
-    const roles = migrateToRoleFigures(catalog(t), existing, t.clock()) ?? existing;
-    const moved = migrateToCratePoints(roles, t.clock()) ?? roles;
+    const moved = migrated(t, existing, cutover);
     return moved !== existing ? t.store.put('runnerProgress', personId, moved) : existing;
   }
   const rounds = t.store.get('runnerScores', personId)?.rounds ?? 0;
   const credited = rounds * credit;
   // The credit for earlier runs is metres: it becomes crate points the same way as an old record.
-  const fresh = { personId, meters: credited, creditedMeters: credited, creditedRounds: rounds, opened: 0, owned: [], selected: {}, deaths: {}, createdAt: t.clock().toISOString(), ...(catalog(t).roleFigures ? { model: roleFiguresModel } : {}) };
-  return t.store.put('runnerProgress', personId, migrateToCratePoints(fresh, t.clock()));
+  const fresh = migrateToCratePoints({ personId, meters: credited, creditedMeters: credited, creditedRounds: rounds, opened: 0, owned: [], selected: {}, deaths: {}, createdAt: t.clock().toISOString(), ...(catalog(t).roleFigures ? { model: roleFiguresModel } : {}) }, t.clock());
+  // Runs without a record were played before the wardrobe existed: their own figures stay theirs.
+  return t.store.put('runnerProgress', personId, settleOwnFigures(catalog(t), fresh, cutover, t.clock(), { fresh: true, played: rounds > 0 }) ?? fresh);
 }
 
 /**
@@ -588,13 +606,19 @@ const progressOf = (t, personId) => {
 };
 
 /**
- * Item ids [p] owns: the defaults, what crates brought, the person's own character, the ensemble's
- * rewards and the unique figures unlocked.
+ * Item ids [p] owns: the defaults (Engel Logge only without a gift figure), what crates, trades and
+ * purchases brought, the gift and the own figures kept from before (both in `owned`), the
+ * ensemble's rewards, the unique figures unlocked and the items a release gives everybody.
  */
 const ownedIds = (t, p) => {
-  const c = catalog(t);
-  return new Set([...Object.values(c.defaults), ...list(p.owned).filter(id => c.byId.has(id)), ...c.items.filter(x => x.personId === p.personId).map(x => x.id), ...ownedRewards(t, credit), ...ownedUniques(c, p), ...releasedFreeItems(t)]);
+  const c = catalog(t), gift = giftOf(c, p);
+  const defaults = Object.values(c.defaults).filter(id => !gift || id !== c.defaults.character);
+  return new Set([...defaults, ...list(p.owned).filter(id => c.byId.has(id)), ...ownedRewards(t, credit), ...ownedUniques(c, p), ...releasedFreeItems(t)]);
 };
+/** What [p] wears when nothing (owned) is chosen: the defaults, the gift instead of Engel Logge. */
+const fallbackOutfit = (c, p) => ({ ...c.defaults, ...(giftOf(c, p) ? { character: giftOf(c, p) } : {}) });
+/** Defaults of the catalog [p] does not own: Engel Logge for people with a gift figure. */
+const hiddenDefaults = (c, p) => giftOf(c, p) ? [c.defaults.character] : [];
 /**
  * Whether [owned] meets a rarity's `requires`: `count` items of its rarity (and kind), or all of them
  * without a count; a catalog with fewer than `count` asks for all it has.
@@ -647,11 +671,12 @@ export function progressView(t, p) {
   };
 }
 
+// Something not owned (any more), e.g. Engel Logge once there is a gift, falls back to the gift.
 const selection = (t, p, owned = ownedIds(t, p)) => {
-  const c = catalog(t);
+  const c = catalog(t), fallback = fallbackOutfit(c, p);
   return Object.fromEntries(wardrobeKinds.map(k => {
     const id = p.selected?.[k];
-    return [k, id && owned.has(id) && c.byId.get(id).kind === k ? id : c.defaults[k]];
+    return [k, id && owned.has(id) && c.byId.get(id).kind === k ? id : fallback[k]];
   }));
 };
 
@@ -687,6 +712,45 @@ export function statsView(t, p) {
     rounds, best: score?.best ?? 0, meters: p.meters, creditedMeters: p.creditedMeters ?? 0, bonusMeters: p.bonusMeters ?? 0, missionMeters: p.missionMeters ?? 0, deaths, unknown: p.deaths?.unknown ?? 0, untracked: Math.max(0, rounds - counted),
     points: p.points ?? 0, bonusPoints: p.bonusPoints ?? 0, missionPoints: p.missionPoints ?? 0, basePoints: p.basePoints ?? 0, crateMeters: p.crateMetersBefore?.meters ?? 0,
   };
+}
+
+/** Whether [x] can be had now: with its picture (an effect for effects; a placeholder tints the default art). */
+const collectibleNow = x => !!(x.image || x.placeholder || (x.kind === 'fx' && x.effect));
+
+/**
+ * What counts for the collection now: crate items and unique figures with their picture, without the
+ * items a release gives everybody. The one definition of the Sammel-Rangliste and of the wardrobe's
+ * `collection`, so both show the same numbers.
+ */
+const countedItems = (t, c = catalog(t)) => {
+  const free = new Set(releasedFreeItems(t));
+  return [...c.collectible, ...c.uniques].filter(x => collectibleNow(x) && !free.has(x.id)).map(x => x.id);
+};
+/** [p]'s collection: `owned` of the `total` [counted] items, `shiny` of those. */
+const collectionOf = (t, p, counted = countedItems(t)) => {
+  const owned = ownedIds(t, p), shiny = new Set(list(p.shiny)), have = counted.filter(id => owned.has(id));
+  return { owned: have.length, total: counted.length, shiny: have.filter(id => shiny.has(id)).length };
+};
+
+/**
+ * GET /games/runner/collection, the Sammel-Rangliste: who has the most complete collection. `total`:
+ * what can be collected now (crate items and unique figures with their picture; not the defaults,
+ * ensemble rewards and items a release gives everybody, which all have anyway); per person `owned`
+ * of them (gift and kept own figures included), `shiny` of those, `percent` (one decimal). The same
+ * people as the Bestenliste: active members, by their name, only with a progress record (nobody's
+ * record is created or changed here; records from before are counted as they will be moved).
+ * Sorted by `owned`, then `shiny`, then name; equal `owned` and `shiny` share a rank; `me`: the caller.
+ */
+export function collectionBoard(t, uid) {
+  return t.store.transaction(() => {
+    const a = t.account(uid), cutover = ownFiguresCutover(t), counted = countedItems(t), total = counted.length;
+    const members = new Map(t.store.all('members').filter(m => m.active === true).map(m => [m.id, m]));
+    const rows = t.store.all('runnerProgress').filter(p => members.has(p.personId)).map(stored => {
+      const { owned, shiny } = collectionOf(t, settleUnlocks(t, migrated(t, stored, cutover)), counted);
+      return { personId: stored.personId, name: members.get(stored.personId).name, owned, shiny, percent: total ? Math.round(owned / total * 1000) / 10 : 0 };
+    }).sort((x, y) => y.owned - x.owned || y.shiny - x.shiny || x.name.localeCompare(y.name, 'de') || x.personId - y.personId);
+    return { total, entries: rows.map(x => ({ ...x, rank: rows.findIndex(o => o.owned === x.owned && o.shiny === x.shiny) + 1, me: x.personId === a.personId })) };
+  });
 }
 
 // Ensemble rewards come apart from `items`, so older apps neither count nor show them; only those
@@ -727,6 +791,14 @@ function view(t, p, roles = false, unique = false) {
     ...(unique ? { uniqueFigures: uniqueView(c, p, all) } : {}),
     // Added with `runnerCrateTargets`: what a crate of the own runs can be opened as.
     crateTargets: crateTargetsView(c, owned, open),
+    // Added with `runnerGiftFigure`: the own figure given for free (null: none, Engel Logge stays) and
+    // the defaults of the catalog this person does not own (Engel Logge once there is a gift); older
+    // apps take every default as owned and ignore both.
+    gift: giftOf(c, p), hiddenDefaults: hiddenDefaults(c, p),
+    // Added after `runnerCollection`: the person's numbers of the Sammel-Rangliste (`collectionOf`,
+    // unique figures included for every app), so the app shows the same count everywhere; `free`: the
+    // items a release gives everybody, which do not count.
+    collection: { ...collectionOf(t, p), free: releasedFreeItems(t) },
   };
   return roles ? plain : olderAppView(c, plain, p, owned);
 }
@@ -954,6 +1026,8 @@ export function selectOutfit(t, uid, b) {
     const p = progressOf(t, a.personId), owned = ownedIds(t, p);
     // A unique figure not unlocked (or asked for by an app from before) is no known item.
     if (item.unique && (!unique || !owned.has(item.id))) fail(404, 'Dieses Teil gibt es nicht.');
+    // Older apps take Engel Logge for owned by everyone: tell why it cannot be worn.
+    if (item.default && !owned.has(item.id)) fail(409, `${item.name} ist die Ersatzfigur für alle ohne eigene Figur. Du spielst mit deiner eigenen.`, 'not_owned');
     const { wear, selectedVariant } = roles || !c.rolesOf.has(item.id) ? { wear: item.id, selectedVariant: p.selectedVariant } : olderAppOutfit(c, p, owned, item, b.variant);
     if (!owned.has(wear)) fail(409, 'Dieses Teil ist noch nicht in deiner Garderobe.', 'not_owned');
     return view(t, t.store.put('runnerProgress', a.personId, { ...p, selected: { ...p.selected, [b.kind]: wear }, ...(selectedVariant ? { selectedVariant } : {}) }), roles, unique);

@@ -7,19 +7,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
+import '../../../app/shell/app_navigation.dart';
 import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
 import '../../../shared/feedback.dart';
+import '../../../shared/layout/breakpoints.dart';
 import '../../../shared/layout/content_width.dart';
 import '../../../shared/navigation.dart';
-import '../../../shared/widgets/page_header.dart';
 import '../data/leaderboard_api.dart';
 import '../data/missions_api.dart';
+import '../data/runner_menu_preferences.dart';
 import '../data/runner_motion_preferences.dart';
 import '../data/score_outbox.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
+import 'ensemble_card.dart' show EnsembleStrip;
 import 'missions_card.dart';
+import 'runner_menu.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart';
 import 'stage_runner_look.dart';
@@ -52,6 +56,19 @@ Future<void> openStageRunner(BuildContext context, AppController controller) =>
 
 enum _Phase { intro, playing, finished }
 
+/// Whether the screen is a phone's: its shorter side below
+/// [Breakpoints.compact] (600 logical pixels, Material's "compact" window
+/// class). Turned sideways a large phone is wider than [Breakpoints.rail],
+/// and the route frame would put the section rail beside the game; on
+/// phones the Bühnenlauf covers it and uses the whole screen instead.
+/// Tablets and desktop windows keep the rail.
+@visibleForTesting
+bool runnerCoversRail(Size size) => size.shortestSide < Breakpoints.compact;
+
+/// From this width the menu shows the hero (or the result) beside the rest,
+/// e.g. on a phone held sideways (844 × 390) and on tablets.
+const _twoColumns = 720.0;
+
 /// "Bühnenlauf": an endless run on the flying wire with the ensemble's
 /// shared leaderboard.
 class StageRunnerScreen extends StatefulWidget {
@@ -62,8 +79,13 @@ class StageRunnerScreen extends StatefulWidget {
     this.onRun,
     this.sound,
     this.motionPreferences,
+    this.menuPreferences,
   });
   final AppController controller;
+
+  /// Where the menu's small choices are kept; by default on this device.
+  @visibleForTesting
+  final RunnerMenuPreferences? menuPreferences;
 
   /// Replaced in tests; by default the [RunnerSound] of this platform.
   @visibleForTesting
@@ -102,6 +124,9 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   late final RunnerMotionPreferences _motion =
       widget.motionPreferences ?? RunnerMotionPreferences();
   bool _systemReducedMotion = false, _settingsOpen = false;
+
+  late final RunnerMenuPreferences _menu =
+      widget.menuPreferences ?? RunnerMenuPreferences();
 
   bool get _sceneryMotion =>
       _motion.ready && _motion.sceneryMotion && !_systemReducedMotion;
@@ -142,6 +167,20 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   String? _boardError, _saveError;
   bool _loadingBoard = false, _saving = false, _improved = false;
 
+  /// The collection ranking; [_collectionMissing] once the server answered
+  /// that it does not know it (404): the menu then leaves it out.
+  CollectionBoard? _collection;
+  String? _collectionError;
+  bool _loadingCollection = false, _collectionMissing = false;
+  bool get _collectionShown =>
+      collectionBoardAvailable(controller) && !_collectionMissing;
+
+  /// The Monatsrangliste; [_monthlyFailed] once it could not be loaded
+  /// without a list in hand: the menu then shows the all-time list as before.
+  Leaderboard? _monthly;
+  bool _monthlyFailed = false;
+  bool get _monthShown => monthlyBoardAvailable(controller) && !_monthlyFailed;
+
   /// Whether the last run's result waits in the outbox for a connection.
   bool _queued = false;
 
@@ -178,9 +217,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     );
     if (_ranked) {
       _loadBoard();
+      if (_monthShown) unawaited(_loadMonthly());
       // Results that found no connection earlier in this session.
       unawaited(runnerScoreOutbox(controller).retry());
     }
+    if (_collectionShown) _loadCollection();
+    _menu.addListener(_menuChanged);
     if (_art == null) {
       RunnerArt.load().then((art) {
         if (mounted && art != null) setState(() => _art = art);
@@ -203,6 +245,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       _systemReducedMotion = reduced;
       _frame.value++;
     }
+  }
+
+  void _menuChanged() {
+    if (mounted) setState(() {});
   }
 
   void _motionChanged() {
@@ -357,20 +403,26 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     if (_sound case final RunnerMusic music) music.useTune(tune);
   }
 
-  Future<void> _openWardrobe() => openWardrobe(
-    context,
-    controller,
-    wardrobe: _wardrobe,
-    sound: _sound,
-    onChanged: (w) {
-      if (!mounted) return;
-      setState(() {
-        _wardrobe = w;
-        if (_progress != null) _progress = w.progress;
-      });
-      _dress();
-    },
-  );
+  Future<void> _openWardrobe() async {
+    var changed = false;
+    await openWardrobe(
+      context,
+      controller,
+      wardrobe: _wardrobe,
+      sound: _sound,
+      onChanged: (w) {
+        if (!mounted) return;
+        changed = true;
+        setState(() {
+          _wardrobe = w;
+          if (_progress != null) _progress = w.progress;
+        });
+        _dress();
+      },
+    );
+    // Opened crates move the own place in the collection ranking.
+    if (mounted && changed && _collectionShown) unawaited(_loadCollection());
+  }
 
   @override
   void dispose() {
@@ -387,6 +439,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _sound.enabled.removeListener(_soundChanged);
     _motion.removeListener(_motionChanged);
     if (widget.motionPreferences == null) _motion.dispose();
+    _menu.removeListener(_menuChanged);
+    if (widget.menuPreferences == null) _menu.dispose();
     _painter?.dispose();
     _sound.stopMusic();
     if (widget.sound == null) _sound.dispose();
@@ -409,6 +463,48 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       if (mounted) setState(() => _boardError = userMessage(e));
     } finally {
       if (mounted) setState(() => _loadingBoard = false);
+    }
+  }
+
+  /// Loads the Monatsrangliste quietly: a failure without a list in hand
+  /// leaves the all-time list alone; a list in hand stays.
+  Future<void> _loadMonthly() async {
+    if (!monthlyBoardAvailable(controller)) return;
+    try {
+      final board = await loadMonthlyLeaderboard(controller);
+      if (mounted) {
+        setState(() {
+          _monthly = board;
+          _monthlyFailed = false;
+        });
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('Bühnenlauf: Monatsrangliste fehlt: $e');
+      if (mounted && _monthly == null) setState(() => _monthlyFailed = true);
+    }
+  }
+
+  Future<void> _loadCollection() async {
+    setState(() {
+      _loadingCollection = true;
+      _collectionError = null;
+    });
+    try {
+      final board = await loadCollectionBoard(controller);
+      if (!mounted) return;
+      setState(() {
+        if (board == null) {
+          _collectionMissing = true;
+        } else {
+          _collection = board;
+        }
+      });
+    } catch (e) {
+      // A list that loaded once stays; the card shows the error only
+      // without one.
+      if (mounted) setState(() => _collectionError = userMessage(e));
+    } finally {
+      if (mounted) setState(() => _loadingCollection = false);
     }
   }
 
@@ -549,6 +645,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         _board = result.leaderboard;
         _boardError = null;
       });
+      // The run may have moved the own place in this month's list.
+      if (monthlyBoardAvailable(controller)) unawaited(_loadMonthly());
     } catch (e) {
       if (kDebugMode) debugPrint('Bühnenlauf: Ergebnis nicht gesendet: $e');
       if (mounted && run == _run) {
@@ -569,58 +667,185 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Bühnenlauf'),
-      actions: [
-        IconButton(
-          key: const ValueKey('runner-settings'),
-          tooltip: 'Spieleinstellungen',
-          icon: const Icon(Icons.settings_outlined),
-          onPressed: _showSettings,
-        ),
-        ValueListenableBuilder(
-          valueListenable: _sound.enabled,
-          builder: (context, on, _) => IconButton(
-            key: const ValueKey('runner-sound'),
-            tooltip: on ? 'Ton aus' : 'Ton an',
-            isSelected: on,
-            icon: const Icon(Icons.volume_off_outlined),
-            selectedIcon: const Icon(Icons.volume_up_outlined),
-            onPressed: () => _sound.setEnabled(!on),
+  Widget build(BuildContext context) {
+    final phone = runnerCoversRail(MediaQuery.sizeOf(context));
+    final scaffold = Scaffold(
+      appBar: AppBar(
+        title: const Text('Bühnenlauf'),
+        actions: [
+          IconButton(
+            key: const ValueKey('runner-settings'),
+            tooltip: 'Spieleinstellungen',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: _showSettings,
           ),
-        ),
-        const SizedBox(width: 8),
-      ],
-    ),
-    body: AnnotatedRegion(
-      value: _phase == _Phase.playing ? runnerBarsPlaying : runnerBarsDefault,
-      child: switch (_phase) {
-        _Phase.playing => Focus(
-          autofocus: true,
-          onKeyEvent: _key,
-          child: _stage(context),
-        ),
-        _ => ListView(
-          padding: pagePadding(context, maxWidth: 640),
-          children: [
-            if (_phase == _Phase.intro)
-              ..._intro(context)
-            else
-              _result(context),
-            if (_phase != _Phase.intro && _missionsOn && _missions != null) ...[
-              const SizedBox(height: 20),
-              _missionsCard(),
-            ],
-            const SizedBox(height: 20),
-            _leaderboard(context),
-          ],
-        ),
-      },
-    ),
-  );
+          ValueListenableBuilder(
+            valueListenable: _sound.enabled,
+            builder: (context, on, _) => IconButton(
+              key: const ValueKey('runner-sound'),
+              tooltip: on ? 'Ton aus' : 'Ton an',
+              isSelected: on,
+              icon: const Icon(Icons.volume_off_outlined),
+              selectedIcon: const Icon(Icons.volume_up_outlined),
+              onPressed: () => _sound.setEnabled(!on),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: AnnotatedRegion(
+        value: _phase == _Phase.playing ? runnerBarsPlaying : runnerBarsDefault,
+        child: switch (_phase) {
+          _Phase.playing => Focus(
+            autofocus: true,
+            onKeyEvent: _key,
+            child: _stage(context),
+          ),
+          _ => _menuBody(context),
+        },
+      ),
+    );
+    // On phones the game covers the section rail the route frame would
+    // show beside it once the phone is turned (see [runnerCoversRail]).
+    final controller = AppNavigationScope.controllerOf(context);
+    final selection = AppNavigationScope.maybeOf(context);
+    if (controller == null || selection == null) return scaffold;
+    return DesktopRouteFrame(
+      controller: controller,
+      selectedIndex: selection.value,
+      enabled: !phone,
+      child: scaffold,
+    );
+  }
 
-  List<Widget> _intro(BuildContext context) {
+  /// The menu before and after a run: the hero (or the last run's result)
+  /// first, then the own standing, the Ensemble-Strecke, the rankings and
+  /// the Tagesmissionen. Wide enough, the hero stays on the left and the
+  /// rest scrolls beside it.
+  Widget _menuBody(BuildContext context) {
+    final lead = _phase == _Phase.intro ? _hero(context) : _result(context);
+    final rest = [
+      ?_stand(context),
+      ?_ensembleStrip(),
+      _ranking(context),
+      if (_missionsOn && (_phase == _Phase.intro || _missions != null))
+        _missionsCard(),
+      if (_phase == _Phase.intro) _rules(context),
+    ];
+    List<Widget> spaced(List<Widget> items) => [
+      for (final (i, w) in items.indexed) ...[
+        if (i > 0) const SizedBox(height: 16),
+        w,
+      ],
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < _twoColumns) {
+          return ListView(
+            padding: pagePadding(context, maxWidth: 640, top: 16),
+            children: spaced([lead, ...rest]),
+          );
+        }
+        final pad = pagePadding(context, maxWidth: 1040, top: 16);
+        final leadWidth = constraints.maxWidth >= 960 ? 380.0 : 320.0;
+        return Padding(
+          padding: EdgeInsets.only(left: pad.left, right: pad.right),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: leadWidth,
+                child: SingleChildScrollView(
+                  key: const ValueKey('runner-lead'),
+                  padding: EdgeInsets.only(top: pad.top, bottom: 16),
+                  child: lead,
+                ),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.only(top: pad.top, bottom: pad.bottom),
+                  children: spaced(rest),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// The worn figure and the big start.
+  Widget _hero(BuildContext context) {
+    final name = _wardrobe?.wornCharacterName() ?? 'Engel Logge';
+    return RunnerHero(
+      figure: _art == null
+          ? const Icon(Icons.theater_comedy, size: 56, color: StageTheme.orange)
+          : CustomPaint(painter: _SpritePainter(_art!, RunnerSprite.cheer)),
+      // Names whoever is worn in the worn role ("Elena als Lucy"), as the
+      // picture beside it shows them.
+      name: name,
+      story:
+          '$name hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt.',
+      onStart: _motion.ready ? _play : null,
+      note: _bonusOpen ? _dailyBonusHint(context, onDark: true) : null,
+      wardrobe: _dressable
+          ? WardrobeButton(
+              crates: _wardrobe?.progress.waiting ?? 0,
+              onPressed: _openWardrobe,
+            )
+          : null,
+    );
+  }
+
+  /// "Dein Stand", once there is something to tell.
+  Widget? _stand(BuildContext context) {
+    final w = _wardrobe;
+    final own = _board?.own;
+    final best =
+        own?.score ?? ((w?.stats.best ?? 0) > 0 ? w!.stats.best : null);
+    final crates = w == null
+        ? null
+        : (_progress?.waiting ?? w.progress.waiting);
+    if (!RunnerStandCard.has(
+      best: best,
+      crates: crates,
+      collectible: w?.collectible,
+    )) {
+      return null;
+    }
+    // After a run its result shows the way to the next crate already.
+    final p = _phase == _Phase.intro ? w?.progress : null;
+    final next = p != null && p.nextAt > 0 ? nextCrateText(p) : null;
+    return RunnerStandCard(
+      best: best,
+      rank: own?.rank,
+      players: _board?.players ?? 0,
+      gage: w != null && dupesAvailable(controller) ? w.gage : null,
+      crates: crates,
+      collected: w?.collected,
+      collectible: w?.collectible,
+      collectionRank: _collectionShown ? _collection?.own?.rank : null,
+      monthRank: _monthShown ? _monthly?.own?.rank : null,
+      nextCrate: next,
+      nextCrateFraction: next == null || p!.complete ? null : p.fraction,
+      onWardrobe: _dressable ? _openWardrobe : null,
+    );
+  }
+
+  /// The Ensemble-Strecke in short; the full card is in the wardrobe.
+  Widget? _ensembleStrip() {
+    final e = _wardrobe?.ensemble;
+    if (e == null || !ensembleAvailable(controller)) return null;
+    return EnsembleStrip(
+      ensemble: e,
+      run: _progress?.ensemble,
+      onOpen: _openWardrobe,
+    );
+  }
+
+  /// How the game is played and what counts, folded away under the menu.
+  Widget _rules(BuildContext context) {
     final theme = Theme.of(context);
     Widget legend(PickupKind? kind, String label, String value) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -637,73 +862,50 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         ],
       ),
     );
-    return [
-      PageHeader(
-        'Bühnenlauf',
-        eyebrow: 'Hinter der Bühne',
-        // Names whoever is worn in the worn role ("Elena als Lucy"), as the
-        // picture below shows them.
-        subtitle:
-            '${_wardrobe?.wornCharacterName() ?? 'Engel Logge'} hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt. Vorbei an Kisten, Kulissen, Scheinwerfern und fallenden Requisiten, immer schneller, bis der Vorhang fällt.',
-      ),
-      if (_art case final art?)
-        Center(
-          child: SizedBox(
-            width: 96,
-            height: 126,
-            child: CustomPaint(
-              painter: _SpritePainter(art, RunnerSprite.cheer),
+    return Card(
+      key: const ValueKey('runner-rules'),
+      clipBehavior: Clip.antiAlias,
+      child: Theme(
+        data: theme.copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          // Its own key: without one the tile would keep its state under
+          // the list's id, which holds the scroll offset.
+          key: const PageStorageKey('runner-rules-tile'),
+          leading: const Icon(Icons.help_outline, color: StageTheme.orange),
+          title: Text('So wird gespielt', style: theme.textTheme.titleMedium),
+          subtitle: Text(
+            'Halten zum Steigen, Loslassen zum Sinken',
+            style: theme.textTheme.bodySmall,
+          ),
+          childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Vorbei an Kisten, Kulissen, Scheinwerfern und fallenden Requisiten, immer schneller, bis der Vorhang fällt.',
+              style: theme.textTheme.bodyMedium,
             ),
-          ),
-        ),
-      const SizedBox(height: 8),
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              legend(null, 'Jeder Meter', '+1'),
-              for (final kind in PickupKind.values)
-                legend(
-                  kind,
-                  // A backdrop's own collectible keeps the plain name the
-                  // missions use: "Bonbon (Rose)".
-                  switch (_art?.pickupNames[kind]) {
-                    final name? => '$name (${_pickupLabel(kind)})',
-                    null => _pickupLabel(kind),
-                  },
-                  '+${kind.points}',
-                ),
-              const SizedBox(height: 12),
-              Text(
-                'Halten zieht dich nach oben, Loslassen lässt dich sinken: Finger oder Maustaste auf der Bühne, am Rechner auch Leertaste oder Pfeil nach oben. Ein Zusammenstoß beendet den Lauf.',
-                style: theme.textTheme.bodySmall,
+            const SizedBox(height: 8),
+            legend(null, 'Jeder Meter', '+1'),
+            for (final kind in PickupKind.values)
+              legend(
+                kind,
+                // A backdrop's own collectible keeps the plain name the
+                // missions use: "Bonbon (Rose)".
+                switch (_art?.pickupNames[kind]) {
+                  final name? => '$name (${_pickupLabel(kind)})',
+                  null => _pickupLabel(kind),
+                },
+                '+${kind.points}',
               ),
-            ],
-          ),
+            const SizedBox(height: 12),
+            Text(
+              'Halten zieht dich nach oben, Loslassen lässt dich sinken: Finger oder Maustaste auf der Bühne, am Rechner auch Leertaste oder Pfeil nach oben. Ein Zusammenstoß beendet den Lauf.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
         ),
       ),
-      const SizedBox(height: 20),
-      if (_bonusOpen) ...[_dailyBonusHint(context), const SizedBox(height: 12)],
-      Center(
-        child: FilledButton.icon(
-          onPressed: _motion.ready ? _play : null,
-          icon: const Icon(Icons.play_arrow),
-          label: const Text('Vorhang auf'),
-        ),
-      ),
-      if (_dressable) ...[
-        const SizedBox(height: 12),
-        Center(
-          child: WardrobeButton(
-            crates: _wardrobe?.progress.waiting ?? 0,
-            onPressed: _openWardrobe,
-          ),
-        ),
-      ],
-      if (_missionsOn) ...[const SizedBox(height: 20), _missionsCard()],
-    ];
+    );
   }
 
   /// The day's missions; loads them on first sight.
@@ -717,19 +919,22 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   );
 
   /// A quiet note while today's first run still counts twice for the crates.
-  Widget _dailyBonusHint(BuildContext context) {
+  Widget _dailyBonusHint(BuildContext context, {bool onDark = false}) {
     final theme = Theme.of(context);
+    final color = onDark ? const Color(0xFFFFD58A) : theme.hintColor;
     return Row(
       key: const ValueKey('runner-daily-bonus'),
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(Icons.wb_sunny_outlined, size: 16, color: theme.hintColor),
+        Icon(Icons.wb_sunny_outlined, size: 16, color: color),
         const SizedBox(width: 6),
         Flexible(
           child: Text(
             dailyBonusHint,
             textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: onDark ? color : null,
+            ),
           ),
         ),
       ],
@@ -884,107 +1089,29 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     );
   }
 
-  Widget _leaderboard(BuildContext context) {
-    final theme = Theme.of(context);
-    final board = _board;
-    final me = controller.user?.personId;
-    Widget row(LeaderboardEntry e) {
-      final own = e.personId == me;
-      final style = own
-          ? theme.textTheme.bodyLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: theme.colorScheme.primary,
-            )
-          : theme.textTheme.bodyLarge;
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            SizedBox(width: 36, child: Text('${e.rank}.', style: style)),
-            Expanded(
-              child: Text(
-                e.name,
-                style: style,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Text('${e.score}', style: style),
-          ],
-        ),
-      );
-    }
-
-    final List<Widget> content;
-    if (!_ranked) {
-      content = [
-        Text(
-          controller.isDemo
-              ? 'In der Demo gibt es keine Bestenliste.'
-              : 'Die Bestenliste ist auf diesem Server noch nicht verfügbar.',
-        ),
-      ];
-    } else if (board == null) {
-      content = [
-        if (_loadingBoard)
-          const Center(child: CircularProgressIndicator())
-        else ...[
-          Text(_boardError ?? 'Die Bestenliste konnte nicht geladen werden.'),
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: TextButton(
-              onPressed: _loadBoard,
-              child: const Text('Erneut laden'),
-            ),
-          ),
-        ],
-      ];
-    } else if (board.top.isEmpty) {
-      content = [const Text('Noch keine Punkte. Lauf als Erste oder Erster!')];
-    } else {
-      final ownOutside =
-          board.own != null &&
-          !board.top.any((e) => e.personId == board.own!.personId);
-      content = [
-        for (final e in board.top) row(e),
-        if (ownOutside) ...[const Divider(), row(board.own!)],
-        if (board.own == null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              'Du stehst noch nicht auf der Liste.',
-              style: theme.textTheme.bodySmall,
-            ),
-          ),
-      ];
-    }
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(
-                  Icons.emoji_events_outlined,
-                  color: StageTheme.orange,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Bestenliste',
-                    style: theme.textTheme.titleMedium,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            ...content,
-          ],
-        ),
-      ),
-    );
-  }
+  /// The rankings: this month, all time, and who has the most complete
+  /// collection.
+  Widget _ranking(BuildContext context) => RunnerRankingCard(
+    view: _menu.board,
+    onView: _menu.setBoard,
+    monthShown: _ranked && _monthShown,
+    monthly: _monthly,
+    board: _board,
+    boardNote: _ranked
+        ? null
+        : controller.isDemo
+        ? 'In der Demo gibt es keine Bestenliste.'
+        : 'Die Bestenliste ist auf diesem Server noch nicht verfügbar.',
+    boardLoading: _loadingBoard,
+    boardError: _boardError,
+    onRetryBoard: _loadBoard,
+    me: controller.user?.personId,
+    collectionShown: _collectionShown,
+    collection: _collection,
+    collectionLoading: _loadingCollection,
+    collectionError: _collectionError,
+    onRetryCollection: _loadCollection,
+  );
 
   /// The stage's painter, kept across rebuilds (its laid-out texts and
   /// shader stay); a new one only for another pixel ratio.

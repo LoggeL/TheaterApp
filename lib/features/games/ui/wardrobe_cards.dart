@@ -59,7 +59,9 @@ IconData kindIcon(WardrobeKind kind) => switch (kind) {
   WardrobeKind.fx => Icons.auto_awesome_outlined,
 };
 
-final _silhouette = ColorFilter.mode(const Color(0xFF39413B), BlendMode.srcIn);
+/// Items not found yet: a silhouette a little lighter than the card, so the
+/// missing ones stay recognisable as such.
+final _silhouette = ColorFilter.mode(const Color(0xFF4A544D), BlendMode.srcIn);
 
 /// Whether [item] brings pictures of its own (portrait, atlas or backdrop);
 /// stand-ins and the default outfit show the game's art.
@@ -424,14 +426,24 @@ class WardrobeCard extends StatelessWidget {
         : item.unique
         ? uniqueRoleLine(playing, uniqueProgressOf(wardrobe, item))
         : playing.line;
+    // A missing figure keeps its secret, but says where it belongs: the
+    // play filter shows as much.
+    final whereFrom = owned || item.unique || hint != null
+        ? null
+        : switch (item.role) {
+            final r? when r.isFunction => 'Technik',
+            final r? => r.production,
+            null => null,
+          };
+    final gift = owned && wardrobe.isGift(item);
     return Semantics(
       button: onTap != null,
       selected: worn,
       label: owned
-          ? '${item.name}${roleLine == null ? '' : ' $roleLine'}, ${rarity.name}${shiny ? ', Glanz' : ''}${worn ? ', angelegt' : ''}'
+          ? '${item.name}${roleLine == null ? '' : ' $roleLine'}, ${rarity.name}${shiny ? ', Glanz' : ''}${gift ? ', Geschenk' : ''}${worn ? ', angelegt' : ''}'
           : item.unique
           ? 'Unique-Figur, noch verborgen${hint == null ? '' : ', $hint'}'
-          : 'Noch nicht gefunden, ${rarity.name}',
+          : 'Noch nicht gefunden, ${rarity.name}${whereFrom == null ? '' : ', $whereFrom'}',
       child: Material(
         color: antique
             ? const Color(0xFF2A2117)
@@ -554,6 +566,17 @@ class WardrobeCard extends StatelessWidget {
                               color: Color(0xFFFFE7A3),
                             ),
                           ),
+                        if (gift)
+                          const Positioned(
+                            left: 6,
+                            bottom: 4,
+                            child: Icon(
+                              Icons.card_giftcard,
+                              key: ValueKey('card-gift'),
+                              size: 16,
+                              color: Color(0xFFFFE7A3),
+                            ),
+                          ),
                         if (item.placeholder && owned)
                           const Positioned(
                             right: 6,
@@ -593,6 +616,17 @@ class WardrobeCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: Colors.white70,
+                            fontSize: 10.5,
+                          ),
+                        )
+                      else if (showRole && whereFrom != null)
+                        Text(
+                          whereFrom,
+                          key: const ValueKey('card-where'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white54,
                             fontSize: 10.5,
                           ),
                         ),

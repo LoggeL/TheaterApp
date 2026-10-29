@@ -18,6 +18,7 @@ import 'package:theater_app/features/games/domain/crate_reel.dart';
 import 'package:theater_app/features/games/domain/stage_runner.dart';
 import 'package:theater_app/features/games/games.dart';
 import 'package:theater_app/features/games/ui/crate_opening.dart';
+import 'package:theater_app/features/games/ui/figure_detail.dart';
 import 'package:theater_app/features/games/ui/stage_runner_art.dart';
 import 'package:theater_app/features/games/ui/stage_runner_look.dart';
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
@@ -891,7 +892,7 @@ void main() {
         WardrobeScreen(controller: controller, sound: _Sound()),
       );
       await tester.pump(const Duration(milliseconds: 100));
-      expect(find.text('1/4 gesammelt'), findsOneWidget);
+      expect(find.text('1 von 4'), findsOneWidget);
       expect(find.text('Sammle alle hellblauen Figuren'), findsOneWidget);
       // Kinds with nothing to collect but their default stay hidden.
       expect(
@@ -934,10 +935,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('Charakter · Technik · Hellblau'), findsNothing);
       expect(find.text('Figur · Technik · Hellblau'), findsOneWidget);
+      // An owned figure has a page of its own; wearing it goes back.
+      expect(find.byType(FigureDetailPage), findsOneWidget);
       await tester.tap(find.text('Anlegen'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(calls, contains('PUT outfit'));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.byType(FigureDetailPage), findsNothing);
 
       await tester.tap(find.text('Statistik'));
       await tester.pump();

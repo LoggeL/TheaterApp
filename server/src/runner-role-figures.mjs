@@ -11,6 +11,8 @@ import { AppError } from './theater.mjs';
 //   the worn figure; owned items, shine, gage, crates, statistics and the ensemble stay as they are.
 //   If Legacy was open under the old rule (all light blue characters of 0.11.2 owned, or a Legacy
 //   item won), it stays open (`unlockedRarities`). Nothing is taken away: the old fields stay too.
+//   (The own figures count as owned here as they did then; since `runnerGiftFigure` the next move,
+//   runner-own-figures.mjs, keeps them in `owned`.)
 // - Older apps (no `roles`): a figure with `variantOf` is shown as a role variant of the person's
 //   figure it names. That figure counts as owned when it or one of its roles is owned (so every
 //   owned figure can be seen and worn); without the figure itself its card wears one of the roles.

@@ -13,6 +13,7 @@ import 'crate_choice.dart';
 import 'crate_opening.dart';
 import 'event_crates_card.dart';
 import 'ensemble_card.dart';
+import 'figure_detail.dart';
 import 'missions_card.dart';
 import 'pack_goals_card.dart';
 import 'stage_runner_art.dart';
@@ -21,6 +22,7 @@ import 'stage_runner_look.dart';
 import 'stage_runner_sound.dart';
 import 'unique_figures.dart';
 import 'wardrobe_cards.dart';
+import 'wardrobe_overview.dart';
 
 /// Opens the wardrobe; [onChanged] gets every new state of it.
 Future<void> openWardrobe(
@@ -342,8 +344,23 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     }
   }
 
+  /// An owned figure gets a page of its own; everything else (and what is
+  /// still missing, which keeps its secret) the details below.
   void _details(WardrobeItem item) {
     final w = _wardrobe!;
+    if (item.kind == WardrobeKind.character && w.owns(item)) {
+      openFigureDetail(
+        context,
+        wardrobe: w,
+        item: item,
+        controller: controller,
+        art: _base,
+        busy: _busy,
+        dupes: _dupes,
+        onWear: _wear,
+      );
+      return;
+    }
     final catalog = w.catalog;
     final owned = w.owns(item);
     final worn = w.worn(item.kind)?.id == item.id;
@@ -793,7 +810,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               )
             : TabBarView(
                 children: [
-                  _costumes(context),
+                  // Below the DefaultTabController: the crates pill switches
+                  // to the crates with it.
+                  Builder(builder: _costumes),
                   _rewards(context),
                   _statistics(context),
                 ],
@@ -804,7 +823,6 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
 
   Widget _costumes(BuildContext context) {
     final w = _wardrobe!;
-    final theme = Theme.of(context);
     final padding = pagePadding(context, maxWidth: 960, top: 16);
     final kinds = [
       for (final kind in WardrobeKind.values)
@@ -813,46 +831,40 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final selected = kinds.contains(_selectedKind)
         ? _selectedKind
         : kinds.firstOrNull;
+    final overview = WardrobeOverview.of(w, unique: _unique);
+    final plays = overview.plays;
     return CustomScrollView(
       key: const PageStorageKey('wardrobe-costumes'),
       slivers: [
         SliverPadding(
           padding: padding.copyWith(bottom: 8),
           sliver: SliverToBoxAdapter(
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  '${w.collected}/${w.collectible} gesammelt',
-                  key: const ValueKey('wardrobe-count'),
-                  style: theme.textTheme.bodyMedium,
-                ),
-                if (_dupes)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.payments_outlined, size: 18),
-                      const SizedBox(width: 6),
-                      Text(
-                        gageText(w.gage),
-                        key: const ValueKey('wardrobe-gage'),
-                        style: theme.textTheme.labelLarge,
-                      ),
-                    ],
-                  ),
-                if (_dupes)
-                  TextButton.icon(
-                    key: const ValueKey('wardrobe-trade'),
-                    onPressed: _busy ? null : _trade,
-                    icon: const Icon(Icons.handshake_outlined, size: 18),
-                    label: const Text('Tauschen'),
-                  ),
-              ],
+            child: CollectionSummaryCard(
+              overview: overview,
+              waitingCrates: _waitingCrates,
+              onCrates: () => DefaultTabController.of(context).animateTo(1),
+              gage: _dupes ? gageText(w.gage) : null,
+              onTrade: _dupes && !_busy ? _trade : null,
             ),
           ),
         ),
+        if (plays.isNotEmpty && kinds.contains(WardrobeKind.character))
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(padding.left, 4, padding.right, 12),
+            sliver: SliverToBoxAdapter(
+              child: PlayProgressStrip(
+                plays: plays,
+                selected: selected == WardrobeKind.character
+                    ? (_play == _techFilter ? 'Technik' : _play)
+                    : null,
+                onSelect: (p) => setState(() {
+                  _selectedKind = WardrobeKind.character;
+                  final value = p.technicians ? _techFilter : p.production;
+                  _play = _play == value ? null : value;
+                }),
+              ),
+            ),
+          ),
         if (kinds.length > 1)
           SliverToBoxAdapter(
             child: SingleChildScrollView(
@@ -865,7 +877,10 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                   for (final kind in kinds)
                     ChoiceChip(
                       key: ValueKey('wardrobe-kind-${kind.name}'),
-                      label: Text(kind.plural),
+                      label: Text(switch (overview.kinds[kind]) {
+                        final t? => '${kind.plural} · ${t.owned}/${t.total}',
+                        null => kind.plural,
+                      }),
                       selected: selected == kind,
                       showCheckmark: false,
                       onSelected: (_) => setState(() => _selectedKind = kind),
@@ -875,7 +890,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
             ),
           ),
         if (selected != null)
-          ..._kind(context, w, selected, padding)
+          ..._kind(context, w, overview, selected, padding)
         else
           SliverPadding(
             padding: padding,
@@ -895,6 +910,28 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       padding: pagePadding(context, maxWidth: 640, top: 16),
       children: [
         _crates(context, w),
+        const SizedBox(height: 12),
+        CrateBalanceCard(
+          waiting: [
+            if (w.progress.crates > 0)
+              ('Kostümkiste', 'Kostümkisten', w.progress.crates),
+            if (_missions && w.progress.missionCrates > 0)
+              ('Missionskiste', 'Missionskisten', w.progress.missionCrates),
+            if (_ensemble &&
+                w.ensemble != null &&
+                w.progress.ensembleCrates > 0)
+              ('Ensemble-Kiste', 'Ensemble-Kisten', w.progress.ensembleCrates),
+            if (_eventCrates && w.eventCrates.isNotEmpty)
+              ('Termin-Kiste', 'Termin-Kisten', w.eventCrates.length),
+            if (_packs && w.packCrates > 0)
+              ('Set-Kiste', 'Set-Kisten', w.packCrates),
+          ],
+          opened: w.progress.opened,
+          earned: w.progress.earned,
+          shiny: w.shiny.where((id) => w.catalog.item(id) != null).length,
+          gageEarned: _dupes ? w.gageEarned : null,
+          duplicates: w.stats.duplicates,
+        ),
         if (_packs && w.packGoals.isNotEmpty) ...[
           const SizedBox(height: 12),
           PackGoalsCard(
@@ -1139,10 +1176,13 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   List<Widget> _kind(
     BuildContext context,
     Wardrobe w,
+    WardrobeOverview overview,
     WardrobeKind kind,
     EdgeInsets padding,
   ) {
-    if (kind == WardrobeKind.character) return _characters(context, w, padding);
+    if (kind == WardrobeKind.character) {
+      return _characters(context, w, overview, padding);
+    }
     final items = w.catalog.items.where((i) => i.kind == kind).toList()
       // Defaults first, then from rare to common; owned before missing.
       ..sort((a, b) {
@@ -1151,19 +1191,25 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         if (rank != 0) return rank;
         return a.name.compareTo(b.name);
       });
-    final collectible = items.where((i) => !i.isDefault);
-    final owned = collectible.where(w.owns).length;
+    // The same count as the kind's chip: ensemble rewards are everybody's
+    // and do not count for the collection, as in the Sammel-Rangliste.
+    final tally = overview.kinds[kind] ?? const Tally(0, 0);
     final worn = w.worn(kind)?.id;
+    if (_missingOnly) items.removeWhere(w.owns);
     return [
       SliverPadding(
-        padding: EdgeInsets.fromLTRB(padding.left, 16, padding.right, 8),
+        padding: EdgeInsets.fromLTRB(padding.left, 12, padding.right, 8),
         sliver: SliverToBoxAdapter(
-          child: Text(
-            '$owned/${collectible.length} ${kind.plural} gesammelt',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
+          child: _tallyHeader(context, '${kind.plural}: ${tally.text}', tally),
         ),
       ),
+      if (items.isEmpty)
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(padding.left, 4, padding.right, 0),
+          sliver: SliverToBoxAdapter(
+            child: Text('Alle ${kind.plural} gefunden.'),
+          ),
+        ),
       SliverPadding(
         padding: EdgeInsets.symmetric(horizontal: padding.left),
         sliver: SliverGrid.builder(
@@ -1189,9 +1235,42 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     ];
   }
 
-  // The figures' filters: a play ("Creepshow 2026") and a person.
+  // The figures' filters: a play ("Creepshow 2026") or the technicians
+  // ([_techFilter]), a person, and only the missing ones.
   String? _play;
   int? _person;
+  bool _missingOnly = false;
+  static const _techFilter = '\u0000Technik';
+
+  /// "Bühnenbilder: 3 von 12" with a bar and the switch to the missing ones.
+  Widget _tallyHeader(BuildContext context, String text, Tally tally) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(text, style: theme.textTheme.titleSmall),
+              const SizedBox(height: 4),
+              TallyBar(tally.fraction, color: StageTheme.orange, height: 4),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        FilterChip(
+          key: const ValueKey('wardrobe-missing-only'),
+          label: Text(
+            tally.missing > 0
+                ? 'Nur fehlende (${tally.missing})'
+                : 'Nur fehlende',
+          ),
+          selected: _missingOnly,
+          onSelected: (on) => setState(() => _missingOnly = on),
+        ),
+      ],
+    );
+  }
 
   /// The figures, one card per role: grouped by rarity from rare to common,
   /// in a rarity the owned ones first, then by the weight of the role. The
@@ -1199,6 +1278,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   List<Widget> _characters(
     BuildContext context,
     Wardrobe w,
+    WardrobeOverview overview,
     EdgeInsets padding,
   ) {
     final theme = Theme.of(context);
@@ -1225,11 +1305,18 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     };
     final persons = people.entries.toList()
       ..sort((a, b) => a.value.compareTo(b.value));
-    final play = plays.contains(_play) ? _play : null;
+    final technicians = collectible.any((i) => i.role?.isFunction == true);
+    final play = plays.contains(_play) || (technicians && _play == _techFilter)
+        ? _play
+        : null;
     final person = people.containsKey(_person) ? _person : null;
     bool shown(WardrobeItem i) =>
-        (play == null || i.role?.production == play) &&
-        (person == null || i.personId == person);
+        (play == null ||
+            (play == _techFilter
+                ? i.role?.isFunction == true
+                : i.role?.production == play)) &&
+        (person == null || i.personId == person) &&
+        (!_missingOnly || !w.owns(i));
     int order(WardrobeItem a, WardrobeItem b) {
       if (w.owns(a) != w.owns(b)) return w.owns(a) ? -1 : 1;
       final weight = (b.importance ?? 0).compareTo(a.importance ?? 0);
@@ -1238,17 +1325,29 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     }
 
     final worn = w.worn(WardrobeKind.character)?.id;
+    // The default figure only for whoever still wears it: with a figure of
+    // their own (a present) Engel Logge is not in the collection.
     final defaults = [
-      if (play == null && person == null)
+      if (play == null && person == null && !_missingOnly)
         for (final i in all)
-          if (i.isDefault) i,
+          if (i.isDefault && w.owns(i)) i,
     ];
     // The unique figures, one per play (unlocked or hidden), on top.
     final uniques = [
-      if (_unique && person == null)
+      if (_unique && person == null && play != _techFilter)
         for (final i in uniqueCards(w))
-          if (play == null || i.role?.production == play) i,
+          if ((play == null || i.role?.production == play) &&
+              (!_missingOnly || !w.owns(i)))
+            i,
     ];
+    // Per rarity the shown figures and how many of the selection (without
+    // the switch to the missing ones) are owned.
+    bool selection(WardrobeItem i) =>
+        (play == null ||
+            (play == _techFilter
+                ? i.role?.isFunction == true
+                : i.role?.production == play)) &&
+        (person == null || i.personId == person);
     final groups = [
       for (final r in catalog.rarities.reversed)
         if ([
@@ -1256,9 +1355,18 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 if (i.rarity == r.id && shown(i)) i,
             ]..sort(order)
             case final items when items.isNotEmpty)
-          (r, items),
+          (
+            r,
+            items,
+            Tally.of(
+              collectible.where((i) => i.rarity == r.id && selection(i)),
+              w,
+            ),
+          ),
     ];
-    final owned = collectible.where(w.owns).length;
+    // The same count as the kind's chip.
+    final tally =
+        overview.kinds[WardrobeKind.character] ?? Tally.of(collectible, w);
     Widget filter<T>({
       required Key key,
       required T? value,
@@ -1286,12 +1394,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     );
     return [
       SliverPadding(
-        padding: EdgeInsets.fromLTRB(padding.left, 16, padding.right, 4),
+        padding: EdgeInsets.fromLTRB(padding.left, 12, padding.right, 4),
         sliver: SliverToBoxAdapter(
-          child: Text(
-            '$owned/${collectible.length} Figuren gesammelt',
-            style: theme.textTheme.bodySmall,
-          ),
+          child: _tallyHeader(context, 'Figuren: ${tally.text}', tally),
         ),
       ),
       if (plays.length > 1 || persons.length > 1)
@@ -1317,7 +1422,10 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                         key: const ValueKey('wardrobe-filter-play'),
                         value: play,
                         all: 'Alle Stücke',
-                        options: [for (final p in plays) (p, p)],
+                        options: [
+                          for (final p in plays) (p, p),
+                          if (technicians) (_techFilter, 'Technik'),
+                        ],
                         onChanged: (v) => setState(() => _play = v),
                       ),
                     ),
@@ -1371,26 +1479,43 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         ),
         _grid(uniques, w, worn, padding),
       ],
-      for (final (rarity, items) in groups) ...[
+      for (final (rarity, items, tally) in groups) ...[
         SliverPadding(
           padding: EdgeInsets.fromLTRB(padding.left, 14, padding.right, 6),
           sliver: SliverToBoxAdapter(
-            child: Row(
+            child: Column(
               key: ValueKey('wardrobe-group-${rarity.id}'),
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                CircleAvatar(radius: 5, backgroundColor: rarity.color),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    w.lockedRarities.contains(rarity.id)
-                        ? '${rarity.name} · ${rarity.hint ?? 'gesperrt'}'
-                        : rarity.name,
-                    style: theme.textTheme.titleSmall,
-                  ),
+                Row(
+                  children: [
+                    CircleAvatar(radius: 5, backgroundColor: rarity.color),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        w.lockedRarities.contains(rarity.id)
+                            ? '${rarity.name} · ${rarity.hint ?? 'gesperrt'}'
+                            : rarity.name,
+                        style: theme.textTheme.titleSmall,
+                      ),
+                    ),
+                    Text(
+                      tally.complete
+                          ? 'alle ${tally.total} ✓'
+                          : '${tally.owned}/${tally.total} · ${tally.missing} offen',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
                 ),
-                Text(
-                  '${items.where(w.owns).length}/${items.length}',
-                  style: theme.textTheme.bodySmall,
+                const SizedBox(height: 4),
+                TallyBar(
+                  tally.fraction,
+                  color: StageTheme.legible(
+                    rarity.color,
+                    theme.colorScheme.surface,
+                    minimum: 3,
+                  ),
+                  height: 3,
                 ),
               ],
             ),
@@ -1401,8 +1526,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       if (groups.isEmpty)
         SliverPadding(
           padding: EdgeInsets.fromLTRB(padding.left, 12, padding.right, 0),
-          sliver: const SliverToBoxAdapter(
-            child: Text('Keine Figur in dieser Auswahl.'),
+          sliver: SliverToBoxAdapter(
+            child: Text(
+              _missingOnly
+                  ? 'In dieser Auswahl fehlt dir nichts mehr.'
+                  : 'Keine Figur in dieser Auswahl.',
+            ),
           ),
         ),
     ];
