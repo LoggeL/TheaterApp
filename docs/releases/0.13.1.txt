@@ -1,1 +1,1 @@
-Neues Hauptmenü für den Bühnenlauf mit Monatsrangliste und Sammel-Rangliste. Die Garderobe zeigt übersichtlicher, was noch fehlt, und jede gefundene Figur hat eine eigene Seite.
+Die Garderobe zeigt übersichtlicher, was noch fehlt, und jede gefundene Figur hat eine eigene Seite. Weitere Verbesserungen an Darstellung und Sammlung.
