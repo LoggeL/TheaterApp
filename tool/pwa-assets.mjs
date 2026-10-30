@@ -3,6 +3,10 @@ import { createHash } from 'node:crypto';
 import { relative, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// The same rule as hashedWebFile in server/src/http.mjs: only these names are served as immutable.
+// All other files must bypass the HTTP cache when a new worker installs.
+const contentAddressed = /^(?:main\.[a-f0-9]{16}\.dart\.(?:js|mjs|wasm)|(?:flutter_bootstrap\.[a-f0-9]{16}|pwa\.[a-f0-9]{16})\.js|(?:icons\/)?[\w-]+\.[a-f0-9]{16}\.png|web-(?:renderer|assets)\/[a-f0-9]{16}\/.+)$/;
+
 export async function writePwaWorker(root, entrypoints, assetPaths = {assetBase:'',canvasKitBaseUrl:'canvaskit/'}) {
   const manifest = JSON.parse(await readFile(new URL('manifest.json', root), 'utf8'));
   // The Dart entrypoints belong to their renderer; the worker precaches the one the browser starts with.
@@ -46,7 +50,9 @@ export async function writePwaWorker(root, entrypoints, assetPaths = {assetBase:
   digest.update(JSON.stringify({assets, renderers}));
   const version = digest.digest('hex').slice(0, 20);
   index = index.replace(/(name="theater-pwa-version" content=")development/, '$1' + version);
-  const worker = template.replace("{version: 'development', assets: []}", JSON.stringify({version, assets: assets.map(path => path.startsWith('https:') ? path : '/' + path), renderers: Object.fromEntries(Object.entries(renderers).map(([name, files]) => [name, files.map(path => '/' + path)]))}));
+  // Pinned Firebase SDK URLs carry their version and never change either.
+  const fresh = [...new Set([...assets, ...Object.values(renderers).flat()])].filter(path => !path.startsWith('https:') && !contentAddressed.test(path)).map(path => '/' + path);
+  const worker = template.replace("{version: 'development', assets: []}", JSON.stringify({version, assets: assets.map(path => path.startsWith('https:') ? path : '/' + path), fresh, renderers: Object.fromEntries(Object.entries(renderers).map(([name, files]) => [name, files.map(path => '/' + path)]))}));
   await writeFile(new URL('index.html', root), index);
   await writeFile(new URL('theater-service-worker.js', root), worker);
   return {version, assets: assets.length, renderers: Object.keys(renderers), worker: 'theater-service-worker.js'};

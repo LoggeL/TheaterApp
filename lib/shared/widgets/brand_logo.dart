@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../app/brand.dart';
 
-/// Unmodified official artwork, on white so the black symbol remains legible.
+/// Official artwork, on white so the black symbol remains legible. The badge is
+/// at most 72 pt, so the 256 px copy is sharp and decodes far faster than the
+/// unmodified original.
 class BrandLogo extends StatelessWidget {
   const BrandLogo({super.key, this.size = 36});
   final double size;
@@ -16,7 +18,7 @@ class BrandLogo extends StatelessWidget {
       borderRadius: BorderRadius.circular(size * .16),
     ),
     child: Image.asset(
-      'assets/brand/kolpingtheater-ramsen.png',
+      'assets/brand/kolpingtheater-ramsen-256.png',
       fit: BoxFit.contain,
       semanticLabel: Brand.organization,
     ),
