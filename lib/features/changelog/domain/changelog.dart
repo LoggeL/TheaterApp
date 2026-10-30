@@ -27,6 +27,16 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.13.2',
+    date: '30. Oktober 2026',
+    items: [
+      'Die App startet deutlich schneller: Deine gespeicherten Daten sind sofort da, Neues kommt im Hintergrund dazu.',
+      'Termine, Nachrichten und Drehbücher öffnen zügiger, und alles läuft flüssiger.',
+      'Bilder in der Garderobe laden schneller und werden nicht mehr jedes Mal neu geholt.',
+      'Weitere Verbesserungen an Darstellung und Sammlung.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.13.1',
     date: '29. Oktober 2026',
     items: [
