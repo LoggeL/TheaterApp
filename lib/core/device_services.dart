@@ -253,7 +253,8 @@ class DeviceServices {
   StreamSubscription<String>? _tokenRefresh;
   String? _registeredToken;
   bool _firebaseReady = false;
-  Future<void>? _pushInitialization;
+  Future<void>? _pushInitialization, _pushRestore;
+  int? _pushRestoreEpoch;
   Future<void> start() async {
     if (kIsWeb) {
       final target = AppTarget.fromWebUri(Uri.base);
@@ -349,7 +350,10 @@ class DeviceServices {
       !controller.isDemo &&
       (controller.hasAccess || controller.user?.status == 'pending');
 
-  Future<String> enablePush() async {
+  /// Registers this device for push. [restore] (at a start or account
+  /// change) leaves out a registration the server already has, see
+  /// [AppController.registerDevice].
+  Future<String> enablePush({bool restore = false}) async {
     if (!_canRegister) {
       return 'Push benötigt ein angemeldetes Theaterkonto.';
     }
@@ -385,11 +389,14 @@ class DeviceServices {
           ? 'ios'
           : 'android',
       notificationActions: AndroidPushNotifications.supported,
+      ifStale: restore,
     );
     if (controller.sessionEpoch != session) return 'Bitte erneut anmelden.';
     _registeredToken = token;
-    await controller.setPreference('pushEnabled', true);
-    if (controller.sessionEpoch != session) return 'Bitte erneut anmelden.';
+    if (controller.preferences['pushEnabled'] != true) {
+      await controller.setPreference('pushEnabled', true);
+      if (controller.sessionEpoch != session) return 'Bitte erneut anmelden.';
+    }
     await _tokenRefresh?.cancel();
     if (controller.sessionEpoch != session) return 'Bitte erneut anmelden.';
     _tokenRefresh = FirebaseMessaging.instance.onTokenRefresh.listen((
@@ -445,7 +452,25 @@ class DeviceServices {
     }
   }
 
-  Future<void> restorePush() async {
+  /// Registers again at a start or account change when push was enabled.
+  /// Calls for the same session share one run; a run that started for an
+  /// earlier session stops by itself, so a new session starts its own.
+  Future<void> restorePush() {
+    final epoch = controller.sessionEpoch;
+    final running = _pushRestore;
+    if (running != null && _pushRestoreEpoch == epoch) return running;
+    final task = runPushRestore();
+    _pushRestore = task;
+    _pushRestoreEpoch = epoch;
+    return task.whenComplete(() {
+      if (identical(_pushRestore, task)) _pushRestore = null;
+    });
+  }
+
+  /// One run of [restorePush]; tests replace it.
+  @visibleForTesting
+  @protected
+  Future<void> runPushRestore() async {
     final session = controller.sessionEpoch;
     if (!Brand.pushEnabled ||
         controller.preferences['pushEnabled'] != true ||
@@ -459,7 +484,7 @@ class DeviceServices {
       if (controller.sessionEpoch != session) return;
       if (settings.authorizationStatus == AuthorizationStatus.authorized ||
           settings.authorizationStatus == AuthorizationStatus.provisional) {
-        await enablePush();
+        await enablePush(restore: true);
       }
     } catch (_) {
       /* App stays usable when provider is unavailable. */

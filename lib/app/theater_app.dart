@@ -46,7 +46,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     if (_perf.available) _perf.navigatorObserver,
   ];
   String? _identity;
-  bool _starting = true;
+  bool _starting = true, _devicesStarted = false;
   Object? _startupError;
 
   /// Completes when the startup update check has finished or does not apply.
@@ -84,16 +84,20 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
   Future<void> _start() async {
     try {
       await widget.controller.init();
-      if (widget.enableDeviceServices) {
-        await _devices.start();
-        await _devices.restorePush();
-      }
       if (mounted) {
         setState(() {
           _starting = false;
           _startupError = null;
         });
         _perf.markReady();
+        // Links, notifications and push follow the first shell frame; they
+        // never hold back the start.
+        if (widget.enableDeviceServices && !_devicesStarted) {
+          _devicesStarted = true;
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => unawaited(_startDevices()),
+          );
+        }
         _sync.start();
         _updateCheck = _checkForUpdate();
         final target = _deepLinks.takePending();
@@ -111,6 +115,16 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
         });
       }
     }
+  }
+
+  Future<void> _startDevices() async {
+    if (!mounted) return;
+    try {
+      await _devices.start();
+    } catch (_) {
+      /* Links and notification taps are optional; the app stays usable. */
+    }
+    if (mounted) await _devices.restorePush();
   }
 
   String? get _sessionIdentity => widget.controller.user == null
@@ -144,13 +158,14 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     final current = _sessionIdentity;
     if (current != _identity) {
       _identity = current;
+      // The start restores push itself, after its first frame.
+      final restorePush =
+          current != null && !_starting && widget.enableDeviceServices;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _navigationTab.value = AppSection.today.index;
         _navigator.currentState?.popUntil((route) => route.isFirst);
-        if (current != null) {
-          if (widget.enableDeviceServices) _devices.restorePush();
-        }
+        if (restorePush) unawaited(_devices.restorePush());
       });
     }
     if (widget.controller.hasAccess &&

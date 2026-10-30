@@ -45,6 +45,9 @@ abstract final class FirebaseConfiguration {
     iosBundleId: 'de.kolpingtheater.ramsen.theaterapp',
     iosClientId: String.fromEnvironment('GOOGLE_IOS_CLIENT_ID'),
   );
+  static Future<void>? _initializing;
+
+  /// Push and sign-in both start Firebase; they share one initialization.
   static Future<void> initialize() async {
     if (projectId.isEmpty || options.apiKey.isEmpty || options.appId.isEmpty) {
       throw const ApiException(
@@ -56,7 +59,11 @@ abstract final class FirebaseConfiguration {
         'Ein Release darf keine lokale Testanmeldung verwenden.',
       );
     }
-    if (Firebase.apps.isEmpty) await Firebase.initializeApp(options: options);
+    if (Firebase.apps.isNotEmpty) return;
+    final running = _initializing ??= Firebase.initializeApp(
+      options: options,
+    ).then<void>((_) {}).whenComplete(() => _initializing = null);
+    await running;
   }
 }
 
@@ -233,6 +240,29 @@ class FirebaseIdentity implements IdentityService {
     if (_googleInitialized) await GoogleSignIn.instance.signOut();
   }
 }
+
+/// Firebase failing to hand out an ID token as the [ApiException] the
+/// controller handles: a disabled, deleted or revoked account ends the
+/// session (401), a missing connection is offline (retryable). Null for
+/// anything else.
+ApiException? identityTokenFailure(Object error) {
+  if (error is! FirebaseAuthException) return null;
+  return switch (error.code) {
+    'user-disabled' ||
+    'user-not-found' ||
+    'user-token-expired' ||
+    'invalid-user-token' => ApiException(
+      identityError(error),
+      statusCode: 401,
+      code: identitySessionEnded,
+    ),
+    'network-request-failed' => ApiException(identityError(error)),
+    _ => null,
+  };
+}
+
+/// [ApiException.code] of a session Firebase itself has ended.
+const identitySessionEnded = 'identity_session_ended';
 
 String identityError(Object error) {
   if (error is FirebaseAuthException) {

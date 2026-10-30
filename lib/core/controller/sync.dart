@@ -124,7 +124,12 @@ extension SyncController on AppController {
     _rebuild();
     _notify();
     await _drain(generation);
-    if (_current(generation) && !_isOffline) await refresh();
+    // After a clean send the refresh only confirms the projection, so it
+    // stays silent and redraws only when the server state differs. A
+    // rejection keeps the visible refresh.
+    if (_current(generation) && !_isOffline) {
+      await refresh(silent: _error == null);
+    }
     return action.id;
   }
 
@@ -184,7 +189,7 @@ extension SyncController on AppController {
         if (!_current(generation)) return;
         _error = _message(error);
         if (error is ApiException && error.isUnauthorized) {
-          await _expire(generation);
+          await _expire(generation, error);
           return;
         }
         if (error is! ApiException || error.retryable) {
@@ -310,9 +315,16 @@ extension SyncController on AppController {
 
   /// Sends queued changes and loads a fresh snapshot. A [silent] refresh (the
   /// automatic background sync) leaves [busy] untouched; [isRefreshing] still
-  /// reports it.
-  Future<void> refresh({bool silent = false}) {
+  /// reports it. [accessChecked] skips the `/auth/session` check of a
+  /// Firebase account because the caller has just made it.
+  Future<void> refresh({bool silent = false, bool accessChecked = false}) {
     if (_user == null) return Future.value();
+    // The first sync after a cache-first start waits for Firebase.
+    final starting = _startSync;
+    if (starting != null) {
+      if (!silent) _busyUntil(starting);
+      return starting;
+    }
     final running = _refreshTask;
     if (running != null) {
       // Someone waits for a silent refresh: show its progress from now on.
@@ -321,7 +333,11 @@ extension SyncController on AppController {
     }
     final generation = _generation;
     _refreshSilent = silent;
-    final task = _refresh(generation, silent: silent);
+    final task = _refresh(
+      generation,
+      silent: silent,
+      accessChecked: accessChecked,
+    );
     _refreshTask = task;
     return task.whenComplete(() {
       if (_current(generation)) _refreshTask = null;
@@ -343,7 +359,20 @@ extension SyncController on AppController {
     );
   }
 
-  Future<void> _refresh(int generation, {bool silent = false}) async {
+  /// Whether the background sync asks `/auth/session` again; in between the
+  /// snapshot itself proves the access (see [_refresh]).
+  bool get _accessCheckDue {
+    final at = _accessCheckedAt;
+    if (at == null || !hasAccess) return true;
+    final age = _clock().difference(at);
+    return age.isNegative || age >= AppController.accessCheckInterval;
+  }
+
+  Future<void> _refresh(
+    int generation, {
+    bool silent = false,
+    bool accessChecked = false,
+  }) async {
     if (_isDemo) {
       _error = null;
       _lastSync = _clock();
@@ -360,7 +389,7 @@ extension SyncController on AppController {
     _error = null;
     if (!quietStart) _notify();
     try {
-      if (_identity != null) {
+      if (_identity != null && !accessChecked && _accessCheckDue) {
         await refreshAccess(refreshData: false);
         if (!_current(generation) || !hasAccess) return;
       }
@@ -399,12 +428,32 @@ extension SyncController on AppController {
       }
       _rebuild();
       await _persistCore(generation);
+      if (_identity != null && hasAccess && _current(generation)) {
+        try {
+          await _storeFirebaseUser(generation, _user!);
+        } catch (_) {
+          /* The next changed sync or access check writes it again. */
+        }
+      }
     } catch (error) {
+      if (_current(generation) &&
+          _identity != null &&
+          error is ApiException &&
+          error.statusCode == 403 &&
+          error.code == 'access') {
+        // The access is gone: the session says how (waiting, suspended).
+        try {
+          await refreshAccess(refreshData: false);
+        } catch (_) {
+          /* The snapshot's error below stays. */
+        }
+        if (!_current(generation) || !hasAccess) return;
+      }
       if (_current(generation)) {
         _isOffline = error is ApiException && error.retryable;
         _error = _message(error);
         if (error is ApiException && error.isUnauthorized) {
-          await _expire(generation);
+          await _expire(generation, error);
         }
       }
     } finally {
