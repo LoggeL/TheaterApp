@@ -72,6 +72,7 @@ extension SessionController on AppController {
     }
     if (!_current(generation)) return;
     if (cachedUid != null) {
+      _firstSyncPending.value = true;
       _startSync = _verifyCachedStart(generation, cachedUid, identityStart!);
     } else if (_identity == null && _user != null) {
       await refresh();
@@ -188,8 +189,21 @@ extension SessionController on AppController {
       _error = _message(error);
       _notify();
     } finally {
-      if (_current(generation)) _startSync = null;
+      if (_current(generation)) {
+        _startSync = null;
+        _firstSyncPending.value = false;
+      }
     }
+  }
+
+  /// [_hydrate] for a sign-in that does not continue a stored session. The
+  /// server keeps one row per device token and another account of this
+  /// device may hold it by now, so the next push restore registers again.
+  Future<void> _hydrateSignIn(int generation) async {
+    await _hydrate(generation);
+    if (!_current(generation) || _deviceRegisteredAt == null) return;
+    _deviceRegisteredAt = null;
+    await _persistCore(generation);
   }
 
   Future<void> _hydrate(int generation, {JsonMap? state}) async {
@@ -282,7 +296,7 @@ extension SessionController on AppController {
         await _store.write('_device', 'settings', {'baseUrl': origin});
       });
       if (!_current(generation)) return;
-      await _hydrate(generation);
+      await _hydrateSignIn(generation);
       if (!_current(generation)) return;
       // Authentication succeeded. A following network failure remains an explicit
       // offline state; it never silently substitutes sample data.
@@ -497,6 +511,7 @@ extension SessionController on AppController {
         _refreshTask = null;
         _drainTask = null;
         _startSync = null;
+        _firstSyncPending.value = false;
         _loadingScripts.clear();
         _busyCount = 0;
         _refreshing = false;
@@ -509,7 +524,7 @@ extension SessionController on AppController {
       _preferences.clear();
       _rebuild();
     } else if (previous?.isApproved != true) {
-      await _hydrate(generation);
+      await _hydrateSignIn(generation);
     } else {
       // The server's own map, so the next unchanged snapshot compares equal
       // (it carries fields the app does not keep, like `provider`).
@@ -676,6 +691,7 @@ extension SessionController on AppController {
     _deviceRegistration = null;
     _deviceRegistrationToken = null;
     _startSync = null;
+    _firstSyncPending.value = false;
     _baseSnapshot = {};
     _view = {};
     _events = [];

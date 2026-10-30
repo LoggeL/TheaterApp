@@ -743,7 +743,10 @@ export class Theater {
         if (memberId === a.personId && b.active === false) fail(409, 'Den eigenen Zugang hier nicht deaktivieren.');
         const roleIds = b.roleIds === undefined ? list(old?.roleIds) : [...new Set(list(b.roleIds))];
         if (roleIds.length > 30 || roleIds.some(r => typeof r !== 'string' || !s.get('personRoles', r))) fail(400, 'Bitte gültige Rollen auswählen.');
-        s.put('members', memberId, { ...old, id: memberId, name, roleIds, initials: initials(name), active: b.active !== false, version: (old?.version ?? 0) + 1 }); return { id: memberId };
+        s.put('members', memberId, { ...old, id: memberId, name, roleIds, initials: initials(name), active: b.active !== false, version: (old?.version ?? 0) + 1 });
+        // script() puts the name into the roles; the production's version tells stored scripts to fetch again.
+        if (old && old.name !== name) for (const p of s.all('productions')) if (Object.values(p.casting ?? {}).some(x => Number(x) === memberId)) s.put('productions', p.id, { ...p, version: (p.version ?? 1) + 1 });
+        return { id: memberId };
       }
       case 'member.delete': {
         // Linked logins are deleted beforehand via DELETE /admin/accounts/:uid,

@@ -7,6 +7,7 @@ import '../../../core/models.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/first_sync_placeholder.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/state_pill.dart';
 import '../../rehearsal/ui/attendance_screen.dart';
@@ -78,11 +79,14 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
           selectedIndex: AppSection.schedule.index,
           child: Scaffold(
             appBar: AppBar(title: const Text('Termin')),
-            body: const EmptyState(
-              icon: Icons.event_busy,
-              title: 'Termin nicht verfügbar',
-              message:
-                  'Der Termin wurde entfernt oder ist für dein Konto nicht sichtbar.',
+            body: FirstSyncPlaceholder(
+              controller: controller,
+              child: const EmptyState(
+                icon: Icons.event_busy,
+                title: 'Termin nicht verfügbar',
+                message:
+                    'Der Termin wurde entfernt oder ist für dein Konto nicht sichtbar.',
+              ),
             ),
           ),
         );

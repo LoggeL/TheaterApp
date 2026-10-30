@@ -244,6 +244,25 @@ test('a slow navigation falls back to this version\'s cached app shell and the p
   assert.equal(preloaded.fetched.length, 0);
 });
 
+test('a server error on navigation gives way to the cached app shell, the error page stays the last resort', async () => {
+  const status = code => () => basic('server says ' + code, {status: code});
+  const runtime = await loadWorker({network: status(502)});
+  await lifecycle(runtime, 'install');
+  assert.equal(await (await request(runtime, '/events/123', {mode: 'navigate'})).text(), 'offline app');
+  // Without a cached shell the answer itself is all there is, also from the preload.
+  const uncached = await loadWorker({network: status(503)});
+  const error = await request(uncached, '/', {mode: 'navigate'});
+  assert.equal(error.status, 503);
+  assert.equal(await error.text(), 'server says 503');
+  const preloaded = await loadWorker({network: () => { throw new Error('No second request'); }});
+  await lifecycle(preloaded, 'install');
+  assert.equal(await (await request(preloaded, '/', {mode: 'navigate', preloadResponse: Promise.resolve(basic('bad gateway', {status: 502}))})).text(), 'offline app');
+  // Only 5xx: the server's other answers still count.
+  const missing = await loadWorker({network: status(404)});
+  await lifecycle(missing, 'install');
+  assert.equal((await request(missing, '/privacy', {mode: 'navigate'})).status, 404);
+});
+
 const jwt = (sub, extra = {}) => ['eyJhbGciOiJSUzI1NiJ9', Buffer.from(JSON.stringify({sub, ...extra})).toString('base64url'), 'c2lnbmF0dXJl'].join('.');
 const skinName = sub => 'theater-skins-v1-' + createHash('sha256').update(sub).digest('hex');
 function skinNetwork(cacheControl = 'private, max-age=31536000, immutable') {

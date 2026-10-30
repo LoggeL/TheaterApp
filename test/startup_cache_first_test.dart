@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:theater_app/app/deep_links.dart';
 import 'package:theater_app/app/shell/app_navigation.dart';
 import 'package:theater_app/app/shell/app_section.dart';
 import 'package:theater_app/core/app_controller.dart';
@@ -15,6 +16,10 @@ import 'package:theater_app/data/api_client.dart';
 import 'package:theater_app/data/demo_data.dart';
 import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/features/auth/auth.dart';
+import 'package:theater_app/features/events/ui/event_detail_screen.dart';
+import 'package:theater_app/features/polls/ui/poll_detail_screen.dart';
+import 'package:theater_app/features/rehearsal/ui/attendance_screen.dart';
+import 'package:theater_app/features/slots/ui/slot_pool_screen.dart';
 import 'package:theater_app/main.dart';
 
 import 'app_controller_test.dart' show fixedNow, jsonResponse;
@@ -496,6 +501,23 @@ void main() {
       });
     }
 
+    test(
+      'a Firebase account ended while opening a script keeps its message',
+      () async {
+        final session = Session(FirebaseServer());
+        await session.signInOnce();
+        final identity = GatedIdentity(session.uid)..release();
+        final c = session.controller(identity);
+        addTearDown(c.dispose);
+        await c.init();
+        await c.refresh(silent: true);
+        identity.tokenError = FirebaseAuthException(code: 'user-disabled');
+        await c.loadScript(DemoData.mainProductionId);
+        expect(c.user, isNull);
+        expect(c.error, 'Dieses Konto wurde gesperrt.');
+      },
+    );
+
     test('a Firebase sign-in without network stays offline', () async {
       final session = Session(FirebaseServer());
       await session.signInOnce();
@@ -637,6 +659,215 @@ void main() {
       expect(posts(), 3);
       await next.registerDevice('token-2', 'web');
       expect(posts(), 4);
+    });
+
+    test('a new sign-in sends an unchanged token again', () async {
+      // Two expired sessions on one phone: the server's row of the token may
+      // belong to the other account by now.
+      final session = Session(FirebaseServer());
+      await session.signInOnce();
+      final identity = GatedIdentity(session.uid)..release();
+      final c = session.controller(identity);
+      await c.init();
+      await c.refresh(silent: true);
+      int posts() => session.server.count('POST', '/devices');
+      await c.registerDevice('token-1', 'web', ifStale: true);
+      expect(posts(), 1);
+      session.server.override = (request) => isPath(request, '/snapshot')
+          ? Future.value(jsonResponse({'error': 'abgelaufen'}, 401))
+          : null;
+      await c.refresh(silent: true);
+      expect(c.user, isNull);
+      session.server.override = null;
+
+      await c.login(
+        email: session.uid,
+        password: 'Long password!2026',
+        baseUrl: 'https://theater.example.invalid',
+      );
+      expect(c.hasAccess, isTrue);
+      c.dispose();
+      // Also when the app ends before the restore gets to run.
+      final restarted = session.controller(
+        GatedIdentity(session.uid)..release(),
+      );
+      addTearDown(restarted.dispose);
+      await restarted.init();
+      await restarted.refresh(silent: true);
+      await restarted.registerDevice('token-1', 'web', ifStale: true);
+      expect(posts(), 2);
+      await restarted.registerDevice('token-1', 'web', ifStale: true);
+      expect(posts(), 2);
+    });
+  });
+
+  group('first sync of a cache-first start', () {
+    Future<http.Response> holdSnapshot(
+      Session session,
+      Completer<void> gate,
+    ) async {
+      await gate.future;
+      return jsonResponse(session.server.snapshot(session.uid));
+    }
+
+    test('stays pending until the snapshot is there', () async {
+      final session = Session(FirebaseServer());
+      await session.signInOnce();
+      final snapshot = Completer<void>();
+      session.server.override = (request) =>
+          isPath(request, '/snapshot') ? holdSnapshot(session, snapshot) : null;
+      final identity = GatedIdentity(session.uid);
+      final c = session.controller(identity);
+      addTearDown(c.dispose);
+      await c.init();
+      expect(c.firstSyncPending.value, isTrue);
+      var redraws = 0;
+      c.addListener(() => redraws++);
+      identity.release();
+      await pumpEventQueue();
+      // The access check is done, the data is not.
+      expect(session.server.count('GET', '/auth/session'), 1);
+      expect(c.firstSyncPending.value, isTrue);
+      snapshot.complete();
+      await pumpEventQueue();
+      expect(c.firstSyncPending.value, isFalse);
+      // An unchanged start redraws nothing.
+      expect(redraws, 0);
+    });
+
+    test('ends with a failed sync and with the session', () async {
+      final session = Session(FirebaseServer());
+      await session.signInOnce();
+      session.server.override = (request) => isPath(request, '/snapshot')
+          ? Future<http.Response>.error(http.ClientException('offline'))
+          : null;
+      final identity = GatedIdentity(session.uid);
+      final failed = session.controller(identity);
+      addTearDown(failed.dispose);
+      await failed.init();
+      identity.release();
+      await pumpEventQueue();
+      expect(failed.firstSyncPending.value, isFalse);
+      expect(failed.isOffline, isTrue);
+
+      session.server.override = null;
+      final other = GatedIdentity(null);
+      final gone = session.controller(other);
+      addTearDown(gone.dispose);
+      await gone.init();
+      expect(gone.firstSyncPending.value, isTrue);
+      other.release();
+      await pumpEventQueue();
+      expect(gone.user, isNull);
+      expect(gone.firstSyncPending.value, isFalse);
+    });
+
+    for (final (name, page, empty)
+        in <(String, Widget Function(AppController), String)>[
+          (
+            'event',
+            (c) => EventDetailScreen(controller: c, eventId: 'new'),
+            'Termin nicht verfügbar',
+          ),
+          (
+            'poll',
+            (c) => PollDetailScreen(controller: c, pollId: 'new'),
+            'Abstimmung nicht verfügbar',
+          ),
+          (
+            'slot pool',
+            (c) => SlotPoolScreen(controller: c, poolId: 'new'),
+            'Terminfinder nicht verfügbar',
+          ),
+        ]) {
+      testWidgets('a $name target waits instead of calling it removed', (
+        tester,
+      ) async {
+        late final Session session;
+        late final GatedIdentity identity;
+        late final AppController c;
+        await tester.runAsync(() async {
+          session = Session(FirebaseServer());
+          await session.signInOnce();
+          identity = GatedIdentity(session.uid);
+          c = session.controller(identity);
+          await c.init();
+        });
+        await tester.pumpWidget(MaterialApp(home: page(c)));
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        expect(find.text(empty), findsNothing);
+        await tester.runAsync(() async {
+          identity.release();
+          await pumpEventQueue();
+        });
+        await tester.pump();
+        expect(c.firstSyncPending.value, isFalse);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+        expect(find.text(empty), findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+        c.dispose();
+      });
+    }
+
+    testWidgets('a check-in reminder for a new event opens after the sync', (
+      tester,
+    ) async {
+      final server = FirebaseServer()..role = 'admin';
+      final session = Session(server);
+      final identity = GatedIdentity(session.uid);
+      late final AppController c;
+      await tester.runAsync(() async {
+        await session.signInOnce();
+        c = session.controller(identity);
+        await c.init();
+      });
+      // The stored data lacks the event, the first sync brings it.
+      server.override = (request) {
+        if (!isPath(request, '/snapshot')) return null;
+        final snapshot = server.snapshot(session.uid);
+        final events = snapshot['events'] as List;
+        return Future.value(
+          jsonResponse({
+            ...snapshot,
+            'events': [
+              ...events,
+              {...(events.first as Map), 'id': 'new'},
+            ],
+          }),
+        );
+      };
+      final navigator = GlobalKey<NavigatorState>();
+      final messenger = GlobalKey<ScaffoldMessengerState>();
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: navigator,
+          scaffoldMessengerKey: messenger,
+          home: const SizedBox(),
+        ),
+      );
+      final router = DeepLinkRouter(
+        controller: c,
+        navigator: navigator,
+        messenger: messenger,
+        isMounted: () => true,
+      );
+      router.handle(AppTarget('events', 'new', intent: 'checkin'));
+      expect(router.hasPending, isTrue);
+      await tester.pump();
+      expect(find.byType(EventDetailScreen), findsNothing);
+
+      await tester.runAsync(() async {
+        identity.release();
+        await pumpEventQueue();
+      });
+      expect(c.firstSyncPending.value, isFalse);
+      expect(router.hasPending, isFalse);
+      await tester.pump();
+      await tester.runAsync(pumpEventQueue);
+      await tester.pump();
+      expect(find.byType(AttendanceEditorScreen), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
     });
   });
 

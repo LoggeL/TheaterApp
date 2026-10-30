@@ -11,6 +11,7 @@ import '../../../shared/layout/content_width.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/nudges.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/first_sync_placeholder.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/state_pill.dart';
 import '../../events/ui/event_style.dart';
@@ -353,11 +354,14 @@ class _SlotPoolScreenState extends State<SlotPoolScreen> {
       if (json == null) {
         return Scaffold(
           appBar: AppBar(title: const Text('Terminfinder')),
-          body: const EmptyState(
-            icon: Icons.edit_calendar_outlined,
-            title: 'Terminfinder nicht verfügbar',
-            message:
-                'Der Terminfinder wurde entfernt oder ist für dein Konto nicht freigegeben.',
+          body: FirstSyncPlaceholder(
+            controller: _controller,
+            child: const EmptyState(
+              icon: Icons.edit_calendar_outlined,
+              title: 'Terminfinder nicht verfügbar',
+              message:
+                  'Der Terminfinder wurde entfernt oder ist für dein Konto nicht freigegeben.',
+            ),
           ),
         );
       }

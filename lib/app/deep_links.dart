@@ -48,11 +48,36 @@ class DeepLinkRouter {
     return target;
   }
 
+  /// The attendance editor needs the event itself; a new event arrives with
+  /// the first sync of a cache-first start.
+  bool _awaitsFirstSync(AppTarget target) =>
+      controller.firstSyncPending.value &&
+      target.intent == 'checkin' &&
+      controller.user?.canManageEvents == true &&
+      !controller.events.any((e) => e.id == target.id);
+
+  void _resumeAfterFirstSync() {
+    final pending = controller.firstSyncPending;
+    void ended() {
+      if (pending.value) return;
+      pending.removeListener(ended);
+      final target = takePending();
+      if (target != null && isMounted()) handle(target);
+    }
+
+    pending.addListener(ended);
+  }
+
   void handle(AppTarget target) {
     if (!controller.hasAccess ||
         controller.user!.mustChangePassword ||
         navigator.currentState == null) {
       _pendingTarget = target;
+      return;
+    }
+    if (_awaitsFirstSync(target)) {
+      _pendingTarget = target;
+      _resumeAfterFirstSync();
       return;
     }
     _pendingTarget = null;

@@ -3,9 +3,10 @@
 // call (~150–250 ms). Signature, expiry, audience and issuer are checked locally with the public
 // keys firebase-admin caches; only the revocation state (disabled, tokensValidAfterTime) comes
 // from `auth.getUser` and is remembered per uid for `ttlMs`. Parallel requests of one account
-// share a single lookup. A failed lookup at Google (network, 5xx) keeps using an entry younger
-// than `staleMs`; without one the error is `transient` and the API answers 503 instead of 401,
-// so an outage at Google never signs anyone out. Such an entry also answers when Google has not
+// share a single lookup. A failed lookup at Google (network, 5xx, also while the server renews its
+// own access token) keeps using an entry younger than `staleMs`; without one the error is
+// `transient` and the API answers 503 instead of 401, so an outage at Google never signs anyone
+// out. Such an entry also answers when Google has not
 // replied within `staleWaitMs` (firebase-admin itself waits 25 s per attempt and retries, longer
 // than the app's 20 s); the lookup then refreshes it in the background. Disabled or unknown users
 // are never cached.
@@ -14,12 +15,18 @@
 const transientCodes = new Set(['app/network-error', 'app/network-timeout', 'auth/internal-error', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EPIPE']);
 // A failed fetch of Google's public keys surfaces as `auth/argument-error`; only its message tells.
 const keyFetchFailure = /Error fetching public keys|Error while making request/;
+// The server's own access token could not be renewed: `cause` is Google's answer. 5xx and 429 are
+// Google's doing; `invalid_grant` and other 4xx mean a broken service account and stay errors.
+function tokenRenewalOutage(e) {
+  const status = e.cause?.status ?? e.cause?.code;
+  return e.code === 'app/invalid-credential' && typeof status === 'number' && (status >= 500 || status === 429);
+}
 
 /** True for errors of Google's or the network's making, never for a bad, expired or revoked token. */
 export function isTransientAuthError(e) {
   if (!e) return false;
   if (e.transient === true) return true;
-  if (transientCodes.has(e.code) || transientCodes.has(e.cause?.code)) return true;
+  if (transientCodes.has(e.code) || transientCodes.has(e.cause?.code) || tokenRenewalOutage(e)) return true;
   return e.code === 'auth/argument-error' && keyFetchFailure.test(e.message ?? '');
 }
 

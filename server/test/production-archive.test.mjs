@@ -20,6 +20,21 @@ function setup(t) {
   return {store,theater,action,document,memberId};
 }
 
+test('a new name of a cast person outdates stored scripts, nothing else does', t => {
+  const {store,theater,action,memberId} = setup(t);
+  const version = () => store.get('productions','summer').version;
+  const member = () => store.get('members',memberId);
+  const before = version();
+  assert.equal(theater.script('member','summer').roles[0].actor,'Mara Beispiel');
+  action({action:'member.save',id:memberId,version:member().version,name:'Mara Beispiel',roleIds:[]});
+  const uncast = action({action:'member.save',name:'Lou Nebenan'}).id;
+  action({action:'member.save',id:uncast,version:1,name:'Lou Umbenannt'});
+  assert.equal(version(),before);
+  action({action:'member.save',id:memberId,version:member().version,name:'Mara Neu'});
+  assert.equal(version(),before+1);
+  assert.equal(theater.script('member','summer').roles[0].actor,'Mara Neu');
+});
+
 test('archiving and restoring preserve script access, casting, comments and event links', t => {
   const {store,theater,action} = setup(t);
   const previous = store.get('productions','summer');

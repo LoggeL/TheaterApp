@@ -6,8 +6,8 @@ extension ScriptsController on AppController {
   ///
   /// With [ifChanged] a stored script is only fetched again when its
   /// production changed on the server since (its `revision` and `version`
-  /// in the snapshot: a new script import or a new cast); readers opening a
-  /// script use this. An unchanged result keeps the stored document as it
+  /// in the snapshot: a new script import, a new cast or a cast person's new
+  /// name); readers opening a script use this. An unchanged result keeps the stored document as it
   /// is, without rebuilding, storing or notifying.
   Future<void> loadScript(String productionId, {bool ifChanged = false}) async {
     if (_user == null) {
@@ -57,7 +57,7 @@ extension ScriptsController on AppController {
         _isOffline = error is ApiException && error.retryable;
         changed = true;
         if (error is ApiException && error.isUnauthorized) {
-          await _expire(generation);
+          await _expire(generation, error);
         }
       }
     } finally {
@@ -70,7 +70,8 @@ extension ScriptsController on AppController {
 
   /// What the stored script of [productionId] depends on, as the server
   /// last reported it: the script's revision and the production's version
-  /// (bumped by imports and casting). Null when the production is unknown.
+  /// (bumped by imports, casting and renaming a cast person). Null when the
+  /// production is unknown.
   String? scriptStamp(String productionId) {
     for (final production in jsonList(_baseSnapshot['productions'])) {
       final json = jsonMap(production);

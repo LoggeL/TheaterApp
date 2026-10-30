@@ -41,6 +41,17 @@ test('Google being unreachable answers 503 with Retry-After instead of signing o
   assert.equal(body.code, 'auth_unavailable');
 });
 
+test('a failed renewal of the server\'s access token answers 503 for Google 5xx, 401 for a rejected key', async t => {
+  const renewal = status => async () => { throw Object.assign(new Error('Credential implementation failed'), { code: 'app/invalid-credential', cause: { code: status, status } }); };
+  const outage = await serve(t, renewal(503));
+  const { status, headers, body } = await outage.request('GET', '/snapshot', 'sam');
+  assert.equal(status, 503);
+  assert.equal(headers.get('retry-after'), '5');
+  assert.equal(body.code, 'auth_unavailable');
+  const rejected = await serve(t, renewal(400));
+  assert.equal((await rejected.request('GET', '/snapshot', 'sam')).status, 401);
+});
+
 test('expired, revoked and deleted logins stay 401', async t => {
   const { request } = await serve(t, fakeVerify);
   for (const token of ['expired', 'gone']) {

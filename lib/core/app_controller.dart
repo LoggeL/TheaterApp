@@ -180,6 +180,7 @@ class AppController extends ChangeNotifier {
   /// The first sync after a cache-first start; it waits for Firebase, and
   /// refreshes started meanwhile join it.
   Future<void>? _startSync;
+  final _firstSyncPending = ValueNotifier(false);
 
   /// Completes (never with an error) once Firebase has restored its sign-in.
   Future<void> _identityReady = Future.value();
@@ -244,6 +245,11 @@ class AppController extends ChangeNotifier {
 
   /// True while any refresh runs, also a silent background refresh.
   bool get isRefreshing => _refreshing;
+
+  /// True until a cache-first start has finished its first sync: what the
+  /// stored data lacks may simply be new. Its own listenable, because an
+  /// unchanged start must not redraw the app.
+  ValueListenable<bool> get firstSyncPending => _firstSyncPending;
   bool get isDemo => _isDemo;
   bool get isOffline => _isOffline;
   bool get isAuthenticated => _user != null;
@@ -501,6 +507,7 @@ class AppController extends ChangeNotifier {
     _disposed = true;
     ++_generation;
     _api.close();
+    _firstSyncPending.dispose();
     super.dispose();
   }
 }

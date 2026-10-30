@@ -8,7 +8,8 @@ const href = path => new URL(path, self.location.origin).href;
 const assets = new Set([...BUILD.assets, ...Object.values(renderers).flat()].map(href));
 // Files without a content hash in their name (index.html, manifests …); all others never change under their name.
 const fresh = new Set((BUILD.fresh || []).map(href));
-// A slow server answer gives way to the cached app shell of this version; the network answer still completes.
+// A slow server answer or a 5xx (a restart, an outage) gives way to the cached app shell of this version;
+// the network answer still completes.
 const NAVIGATION_TIMEOUT_MS = 3000;
 // Wardrobe pictures and music are private but content-addressed (`?v=<hash>`, `immutable`). This cache
 // is kept per account and outside PREFIX, so a new app version keeps it; logging out removes it.
@@ -129,9 +130,9 @@ function navigation(event, request, url) {
     const late = new Promise(resolve => { timer = setTimeout(resolve, NAVIGATION_TIMEOUT_MS, null); });
     try {
       const response = await Promise.race([network, late]);
-      if (response) return response;
+      if (response && response.status < 500) return response;
       // The fallback stays in this version's cache, so index.html and its assets belong together.
-      return await cachedPage(url) || await network;
+      return await cachedPage(url) || response || await network;
     } catch {
       return await cachedPage(url);
     } finally { clearTimeout(timer); }

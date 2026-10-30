@@ -11,6 +11,7 @@ import '../../../shared/layout/content_width.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/nudges.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/first_sync_placeholder.dart';
 import '../domain/poll_selectors.dart';
 import 'poll_editor_screen.dart';
 import 'widgets/poll_updates.dart';
@@ -329,11 +330,14 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
           ],
         ),
         body: poll == null
-            ? const EmptyState(
-                icon: Icons.poll_outlined,
-                title: 'Abstimmung nicht verfügbar',
-                message:
-                    'Die Abstimmung wurde entfernt oder ist für dein Konto nicht freigegeben.',
+            ? FirstSyncPlaceholder(
+                controller: c,
+                child: const EmptyState(
+                  icon: Icons.poll_outlined,
+                  title: 'Abstimmung nicht verfügbar',
+                  message:
+                      'Die Abstimmung wurde entfernt oder ist für dein Konto nicht freigegeben.',
+                ),
               )
             : ListView(
                 padding: pagePadding(context),

@@ -159,6 +159,29 @@ test('5xx answers and socket errors count as transient, token errors do not', as
   assert.equal(isTransientAuthError(new Error('invalid')), false);
 });
 
+test('a failed renewal of the server\'s own access token is transient only for 5xx and 429', async () => {
+  const renewal = status => Object.assign(new Error('Credential implementation failed'), { code: 'app/invalid-credential', cause: { code: status, status } });
+  assert.ok(isTransientAuthError(renewal(503)));
+  assert.ok(isTransientAuthError(renewal(429)));
+  // gaxios reports the status in `code`; a socket error has none.
+  assert.ok(isTransientAuthError({ code: 'app/invalid-credential', cause: { code: 500 } }));
+  assert.ok(isTransientAuthError({ code: 'app/invalid-credential', cause: { code: 'ECONNRESET' } }));
+  assert.equal(isTransientAuthError(renewal(400)), false);
+  assert.equal(isTransientAuthError(renewal(401)), false);
+  assert.equal(isTransientAuthError({ code: 'app/invalid-credential', cause: new Error('invalid_grant') }), false);
+  assert.equal(isTransientAuthError({ code: 'app/invalid-credential' }), false);
+
+  const { verifier, fail, tick } = setup();
+  await verifier.verify('sam');
+  tick(360_000);
+  fail(renewal(503));
+  assert.equal((await verifier.verify('sam')).uid, 'sam');
+  await assert.rejects(verifier.verify('kim'), e => e.transient === true && isTransientAuthError(e));
+  // A rejected service account is no outage: the entry does not hide it.
+  fail(renewal(400));
+  await assert.rejects(verifier.verify('sam'), e => e.code === 'app/invalid-credential' && !e.transient);
+});
+
 test('a failed local check is transient only when the keys could not be fetched', async () => {
   const { verifier, failVerify, calls } = setup();
   await assert.rejects(verifier.verify('expired'), e => e.code === 'auth/id-token-expired' && !e.transient);
