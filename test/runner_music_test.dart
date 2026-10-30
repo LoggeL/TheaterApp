@@ -13,8 +13,11 @@ import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/games/data/wardrobe_api.dart';
 import 'package:theater_app/features/games/games.dart';
+import 'package:theater_app/features/games/ui/stage_runner_art.dart';
+import 'package:theater_app/features/games/ui/stage_runner_look.dart';
 import 'package:theater_app/features/games/ui/stage_runner_music.dart';
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
+import 'package:theater_app/features/games/ui/wardrobe_screen.dart';
 
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
 
@@ -40,7 +43,7 @@ JsonMap _item(
 };
 
 /// A wardrobe with a backdrop that brings its music, worn or not.
-JsonMap _wardrobeJson({String backdrop = 'b1'}) => {
+JsonMap _wardrobeJson({String backdrop = 'b1', String? image}) => {
   'progress': {
     'meters': 0,
     'earned': 0,
@@ -58,7 +61,7 @@ JsonMap _wardrobeJson({String backdrop = 'b1'}) => {
       _item('b0', 'backdrop', isDefault: true),
       _item('o0', 'obstacles', isDefault: true),
       _item('f0', 'fx', isDefault: true),
-      _item('b1', 'backdrop', extra: {'music': _music}),
+      _item('b1', 'backdrop', extra: {'music': _music, 'image': ?image}),
     ],
   },
   'owned': ['c0', 'b0', 'o0', 'f0', 'b1'],
@@ -321,6 +324,96 @@ void main() {
       sound.setEnabled(true);
       await tester.pump();
       expect(sound.log, isEmpty, reason: 'the screen removed its listener');
+      sound.dispose();
+    });
+
+    testWidgets('back on the shown costume before the other one was dressed, '
+        'its music comes back too', (tester) async {
+      const picture = '/games/runner/skins/backdrop-b1.webp';
+      final art = (await tester.runAsync(
+        () async => RunnerArt.test(
+          await createTestImage(width: 1124, height: 577),
+          await createTestImage(width: 64, height: 32),
+        ),
+      ))!;
+      RunnerArt.useForTest(art);
+      addTearDown(() {
+        RunnerArt.useForTest(null);
+        WardrobePictures.clear();
+      });
+      final hanging = Completer<http.Response>();
+      final controller = await _signedIn((request) {
+        final path = request.url.path.replaceFirst(RegExp(r'/$'), '');
+        if (path.endsWith('/leaderboard') || path.endsWith('/month')) {
+          return Future.value(
+            jsonResponse({'players': 0, 'top': [], 'own': null}),
+          );
+        }
+        if (path.endsWith('/wardrobe')) {
+          return Future.value(
+            jsonResponse(_wardrobeJson(backdrop: 'b0', image: picture)),
+          );
+        }
+        if (path.endsWith('/games/runner/skins/music-gruft.m4a')) {
+          return Future.value(
+            http.Response.bytes(
+              _m4a,
+              200,
+              headers: {'content-type': 'audio/mp4'},
+            ),
+          );
+        }
+        if (path.endsWith(picture)) return hanging.future;
+        return null;
+      });
+      final sound = _MusicSound();
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      dressCount = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StageTheme.build(Brightness.light),
+          home: StageRunnerScreen(controller: controller, sound: sound),
+        ),
+      );
+      Future<void> settle(bool Function() done) async {
+        for (var i = 0; i < 50 && !done(); i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+      }
+
+      await settle(() => dressCount == 1);
+      await tester.tap(find.byKey(const ValueKey('runner-wardrobe')));
+      await tester.pumpAndSettle();
+      final wardrobe = tester.widget<WardrobeScreen>(
+        find.byType(WardrobeScreen),
+      );
+
+      // Another backdrop: its music is quick, its picture is not.
+      wardrobe.onChanged!(
+        Wardrobe.fromJson(_wardrobeJson(backdrop: 'b1', image: picture)),
+      );
+      await settle(() => sound.tunes.lastOrNull == _m4a);
+      expect(sound.tunes.last, _m4a);
+      expect(dressCount, 2);
+
+      // And back: nothing to dress, but this one has no music of its own.
+      wardrobe.onChanged!(
+        Wardrobe.fromJson(_wardrobeJson(backdrop: 'b0', image: picture)),
+      );
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+      expect(sound.tunes.last, isNull);
+      expect(dressCount, 2);
+
+      hanging.complete(http.Response('', 404));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(minutes: 1));
+      await tester.pump(const Duration(minutes: 1));
       sound.dispose();
     });
 

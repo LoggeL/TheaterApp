@@ -117,6 +117,7 @@ class _UniqueCelebrationState extends State<UniqueCelebration>
                                       wardrobe: widget.wardrobe,
                                       controller: widget.controller,
                                       art: widget.art,
+                                      small: true,
                                       animateShine: true,
                                     ),
                                     // The curtain opens on what was a

@@ -423,7 +423,14 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
           _wardrobe = w;
           if (_progress != null) _progress = w.progress;
         });
-        if (outfitOf(w) != _outfit) _dress();
+        // [_outfit] moves with a finished dress only: back on the costume
+        // still shown, the dress on its way is dropped, but the music of
+        // that other backdrop may already be playing.
+        if (outfitOf(w) != _outfit) {
+          _dress();
+        } else {
+          unawaited(_tune());
+        }
       },
     );
     // Opened crates move the own place in the collection ranking.

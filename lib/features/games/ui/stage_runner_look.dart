@@ -350,7 +350,8 @@ abstract final class WardrobePictures {
   /// Pictures decoding at the same time, in the browser.
   static const maxDecoding = 2;
 
-  /// A frame above this (ms) makes the next picture wait a frame.
+  /// A frame longer than this (ms) after the one before makes the next
+  /// picture wait a frame.
   static const frameBudgetMs = 20.0;
 
   /// Frames a picture gives way at most: the pictures come even while every
@@ -397,7 +398,8 @@ abstract final class WardrobePictures {
   static int _decoding = 0;
   static final _decodeTurns = <_Turn>[];
   static final _showTurns = <_Turn>[];
-  static bool _frameAsked = false, _watching = false;
+  static bool _frameAsked = false;
+  static Duration? _lastFrame;
   static double _lastFrameMs = 0;
   static int _heldFrames = 0;
 
@@ -437,25 +439,25 @@ abstract final class WardrobePictures {
   static void _askFrame() {
     if (_frameAsked || _showTurns.isEmpty) return;
     _frameAsked = true;
-    if (!_watching) {
-      _watching = true;
-      SchedulerBinding.instance.addTimingsCallback(_frameTimings);
-    }
     SchedulerBinding.instance
       ..scheduleFrameCallback(_frame)
       ..ensureVisualUpdate();
   }
 
-  static void _frameTimings(List<ui.FrameTiming> timings) =>
-      noteFrame(timings.last.totalSpan.inMicroseconds / 1000);
-
-  /// The duration of the last frame, as the engine reported it.
-  @visibleForTesting
-  static void noteFrame(double ms) => _lastFrameMs = ms;
-
-  static void _frame(Duration _) {
+  /// How long a frame took is its distance to the one before: known at once,
+  /// unlike the engine's FrameTimings, which come in batches of 100 ms on the
+  /// web, and the whole of it. The first frame of a burst has none (nothing
+  /// may have been going on), the following ones were asked for right here.
+  static void _frame(Duration now) {
     _frameAsked = false;
-    if (_lastFrameMs > frameBudgetMs && _heldFrames < maxHeldFrames) {
+    final last = _lastFrame;
+    final ms = last == null ? 0.0 : (now - last).inMicroseconds / 1000;
+    // Held back and hardly quicker: the pictures are not why. A display at
+    // 30 Hz (a phone saving power) has every frame above the budget.
+    final slow =
+        ms > frameBudgetMs && (_heldFrames == 0 || ms < _lastFrameMs * .75);
+    _lastFrameMs = ms;
+    if (slow && _heldFrames < maxHeldFrames) {
       _heldFrames++;
     } else {
       _heldFrames = 0;
@@ -465,6 +467,7 @@ abstract final class WardrobePictures {
         turn.done.complete();
       }
     }
+    _lastFrame = _showTurns.isEmpty ? null : now;
     _askFrame();
   }
 
@@ -502,6 +505,7 @@ abstract final class WardrobePictures {
     _decodeTurns.clear();
     _showTurns.clear();
     _frameAsked = false;
+    _lastFrame = null;
     _lastFrameMs = 0;
     _heldFrames = 0;
     RunnerArt.forgetCells();

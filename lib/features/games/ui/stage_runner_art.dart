@@ -221,21 +221,33 @@ class RunnerArt {
     assert(_optionalCells.contains(sprite));
     final cells = path == null
         ? _cells[image] ??= _readCells(image)
-        : _cellsByPath[path] ??= _readCells(image, path);
-    return (await cells)[sprite] ?? false;
+        : _cellsByPath[path] ??= _readCells(image);
+    final found = await cells;
+    if (found != null) return found[sprite] ?? false;
+    // Not readable just now: the next one tries again.
+    if (path == null) {
+      _cells[image] = null;
+    } else {
+      _cellsByPath.remove(path);
+    }
+    return false;
   }
 
-  static Future<Map<RunnerSprite, bool>> _readCells(
-    ui.Image image, [
-    String? path,
-  ]) async {
+  /// The optional cells of [image]; null if its pixels could not be read,
+  /// which the web engine reports with an error.
+  static Future<Map<RunnerSprite, bool>?> _readCells(ui.Image image) async {
     pixelReads++;
-    final bytes = await image.toByteData();
-    // Not readable just now: the next one tries again.
-    if (bytes == null && path != null) _cellsByPath.remove(path);
+    final ByteData? bytes;
+    try {
+      bytes = await image.toByteData();
+    } catch (e) {
+      if (kDebugMode) debugPrint('Bühnenlauf: Atlas nicht lesbar: $e');
+      return null;
+    }
+    if (bytes == null) return null;
     return {
       for (final sprite in _optionalCells)
-        sprite: bytes != null && _drawn(bytes, image, sprite.rect),
+        sprite: _drawn(bytes, image, sprite.rect),
     };
   }
 
@@ -252,8 +264,8 @@ class RunnerArt {
     return false;
   }
 
-  static final _cells = Expando<Future<Map<RunnerSprite, bool>>>();
-  static final _cellsByPath = <String, Future<Map<RunnerSprite, bool>>>{};
+  static final _cells = Expando<Future<Map<RunnerSprite, bool>?>>();
+  static final _cellsByPath = <String, Future<Map<RunnerSprite, bool>?>>{};
 
   /// How often the pixels of a picture were read back, for tests.
   @visibleForTesting

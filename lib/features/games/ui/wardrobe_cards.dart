@@ -252,8 +252,8 @@ class WardrobeItemArt extends StatefulWidget {
   final RunnerArt? art;
   final bool hidden, antique;
 
-  /// A small card (the grid): the thumbnail is enough, if there is one. So
-  /// is it for a silhouette.
+  /// A small card (up to about 130 pt, as in the grid): the thumbnail is
+  /// enough, if there is one. So is it for a silhouette.
   final bool small;
 
   @override
@@ -428,7 +428,7 @@ class WardrobeCard extends StatelessWidget {
   /// The role line; off where it stands next to the card.
   final bool showRole;
 
-  /// A card of the grid: see [WardrobeItemArt.small].
+  /// A small card: see [WardrobeItemArt.small].
   final bool small;
 
   @override

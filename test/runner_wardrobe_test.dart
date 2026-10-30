@@ -1529,15 +1529,69 @@ void main() {
         WardrobePictures.load(controller, path(i)).then((_) => arrived++);
       }
       await settle(tester);
-      WardrobePictures.noteFrame(40);
-      for (var i = 0; i < WardrobePictures.maxHeldFrames; i++) {
-        await tester.pump();
-        expect(arrived, 0);
+      // The distance between the frames tells, at once.
+      await tester.pump();
+      expect(arrived, 1, reason: 'nothing to measure on the first frame');
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(arrived, 2);
+      await tester.pump(const Duration(milliseconds: 40));
+      expect(arrived, 2);
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(arrived, 3);
+    });
+
+    testWidgets('frames getting quicker hold the pictures, but not for long', (
+      tester,
+    ) async {
+      final (controller, _) = await paced(tester);
+      var arrived = 0;
+      for (var i = 0; i < 3; i++) {
+        WardrobePictures.load(controller, path(i)).then((_) => arrived++);
       }
+      await settle(tester);
       await tester.pump();
-      expect(arrived, 1, reason: 'even if every frame is slow');
-      WardrobePictures.noteFrame(8);
+      expect(arrived, 1);
+      const held = [100, 70, 45];
+      expect(held, hasLength(WardrobePictures.maxHeldFrames));
+      for (final ms in held) {
+        await tester.pump(Duration(milliseconds: ms));
+        expect(arrived, 1);
+      }
+      await tester.pump(const Duration(milliseconds: 30));
+      expect(arrived, 2, reason: 'even if every frame is slow');
+    });
+
+    testWidgets('a display at 30 Hz does not wait out every frame', (
+      tester,
+    ) async {
+      final (controller, _) = await paced(tester);
+      var arrived = 0;
+      for (var i = 0; i < 3; i++) {
+        WardrobePictures.load(controller, path(i)).then((_) => arrived++);
+      }
+      await settle(tester);
       await tester.pump();
+      expect(arrived, 1);
+      const frame = Duration(milliseconds: 33);
+      await tester.pump(frame);
+      expect(arrived, 1);
+      await tester.pump(frame);
+      expect(arrived, 2, reason: 'no quicker without a picture');
+    });
+
+    testWidgets('a pause between two bursts is not a slow frame', (
+      tester,
+    ) async {
+      final (controller, _) = await paced(tester);
+      var arrived = 0;
+      WardrobePictures.load(controller, path(0)).then((_) => arrived++);
+      await settle(tester);
+      await tester.pump();
+      expect(arrived, 1);
+      await tester.pump(const Duration(seconds: 5));
+      WardrobePictures.load(controller, path(1)).then((_) => arrived++);
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 5));
       expect(arrived, 2);
     });
 
@@ -1707,6 +1761,29 @@ void main() {
       await RunnerArt.draws(image, RunnerSprite.pile);
       await RunnerArt.draws(image, RunnerSprite.tallCrate);
       expect(RunnerArt.pixelReads, 2);
+    });
+
+    test('a failed read is not kept: the next one tries again', () async {
+      RunnerArt.forgetCells();
+      for (final fail in [
+        () => throw StateError('read back failed'),
+        () => Future<ByteData?>.error(StateError('read back failed')),
+        () => Future<ByteData?>.value(),
+      ]) {
+        final image = _Unreadable(fail);
+        const path = '/games/runner/skins/obstacles-b.webp?v=1';
+        for (final at in [path, null]) {
+          for (var round = 1; round <= 2; round++) {
+            image.reads = 0;
+            final found = await Future.wait([
+              RunnerArt.draws(image, RunnerSprite.pile, path: at),
+              RunnerArt.draws(image, RunnerSprite.tallCrate, path: at),
+            ]);
+            expect(found, [false, false]);
+            expect(image.reads, 1, reason: 'shared, and tried anew each time');
+          }
+        }
+      }
     });
 
     testWidgets('opening the wardrobe waits for its entrance and does not '
@@ -2018,6 +2095,24 @@ void main() {
       await tester.pump(const Duration(seconds: 40));
     });
   });
+}
+
+/// A picture whose pixels cannot be read back.
+class _Unreadable extends Fake implements ui.Image {
+  _Unreadable(this.fail);
+  final Future<ByteData?> Function() fail;
+  int reads = 0;
+  @override
+  int get width => 1124;
+  @override
+  int get height => 577;
+  @override
+  Future<ByteData?> toByteData({
+    ui.ImageByteFormat format = ui.ImageByteFormat.rawRgba,
+  }) {
+    reads++;
+    return fail();
+  }
 }
 
 /// A codec that gives [image] without decoding anything.
