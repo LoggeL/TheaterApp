@@ -35,7 +35,22 @@ const _plurals = {
   'Dublone': 'Dublonen',
   'Herz': 'Herzen',
   'Mond': 'Monde',
+  'Dolch': 'Dolche',
+  'Daumenschraube': 'Daumenschrauben',
+  'Falke': 'Falken',
+  'Ausgestopfter Falke': 'Ausgestopfte Falken',
 };
+
+/// Singular names that change after "Sammle 1" (the accusative); the
+/// others stay as they are ("Sammle 1 Dolch").
+const _accusatives = {
+  'Falke': 'Falken',
+  'Ausgestopfter Falke': 'ausgestopften Falken',
+};
+
+/// A pickup's [name] as the one to collect: "Sammle 1 ausgestopften Falken".
+String collectibleAccusative(String name) =>
+    _accusatives[name.trim()] ?? name.trim();
 
 /// The German plural of a pickup's [name]: known words (also as the end of
 /// a compound, "Teufelsstern" → "Teufelssterne", and the last of several,
@@ -129,7 +144,9 @@ class DailyMission {
   String textFor(Map<String, String> names) {
     final name = names[kind];
     if (type != 'collect' || name == null || name.trim().isEmpty) return text;
-    final noun = target == 1 ? name.trim() : collectiblePlural(name);
+    final noun = target == 1
+        ? collectibleAccusative(name)
+        : collectiblePlural(name);
     return 'Sammle ${_number.format(target)} $noun in einem Lauf';
   }
 

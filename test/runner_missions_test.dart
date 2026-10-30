@@ -355,6 +355,9 @@ void main() {
           'Siegel',
           'Lorbeerkranz',
           'Datenchip',
+          'Dolch',
+          'Daumenschraube',
+          'Ausgestopfter Falke',
         ].map(collectiblePlural),
         [
           'Bonbons',
@@ -366,6 +369,9 @@ void main() {
           'Siegel',
           'Lorbeerkränze',
           'Datenchips',
+          'Dolche',
+          'Daumenschrauben',
+          'Ausgestopfte Falken',
         ],
       );
     });
@@ -390,6 +396,15 @@ void main() {
       expect(
         collect('star', 1).textFor(names),
         'Sammle 1 Teufelsstern in einem Lauf',
+      );
+      // One is collected in the accusative: the weak noun changes.
+      expect(
+        collect('star', 1).textFor({'star': 'Ausgestopfter Falke'}),
+        'Sammle 1 ausgestopften Falken in einem Lauf',
+      );
+      expect(
+        collect('rose', 1).textFor({'rose': 'Dolch'}),
+        'Sammle 1 Dolch in einem Lauf',
       );
       // Without a name of the backdrop (or a blank one) the server's text.
       expect(collect('mask', 3).textFor(names), 'Sammle 3 Rosen in einem Lauf');

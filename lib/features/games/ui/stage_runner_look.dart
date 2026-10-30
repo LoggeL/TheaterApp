@@ -336,6 +336,9 @@ Future<RunnerArt> dressArt(
   return base.dressed(
     runner: runner,
     obstacles: set,
+    ownPile: set != null && await RunnerArt.draws(set, RunnerSprite.pile),
+    ownTallCrate:
+        set != null && await RunnerArt.draws(set, RunnerSprite.tallCrate),
     pickups: fits(images[3]) ? images[3] : null,
     backdrop: images[2],
     runnerFilter: tintFilter(character?.tint),

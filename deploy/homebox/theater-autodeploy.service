@@ -1,0 +1,18 @@
+[Unit]
+Description=Deploy Theater-App main after a green CI verify job
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/theater-autodeploy
+# Private, mode 600: GH_TOKEN_FILE, DOKPLOY_API_KEY_FILE, THEATER_BACKUP_DIR, optional NOTIFY_CMD, THEATER_BACKUP_KEEP.
+EnvironmentFile=%h/.config/theater-autodeploy/env
+Environment=THEATER_AUTODEPLOY_HOME=%h/projects/theater-autodeploy
+# 'node' is a symlink to the nvm version, so an nvm update does not silently break the PATH.
+Environment=PATH=%h/projects/theater-autodeploy/node/bin:/usr/local/bin:/usr/bin:/bin
+# Installed copy, not the clone in src/, so a broken commit cannot break the poller itself. This is no
+# security boundary: deploy.py/backup.py from the pushed commit run as this user (docker group) and could
+# rewrite this copy, the units and the keys. Whatever reaches main and passes 'verify' runs here.
+ExecStart=/usr/bin/python3 %h/projects/theater-autodeploy/bin/autodeploy.py --once
+# Build and rollout, up to 5 minutes for healthz and, on failure, up to 5 more for the rollback.
+TimeoutStartSec=30min
+UMask=0077

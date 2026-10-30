@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
 
@@ -519,10 +520,17 @@ void main() {
             if (o.right < x && o.right >= before) {
               passed.update(o.kind, (n) => n + 1, ifAbsent: () => 1);
             }
-            // A drum has come to rest where it was placed before the
-            // runner gets to it, so the space before it is as usual.
-            if (o.kind == ObstacleKind.drum && o.left < x + hw) {
-              expect(o.left, o.anchor, reason: 'seed $seed');
+            // A drum gets to where it was placed just when the runner gets
+            // to it, so the space before it is as usual.
+            if (o.kind == ObstacleKind.drum &&
+                o.left < x + hw &&
+                o.left + StageRunner.rollSpeed / 60 >= before + hw) {
+              final step = (game.speed + StageRunner.rollSpeed) / 60;
+              expect(
+                o.left,
+                closeTo(o.anchor, step + .001),
+                reason: 'seed $seed',
+              );
             }
           }
         }
@@ -548,6 +556,355 @@ void main() {
         final bottom = StageRunner.dropBottom(StageRunner.dropMiddle, 1, t);
         expect(bottom, inInclusiveRange(highest - 1e-9, lowest + 1e-9));
       }
+    });
+  });
+
+  group('rolling drum', () {
+    const rs = StageRunner.rollSpeed, hw = StageRunner.hitHalfWidth;
+    // Phones upright and turned, 21:9, a cinema-wide window and a strip.
+    const views = [1.6, 2.17, 2.33, 3.5, 5.0];
+
+    /// Runs [seconds] of a few courses on each of [views], calling [check]
+    /// after every frame with the left edge each drum had the frame before
+    /// (null for one that is new).
+    void watch(
+      void Function(
+        StageRunner game,
+        Obstacle drum,
+        double? before,
+        double view,
+        String why,
+      )
+      check, {
+      double seconds = 150,
+      int seeds = 3,
+    }) {
+      for (final view in views) {
+        for (var seed = 0; seed < seeds; seed++) {
+          final game = StageRunner(random: Random(seed))
+            ..invincible = true
+            ..view = view;
+          // By identity and anchor: a recycled object is a new drum.
+          final last = Map<Obstacle, (double, double)>.identity();
+          var drums = 0;
+          while (game.time < seconds) {
+            _greedyStep(game);
+            final now = Map<Obstacle, (double, double)>.identity();
+            for (final o in game.obstacles) {
+              if (o.kind != ObstacleKind.drum) continue;
+              final was = last[o];
+              final before = was != null && was.$1 == o.anchor ? was.$2 : null;
+              if (before == null) drums++;
+              check(game, o, before, view, 'view $view, seed $seed');
+              now[o] = (o.anchor, o.left);
+            }
+            last
+              ..clear()
+              ..addAll(now);
+          }
+          expect(drums, greaterThan(10), reason: 'view $view, seed $seed');
+        }
+      }
+    }
+
+    bool inPicture(StageRunner game, double left, double right, double view) =>
+        left < game.distance + view && right > game.distance;
+
+    test('rolls from its first frame in the picture until it has left it, '
+        'evenly and without stopping', () {
+      var frames = 0;
+      watch((game, o, before, view, why) {
+        final shown = inPicture(game, o.left - .01, o.right + .01, view);
+        if (before == null) {
+          // It is laid out beyond the right edge: the picture never shows
+          // it standing still before it rolls.
+          expect(o.left - game.distance, greaterThan(view), reason: why);
+          return;
+        }
+        expect(before - o.left, closeTo(rs / 60, 1e-9), reason: why);
+        if (shown) frames++;
+      });
+      expect(frames, greaterThan(1000));
+    });
+
+    test('gets to its place just when the runner gets to it', () {
+      watch((game, o, before, view, why) {
+        if (before == null) return;
+        final front = game.runnerWorldX + hw, step = game.speed / 60;
+        if (front >= o.left && front - step < before) {
+          // The space before it is as long as without rolling.
+          expect(
+            o.left,
+            closeTo(o.anchor, (game.speed + rs) / 60 + .001),
+            reason: why,
+          );
+        }
+      });
+    });
+
+    test('never rolls into another obstacle while both are in the picture', () {
+      // Drawings reach a little beyond their hitboxes.
+      const reach = StageRunner.rollClearance / 2;
+      var close = 0;
+      watch((game, o, before, view, why) {
+        if (!inPicture(game, o.left - reach, o.right + reach, view)) return;
+        for (final other in game.obstacles) {
+          if (identical(other, o)) continue;
+          if (!inPicture(game, other.left - reach, other.right + reach, view)) {
+            continue;
+          }
+          final gap = max(other.left - o.right, o.left - other.right);
+          expect(
+            gap,
+            greaterThanOrEqualTo(StageRunner.rollClearance - 1e-9),
+            reason: '$why: ${other.kind} at ${game.meters} m',
+          );
+          if (gap < .3) close++;
+        }
+      });
+      // Neighbours do come close in the picture, just never too close.
+      expect(close, greaterThan(0));
+    });
+
+    test('can be hopped at every speed from the floor', () {
+      // The least room a runner ever gets before an obstacle is the
+      // spacing of the sections: at least .6 and the reaction time.
+      for (
+        var v = RunnerRules.startSpeed;
+        v <= RunnerRules.maxSpeed + 1e-9;
+        v += .05
+      ) {
+        final t0 = (v - RunnerRules.startSpeed) / RunnerRules.acceleration;
+        final game = StageRunner(random: Random(1))
+          ..time = t0
+          ..distance = 10
+          ..invincible = true
+          // Lays out the course up to beyond the right edge, then clears
+          // it: the next obstacles come long after the drum.
+          ..update(0);
+        game
+          ..invincible = false
+          ..obstacles.clear()
+          ..pickups.clear();
+        final space = max(.6, v * StageRunner.reactionTime(1e9));
+        final anchor = game.runnerWorldX + hw + space;
+        // When the runner's front gets there, found by halving.
+        var lo = t0, hi = t0 + 10;
+        for (var i = 0; i < 60; i++) {
+          final mid = (lo + hi) / 2;
+          final front =
+              game.runnerWorldX +
+              hw +
+              StageRunner.unitsAt(mid) -
+              StageRunner.unitsAt(t0);
+          if (front < anchor) {
+            lo = mid;
+          } else {
+            hi = mid;
+          }
+        }
+        game.obstacles.add(
+          Obstacle()
+            ..kind = ObstacleKind.drum
+            ..anchor = anchor
+            ..meets = hi
+            ..left = anchor + rs * (hi - t0)
+            ..width = StageRunner.drumWidth
+            ..top = StageRunner.floor - StageRunner.drumWidth
+            ..bottom = StageRunner.floor
+            ..falling = true,
+        );
+        // On the floor when the room before it begins; then up just enough
+        // and stay there, steered like [_pilotStep].
+        const over =
+            StageRunner.floor -
+            StageRunner.drumWidth -
+            StageRunner.hitHalfHeight -
+            .025;
+        expect(game.y, StageRunner.floor - StageRunner.runnerHeight / 2);
+        final drum = game.obstacles.single;
+        while (drum.right > game.runnerWorldX - hw - .05 && !game.over) {
+          final wanted = ((over - game.y) * 10)
+              .clamp(-StageRunner.maxRise, StageRunner.maxFall)
+              .toDouble();
+          game
+            ..holding = game.vy > wanted
+            ..update(1 / 60);
+        }
+        expect(game.over, isFalse, reason: 'speed $v');
+        // It was still rolling when the runner passed it.
+        expect(drum.left, lessThan(anchor), reason: 'speed $v');
+      }
+    });
+  });
+
+  group('a pile of its own', () {
+    test('without one a pile is crates', () {
+      expect(RunnerSprite.ofObstacle(ObstacleKind.pile), RunnerSprite.crate);
+      expect(
+        RunnerSprite.ofObstacle(ObstacleKind.pile, ownPile: true),
+        RunnerSprite.pile,
+      );
+      expect(RunnerSprite.pile.layer, RunnerLayer.obstacles);
+    });
+
+    testWidgets('only obstacle sets that draw one have one', (tester) async {
+      final found = await tester.runAsync(() async {
+        final out = <String, bool>{};
+        final files = Directory('server/src/wardrobe/images')
+            .listSync()
+            .whereType<File>()
+            .where((f) => RegExp(r'/obstacles-[^/]+\.webp$').hasMatch(f.path));
+        for (final f in files) {
+          final codec = await ui.instantiateImageCodec(f.readAsBytesSync());
+          final image = (await codec.getNextFrame()).image;
+          out[f.uri.pathSegments.last] = await RunnerArt.draws(
+            image,
+            RunnerSprite.pile,
+          );
+          // Asked again, the answer is remembered.
+          expect(
+            await RunnerArt.draws(image, RunnerSprite.pile),
+            out[f.uri.pathSegments.last],
+          );
+        }
+        return out;
+      });
+      expect(found!.length, greaterThan(5));
+      expect(
+        {
+          for (final MapEntry(:key, :value) in found.entries)
+            if (value) key,
+        },
+        {'obstacles-creepshow.webp'},
+      );
+    });
+
+    testWidgets('the game’s own art never has one', (tester) async {
+      final art = (await tester.runAsync(() async {
+        Future<ui.Image> decode(String name) async {
+          final data = await rootBundle.load('assets/games/stage_runner/$name');
+          final codec = await ui.instantiateImageCodec(
+            data.buffer.asUint8List(),
+          );
+          return (await codec.getNextFrame()).image;
+        }
+
+        return RunnerArt.test(
+          await decode('atlas.webp'),
+          await decode('backdrop.webp'),
+        );
+      }))!;
+      expect(art.ownPile, isFalse);
+      // Without an obstacle set of its own, the flag has nothing to say.
+      expect(art.dressed(ownPile: true).ownPile, isFalse);
+      expect(art.dressed(obstacles: art.atlas, ownPile: true).ownPile, isTrue);
+    });
+  });
+
+  group('a tall crate of its own', () {
+    test('its cell fits the tall crates and is an obstacle', () {
+      final cell = RunnerSprite.tallCrate;
+      expect(cell.layer, RunnerLayer.obstacles);
+      // Crates are drawn tall from 1.35 times their width to the highest
+      // one; the picture is stretched or squeezed by at most a sixth.
+      const lowest = 1.35, highest = .22 / .12;
+      final shape = cell.height / cell.width;
+      expect(lowest / shape, greaterThan(5 / 6));
+      expect(highest / shape, lessThan(7 / 6));
+    });
+
+    testWidgets('a tall crate is one picture, else two crates', (tester) async {
+      final (atlas, set) = (await tester.runAsync(
+        () async => (
+          await createTestImage(width: 1124, height: 577),
+          await createTestImage(width: 1124, height: 577),
+        ),
+      ))!;
+      final base = RunnerArt.test(atlas, atlas);
+      final game = StageRunner(random: Random(1))
+        ..obstacles.clear()
+        ..pickups.clear();
+      // Which cells of the obstacle set are drawn for a crate [height] high.
+      List<Rect> crate(RunnerArt art, double height) {
+        game.obstacles
+          ..clear()
+          ..add(
+            Obstacle()
+              ..left = game.distance + 1
+              ..width = .12
+              ..top = StageRunner.floor - height
+              ..bottom = StageRunner.floor,
+          );
+        final canvas = _DrawnCells(set);
+        stagePainterFor(game, art).paint(canvas, const Size(640, 400));
+        return canvas.cells;
+      }
+
+      final own = base.dressed(obstacles: set, ownTallCrate: true);
+      final plain = base.dressed(obstacles: set);
+      final crates = [RunnerSprite.crate.rect, RunnerSprite.crate.rect];
+      expect(crate(own, .22), [RunnerSprite.tallCrate.rect]);
+      expect(crate(own, .17), [RunnerSprite.tallCrate.rect]);
+      expect(crate(plain, .22), crates);
+      expect(crate(plain, .17), crates);
+      // A low crate is one crate either way.
+      expect(crate(own, .14), [RunnerSprite.crate.rect]);
+      expect(crate(plain, .14), [RunnerSprite.crate.rect]);
+    });
+
+    testWidgets('only obstacle sets that draw one have one', (tester) async {
+      final found = await tester.runAsync(() async {
+        final out = <String, bool>{};
+        final files = Directory('server/src/wardrobe/images')
+            .listSync()
+            .whereType<File>()
+            .where((f) => RegExp(r'/obstacles-[^/]+\.webp$').hasMatch(f.path));
+        for (final f in files) {
+          final codec = await ui.instantiateImageCodec(f.readAsBytesSync());
+          final image = (await codec.getNextFrame()).image;
+          out[f.uri.pathSegments.last] = await RunnerArt.draws(
+            image,
+            RunnerSprite.tallCrate,
+          );
+        }
+        return out;
+      });
+      expect(found!.length, greaterThan(5));
+      expect(
+        {
+          for (final MapEntry(:key, :value) in found.entries)
+            if (value) key,
+        },
+        {'obstacles-creepshow.webp'},
+      );
+    });
+
+    testWidgets('the game’s own art never has one', (tester) async {
+      final art = (await tester.runAsync(() async {
+        Future<ui.Image> decode(String name) async {
+          final data = await rootBundle.load('assets/games/stage_runner/$name');
+          final codec = await ui.instantiateImageCodec(
+            data.buffer.asUint8List(),
+          );
+          return (await codec.getNextFrame()).image;
+        }
+
+        final art = RunnerArt.test(
+          await decode('atlas.webp'),
+          await decode('backdrop.webp'),
+        );
+        // The game's own atlas leaves the cell empty, too.
+        expect(await RunnerArt.draws(art.atlas, RunnerSprite.tallCrate), false);
+        return art;
+      }))!;
+      expect(art.ownTallCrate, isFalse);
+      // Without an obstacle set of its own, the flag has nothing to say.
+      expect(art.dressed(ownTallCrate: true).ownTallCrate, isFalse);
+      expect(
+        art.dressed(obstacles: art.atlas, ownTallCrate: true).ownTallCrate,
+        isTrue,
+      );
     });
   });
 
@@ -2666,4 +3023,22 @@ void main() {
       expect(largest, lessThanOrEqualTo(.01));
     });
   });
+}
+
+/// Records the cells drawn from one atlas [of]; everything else is ignored.
+class _DrawnCells implements Canvas {
+  _DrawnCells(this.of);
+  final ui.Image of;
+  final cells = <Rect>[];
+
+  @override
+  void drawImageRect(ui.Image image, Rect src, Rect dst, Paint paint) {
+    if (image == of) cells.add(src);
+  }
+
+  @override
+  int getSaveCount() => 1;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }

@@ -43,8 +43,9 @@ enum ObstacleKind {
   /// Sandbag that drops from the fly loft shortly before the runner arrives.
   sandbag,
 
-  /// Cable drum that rolls towards the runner along the floor and comes to
-  /// rest just before the runner gets there: hop over it.
+  /// Cable drum that rolls towards the runner along the floor, evenly from
+  /// before it comes into the picture until after it has left it: hop over
+  /// it.
   drum,
 
   /// Pile of three props crates, twice as wide as one: a long hop.
@@ -72,7 +73,7 @@ class Obstacle {
   ObstacleKind kind = ObstacleKind.crate;
   double left = 0, width = 0, top = 0, bottom = 0;
 
-  /// A sandbag is falling or a drum is rolling.
+  /// A sandbag is falling or a drum is rolling (a drum always is).
   bool falling = false;
 
   /// Whether passing it counts for the missions: one per section (the flat
@@ -80,9 +81,13 @@ class Obstacle {
   /// the runner is past it.
   bool counted = false, passed = false;
 
-  /// Where a drum comes to rest (its left edge), or the middle height of a
-  /// drop's lower edge.
+  /// Where a drum's left edge is when the runner gets to it, or the middle
+  /// height of a drop's lower edge.
   double anchor = 0;
+
+  /// When the runner gets to a drum, in seconds of the run: it is at
+  /// [anchor] then and rolls at [StageRunner.rollSpeed] all along.
+  double meets = 0;
 
   /// Where a drop is in its ride up and down, in radians.
   double phase = 0;
@@ -133,8 +138,19 @@ class StageRunner {
     (1000, ObstacleKind.drop),
   ];
 
-  /// A drum starts rolling this far ahead of the runner, at this speed.
-  static const rollFrom = 1.0, rollSpeed = .3;
+  /// A drum rolls towards the runner at this speed (stage heights per
+  /// second), never faster or slower, never stopping.
+  static const rollSpeed = .3;
+
+  /// The section after a drum stands far enough on that the drum has rolled
+  /// past where it stands before it shows on a picture this wide, so the
+  /// course is the same on every screen up to it (only still wider ones get
+  /// their own); [rollClearance] is what the drawings take beyond their
+  /// hitboxes, on both sides together.
+  static const rollView = 3.6, rollClearance = .03;
+
+  /// A drum's size, on the floor.
+  static const drumWidth = .12;
 
   /// A drop's lower edge rides between [dropMiddle] ± [dropSwing], once in
   /// [dropPeriod] seconds: never faster than the runner climbs or sinks, and
@@ -202,6 +218,10 @@ class StageRunner {
   /// Where the next section starts, and the centre of the last gap.
   double _nextX = viewWidth + .3, _lastGapX = 0, _lastGapCenter = .5;
 
+  /// Where and when the drum of the last section meets the runner, if it was
+  /// one.
+  ({double x, double meets})? _drum;
+
   /// The visible width in stage heights, never less than [viewWidth]; the
   /// runner stays [runnerX] from its left edge. The course is laid out .4
   /// beyond its right edge, so on wide screens, too, every obstacle comes in
@@ -263,11 +283,10 @@ class StageRunner {
   static double dropBottom(double middle, double phase, double time) =>
       middle + dropSwing * sin(2 * pi * time / dropPeriod + phase);
 
-  /// How far ahead of its resting place a drum starts, so that it gets there
-  /// before a runner at [speed]: it rolls while both close in on each other,
-  /// counted from a little nearer than [rollFrom] to be sure.
-  static double rollLead(double speed) =>
-      rollSpeed * (rollFrom - .1) / (speed + rollSpeed);
+  /// Stage heights a run has covered after [seconds], as [update] counts
+  /// them.
+  static double unitsAt(double seconds) =>
+      RunnerRules.maxMeters(seconds) / RunnerRules.metersPerUnit;
 
   void update(double dt) {
     dt = dt.clamp(0, .05).toDouble();
@@ -305,10 +324,7 @@ class StageRunner {
               ..bottom += drop;
           }
         case ObstacleKind.drum:
-          if (!o.falling && o.left - x <= rollFrom) o.falling = true;
-          if (o.falling && o.left > o.anchor) {
-            o.left -= min(rollSpeed * dt, o.left - o.anchor);
-          }
+          o.left = o.anchor + rollSpeed * (o.meets - time);
         case ObstacleKind.drop:
           o.bottom = dropBottom(o.anchor, o.phase, time);
         default:
@@ -398,7 +414,8 @@ class StageRunner {
   /// Places one section at [_nextX]: an obstacle (or a gap) and maybe a few
   /// pickups in the safe space next to it.
   void _section() {
-    final x = _nextX, m = x * RunnerRules.metersPerUnit;
+    final x = _pastDrum(_nextX), m = x * RunnerRules.metersPerUnit;
+    _drum = null;
     // The speed when the runner gets here, not the current one. It is
     // estimated as on the narrowest picture, from [lead] ahead: a wider one
     // lays the course out earlier, but must not lay out another one.
@@ -470,11 +487,17 @@ class StageRunner {
         _lastGapCenter = center;
         safeY = center;
       case ObstacleKind.drum:
-        width = .12;
-        // Placed a little further on: it rolls back to x by the time the
-        // runner gets there, so the space before it stays as long as usual.
-        _obstacle(kind, x + rollLead(v), width, floor - width, floor).anchor =
-            x;
+        width = drumWidth;
+        // It gets to x just when the runner does, so the space before it is
+        // as long as usual; until then it is further on, rolling.
+        final meets =
+            time + _secondsFor(max(0.0, x - hitHalfWidth - runnerWorldX));
+        final left = x + rollSpeed * (meets - time);
+        _obstacle(kind, left, width, floor - width, floor)
+          ..falling = true
+          ..anchor = x
+          ..meets = meets;
+        _drum = (x: x, meets: meets);
         safeY = floor - width - .12;
       case ObstacleKind.pile:
         width = .22;
@@ -505,6 +528,30 @@ class StageRunner {
     final length = width + spacing;
     _nextX = x + length;
     if (_random.nextDouble() < .55) _pickups(x + width / 2, safeY, length);
+  }
+
+  /// Where the section that would start at [x] starts instead, so that the
+  /// drum before it (if any) does not roll over it in the picture: by the
+  /// time it shows on the right, even of a [rollView] wide picture, the drum
+  /// has rolled past it. Only ever further on; early in a run, when the
+  /// runner is slow, by a few hundredths.
+  double _pastDrum(double x) {
+    final drum = _drum;
+    if (drum == null) return x;
+    final view = max(rollView, _view);
+    bool clear(double x) {
+      // When the drum's right edge has rolled past x, and how far the runner
+      // has come by then (counted from now, either way).
+      final at =
+          drum.meets - (x - rollClearance - drumWidth - drum.x) / rollSpeed;
+      final then = distance + unitsAt(at) - unitsAt(time);
+      return then + view <= x - rollClearance;
+    }
+
+    while (!clear(x)) {
+      x += .01;
+    }
+    return x;
   }
 
   /// A row of pickups worth at most the per-metre budget of the section.

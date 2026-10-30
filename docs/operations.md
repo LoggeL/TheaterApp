@@ -45,20 +45,51 @@ Unter "Drehbücher" stehen die aktuellen Produktionen. "Drehbucharchiv" öffnet 
 
 ### Web-Build veröffentlichen
 
+**Normalweg: Push auf `main`.** GitHub Actions (`.github/workflows/checks.yml`) prüft und baut im Job `verify` genau die Produktionsversion und lädt sie als Artefakt `theater-web` hoch. Auf HomeBox fragt `theater-autodeploy.timer` jede Minute GitHub ab, nur über ausgehende Verbindungen. Ist `verify` für den aktuellen main-Commit grün, startet `tool/autodeploy.py` den Deploy:
+
+1. Es nimmt das Artefakt nur aus dem Push-Lauf von `checks.yml` auf `LoggeL/TheaterApp` für genau diesen Commit. Pull-Request- und Fork-Läufe zählen nicht. Geprüft werden Ablaufdatum, Größe und die sha256-Prüfsumme. Entpackt wird sicher in ein neues Verzeichnis.
+2. Es checkt denselben Commit im eigenen Clone `~/projects/theater-autodeploy/src` aus, ohne `git clean -x`, und ersetzt `build/web` durch das Artefakt.
+3. Es prüft noch einmal, dass `main` sich nicht bewegt hat, und sichert die laufende Compose-Datei aus Dokploy (`compose.one`) nach `state/prev-compose.yml` und deren Release nach `state/prev-release.json`. Ohne diesen Rückfallpunkt gibt es keinen Rollout.
+4. Dann ruft es `tool/deploy.py --skip-build` lokal auf (`THEATER_DEPLOY_LOCAL=1`, `DOKPLOY_API_URL=http://localhost:3000/api`). Das Backup läuft wie immer zuerst.
+5. Es wartet bis zu 5 Minuten, bis `/api/healthz` die Release aus `artifacts/last-deploy.json` meldet und der Container `healthy` ist. Dann schreibt es den Beleg `~/projects/theater-autodeploy/state/deployed.json` (Commit, Lauf, verify-Job, Release, vorherige Release, Backup-Dateien, Zeit).
+6. Wird die neue Release nicht gesund, spielt es die gesicherte Compose-Datei wieder ein (`compose.update`, `compose.deploy`) und wartet auf die alte Release. Die Meldung nennt beide Releases und die Backup-Datei. Die Datenbank wird nie automatisch zurückgespielt; hat der neue Server beim Start das Schema geändert, läuft die alte Version auf dem geänderten Schema.
+7. Nach einem Erfolg räumt es auf: die neuesten 3 `artifacts/deploy-*.tar.gz` im Clone, die neuesten 10 Ordner in `~/projects/theater-app/releases/` und die neuesten 5 `theater-app`-Images bleiben, die laufende und die vorherige Release immer. Backups löscht es nur mit `THEATER_BACKUP_KEEP` (mindestens 3). Unter 10 GB freiem Platz meldet es sich einmal am Tag.
+
+**Vertrauensmodell:** Was auf `main` landet und `verify` besteht, läuft ohne weitere Prüfung auf HomeBox als `logge` (Docker-Gruppe, Root-äquivalent), denn `deploy.py` und `backup.py` kommen aus dem gepushten Commit. Die installierte Kopie des Deployers schützt nur vor versehentlichem Kaputtmachen, nicht vor einem böswilligen Commit. Push-Zugänge auf `main`, auch Tokens von Agenten, sind deshalb Zugänge zur Produktion. Voraussetzung ist ein Ruleset auf `main` (kein Force-Push, kein Löschen, Status-Check `verify` verpflichtend), siehe [deploy/homebox/README.md](../deploy/homebox/README.md).
+
+Ein grüner Push ist so nach etwa 10 Minuten live. Der Job `google-play` wird dafür nicht abgewartet. Ist nur er rot, wird Web trotzdem bereitgestellt, und Web und Android können kurz auseinanderlaufen. Ist `verify` rot, endet der Lauf ohne `verify`-Job (etwa `startup_failure` nach einem Fehler in `checks.yml`) oder schlägt der Deploy fehl, steht das einmal in `state/failed.json` und wird gemeldet (`NOTIFY_CMD`). Derselbe `verify`-Job wird dann nicht jede Minute erneut versucht. Ein neuer Push oder ein neuer Lauf von `verify` löst wieder aus; ein erneuter Lauf nur von `google-play` nicht. Wird ein Durchgang mitten im Deploy beendet (Timeout, Neustart), meldet der nächste Durchgang das einmal mit dem neuesten Backup; Produktion dann prüfen. Weitere Meldungen: CI nach 60 Minuten noch nicht fertig (einmal am Tag), Fehler außerhalb eines Deploys wie Netz, Git, voller Datenträger, die länger als 15 Minuten anhalten (alle 6 Stunden), abgelehntes GitHub-Token (einmal am Tag). Die Datenbank wird nie automatisch zurückgespielt. Die Einrichtung steht in [deploy/homebox/README.md](../deploy/homebox/README.md).
+
+**Jeder Push auf `main` reicht außerdem Android ein**, im geschlossenen Google-Play-Test `alpha` (Job `google-play`, nach grünem `verify`). Der Job meldet den von Google zurückgelesenen Status (in Prüfung oder veröffentlicht) im Log und im Artefakt `theater-google-play`. Für die Tester verfügbar ist ein eingereichter Release erst nach Googles Freigabe.
+
+Manuell anstoßen, etwa nach einem behobenen Fehler (Rowdy startet nur diesen Dienst und deployt nicht selbst):
+
 ```sh
-git pull --ff-only
+ssh -i ~/.ssh/id_ed25519_homebox -o IdentitiesOnly=yes logge@192.168.178.46 systemctl --user start theater-autodeploy.service
+ssh -i ~/.ssh/id_ed25519_homebox -o IdentitiesOnly=yes logge@192.168.178.46 'journalctl --user -u theater-autodeploy.service -n 50; cat ~/projects/theater-autodeploy/state/deployed.json'
+```
+
+Einen als fehlgeschlagen vermerkten Commit erneut versuchen: auf HomeBox `state/failed.json` löschen und den Dienst starten, oder die installierte Kopie einmal mit `--retry` aufrufen.
+
+**Notfallweg vom Mac**, nur wenn der Auto-Deploy nicht funktioniert. Immer aus einem sauberen Worktree auf dem Stand von `origin/main`, nie mit lokalen Änderungen. Vorher den Timer anhalten und auf die Sperre des Deployers warten, damit nicht zwei Deploys mit Backup gleichzeitig laufen. `systemctl is-active` taugt dafür nicht: Ein laufender oneshot-Dienst steht auf `activating`, und `is-active` endet dann sofort mit Code 3. Bis zum Neustart des Timers den Dienst auch nicht über Rowdy anstoßen.
+
+```sh
+git fetch origin && git switch --detach origin/main && git status --porcelain   # muss leer sein
 flutter pub get
 npm --prefix server ci --ignore-scripts
 flutter analyze
 flutter test
 npm --prefix server test
+ssh -i ~/.ssh/id_ed25519_homebox -o IdentitiesOnly=yes logge@192.168.178.46 'systemctl --user stop theater-autodeploy.timer && flock ~/projects/theater-autodeploy/.deploy.lock true'
 python3 tool/deploy.py
 curl --fail https://app.kolpingtheater-ramsen.de/api/healthz
+ssh -i ~/.ssh/id_ed25519_homebox -o IdentitiesOnly=yes logge@192.168.178.46 systemctl --user start theater-autodeploy.timer
 ```
+
+Nach dem Neustart des Timers stellt der Auto-Deploy den main-Commit einmal selbst bereit, sobald `verify` grün ist, falls er noch nicht in `deployed.json` steht. Das ist gewollt: Produktion läuft danach wieder mit dem CI-Build.
 
 Ist der LAN-Zugang per SSH nicht erreichbar, kann derselbe Ablauf ausdrücklich mit `THEATER_DEPLOY_TRANSPORT=dokploy python3 tool/deploy.py` über den vorhandenen Dokploy-Zugang laufen. `tool/dokploy-transport.mjs` nutzt den bestehenden Schlüsselbund-Eintrag und den laufenden Manager-Container. Backup, Integritätsprüfung und unveränderliche Images bleiben Teil des Ablaufs. Die Build-Verzeichnisse liegen dann im dauerhaften Mount `/etc/dokploy/theater-app/releases/`; die Daten- und Schlüsselpfade des Theater-Dienstes bleiben dieselben. Es werden keine neuen Zugänge oder Netzwerkfreigaben angelegt.
 
-Das Deployment legt zuerst mit `tool/backup.py` eine konsistente SQLite- und Medien-Sicherung an und bricht bei einem Fehler vor Build und Rollout ab. Standardmäßig nutzt es den bestehenden SSH-Key `~/.ssh/id_ed25519_homebox` und auf macOS den Keychain-Eintrag `dokploy.logge.top API Key`. Linux/CI kann den Schlüssel explizit über `DOKPLOY_API_KEY` oder `DOKPLOY_API_KEY_FILE` (reine Schlüsseldatei, Modus 600 oder strenger) bereitstellen. Nur bei Ausführung direkt auf HomeBox `THEATER_DEPLOY_LOCAL=1` setzen; dann läuft dieselbe Container-/Build-Sequenz lokal statt über SSH. `DOKPLOY_API_URL=http://localhost:3000/api` erlaubt dort den direkten Dokploy-Zugriff; ohne diese Variable bleibt die öffentliche HTTPS-API aktiv. Schlüssel nie als Kommandoargument oder im Repository ablegen. Es überträgt ausschließlich explizit ausgewählte Docker-Quelldateien und `build/web`, erzeugt ein unveränderliches Image mit Inhalts-Hash und aktualisiert den bekannten Compose-Dienst. Ein Git-Push allein löst keine Serverbereitstellung aus. `artifacts/last-deploy.json` enthält den erwarteten Hash; `/api/healthz` muss ihn zurückgeben. In Dokploy muss der Dienst `done` und der Container `healthy` sein.
+Das Deployment legt zuerst mit `tool/backup.py` eine konsistente SQLite- und Medien-Sicherung an und bricht bei einem Fehler vor Build und Rollout ab. Standardmäßig nutzt es den bestehenden SSH-Key `~/.ssh/id_ed25519_homebox` und auf macOS den Keychain-Eintrag `dokploy.logge.top API Key`. Linux/CI kann den Schlüssel explizit über `DOKPLOY_API_KEY` oder `DOKPLOY_API_KEY_FILE` (reine Schlüsseldatei, Modus 600 oder strenger) bereitstellen. Nur bei Ausführung direkt auf HomeBox `THEATER_DEPLOY_LOCAL=1` setzen; dann läuft dieselbe Container-/Build-Sequenz lokal statt über SSH. `DOKPLOY_API_URL=http://localhost:3000/api` erlaubt dort den direkten Dokploy-Zugriff; ohne diese Variable bleibt die öffentliche HTTPS-API aktiv. Schlüssel nie als Kommandoargument oder im Repository ablegen. Es überträgt ausschließlich explizit ausgewählte Docker-Quelldateien und `build/web`, erzeugt ein unveränderliches Image mit Inhalts-Hash und aktualisiert den bekannten Compose-Dienst. Mit `--skip-build` übernimmt es ein vorhandenes `build/web`, wie das CI-Artefakt beim Auto-Deploy; `version-web.mjs` und die Prüfung des Firebase-Projekts laufen trotzdem. `artifacts/last-deploy.json` enthält den erwarteten Hash; `/api/healthz` muss ihn zurückgeben. In Dokploy muss der Dienst `done` und der Container `healthy` sein.
 
 Die Daten und der Firebase-Schlüssel liegen auf HomeBox getrennt vom Image:
 
@@ -76,7 +107,7 @@ In der Cloudflare-Zone `logge.top` ist die Single-Redirect-Regel "Theater-App: n
 
 ## Backup und Wiederherstellung
 
-`python3 tool/backup.py` erzeugt über die SQLite-Backup-API eine konsistente lokale Sicherung unter `.secrets/backups/`. Die Sicherung zusätzlich auf ein separates verschlüsseltes Medium kopieren. Die Firebase- und Android-Schlüssel müssen ebenfalls separat gesichert werden.
+`python3 tool/backup.py` erzeugt über die SQLite-Backup-API eine konsistente lokale Sicherung unter `.secrets/backups/`, oder in `THEATER_BACKUP_DIR`, wenn gesetzt. Der Auto-Deploy legt seine Sicherungen auf HomeBox unter `~/projects/theater-autodeploy/backups/` ab, außerhalb des Clones. Weil der Mac-Deploy dabei nicht mehr nebenbei eine Kopie außerhalb von HomeBox erzeugt, ist die Kopie auf ein separates Medium umso wichtiger. Die Sicherung zusätzlich auf ein separates verschlüsseltes Medium kopieren. Die Firebase- und Android-Schlüssel müssen ebenfalls separat gesichert werden.
 
 Zur Wiederherstellung zuerst nur den Theater-App-Container stoppen, dessen Datenbank und WAL/SHM-Dateien als Rückfallkopie sichern und die Backup-Datenbank an ihren Platz kopieren. Eigentümer UID/GID 1000 und Dateimodus 600 wiederherstellen, dann den Dienst starten. Nicht eine Datenbankdatei über eine laufende WAL-Datenbank kopieren. Anschließend Integritätsprüfung, Anmeldung, Termine und Leser kontrollieren.
 

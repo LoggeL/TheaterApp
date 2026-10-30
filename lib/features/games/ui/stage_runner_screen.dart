@@ -1833,6 +1833,10 @@ class _StagePainter extends CustomPainter {
     canvas.drawLine(Offset(0, floorY), Offset(w, floorY), _edgePaint);
   }
 
+  /// A crate too tall for one crate picture: two crates, or the obstacle
+  /// set's own tall one.
+  static bool _tall(Rect rect) => rect.height > rect.width * 1.35;
+
   void _obstacle(
     Canvas canvas,
     RunnerArt a,
@@ -1842,9 +1846,13 @@ class _StagePainter extends CustomPainter {
     double floorY,
   ) {
     switch (o.kind) {
+      case ObstacleKind.crate when a.ownTallCrate && _tall(rect):
+        // One tall picture over the whole hitbox: the cell is as high as
+        // the tall crates are on average, so it is never stretched much.
+        _sprite(canvas, a, RunnerSprite.tallCrate, rect);
       case ObstacleKind.crate:
         // A tall pile is two crates, so none gets stretched much.
-        if (rect.height > rect.width * 1.35) {
+        if (_tall(rect)) {
           final half = rect.height / 2;
           _sprite(
             canvas,
@@ -1911,6 +1919,22 @@ class _StagePainter extends CustomPainter {
           Rect.fromCircle(center: Offset.zero, radius: r),
         );
         canvas.restore();
+      case ObstacleKind.pile when a.ownPile:
+        // One picture over both parts, drawn with the lower one (the upper
+        // one is as high and stands on it); the hitboxes stay the same.
+        if (o.bottom >= StageRunner.floor) {
+          _sprite(
+            canvas,
+            a,
+            RunnerSprite.pile,
+            Rect.fromLTRB(
+              rect.left,
+              rect.top - rect.height,
+              rect.right,
+              rect.bottom,
+            ),
+          );
+        }
       case ObstacleKind.pile:
         // The lower part holds two crates side by side, the top one.
         final count = max(1, (rect.width / rect.height).round());
