@@ -18,8 +18,8 @@ async function serve(t, verifyToken) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}/api/mobile/v1`;
-  const request = async (method, path, token, headers = {}) => {
-    const response = await fetch(`${base}${path}`, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json', ...headers }, ...(['POST', 'PUT', 'DELETE'].includes(method) ? { body: '{}' } : {}) });
+  const request = async (method, path, token, headers = {}, body = {}) => {
+    const response = await fetch(`${base}${path}`, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json', ...headers }, ...(['POST', 'PUT', 'DELETE'].includes(method) ? { body: JSON.stringify(body) } : {}) });
     return { status: response.status, headers: response.headers, body: response.status === 204 ? null : await response.json() };
   };
   return { request, calls, app };
@@ -76,7 +76,7 @@ test('the auth part of Server-Timing reflects a slow token check', async t => {
   assert.ok(app < auth, timing);
 });
 
-test('sign-in, sign-out and admin changes ask for a fresh check; reads may use the cache', async t => {
+test('registration, sign-out and admin changes ask for a fresh check; reads may use the cache', async t => {
   const { request, calls } = await serve(t, fakeVerify);
   await request('POST', '/auth/session', 'admin');
   await request('POST', '/auth/logout', 'admin');
@@ -87,6 +87,31 @@ test('sign-in, sign-out and admin changes ask for a fresh check; reads may use t
   await request('GET', '/admin/accounts', 'admin');
   await request('POST', '/actions', 'admin');
   assert.deepEqual(calls.map(c => c.options), [true, true, true, true, false, false, false, false].map(fresh => ({ fresh })));
+});
+
+test('account administration via /actions is checked again without the cache', async t => {
+  const { request, calls } = await serve(t, fakeVerify);
+  for (const action of ['account.approve', 'account.status', 'account.role', 'account.permissions', 'account.reconsider']) {
+    calls.length = 0;
+    await request('POST', '/actions', 'admin', {}, { action, uid: 'nobody', version: 0 });
+    assert.deepEqual(calls.map(c => c.options), [{ fresh: false }, { fresh: true }], action);
+  }
+  calls.length = 0;
+  await request('POST', '/actions', 'admin', {}, { action: 'settings.reminders', value: {} });
+  assert.deepEqual(calls.map(c => c.options), [{ fresh: false }]);
+});
+
+test('a login revoked meanwhile cannot change accounts, even with a cached check', async t => {
+  let revoked = false;
+  const { request, app } = await serve(t, async (token, { fresh }) => {
+    if (fresh && revoked) throw firebaseError('auth/id-token-revoked');
+    return fakeVerify(token);
+  });
+  revoked = true;
+  const response = await request('POST', '/actions', 'admin', {}, { action: 'account.role', uid: 'admin', role: 'member', version: 1 });
+  assert.equal(response.status, 401);
+  assert.equal(app.store.account('admin').role, 'admin');
+  assert.equal((await request('GET', '/snapshot', 'admin')).status, 200);
 });
 
 test('with the real verifier a revocation is seen at the next sign-in, a Google outage is 503', async t => {

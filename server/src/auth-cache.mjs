@@ -5,7 +5,10 @@
 // from `auth.getUser` and is remembered per uid for `ttlMs`. Parallel requests of one account
 // share a single lookup. A failed lookup at Google (network, 5xx) keeps using an entry younger
 // than `staleMs`; without one the error is `transient` and the API answers 503 instead of 401,
-// so an outage at Google never signs anyone out. Disabled or unknown users are never cached.
+// so an outage at Google never signs anyone out. Such an entry also answers when Google has not
+// replied within `staleWaitMs` (firebase-admin itself waits 25 s per attempt and retries, longer
+// than the app's 20 s); the lookup then refreshes it in the background. Disabled or unknown users
+// are never cached.
 
 // firebase-admin codes and Node socket errors that say nothing about the token or the account.
 const transientCodes = new Set(['app/network-error', 'app/network-timeout', 'auth/internal-error', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EPIPE']);
@@ -28,7 +31,7 @@ const transient = cause => Object.assign(new Error('Die Anmeldung kann gerade ni
  * cached revocation state (sign-in, sign-out, admin changes). `forget(uid)` drops it, e.g. around
  * deleting the Firebase user, so the next request asks Google again.
  */
-export function createTokenVerifier(auth, { ttlMs = 300_000, staleMs = 3_600_000, now = Date.now, maxEntries = 5000 } = {}) {
+export function createTokenVerifier(auth, { ttlMs = 300_000, staleMs = 3_600_000, staleWaitMs = 1500, now = Date.now, maxEntries = 5000 } = {}) {
   const entries = new Map(); // uid -> { checkedAt, disabled, validAfterMs }
   const lookups = new Map(); // uid -> running getUser promise
 
@@ -58,10 +61,20 @@ export function createTokenVerifier(auth, { ttlMs = 300_000, staleMs = 3_600_000
     while (entries.size > maxEntries) entries.delete(entries.keys().next().value);
   };
 
+  // `promise`, or `fallback` once it has not settled within `ms`; the promise keeps running.
+  const within = (promise, ms, fallback) => {
+    let timer;
+    const late = new Promise(resolve => { timer = setTimeout(resolve, ms, fallback); timer.unref?.(); });
+    return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+  };
+
   const state = async (uid, fresh) => {
     const cached = entries.get(uid);
-    if (!fresh && cached && now() - cached.checkedAt < ttlMs) return cached;
+    const age = cached ? now() - cached.checkedAt : Infinity;
+    if (!fresh && age < ttlMs) return cached;
     try {
+      // A hanging Google must not hold up requests that a recent entry can answer.
+      if (!fresh && age < staleMs) return await within(lookup(uid), staleWaitMs, cached);
       return await lookup(uid);
     } catch (e) {
       if (!isTransientAuthError(e)) throw e;

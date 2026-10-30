@@ -111,6 +111,44 @@ test('network errors keep a recent entry and are transient without one', async (
   assert.equal(newcomer.transient, true);
 });
 
+test('a hanging lookup answers from a recent entry after staleWaitMs and refreshes it later', async () => {
+  const { verifier, users, calls, hold, tick } = setup({ staleWaitMs: 20 });
+  await verifier.verify('sam');
+  tick(360_000); // 6 minutes: past the TTL, well within staleMs
+  users.set('sam', { disabled: false, tokensValidAfterTime: new Date(2_000_000).toUTCString() });
+  const release = hold(); // Google never answers until released
+  const started = Date.now();
+  const results = await Promise.all(Array.from({ length: 5 }, () => verifier.verify('sam@1000')));
+  assert.ok(results.every(r => r.uid === 'sam'));
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(calls.getUser, 2); // one shared lookup, still running
+  release();
+  await new Promise(resolve => setImmediate(resolve));
+  // The background lookup stored Google's answer: the revocation now applies.
+  await assert.rejects(verifier.verify('sam@1000'), { code: 'auth/id-token-revoked' });
+  assert.equal(calls.getUser, 2);
+});
+
+test('a lookup that answers in time decides, even past the TTL; fresh checks and newcomers wait', async () => {
+  const { verifier, users, hold, tick } = setup({ staleWaitMs: 20 });
+  await verifier.verify('sam');
+  tick(360_000);
+  users.delete('sam');
+  await assert.rejects(verifier.verify('sam'), { code: 'auth/user-not-found' });
+  users.set('sam', { disabled: false, tokensValidAfterTime: null });
+  await verifier.verify('sam');
+  tick(360_000);
+  const release = hold();
+  let settled = false;
+  const fresh = verifier.verify('sam', { fresh: true }).finally(() => { settled = true; });
+  const newcomer = verifier.verify('kim').then(() => null, e => e);
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(settled, false);
+  release();
+  assert.equal((await fresh).uid, 'sam');
+  assert.equal((await newcomer).code, 'auth/user-not-found');
+});
+
 test('5xx answers and socket errors count as transient, token errors do not', async () => {
   assert.ok(isTransientAuthError({ code: 'auth/internal-error' }));
   assert.ok(isTransientAuthError({ code: 'app/network-timeout' }));
