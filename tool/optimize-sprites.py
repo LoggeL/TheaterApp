@@ -3,7 +3,8 @@
 
   python3 tool/optimize-sprites.py            # dry run: what each file would become
   python3 tool/optimize-sprites.py --write    # overwrite the files that get smaller
-  python3 tool/optimize-sprites.py --check    # exit 1 if a file is new or changed since it was optimized
+  python3 tool/optimize-sprites.py --check    # exit 1 if a file is new or changed since it was optimized,
+                                              # or a thumbnail no longer belongs to its source
   python3 tool/optimize-sprites.py --write server/src/wardrobe/images/obstacles-neu.webp
 
 Needs cwebp/dwebp from libwebp (`brew install webp`) and Python with numpy and Pillow.
@@ -31,6 +32,14 @@ atlas rects, harness points and hitboxes keep matching.
 
 A lossy re-encode compared with a file that was itself re-encoded would lose a little each time,
 so tool/optimize-sprites.json remembers the hash of every optimized file: those are skipped.
+
+Unlike the rest, the small pictures of the wardrobe's cards are made here, from the committed
+pictures, and never edited by hand (`--write` makes what is missing or out of date; a thumbnail is
+only ever made from the optimized source, so it comes after the optimizing):
+- `character-x-thumb.webp` from each `character-x-portrait.webp`, THUMB_SIZE² for the cards;
+- `backdrop-x-portrait.webp` from each `backdrop-x.webp`, the middle of the stage, THUMB_SIZE².
+Their manifest entries name the `source` and its hash (`sourceSha256`), so a re-exported portrait
+whose thumbnail was forgotten fails `--check` (and server/test/runner-thumbs.test.mjs).
 """
 import argparse
 import hashlib
@@ -48,11 +57,14 @@ import numpy as np
 from PIL import Image
 
 root = Path(__file__).resolve().parents[1]
+IMAGES = root / 'server/src/wardrobe/images'
 DIRS = ('assets/games/stage_runner', 'server/src/wardrobe/images')
 MANIFEST = root / 'tool/optimize-sprites.json'
 MIN_SSIM, MIN_TILE_SSIM, MIN_PSNR = 0.995, 0.98, 40.0
 ALPHA_SNAP = 4
 QUALITIES = (70, 74, 78, 81, 84, 86, 88, 90, 92, 94, 96)
+# 384 covers the cards of about 130 pt on phones of a pixel ratio of 3; 320 is visibly softer there.
+THUMB_SIZE, THUMB_QUALITY = 384, 80
 LOSSY = ('-m', '6', '-alpha_q', '100', '-alpha_filter', 'best', '-alpha_method', '1', '-metadata', 'none')
 
 
@@ -296,11 +308,68 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+# --- generated pictures ---------------------------------------------------------------------------
+
+def generated(names):
+    """Name of each generated picture -> the name of the picture it is made from, of the files
+    [names] (the wardrobe's folder)."""
+    out = {}
+    for name in names:
+        if name.startswith('backdrop-'):
+            if not name.endswith('-portrait.webp'):
+                out[f'{name[:-len(".webp")]}-portrait.webp'] = name
+        elif name.endswith('-portrait.webp'):
+            out[f'{name[:-len("-portrait.webp")]}-thumb.webp'] = name
+    return out
+
+
+def small_picture(path):
+    """The source at [path] as a square of THUMB_SIZE: a portrait as it is, a backdrop its middle."""
+    with Image.open(path) as im:
+        rgba = im.convert('RGBA')
+    width, height = rgba.size
+    side = min(width, height)
+    left, top = (width - side) // 2, (height - side) // 2
+    # Pillow scales RGBA premultiplied: no fringe from the colours under the transparent pixels.
+    square = rgba.crop((left, top, left + side, top + side)).resize((THUMB_SIZE, THUMB_SIZE), Image.Resampling.LANCZOS)
+    with tempfile.TemporaryDirectory() as tmp:
+        png = Path(tmp) / 'in.png'
+        save_png(snap(np.asarray(square)), png)
+        return cwebp(png, '-q', str(THUMB_QUALITY), *LOSSY)
+
+
+def outdated(manifest, folder=None):
+    """What is wrong with the generated pictures: (name, source or None, reason), by [manifest]."""
+    folder = folder or IMAGES
+    names = sorted(p.name for p in folder.glob('*.webp'))
+    made = generated(names)
+    key = lambda name: f'{folder.relative_to(root)}/{name}'
+    out = []
+    for name, source in sorted(made.items()):
+        entry = manifest.get(key(name), {})
+        if name not in names:
+            out.append((name, source, 'missing'))
+        elif entry.get('sourceSha256') != sha((folder / source).read_bytes()):
+            out.append((name, source, f'older than {source}'))
+        elif entry.get('sha256') != sha((folder / name).read_bytes()):
+            out.append((name, source, 'changed by hand'))
+    # Left behind by a picture that is gone.
+    for name in names:
+        if 'source' in manifest.get(key(name), {}) and name not in made:
+            out.append((name, None, f"{manifest[key(name)]['source']} is gone"))
+    return out
+
+
+def make(job):
+    name, source = job
+    return name, source, small_picture(IMAGES / source)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('files', nargs='*', type=Path, help='WebP files (default: all of ' + ', '.join(DIRS) + ')')
     parser.add_argument('--write', action='store_true', help='overwrite files that get smaller and record them')
-    parser.add_argument('--check', action='store_true', help='only list files not optimized yet; exit 1 if any')
+    parser.add_argument('--check', action='store_true', help='only list files not optimized yet or generated pictures out of date; exit 1 if any')
     parser.add_argument('--force', action='store_true', help='also re-encode files already optimized (loses a little each time)')
     parser.add_argument('--report', type=Path, help='write the per-file results as JSON here')
     args = parser.parse_args()
@@ -310,12 +379,18 @@ def main():
     for p in files:
         if p.suffix == '.png':
             print(f'{rel(p)}: PNG, please convert to WebP first (and point the catalog at it)', file=sys.stderr)
-    files = [p for p in files if p.suffix == '.webp']
+    # Generated pictures are encoded once, from their source: never optimized on top.
+    made = {IMAGES / name for name in generated(p.name for p in IMAGES.glob('*.webp'))}
+    made |= {root / k for k, v in manifest.items() if 'source' in v}
+    files = [p for p in files if p.suffix == '.webp' and p not in made]
     todo = [p for p in files if args.force or manifest.get(rel(p), {}).get('sha256') != sha(p.read_bytes())]
     if args.check:
         for p in todo:
             print(f'not optimized: {rel(p)}')
-        return 1 if todo else 0
+        stale = outdated(manifest)
+        for name, _, why in stale:
+            print(f'generated picture out of date: {name} ({why}); run --write')
+        return 1 if todo or stale else 0
     reports = []
     with ProcessPoolExecutor(max_workers=os.cpu_count()) as pool:
         for report, out in pool.map(optimize, todo):
@@ -330,6 +405,18 @@ def main():
                 manifest[report['path']] = {'sha256': sha(out), 'before': report['before'], 'method': report['method'] or 'unchanged',
                                             **({'ssim': round(q['ssim'], 5)} if q else {})}
     if args.write:
+        jobs = [(name, source) for name, source, _ in outdated(manifest) if source]
+        with ProcessPoolExecutor(max_workers=os.cpu_count()) as pool:
+            for name, source, out in pool.map(make, jobs):
+                (IMAGES / name).write_bytes(out)
+                manifest[f'{IMAGES.relative_to(root)}/{name}'] = {
+                    'sha256': sha(out), 'source': f'{IMAGES.relative_to(root)}/{source}',
+                    'sourceSha256': sha((IMAGES / source).read_bytes()), 'method': f'{THUMB_SIZE}px q{THUMB_QUALITY}'}
+                print(f'{name}: {len(out)} B from {source}')
+        for name, source, _ in outdated(manifest):
+            if source is None:
+                (IMAGES / name).unlink()
+                print(f'{name}: removed')
         for key in [k for k in manifest if not (root / k).exists()]:
             del manifest[key]
         # One line per file, so a diff shows which pictures changed.

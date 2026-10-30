@@ -375,9 +375,13 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     final art = await dressArt(base, w, controller);
     if (mounted && identical(w, _wardrobe)) {
       setState(() => _art = art);
+      _outfit = dressedOutfit(w);
       _perf?.skin();
     }
   }
+
+  /// The costume [_art] is dressed in, as [outfitOf] says; null for none yet.
+  String? _outfit;
 
   int _tuneRequest = 0;
 
@@ -405,10 +409,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   Future<void> _openWardrobe() async {
     var changed = false;
+    final worn = _wardrobe;
     await openWardrobe(
       context,
       controller,
-      wardrobe: _wardrobe,
+      wardrobe: worn,
+      dressed: worn != null && outfitOf(worn) == _outfit ? _art : null,
       sound: _sound,
       onChanged: (w) {
         if (!mounted) return;
@@ -417,7 +423,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
           _wardrobe = w;
           if (_progress != null) _progress = w.progress;
         });
-        _dress();
+        if (outfitOf(w) != _outfit) _dress();
       },
     );
     // Opened crates move the own place in the collection ranking.
@@ -512,11 +518,15 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     if (!_motion.ready) return;
     final run = ++_run;
     final game = _game = StageRunner(random: widget.random);
-    final perf = _perf = RunnerPerf(game, curtainStart: _curtainStart);
+    final perf = _perf = RunnerPerf(
+      game,
+      curtainStart: _curtainStart,
+      sound: () => _sound.enabled.value,
+    );
     final fx = _fx = RunnerFx(
       best: _board?.own?.score,
       onSound: (sfx) {
-        perf.sound();
+        perf.played();
         _sound.play(sfx);
       },
     );
@@ -533,7 +543,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _sound
       ..prepare()
       ..startMusic();
-    perf.sound();
+    perf.start();
     widget.onRun?.call(_game);
     _hud.value = (0, 0);
     _pointers = 0;

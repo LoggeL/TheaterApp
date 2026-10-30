@@ -1210,7 +1210,7 @@ void main() {
       expect(worst, hasLength(5));
       expect(worst.first['m'], isA<int>());
       final events = worst.expand((w) => '${w['ev'] ?? ''}'.split(',')).toSet();
-      expect(events, contains('sound'), reason: 'the music starts the run');
+      expect(events, contains('start'), reason: 'setting up the run is slow');
       await tester.pumpWidget(const SizedBox());
     });
 

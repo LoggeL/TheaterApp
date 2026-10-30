@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../../../core/app_controller.dart';
+import '../../../core/telemetry/perf_telemetry.dart';
 import '../../../shared/feedback.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/crate_reel.dart';
@@ -32,8 +33,8 @@ Future<Wardrobe?> showCrateOpening(
   PackGoal? packGoal,
   CrateTarget? target,
   Future<CrateTarget?> Function(Wardrobe wardrobe)? chooseTarget,
-}) => Navigator.of(context).push<Wardrobe>(
-  PageRouteBuilder(
+}) {
+  final route = PageRouteBuilder<Wardrobe>(
     opaque: false,
     barrierColor: Colors.black87,
     pageBuilder: (context, _, _) => CrateOpeningPage(
@@ -51,8 +52,10 @@ Future<Wardrobe?> showCrateOpening(
     ),
     transitionsBuilder: (context, animation, _, child) =>
         FadeTransition(opacity: animation, child: child),
-  ),
-);
+  );
+  PerfTelemetry.nameRouteAs(route, 'CrateOpening');
+  return Navigator.of(context).push(route);
+}
 
 enum _Phase { opening, unboxing, spinning, revealed, failed }
 
@@ -130,7 +133,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   CrateOpening? _result;
   CrateReel? _reel;
 
-  /// The reel's portraits, held while the crate is open: the shared cache
+  /// The reel's pictures, held while the crate is open: the shared cache
   /// may drop them meanwhile, the reel must not.
   final _pictures = <String, ui.Image>{};
   late Wardrobe _wardrobe = widget.wardrobe;
@@ -203,19 +206,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                 target: _target?.id,
                 packId: widget.packGoal?.releaseId,
               ))();
-      // The cards' portraits, so the reel never shows an empty card; a slow
-      // connection waits a moment at most.
-      final ids = <String>{};
-      await Future.wait([
-        for (final item in opening.reel)
-          if (item.portrait case final portrait? when ids.add(item.id))
-            WardrobePictures.loadPortrait(widget.controller, portrait).then((
-              image,
-            ) {
-              if (image != null) _pictures[portrait] = image;
-              return image;
-            }),
-      ]).timeout(const Duration(milliseconds: 1500), onTimeout: () => []);
+      await _loadReel(opening);
       if (!mounted) return;
       _wardrobe = opening.wardrobe;
       _changed = true;
@@ -238,6 +229,46 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         });
       }
     }
+  }
+
+  /// The pictures of the reel. Around the winner it comes to rest and is
+  /// looked at: only those (and the large won card) are waited for, a moment
+  /// at most on a slow connection. The others follow as they come: they fly
+  /// past, and all of them at once are a burst the connection handles well,
+  /// but a slow one should not hold up the crate.
+  Future<void> _loadReel(CrateOpening opening) {
+    final reel = opening.reel, winner = opening.winnerIndex;
+    final asked = <String>{};
+    Future<void>? card(WardrobeItem item, {bool Function()? shown}) {
+      final path = item.thumb ?? item.portrait;
+      if (path == null || !asked.add(path)) return null;
+      final load = item.thumb != null
+          ? WardrobePictures.load(widget.controller, path, shown: shown)
+          : WardrobePictures.loadPortrait(
+              widget.controller,
+              path,
+              shown: shown,
+            );
+      return load.then((image) {
+        if (image != null) _pictures[path] = image;
+      });
+    }
+
+    final waited = [
+      for (
+        var i = max(0, winner - 4);
+        i <= min(reel.length - 1, winner + 4);
+        i++
+      )
+        ?card(reel[i]),
+      loadLargeArt(widget.controller, opening.item),
+    ];
+    for (final item in reel) {
+      card(item, shown: () => false);
+    }
+    return Future.wait(
+      waited,
+    ).timeout(const Duration(milliseconds: 1500), onTimeout: () => []);
   }
 
   /// The reel of [opening], after its crate opened (or at once).
@@ -802,7 +833,7 @@ class _ReelPainter extends CustomPainter {
     this.pictures = const {},
   }) : super(repaint: position);
 
-  /// Portraits by path, held by the opening (see [paintItemArt]).
+  /// Pictures by path, held by the opening (see [paintItemArt]).
   final Map<String, ui.Image> pictures;
   final List<WardrobeItem> items;
   final WardrobeCatalog catalog;
@@ -872,7 +903,7 @@ class _ReelPainter extends CustomPainter {
         item,
         art,
         antique: antique,
-        portrait: pictures[item.portrait],
+        portrait: pictures[item.thumb ?? item.portrait],
       );
       final name = _name(item);
       name.paint(canvas, Offset(6, h * .72));

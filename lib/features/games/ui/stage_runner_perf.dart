@@ -7,20 +7,34 @@ import '../domain/stage_runner.dart';
 /// crash and the curtain). Independent of the score: nothing here reaches
 /// `runnerScore`. Inert while the telemetry is off (tests, debug builds).
 class RunnerPerf {
-  RunnerPerf(this._game, {required this.curtainStart})
-    : _recorder = PerfTelemetry.instance.beginRun();
+  RunnerPerf(
+    this._game, {
+    required this.curtainStart,
+    PerfRunRecorder? recorder,
+    this.sound,
+  }) : _recorder = recorder ?? PerfTelemetry.instance.beginRun();
   final StageRunner _game;
   final PerfRunRecorder _recorder;
 
   /// Seconds after the crash when the curtain starts to close.
   final double curtainStart;
+
+  /// Whether sound is on, asked at the end of the run.
+  final bool Function()? sound;
   Object? _lastObstacle;
   Object? _debut;
   bool _crashed = false, _curtain = false;
+  double? _firstStepMs;
 
   /// A game-loop step of [seconds]; the first one after the start has none.
+  /// The first measured one is the start's picture: what setting up the run
+  /// noted (the first obstacle, a sound) is not what happened in the game.
   void step(double seconds) {
     if (seconds <= 0) return;
+    if (_firstStepMs == null) {
+      _firstStepMs = seconds * 1000;
+      _recorder.clear();
+    }
     _recorder.frame(seconds * 1000, seconds: _game.time, meters: _game.meters);
   }
 
@@ -46,7 +60,9 @@ class RunnerPerf {
     }
   }
 
-  void sound() => _recorder.mark(PerfRunEvent.sound);
+  /// The run is being set up: the game, the sound, the music.
+  void start() => _recorder.mark(PerfRunEvent.start);
+  void played() => _recorder.mark(PerfRunEvent.sound);
   void pickup() => _recorder.mark(PerfRunEvent.pickup);
 
   /// A costume picture was decoded and is worn from now on.
@@ -69,6 +85,8 @@ class RunnerPerf {
       backdrop: worn(WardrobeKind.backdrop),
       fx: worn(WardrobeKind.fx),
       end: end,
+      sound: sound?.call(),
+      firstStepMs: _firstStepMs,
     );
   }
 }

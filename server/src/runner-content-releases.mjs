@@ -36,7 +36,7 @@ export const releasePackReady = (base, release) => release.itemIds.every(id => {
 });
 export const releasedFreeItems = t => (t.runnerReleases ?? []).filter(r => releaseIsActive(r, t.clock())).flatMap(r => r.freeItemIds ?? []).filter(id => t.runnerCatalog.byId.has(id));
 
-const assetKeys = ['image', 'portrait', 'obstacles', 'collectibles', 'music', 'openImage', 'fxImage'];
+const assetKeys = ['image', 'portrait', 'thumb', 'obstacles', 'collectibles', 'music', 'openImage', 'fxImage'];
 const filesOf = entries => new Set(entries.flatMap(x => assetKeys.flatMap(key => typeof x[key] === 'string' ? [x[key].match(/\/skins\/([^?]+)/)?.[1]].filter(Boolean) : [])));
 
 /** Preserves parsed item objects (including non-enumerable draw/legacy metadata). */

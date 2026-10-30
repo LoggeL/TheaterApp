@@ -74,10 +74,11 @@ final _placeholder = Paint()..color = const Color(0x14FFFFFF);
 /// Draws the picture of [item] into [rect]: its [portrait] if loaded, else
 /// the cheer pose (or crate and lamp) of its [own] atlas, else the default
 /// art in the item's tint (stand-ins). Both default to what
-/// [WardrobePictures] has. An item with pictures of its own that are not
-/// there (yet, or dropped from the cache) gets a neutral placeholder, never
-/// the default figure. [hidden] shows only a silhouette, for items not
-/// found yet.
+/// [WardrobePictures] has; a given [own] is what the card chose to show,
+/// a cached portrait does not replace it. An item with pictures of its own
+/// that are not there (yet, or dropped from the cache) gets a neutral
+/// placeholder, never the default figure. [hidden] shows only a silhouette,
+/// for items not found yet.
 void paintItemArt(
   Canvas canvas,
   Rect rect,
@@ -107,7 +108,12 @@ void paintItemArt(
     canvas.drawImageRect(image, src, dst, paint);
   }
 
-  final preview = portrait ?? WardrobePictures.cached(item.portrait);
+  final preview =
+      portrait ??
+      (own != null
+          ? null
+          : WardrobePictures.cached(item.portrait) ??
+                WardrobePictures.cached(item.thumb));
   if (preview != null) {
     canvas.save();
     canvas.clipRect(rect);
@@ -219,6 +225,17 @@ void paintItemArt(
   }
 }
 
+/// A large card of a stage shows the picture itself: its portrait is only as
+/// large as a small card.
+bool _largeShowsImage(WardrobeItem item) =>
+    item.kind == WardrobeKind.backdrop && item.image != null;
+
+/// Loads what a large card of [item] shows.
+Future<ui.Image?> loadLargeArt(AppController controller, WardrobeItem item) =>
+    _largeShowsImage(item)
+    ? WardrobePictures.load(controller, item.image)
+    : WardrobePictures.loadPortrait(controller, item.portrait);
+
 /// The picture of an item, loading its preview on demand.
 class WardrobeItemArt extends StatefulWidget {
   const WardrobeItemArt({
@@ -228,11 +245,16 @@ class WardrobeItemArt extends StatefulWidget {
     this.art,
     this.hidden = false,
     this.antique = false,
+    this.small = false,
   });
   final WardrobeItem item;
   final AppController controller;
   final RunnerArt? art;
   final bool hidden, antique;
+
+  /// A small card (the grid): the thumbnail is enough, if there is one. So
+  /// is it for a silhouette.
+  final bool small;
 
   @override
   State<WardrobeItemArt> createState() => _WardrobeItemArtState();
@@ -258,6 +280,7 @@ class _WardrobeItemArtState extends State<WardrobeItemArt> {
     // default art (Engel Logge) instead of the chosen role.
     if (old.item.id != widget.item.id ||
         old.item.portrait != widget.item.portrait ||
+        old.item.thumb != widget.item.thumb ||
         old.item.image != widget.item.image) {
       _portrait = _own = null;
       _load();
@@ -267,25 +290,42 @@ class _WardrobeItemArtState extends State<WardrobeItemArt> {
     }
   }
 
-  /// The portrait; without one (or offline) the item's own atlas or
-  /// backdrop, which the fallback picture is cut from. Dropped from the
-  /// cache, they are fetched again.
+  /// The thumbnail on a small card, else the portrait; without one (or
+  /// offline) the item's own atlas or backdrop, which the fallback picture
+  /// is cut from. Dropped from the cache, they are fetched again.
   Future<void> _load() async {
     final item = widget.item;
     if (!hasOwnPictures(item)) return;
-    _portrait = WardrobePictures.cached(item.portrait);
+    final preview = widget.small || widget.hidden
+        ? item.thumb ?? item.portrait
+        : _largeShowsImage(item)
+        ? null
+        : item.portrait;
+    _portrait = WardrobePictures.cached(preview);
     if (_portrait != null) return;
     _loading = true;
     try {
-      final portrait = await WardrobePictures.loadPortrait(
-        widget.controller,
-        item.portrait,
-      );
+      bool shown() => mounted;
+      final portrait = preview == item.thumb
+          ? await WardrobePictures.load(
+              widget.controller,
+              preview,
+              shown: shown,
+            )
+          : await WardrobePictures.loadPortrait(
+              widget.controller,
+              preview,
+              shown: shown,
+            );
       ui.Image? own;
       if (portrait == null &&
           item.image != null &&
           item.kind != WardrobeKind.fx) {
-        own = await WardrobePictures.load(widget.controller, item.image);
+        own = await WardrobePictures.load(
+          widget.controller,
+          item.image,
+          shown: shown,
+        );
       }
       // Only for the item still shown: a late picture of the one before
       // must not land on this card.
@@ -368,6 +408,7 @@ class WardrobeCard extends StatelessWidget {
     this.animateShine = false,
     this.role,
     this.showRole = true,
+    this.small = false,
   });
   final WardrobeItem item;
   final Wardrobe wardrobe;
@@ -386,6 +427,9 @@ class WardrobeCard extends StatelessWidget {
 
   /// The role line; off where it stands next to the card.
   final bool showRole;
+
+  /// A card of the grid: see [WardrobeItemArt.small].
+  final bool small;
 
   @override
   Widget build(BuildContext context) {
@@ -492,6 +536,7 @@ class WardrobeCard extends StatelessWidget {
                             art: art,
                             hidden: !owned && !item.reward,
                             antique: antique,
+                            small: small,
                           ),
                         ),
                         if (shiny)

@@ -358,7 +358,7 @@ test('the bundled catalog: play-specific uniques and Kolping for the complete te
     ['character.unique-adolph-kolping', '{"allTechnicians":true}'],
     ['character.unique-willi', '{"play":"Eine höllische Herausforderung"}'],
   ]);
-  assert.deepEqual([...c.uniqueFiles.keys()].sort(), ['character-unique-adolph-kolping-portrait.webp', 'character-unique-adolph-kolping.webp', 'character-unique-beatrice-portrait.webp', 'character-unique-beatrice.webp', 'character-unique-captain-kuschel-portrait.webp', 'character-unique-captain-kuschel.webp', 'character-unique-ki-nexus-portrait.webp', 'character-unique-ki-nexus.webp', 'character-unique-willi-portrait.webp', 'character-unique-willi.webp']);
+  assert.deepEqual([...c.uniqueFiles.keys()].sort(), ['character-unique-adolph-kolping-portrait.webp', 'character-unique-adolph-kolping-thumb.webp', 'character-unique-adolph-kolping.webp', 'character-unique-beatrice-portrait.webp', 'character-unique-beatrice-thumb.webp', 'character-unique-beatrice.webp', 'character-unique-captain-kuschel-portrait.webp', 'character-unique-captain-kuschel-thumb.webp', 'character-unique-captain-kuschel.webp', 'character-unique-ki-nexus-portrait.webp', 'character-unique-ki-nexus-thumb.webp', 'character-unique-ki-nexus.webp', 'character-unique-willi-portrait.webp', 'character-unique-willi-thumb.webp', 'character-unique-willi.webp']);
   const raw = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url), 'utf8')).items;
   const beatrice = c.byId.get('character.unique-beatrice');
   assert.deepEqual([beatrice.name, beatrice.play, beatrice.year, beatrice.unlock], ['Beatrice', 'Creepshow', 2026, { play: 'Creepshow' }]);
