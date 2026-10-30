@@ -89,12 +89,17 @@ class _RoutePageState extends State<_RoutePage> {
     _visible = TickerMode.valuesOf(context).enabled;
     if (_visible && _missed) {
       // Uncovered: one rebuild catches up on everything missed meanwhile.
+      // This runs during build, where the element tree must not be walked,
+      // so the screen is marked right after this frame.
       _missed = false;
-      _markScreen();
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _markScreen();
+      });
     }
   }
 
-  /// The screen is the same widget instance: mark it for a rebuild.
+  /// The screen is the same widget instance: mark it for a rebuild. Never
+  /// called during build.
   void _markScreen() =>
       _page.currentContext?.visitChildElements((e) => e.markNeedsBuild());
 

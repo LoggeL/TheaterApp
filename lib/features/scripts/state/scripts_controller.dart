@@ -16,7 +16,7 @@ extension ScriptsController on AppController {
     if (_isDemo || _loadingScripts.contains(productionId)) return;
     final generation = _generation, origin = _apiBaseUrl, token = _token!;
     final stored = _scripts[productionId];
-    final stamp = _scriptStamp(productionId);
+    final stamp = scriptStamp(productionId);
     if (ifChanged && stored != null && stamp != null && _account != null) {
       final index = await _store.read(_account!, 'script_index');
       if (!_current(generation) || _loadingScripts.contains(productionId)) {
@@ -71,7 +71,7 @@ extension ScriptsController on AppController {
   /// What the stored script of [productionId] depends on, as the server
   /// last reported it: the script's revision and the production's version
   /// (bumped by imports and casting). Null when the production is unknown.
-  String? _scriptStamp(String productionId) {
+  String? scriptStamp(String productionId) {
     for (final production in jsonList(_baseSnapshot['productions'])) {
       final json = jsonMap(production);
       if (textValue(json['id']) == productionId) {
@@ -88,7 +88,7 @@ extension ScriptsController on AppController {
     return a.stale == b.stale && _sameJson(left, right);
   }
 
-  /// The stored scripts and, per script, the [_scriptStamp] it was fetched
+  /// The stored scripts and, per script, the [scriptStamp] it was fetched
   /// at. Read and written within the write queue, so parallel loads of
   /// different scripts keep each other's stamps.
   Future<void> _persistScriptIndex(

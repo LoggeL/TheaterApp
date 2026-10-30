@@ -77,6 +77,13 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
 
   /// The last cue in view, written at most every [_cueSaveInterval].
   String? _pendingCueId;
+
+  /// The member who opened the reader; their place is never saved into
+  /// another account that signed in meanwhile.
+  String? _readerId;
+
+  /// The production's script stamp last seen (see [_stampChanged]).
+  String? _stamp;
   static const _cueSaveInterval = Duration(seconds: 5);
   Timer? _searchTimer;
   late final LiveFocusController _live;
@@ -124,6 +131,9 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     return 'Drehbuch';
   }
 
+  /// False once another account took over; the reader closes shortly after.
+  bool get _sameMember => widget.controller.user?.id == _readerId;
+
   /// Lets the part files rebuild; `setState` is protected.
   void _update(VoidCallback change) => setState(change);
 
@@ -160,6 +170,9 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
       productionId: widget.productionId,
     )..addListener(_rebuild);
     _positions.itemPositions.addListener(_onPositionsChanged);
+    _readerId = widget.controller.user?.id;
+    _stamp = widget.controller.scriptStamp(widget.productionId);
+    widget.controller.addListener(_stampChanged);
     _document = widget.controller.scripts[widget.productionId];
     _loading = _document == null;
     _selectAssignedRoles();
@@ -183,6 +196,7 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   void dispose() {
     _saveTimer?.cancel();
     _saveCue();
+    widget.controller.removeListener(_stampChanged);
     _scene.dispose();
     _searchTimer?.cancel();
     _live.dispose();
@@ -196,6 +210,17 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
 
   void _rebuild() {
     if (mounted) setState(() {});
+  }
+
+  /// A sync while the reader is open can bring a new revision or version
+  /// (a cached snapshot at app start is the usual case): check once more,
+  /// or comments and live focus would refer to an outdated version.
+  void _stampChanged() {
+    if (!mounted || !_sameMember || _document == null) return;
+    final stamp = widget.controller.scriptStamp(widget.productionId);
+    if (stamp == null || stamp == _stamp) return;
+    _stamp = stamp;
+    _checkForUpdate();
   }
 
   @override
@@ -369,6 +394,7 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   }
 
   void _saveLastCue(String cueId) {
+    if (!_sameMember) return;
     if (widget.controller.preferences[ReaderPreferences.key(
           widget.productionId,
           'lastCueId',

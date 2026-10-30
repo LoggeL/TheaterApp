@@ -367,5 +367,51 @@ void main() {
       expect(scriptRequests, 3);
       await tester.pumpWidget(const SizedBox.shrink());
     });
+
+    testWidgets('an open reader checks again when a sync brings a change', (
+      tester,
+    ) async {
+      final controller = await signedIn(tester);
+      addTearDown(controller.dispose);
+      await controller.loadScript(id);
+      await open(tester, controller);
+      expect(scriptRequests, 1);
+
+      // Unrelated changes do not fetch.
+      await controller.refresh();
+      await tester.pumpAndSettle();
+      expect(scriptRequests, 1);
+
+      // A re-import while the reader is open: fetched once, quietly.
+      final production = (server.data['productions'] as List).first as Map;
+      production['version'] = 2;
+      await controller.refresh();
+      await tester.pumpAndSettle();
+      expect(scriptRequests, 2);
+      await controller.refresh();
+      await tester.pumpAndSettle();
+      expect(scriptRequests, 2);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('closing the reader after a switch saves nothing elsewhere', (
+      tester,
+    ) async {
+      final controller = await signedIn(tester);
+      addTearDown(controller.dispose);
+      await controller.loadScript(id);
+      await open(tester, controller);
+      await tester.drag(
+        find.byType(ScrollablePositionedList),
+        const Offset(0, -1500),
+      );
+      await tester.pumpAndSettle();
+
+      // Another account takes over before the reader closes.
+      await tester.runAsync(controller.startDemo);
+      expect(controller.isDemo, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(controller.preferences['reader.$id.lastCueId'], isNull);
+    });
   });
 }

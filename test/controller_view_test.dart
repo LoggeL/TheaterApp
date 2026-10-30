@@ -75,6 +75,52 @@ void main() {
     c.dispose();
   });
 
+  testWidgets('an uncovered page catches up once, after the build', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.reset);
+    final c = AppController(
+      localStore: MemoryLocalStore(),
+      credentialStore: MemoryCredentialStore(),
+    );
+    await c.init();
+    await c.startDemo();
+    await tester.pumpWidget(
+      TheaterApp(controller: c, enableDeviceServices: false),
+    );
+    await tester.pumpAndSettle();
+    final builds = <String, int>{};
+    openPage(
+      tester.element(find.byType(AppShell)),
+      _BuildProbe(name: 'A', builds: builds),
+    );
+    await tester.pumpAndSettle();
+    openPage(
+      tester.element(find.byKey(const ValueKey('probe-A'))),
+      _BuildProbe(name: 'B', builds: builds),
+    );
+    await tester.pumpAndSettle();
+
+    builds.clear();
+    await c.setPreference('test.change', 1);
+    await tester.pumpAndSettle();
+    await c.setPreference('test.change', 2);
+    await tester.pumpAndSettle();
+    // Only the page on top shows the changes.
+    expect(builds, {'B': 2});
+
+    builds.clear();
+    Navigator.of(tester.element(find.byKey(const ValueKey('probe-B')))).pop();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    // Uncovered: one rebuild catches up on both changes.
+    expect(builds, {'A': 1});
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
+
   testWidgets('a change rebuilds the shell, not the session gate', (
     tester,
   ) async {
@@ -270,4 +316,17 @@ void main() {
       'Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an.',
     );
   });
+}
+
+/// A page that only counts its builds.
+class _BuildProbe extends StatelessWidget {
+  const _BuildProbe({required this.name, required this.builds});
+  final String name;
+  final Map<String, int> builds;
+
+  @override
+  Widget build(BuildContext context) {
+    builds.update(name, (n) => n + 1, ifAbsent: () => 1);
+    return Scaffold(key: ValueKey('probe-$name'), body: Text(name));
+  }
 }

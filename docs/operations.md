@@ -43,12 +43,6 @@ Ab 0.13.0 steuert `server/src/wardrobe/releases.json` die Freischaltung neuer Sk
 
 Unter "Drehbücher" stehen die aktuellen Produktionen. "Drehbucharchiv" öffnet ältere Stücke, ebenfalls mit dem neuesten zuerst. Die Theaterleitung kann in "Produktionen & Besetzung" eine Produktion öffnen und über "Ins Archiv verschieben" oder "Aus Archiv zurückholen" ihren Status ändern. Der Status bleibt beim erneuten Drehbuchimport erhalten. Rollen, Besetzungen, Kommentare, lokale Markierungen, Offline-Drehbücher und Terminverknüpfungen bleiben bestehen; das Archiv ändert die Sichtbarkeit in der aktuellen Übersicht.
 
-### Drehbuch-Abgleich und Bildschirmaufbau
-
-Ein auf dem Gerät gespeichertes Drehbuch öffnet sofort, ohne Netz. Die App merkt sich zu jedem Drehbuch `revision` und `version` der Produktion aus dem Snapshot (lokal in `script_index.stamps`). Erst wenn sich eines davon ändert (neuer Import oder neue Besetzung), lädt der Reader nach dem Seitenübergang still `GET /productions/:id/script`; ein unverändertes Ergebnis wird weder neu gespeichert noch angezeigt. Geänderte Schauspielernamen allein lösen keinen Abruf aus; dafür gibt es „Fassung aktualisieren“, das immer lädt. Die Leseposition (`lastCueId`) wird höchstens alle 5 Sekunden sowie beim Schließen und beim Wechsel in den Hintergrund gespeichert. Sie und die reinen Reader-Einstellungen (Ansicht, Hinweisarten, Lesezeichen) lösen keinen Neuaufbau der übrigen App aus, ebenso wenig der Szenenwechsel beim Scrollen.
-
-Die Hauptbereiche (Heute, Termine, Skript, Post, Ich) werden erst beim ersten Öffnen aufgebaut und bleiben danach erhalten. Bereiche und Seiten, die von einer anderen Seite verdeckt sind, bauen bei Datenänderungen nicht neu, sondern einmal beim Aufdecken. Eine Mitteilung gilt erst nach dem Seitenübergang als gelesen. Öffnet ein Benachrichtigungslink die App (erster Link in den ersten 10 Sekunden), erscheint die Zielseite einen Frame nach ihrem Bereich und ohne Einblendung; zurück geht es wie gewohnt.
-
 ### Web-Build veröffentlichen
 
 **Normalweg: Push auf `main`.** GitHub Actions (`.github/workflows/checks.yml`) prüft und baut im Job `verify` genau die Produktionsversion und lädt sie als Artefakt `theater-web` hoch. Auf HomeBox fragt `theater-autodeploy.timer` jede Minute GitHub ab, nur über ausgehende Verbindungen. Ist `verify` für den aktuellen main-Commit grün, startet `tool/autodeploy.py` den Deploy:
