@@ -39,6 +39,14 @@
         return choice.outcome === 'accepted';
       } finally { notify(); }
     },
+    // Logging out removes the wardrobe pictures the service worker keeps per account (prefix as in
+    // theater-service-worker.js), also offline and on a page the worker does not control.
+    async clearPrivateCaches() {
+      const storage = window.caches;
+      if (!storage) return;
+      const keys = await storage.keys();
+      await Promise.all(keys.filter(key => key.startsWith('theater-skins-v1-')).map(key => storage.delete(key)));
+    },
   };
   window.addEventListener('beforeinstallprompt', event => {
     event.preventDefault();

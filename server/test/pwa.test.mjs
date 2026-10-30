@@ -119,7 +119,7 @@ function workerRuntime({networkFails = false, installFails = false, userAgent = 
     };
   };
   const context = {
-    URL, Request, Response, WebAssembly, TextEncoder, TextDecoder, atob, crypto,
+    URL, Request, Response, Headers, WebAssembly, TextEncoder, TextDecoder, atob, crypto,
     setTimeout: (callback, ms, ...args) => setTimeout(callback, timeoutMs ?? ms, ...args), clearTimeout,
     self: {location: {origin: ORIGIN}, navigator: {userAgent}, addEventListener: (name, handler) => { handlers[name] = handler; }, skipWaiting: async () => { skipped = true; }, clients: {claim: async () => { claimed = true; }},
       registration: {navigationPreload: {enable: async () => { preload = true; }}}},
@@ -250,7 +250,7 @@ function skinNetwork(cacheControl = 'private, max-age=31536000, immutable') {
   let served = 0;
   const network = request => {
     served++;
-    return basic(`picture ${served} for ${new URL(request.url).pathname}`, {headers: {'Content-Type': 'image/webp', 'Cache-Control': cacheControl, Vary: 'Authorization, Origin'}});
+    return basic(`picture ${served} for ${new URL(request.url).pathname}`, {headers: {'Content-Type': 'image/webp', 'Cache-Control': cacheControl, Vary: 'Authorization, Origin', 'Server-Timing': 'auth;dur=2, app;dur=3'}});
   };
   return {network, served: () => served};
 }
@@ -264,12 +264,17 @@ test('wardrobe pictures come from a per-account cache, also with a renewed token
   const net = skinNetwork();
   const runtime = await loadWorker({network: net.network});
   const first = skin(runtime, 'character-anna.webp', jwt('member-a', {iat: 1}));
-  assert.equal(await (await first.response).text(), 'picture 1 for /api/mobile/v1/games/runner/skins/character-anna.webp/');
+  const fromServer = await first.response;
+  assert.equal(await fromServer.text(), 'picture 1 for /api/mobile/v1/games/runner/skins/character-anna.webp/');
+  assert.equal(fromServer.headers.get('Server-Timing'), 'auth;dur=2, app;dur=3');
   await first.settled();
   const renewed = skin(runtime, 'character-anna.webp', jwt('member-a', {iat: 2}));
   const cached = await renewed.response;
   assert.equal(await cached.text(), 'picture 1 for /api/mobile/v1/games/runner/skins/character-anna.webp/');
   assert.equal(cached.headers.get('Content-Type'), 'image/webp');
+  assert.equal(cached.headers.get('Cache-Control'), 'private, max-age=31536000, immutable');
+  // A hit did not reach the server, so it carries no server timing.
+  assert.equal(cached.headers.get('Server-Timing'), null);
   assert.equal(net.served(), 1);
   // The cache is separated per account and outlives a new app version.
   assert.deepEqual([...runtime.stores.get(skinName('member-a')).keys()], [ORIGIN + '/api/mobile/v1/games/runner/skins/character-anna.webp/?v=abc123']);
@@ -293,6 +298,19 @@ test('wardrobe pictures without a stable version, ranges and unreadable tokens a
   assert.equal(skin(runtime, 'character-anna.webp', jwt('')).response, undefined);
   assert.equal(request(runtime, '/api/mobile/v1/games/runner/skins/character-anna.webp/?v=abc123'), undefined);
   assert.equal(request(runtime, '/api/mobile/v1/games/runner/skins/character-anna.webp/?v=abc123', {method: 'POST', headers: new Headers({Authorization: `Bearer ${jwt('member-a')}`})}), undefined);
+});
+test('wardrobe pictures still come from the server when the browser storage fails', async () => {
+  for (const broken of ['open', 'match']) {
+    const net = skinNetwork();
+    const runtime = await loadWorker({network: net.network});
+    const open = runtime.context.caches.open;
+    runtime.context.caches.open = broken === 'open' ? async () => { throw new Error('UnknownError'); }
+      : async name => ({...await open(name), match: async () => { throw new Error('UnknownError'); }});
+    const attempt = skin(runtime, 'character-anna.webp', jwt('member-a'));
+    assert.equal(await (await attempt.response).text(), 'picture 1 for /api/mobile/v1/games/runner/skins/character-anna.webp/', broken);
+    await attempt.settled();
+    assert.equal(net.served(), 1);
+  }
 });
 test('the per-account picture cache keeps only the newest 600 entries', async () => {
   const net = skinNetwork();
@@ -427,6 +445,19 @@ test('the service worker registers after the first frame, or 10 s after load wit
   insecure.fire('load'); insecure.fire('flutter-first-frame');
   assert.equal(insecure.timers.length + insecure.registrations.length, 0);
   assert(!insecure.splash());
+});
+
+test('the page removes the per-account picture caches itself on logout', async () => {
+  const script = await readFile(source('pwa.js'), 'utf8');
+  const page = pageRuntime();
+  const names = new Set(['theater-skins-v1-aaa', 'theater-skins-v1-bbb', 'theater-app-shell-new', 'unrelated-private-cache']);
+  page.window.caches = {keys: async () => [...names], delete: async name => names.delete(name)};
+  runInNewContext(script, {window: page.window, navigator: page.navigator});
+  await page.window.theaterPwa.clearPrivateCaches();
+  assert.deepEqual([...names], ['theater-app-shell-new', 'unrelated-private-cache']);
+  // Without the Cache API (old browsers, insecure origins) there is nothing to do.
+  delete page.window.caches;
+  await page.window.theaterPwa.clearPrivateCaches();
 });
 
 const run = promisify(execFile);

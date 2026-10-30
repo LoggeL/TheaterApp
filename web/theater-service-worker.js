@@ -55,7 +55,9 @@ self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
     await Promise.all(keys.filter(key => key.startsWith(PREFIX) && key !== CACHE).map(key => caches.delete(key)));
-    // The page request starts while the worker boots instead of after it.
+    // The page request starts while the worker boots instead of after it. The setting belongs to the
+    // registration, not to this worker: a rollback to a worker without preload handling must disable it
+    // in its activate (`self.registration.navigationPreload?.disable()`), or every navigation loads twice.
     try { await self.registration?.navigationPreload?.enable(); } catch {}
     await self.clients.claim();
   })());
@@ -80,16 +82,28 @@ async function skinCacheName(sub) {
   }
   return skinCacheNames.get(sub);
 }
+// A hit must not repeat the server timing of the original request: the app reads `Server-Timing` as server time.
+function storedSkin(response) {
+  const headers = new Headers(response.headers);
+  headers.delete('Server-Timing');
+  return new Response(response.body, {status: response.status, statusText: response.statusText, headers});
+}
 async function skinResponse(event, request, url, sub) {
-  const cache = await caches.open(await skinCacheName(sub));
   // Without headers: another token of the same account finds the same entry despite `Vary: Authorization`.
   const key = new Request(url.href);
-  const cached = await cache.match(key, {ignoreVary: true});
-  if (cached) return cached;
+  let cache;
+  try {
+    cache = await caches.open(await skinCacheName(sub));
+    const cached = await cache.match(key, {ignoreVary: true});
+    if (cached) return cached;
+  } catch {
+    // Broken or full browser storage must not cost the picture; the server still delivers it.
+    return fetch(request);
+  }
   const response = await fetch(request);
   if (response.status === 200 && response.type === 'basic' && /\bimmutable\b/.test(response.headers.get('Cache-Control') || '')) {
     event.waitUntil((async () => {
-      await cache.put(key, response.clone());
+      await cache.put(key, storedSkin(response.clone()));
       // Oldest first; an unbounded wardrobe history must not fill the browser's storage.
       const keys = await cache.keys();
       await Promise.all(keys.slice(0, Math.max(0, keys.length - MAX_SKINS)).map(old => cache.delete(old)));
