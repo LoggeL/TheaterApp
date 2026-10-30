@@ -41,8 +41,31 @@ class AppController extends ChangeNotifier {
            (kIsWeb ? PreferencesCredentialStore() : SecureCredentialStore()),
        _identity = identity,
        _clock = clock ?? DateTime.now {
-    _api.firebaseToken = identity?.token;
+    // A cache-first start shows stored data before Firebase has restored
+    // its sign-in; requests made meanwhile wait for it.
+    _api.firebaseToken = identity == null
+        ? null
+        : (uid) async {
+            if (_identityPending) await _identityReady;
+            return identity.token(uid);
+          };
   }
+
+  /// Whether a start may show the stored data of the last approved Firebase
+  /// account before Firebase has confirmed the sign-in. The snapshot's
+  /// `capabilities.features` can switch it off (`noCacheFirstStart`) or, with
+  /// this default off, on (`cacheFirstStart`); the stored snapshot decides,
+  /// so a change applies from the start after the next sync.
+  static const cacheFirstStartByDefault = true;
+
+  /// How long a confirmed access counts before the background sync asks
+  /// `/auth/session` again. In between the snapshot itself proves the access:
+  /// the server answers it with 403 `access` once it is gone.
+  static const accessCheckInterval = Duration(minutes: 15);
+
+  /// A device token this account registered within this period is not sent
+  /// again when push is restored at a start.
+  static const deviceRegistrationInterval = Duration(hours: 24);
 
   final ApiClient _api;
   final LocalStore _store;
@@ -147,6 +170,14 @@ class AppController extends ChangeNotifier {
   final DateTime Function() _clock;
   Future<void> _writeTail = Future.value();
   Future<void>? _refreshTask, _drainTask;
+
+  /// The first sync after a cache-first start; it waits for Firebase, and
+  /// refreshes started meanwhile join it.
+  Future<void>? _startSync;
+
+  /// Completes (never with an error) once Firebase has restored its sign-in.
+  Future<void> _identityReady = Future.value();
+  bool _identityPending = false;
   bool _refreshSilent = false, _refreshing = false;
   int _generation = 0, _busyCount = 0, _mutationVersion = 0;
   bool _initialized = false,
@@ -156,7 +187,9 @@ class AppController extends ChangeNotifier {
       _disposed = false;
   String _apiBaseUrl = const String.fromEnvironment('API_BASE_URL');
   String? _token, _account, _error, _deviceToken;
-  DateTime? _lastSync, _expiresAt;
+  DateTime? _lastSync, _expiresAt, _deviceRegisteredAt, _accessCheckedAt;
+  Future<void>? _deviceRegistration;
+  String? _deviceRegistrationToken;
   AppUser? _user;
   JsonMap _baseSnapshot = {};
 
@@ -271,6 +304,7 @@ class AppController extends ChangeNotifier {
       'outbox': _outbox.map((e) => e.toJson()).toList(),
       'lastSync': _lastSync?.toIso8601String(),
       'deviceToken': _deviceToken,
+      'deviceRegisteredAt': _deviceRegisteredAt?.toIso8601String(),
     },
   );
 
@@ -364,12 +398,45 @@ class AppController extends ChangeNotifier {
 
   Future<void> Function()? beforeLogout;
 
+  /// Registers [token] for push. With [ifStale] (restoring push at a start)
+  /// a token this account registered within [deviceRegistrationInterval] is
+  /// not sent again, and a registration of the same token already running is
+  /// shared.
   Future<void> registerDevice(
     String token,
     String platform, {
     bool notificationActions = false,
-  }) async {
-    if (_isDemo || _user == null) return;
+    bool ifStale = false,
+  }) {
+    if (_isDemo || _user == null) return Future.value();
+    if (ifStale) {
+      final running = _deviceRegistration;
+      if (running != null && _deviceRegistrationToken == token) return running;
+      final at = _deviceRegisteredAt;
+      final age = at == null ? null : _clock().difference(at);
+      if (token == _deviceToken &&
+          age != null &&
+          !age.isNegative &&
+          age < deviceRegistrationInterval) {
+        return Future.value();
+      }
+    }
+    final task = _registerDevice(token, platform, notificationActions);
+    _deviceRegistration = task;
+    _deviceRegistrationToken = token;
+    return task.whenComplete(() {
+      if (identical(_deviceRegistration, task)) {
+        _deviceRegistration = null;
+        _deviceRegistrationToken = null;
+      }
+    });
+  }
+
+  Future<void> _registerDevice(
+    String token,
+    String platform,
+    bool notificationActions,
+  ) async {
     final generation = _generation;
     final response = await _api.request(
       _apiBaseUrl,
@@ -384,6 +451,7 @@ class AppController extends ChangeNotifier {
     );
     if (!_current(generation)) return;
     _deviceToken = token;
+    _deviceRegisteredAt = _clock();
     _capabilities['pushConfigured'] = response['pushEnabled'] == true;
     await _persistCore(generation);
     _notify();
@@ -400,7 +468,10 @@ class AppController extends ChangeNotifier {
       body: {'token': token},
     );
     if (!_current(generation)) return;
-    if (_deviceToken == token) _deviceToken = null;
+    if (_deviceToken == token) {
+      _deviceToken = null;
+      _deviceRegisteredAt = null;
+    }
     await _persistCore(generation);
   }
 

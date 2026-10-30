@@ -19,6 +19,9 @@ extension SessionController on AppController {
   Future<void> init() async {
     if (_initialized) return;
     final generation = _generation;
+    // Firebase restores its sign-in while the local store opens.
+    final identityStart = _identity == null ? null : _startIdentity();
+    String? cachedUid;
     try {
       await _store.initialize();
       _storeReady = true;
@@ -27,44 +30,39 @@ extension SessionController on AppController {
       if (_apiBaseUrl.isEmpty) _apiBaseUrl = textValue(settings?['baseUrl']);
       await _loadBotCheck();
       if (_identity != null) {
-        await _identity.initialize();
-        if (!_current(generation)) return;
-        // Members signed in before the bot check existed are never asked.
-        if (_identity.uid != null && !_botCheckPassed) {
-          await _rememberBotCheck();
-        }
-        await _restoreFirebase(generation);
-        return;
-      }
-      final saved = await _credentials.read();
-      if (!_current(generation)) return;
-      if (saved != null) {
-        _apiBaseUrl = ApiClient.normalizeBaseUrl(textValue(saved['baseUrl']));
-        _expiresAt = dateValue(saved['expiresAt']);
-        if (_expiresAt != null && !_expiresAt!.isAfter(_clock())) {
-          await _write(() => _credentials.clear());
-          _error =
-              'Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an.';
-        } else {
-          _token = textValue(saved['token']);
-          _user = AppUser.fromJson(jsonMap(saved['user']));
-          if (_token!.isEmpty || _user!.id.isEmpty) {
-            throw const FormatException('Invalid cached session');
-          }
-          _account = _accountKey(_apiBaseUrl, _user!.id);
-          await _hydrate(generation);
+        cachedUid = await _restoreCached(generation);
+        if (cachedUid == null) {
+          await identityStart;
           if (!_current(generation)) return;
-          _isOffline = true;
+          await _restoreIdentity(generation);
+        }
+      } else {
+        final saved = await _credentials.read();
+        if (!_current(generation)) return;
+        if (saved != null) {
+          _apiBaseUrl = ApiClient.normalizeBaseUrl(textValue(saved['baseUrl']));
+          _expiresAt = dateValue(saved['expiresAt']);
+          if (_expiresAt != null && !_expiresAt!.isAfter(_clock())) {
+            await _write(() => _credentials.clear());
+            _error =
+                'Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an.';
+          } else {
+            _token = textValue(saved['token']);
+            _user = AppUser.fromJson(jsonMap(saved['user']));
+            if (_token!.isEmpty || _user!.id.isEmpty) {
+              throw const FormatException('Invalid cached session');
+            }
+            _account = _accountKey(_apiBaseUrl, _user!.id);
+            await _hydrate(generation);
+            if (!_current(generation)) return;
+            _isOffline = true;
+          }
         }
       }
     } catch (_) {
       if (_current(generation)) {
-        _error = _storeReady
-            ? 'Die lokale Anmeldung konnte nicht geladen werden. Bitte melde dich erneut an.'
-            : 'Der lokale Datenspeicher konnte nicht geöffnet werden. Bitte starte die App erneut; Änderungen können noch nicht sicher gespeichert werden.';
-        _token = null;
-        _user = null;
-        _account = null;
+        cachedUid = null;
+        _dropStartSession();
       }
     } finally {
       if (_current(generation)) {
@@ -72,12 +70,126 @@ extension SessionController on AppController {
         _notify();
       }
     }
-    if (_current(generation) && _user != null) await refresh();
+    if (!_current(generation)) return;
+    if (cachedUid != null) {
+      _startSync = _verifyCachedStart(generation, cachedUid, identityStart!);
+    } else if (_identity == null && _user != null) {
+      await refresh();
+    }
   }
 
-  Future<void> _hydrate(int generation) async {
-    final account = _account!;
+  /// The start failed: no session, and a hint what to do.
+  void _dropStartSession() {
+    _error = _storeReady
+        ? 'Die lokale Anmeldung konnte nicht geladen werden. Bitte melde dich erneut an.'
+        : 'Der lokale Datenspeicher konnte nicht geöffnet werden. Bitte starte die App erneut; Änderungen können noch nicht sicher gespeichert werden.';
+    _token = null;
+    _user = null;
+    _account = null;
+  }
+
+  /// Starts restoring the Firebase sign-in. A sign-out waits for it.
+  Future<void> _startIdentity() {
+    final start = _withIdentityTransition(() => _identity!.initialize());
+    _identityPending = true;
+    void done() => _identityPending = false;
+    _identityReady = start.then((_) => done(), onError: (Object _) => done());
+    return start;
+  }
+
+  /// Members signed in before the bot check existed are never asked.
+  Future<void> _restoreIdentity(int generation) async {
+    if (_identity!.uid != null && !_botCheckPassed) await _rememberBotCheck();
+    await _restoreFirebase(generation);
+  }
+
+  /// Cache-first start: shows the stored data of the last approved Firebase
+  /// account before Firebase has restored its sign-in. Returns that account's
+  /// uid, or null when the start has to wait for Firebase (no usable cache,
+  /// another server, a waiting account, or switched off by the server).
+  Future<String?> _restoreCached(int generation) async {
+    final saved = await _credentials.read();
+    if (!_current(generation) || saved == null) return null;
+    final user = AppUser.fromJson(jsonMap(saved['user']));
+    if (user.id.isEmpty ||
+        !user.isApproved ||
+        user.mustChangePassword ||
+        saved['baseUrl'] != _apiBaseUrl) {
+      return null;
+    }
+    final account = _accountKey(_apiBaseUrl, user.id);
     final state = await _store.read(account, 'state');
+    if (!_current(generation) || state == null) return null;
+    final snapshot = jsonMap(state['snapshot']);
+    final features = jsonList(jsonMap(snapshot['capabilities'])['features']);
+    if (jsonMap(snapshot['user'])['userId'] != user.id ||
+        features.contains('noCacheFirstStart') ||
+        !(AppController.cacheFirstStartByDefault ||
+            features.contains('cacheFirstStart'))) {
+      return null;
+    }
+    _user = user;
+    _token = 'firebase:${user.id}';
+    _account = account;
+    await _hydrate(generation, state: state);
+    return _current(generation) ? user.id : null;
+  }
+
+  /// The background half of a cache-first start: once Firebase has restored
+  /// its sign-in, a different or missing sign-in drops the shown data and
+  /// starts like before; the same one checks the access and syncs. Errors
+  /// show as offline or sync error, the stored data stays.
+  Future<void> _verifyCachedStart(
+    int generation,
+    String uid,
+    Future<void> identityStart,
+  ) async {
+    try {
+      try {
+        await identityStart;
+      } catch (_) {
+        if (!_current(generation)) return;
+        ++_generation;
+        _resetMemory();
+        _dropStartSession();
+        _notify();
+        return;
+      }
+      if (!_current(generation)) return;
+      if (_identity!.uid != uid) {
+        final next = ++_generation;
+        _resetMemory();
+        _notify();
+        try {
+          await _restoreIdentity(next);
+        } catch (_) {
+          if (_current(next)) _dropStartSession();
+        }
+        if (_current(next)) _notify();
+        return;
+      }
+      if (!_botCheckPassed) await _rememberBotCheck();
+      await refreshAccess(refreshData: false);
+      if (!_current(generation) || !hasAccess) return;
+      _startSync = null;
+      await refresh(silent: true, accessChecked: true);
+    } catch (error) {
+      if (!_current(generation)) return;
+      if (error is ApiException && error.isUnauthorized) {
+        await _expire(generation);
+        return;
+      }
+      _isOffline = error is ApiException && error.retryable;
+      _error = _message(error);
+      _notify();
+    } finally {
+      if (_current(generation)) _startSync = null;
+    }
+  }
+
+  Future<void> _hydrate(int generation, {JsonMap? state}) async {
+    final account = _account!;
+    state ??= await _store.read(account, 'state');
     final prefs = await _store.read(account, 'preferences');
     final scriptIndex = await _store.read(account, 'script_index');
     if (!_current(generation)) return;
@@ -89,6 +201,7 @@ extension SessionController on AppController {
     ).map((e) => PendingAction.fromJson(jsonMap(e))).toList();
     _lastSync = dateValue(state?['lastSync']);
     _deviceToken = state?['deviceToken'] as String?;
+    _deviceRegisteredAt = dateValue(state?['deviceRegisteredAt']);
     _preferences = prefs ?? {};
     for (final id in jsonList(scriptIndex?['ids'])) {
       final cached = await _store.read(account, 'script:$id');
@@ -230,7 +343,9 @@ extension SessionController on AppController {
     }
     try {
       await refreshAccess(refreshData: false);
-      if (_current(generation) && hasAccess) await refresh();
+      if (_current(generation) && hasAccess) {
+        await refresh(accessChecked: true);
+      }
     } on ApiException catch (e) {
       if (!_current(generation)) return;
       if (!e.retryable) rethrow;
@@ -335,7 +450,10 @@ extension SessionController on AppController {
     String? botCheckProof,
     BotTrapReport? botTrap,
   }) async {
-    if (_identity == null || _identity.uid == null || _isDemo) return;
+    if (_identity == null || _isDemo) return;
+    // A cache-first start may still be restoring the Firebase sign-in.
+    if (_identityPending) await _identityReady;
+    if (_identity.uid == null) return;
     var generation = _generation;
     final post =
         registrationName != null || botCheckProof != null || botTrap != null;
@@ -361,6 +479,10 @@ extension SessionController on AppController {
         statusCode: 401,
       );
     }
+    // Only a change is stored and shown; the background sync asks often.
+    final changed =
+        previous == null || !_sameJson(previous.toJson(), next.toJson());
+    final settled = _error == null && !_isOffline;
     _user = next;
     _account ??= _accountKey(_apiBaseUrl, next.id);
     if (!next.isApproved) {
@@ -368,6 +490,7 @@ extension SessionController on AppController {
         generation = ++_generation;
         _refreshTask = null;
         _drainTask = null;
+        _startSync = null;
         _loadingScripts.clear();
         _busyCount = 0;
         _refreshing = false;
@@ -382,20 +505,26 @@ extension SessionController on AppController {
     } else if (previous?.isApproved != true) {
       await _hydrate(generation);
     } else {
-      _baseSnapshot['user'] = next.toJson();
+      // The server's own map, so the next unchanged snapshot compares equal
+      // (it carries fields the app does not keep, like `provider`).
+      _baseSnapshot['user'] = jsonMap(result['user']);
     }
     if (!_current(generation)) return;
-    await _write(
-      () => _credentials.write({
-        'baseUrl': _apiBaseUrl,
-        'token': _token,
-        'user': next.toJson(),
-      }),
-    );
+    _accessCheckedAt = _clock();
+    if (changed) {
+      await _write(
+        () => _credentials.write({
+          'baseUrl': _apiBaseUrl,
+          'token': _token,
+          'user': next.toJson(),
+        }),
+      );
+      if (!_current(generation)) return;
+    }
     _error = null;
     _isOffline = false;
-    _notify();
-    if (refreshData && next.isApproved) await refresh();
+    if (changed || !settled) _notify();
+    if (refreshData && next.isApproved) await refresh(accessChecked: true);
   }
 
   Future<void> changePassword(String current, String next) async {
@@ -443,6 +572,7 @@ extension SessionController on AppController {
     _expiresAt = dateValue(response['expiresAt']);
     _baseSnapshot['user'] = nextUser.toJson();
     _deviceToken = null;
+    _deviceRegisteredAt = null;
     await _write(() async {
       if (_current(renewedGeneration)) {
         await _credentials.write({
@@ -522,6 +652,11 @@ extension SessionController on AppController {
     _user = null;
     _expiresAt = null;
     _deviceToken = null;
+    _deviceRegisteredAt = null;
+    _accessCheckedAt = null;
+    _deviceRegistration = null;
+    _deviceRegistrationToken = null;
+    _startSync = null;
     _baseSnapshot = {};
     _view = {};
     _events = [];

@@ -45,6 +45,9 @@ abstract final class FirebaseConfiguration {
     iosBundleId: 'de.kolpingtheater.ramsen.theaterapp',
     iosClientId: String.fromEnvironment('GOOGLE_IOS_CLIENT_ID'),
   );
+  static Future<void>? _initializing;
+
+  /// Push and sign-in both start Firebase; they share one initialization.
   static Future<void> initialize() async {
     if (projectId.isEmpty || options.apiKey.isEmpty || options.appId.isEmpty) {
       throw const ApiException(
@@ -56,7 +59,11 @@ abstract final class FirebaseConfiguration {
         'Ein Release darf keine lokale Testanmeldung verwenden.',
       );
     }
-    if (Firebase.apps.isEmpty) await Firebase.initializeApp(options: options);
+    if (Firebase.apps.isNotEmpty) return;
+    final running = _initializing ??= Firebase.initializeApp(
+      options: options,
+    ).then<void>((_) {}).whenComplete(() => _initializing = null);
+    await running;
   }
 }
 
