@@ -64,6 +64,14 @@ class ApiClient {
   /// for the answer and between two chunks.
   static const _binaryTimeout = Duration(seconds: 30);
 
+  /// A wait longer than its timeout by this much means the timer fired
+  /// late, which happens only when the app was not running meanwhile.
+  static const _late = Duration(seconds: 1);
+
+  /// Measures each request; tests can replace it.
+  @visibleForTesting
+  static Stopwatch Function() stopwatch = Stopwatch.new;
+
   /// The server's own time from `Server-Timing` (`app;dur=1.2`), or null.
   static double? serverTimeOf(String? header) {
     if (header == null) return null;
@@ -78,16 +86,15 @@ class ApiClient {
     String path,
     int status,
     Duration elapsed,
-    String? serverTiming,
-    Duration budget,
-  ) => observer?.call(
+    String? serverTiming, {
+    required bool overdue,
+  }) => observer?.call(
     method,
     path,
     status,
     elapsed,
     serverMs: serverTimeOf(serverTiming),
-    // A timer fires late only when the app was not running meanwhile.
-    overdue: elapsed > budget + const Duration(seconds: 1),
+    overdue: overdue,
   );
 
   static String normalizeBaseUrl(String input) {
@@ -152,7 +159,7 @@ class ApiClient {
       request.headers['Content-Type'] = 'application/json';
       request.body = jsonEncode(body);
     }
-    final watch = Stopwatch()..start();
+    final watch = stopwatch()..start();
     var status = 0;
     String? serverTiming;
     try {
@@ -200,7 +207,15 @@ class ApiClient {
         'Keine Verbindung zum Server. Bereits geladene Inhalte bleiben verfügbar.',
       );
     } finally {
-      _observe(method, path, status, watch.elapsed, serverTiming, timeout);
+      final elapsed = watch.elapsed;
+      _observe(
+        method,
+        path,
+        status,
+        elapsed,
+        serverTiming,
+        overdue: elapsed > timeout + _late,
+      );
     }
   }
 
@@ -223,11 +238,23 @@ class ApiClient {
     final request = http.Request('GET', uri)
       ..followRedirects = false
       ..headers['Authorization'] = 'Bearer $actualToken';
-    final watch = Stopwatch()..start();
+    final watch = stopwatch()..start();
     var status = 0;
     String? serverTiming;
+    // The longest single wait: for the answer, for one chunk or for the
+    // rest of an error body. Each has its own timeout, so only a timer
+    // that fired late makes one longer; a slow but steady download, however
+    // long in all, is no pause.
+    var longestWait = Duration.zero, lastMark = Duration.zero;
+    void waited() {
+      final now = watch.elapsed;
+      if (now - lastMark > longestWait) longestWait = now - lastMark;
+      lastMark = now;
+    }
+
     try {
       final response = await _client.send(request).timeout(_binaryTimeout);
+      waited();
       status = response.statusCode;
       serverTiming = response.headers['server-timing'];
       if (response.statusCode != 200) {
@@ -248,6 +275,7 @@ class ApiClient {
       final chunks = <List<int>>[];
       var size = 0;
       await for (final chunk in response.stream.timeout(_binaryTimeout)) {
+        waited();
         size += chunk.length;
         if (size > 80 * 1024 * 1024) {
           throw const ApiException(
@@ -275,14 +303,14 @@ class ApiClient {
     } on http.ClientException {
       throw const ApiException('Keine Verbindung zur Fotogalerie.');
     } finally {
-      // The answer and then the body may each take the full timeout.
+      waited();
       _observe(
         'GET',
         path,
         status,
         watch.elapsed,
         serverTiming,
-        _binaryTimeout * 2,
+        overdue: longestWait > _binaryTimeout + _late,
       );
     }
   }

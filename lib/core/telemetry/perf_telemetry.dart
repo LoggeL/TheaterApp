@@ -206,8 +206,8 @@ class _HeldFrame {
   final WorstFrame? worst;
 }
 
-/// A worst frame waiting for the engine's FrameTimings of the frames that
-/// began (vsync) between [fromUs] and [toUs].
+/// A worst frame waiting for the engine's FrameTimings of the frames whose
+/// vsync stamp ([PerfTelemetry._vsyncNow]) lies between [fromUs] and [toUs].
 class _AwaitedTiming {
   _AwaitedTiming(this.frame, this.fromUs, this.toUs);
   final WorstFrame frame;
@@ -270,6 +270,14 @@ class PerfTelemetry {
                 .instance
                 .currentSystemFrameTimeStamp
                 .inMicroseconds);
+
+  /// The current frame's number (the one of FrameTiming), -1 when unknown;
+  /// tests can replace it.
+  @visibleForTesting
+  int Function()? frameNumberClock;
+  int _frameNumberNow() =>
+      frameNumberClock?.call() ??
+      (_testing ? -1 : ui.PlatformDispatcher.instance.frameData.frameNumber);
   late final NavigatorObserver navigatorObserver = _PerfRouteObserver(this);
   PerfUplink? _uplink;
   bool _active = false, _flushing = false;
@@ -330,12 +338,27 @@ class PerfTelemetry {
   final _awaited = List<_AwaitedTiming?>.filled(32, null);
   int _awaitedNext = 0, _awaitedCount = 0;
 
+  /// The vsync stamps of the last frames by frame number. The framework's
+  /// stamp is not FrameTiming's vsyncStart: on Android and iOS it is the
+  /// frame's target time a refresh later, on the web the browser's frame
+  /// time, which can lie well before the engine reads its clock. A timing
+  /// is matched by its frame's own stamp, otherwise shifted by the last
+  /// known difference.
+  final _stampFrames = List<int>.filled(256, -1);
+  final _stampsUs = List<int>.filled(256, 0);
+  int _stampOffsetUs = 0;
+
   /// Counts trips to the background, so a run skips the step across one.
   int _epoch = 0;
 
-  /// When the app last went to the background or came back ([_now]); an
-  /// API call across that time measured the pause.
+  /// When the app last went to the background or came back from it
+  /// ([_now]); an API call across that time measured the pause.
   int _pausedUs = -1;
+
+  /// Whether the app is hidden or paused: only coming back from there is a
+  /// return, not `inactive` → `resumed` (a dialog of the system, the
+  /// notification shade, a browser window losing focus).
+  bool _inBackground = false;
   String? _lastInput;
 
   /// When each app event (`route`, `api`, `skin`, `img`, `resume`) last
@@ -702,6 +725,7 @@ class PerfTelemetry {
   /// the input. Other frames (after idle pauses) are not sampled.
   @visibleForTesting
   void frameEnded(int nowUs, {required bool nextScheduled}) {
+    _noteStamp();
     double? sample;
     String? input;
     if (!_suspended) {
@@ -761,9 +785,8 @@ class PerfTelemetry {
   void _awaitTimings(WorstFrame worst, double ms) {
     final vsync = _vsyncNow();
     if (vsync < 0) return;
-    // The engine's vsync stamp is the frame's start or its target time,
-    // and the web engine reads its clock a moment after the browser: the
-    // window is generous by 2 ms on both sides.
+    // Timings are matched by their frames' stamps (see [_stampOf]): the
+    // window is generous by 2 ms on both sides only for rounding.
     if (_awaited[_awaitedNext] == null) _awaitedCount++;
     _awaited[_awaitedNext] = _AwaitedTiming(
       worst,
@@ -773,8 +796,28 @@ class PerfTelemetry {
     _awaitedNext = (_awaitedNext + 1) % _awaited.length;
   }
 
-  /// Gives the worst frames around [vsyncUs] the longest [build] and
-  /// [raster] time.
+  /// Notes the current frame's vsync stamp under its number.
+  void _noteStamp() {
+    final frame = _frameNumberNow();
+    if (frame < 0) return;
+    final stamp = _vsyncNow();
+    if (stamp < 0) return;
+    _stampFrames[frame % _stampFrames.length] = frame;
+    _stampsUs[frame % _stampsUs.length] = stamp;
+  }
+
+  /// The vsync stamp of [frame], whose FrameTiming began at [vsyncStartUs].
+  int _stampOf(int frame, int vsyncStartUs) {
+    if (frame >= 0 && _stampFrames[frame % _stampFrames.length] == frame) {
+      final stamp = _stampsUs[frame % _stampsUs.length];
+      _stampOffsetUs = stamp - vsyncStartUs;
+      return stamp;
+    }
+    return vsyncStartUs + _stampOffsetUs;
+  }
+
+  /// Gives the worst frames around [vsyncUs] (a frame's vsync stamp) the
+  /// longest [build] and [raster] time.
   void _matchTiming(int vsyncUs, double build, double raster) {
     if (_awaitedCount == 0) return;
     for (var i = 0; i < _awaited.length; i++) {
@@ -813,7 +856,10 @@ class PerfTelemetry {
       );
       _timing(build, raster, total, route, run);
       _matchTiming(
-        t.timestampInMicroseconds(ui.FramePhase.vsyncStart),
+        _stampOf(
+          t.frameNumber,
+          t.timestampInMicroseconds(ui.FramePhase.vsyncStart),
+        ),
         build,
         raster,
       );
@@ -829,16 +875,17 @@ class PerfTelemetry {
       1000;
 
   /// One FrameTiming: build, raster and total span in ms, for the frame
-  /// whose vsync was at [vsyncUs].
+  /// [frame] that began (vsyncStart) at [vsyncUs].
   @visibleForTesting
   void recordTiming(
     double build,
     double raster,
     double total, {
     int vsyncUs = -1,
+    int frame = -1,
   }) {
     _timing(build, raster, total, _currentRoute(), _run);
-    if (vsyncUs >= 0) _matchTiming(vsyncUs, build, raster);
+    if (vsyncUs >= 0) _matchTiming(_stampOf(frame, vsyncUs), build, raster);
   }
 
   void _timing(
@@ -1148,14 +1195,18 @@ class PerfTelemetry {
 
   void _lifecycleChanged(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _epoch++;
-      _pausedUs = _now();
+      if (_inBackground) {
+        _inBackground = false;
+        _epoch++;
+        _pausedUs = _now();
+        mark('resume');
+      }
       _suspended = false;
       _continuous = false;
       _lastFrameUs = -1;
-      mark('resume');
     } else if (state == AppLifecycleState.hidden ||
         state == AppLifecycleState.paused) {
+      _inBackground = true;
       _suspended = true;
       _continuous = false;
       _background();

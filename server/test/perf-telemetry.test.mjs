@@ -260,8 +260,15 @@ test('30-Hz windows, duplicates and start frames are recognized', () => {
   assert.equal(throttled('app', { ...slow.frames, b95: 22 }), false, 'expensive frames are real jank');
   assert.equal(throttled('app', { ...slow.frames, n: 40 }), false);
   assert.equal(throttled('app', { ...slow.frames, p50: 16.7 }), false);
-  assert.equal(throttled('stageRunner', { p50: 28.4 }), true);
-  assert.equal(throttled('stageRunner', { p50: 16.7 }), false);
+  const step = { n: 1800, p50: 28.4 };
+  assert.equal(throttled('stageRunner', step, 'web'), true);
+  assert.equal(throttled('stageRunner', { ...step, ft: 1800, b95: 4 }, 'web'), true);
+  assert.equal(throttled('stageRunner', { ...step, p50: 16.7 }, 'web'), false);
+  assert.equal(throttled('stageRunner', { ...step, n: 40 }, 'web'), false);
+  assert.equal(throttled('stageRunner', { ...step, p50: 45 }, 'web'), false);
+  // A game loop too expensive for 60 fps is real jank, in the browser and on Android.
+  assert.equal(throttled('stageRunner', { ...step, p50: 33, ft: 1800, b95: 24 }, 'web'), false, 'expensive frames are real jank');
+  assert.equal(throttled('stageRunner', { ...step, p50: 33 }, 'android'), false);
   const row = (id, session, seq, data = { seq }) => ({ install_id: id, session_id: session, data, raw: JSON.stringify(data) });
   const { rows, dropped } = dedupeReports([row('a', 's', 0), row('a', 's', 0), row('a', 's', 1), row('b', 's', 0), row('c', null, undefined, { x: 1 }), row('c', null, undefined, { x: 1 }), row('c', null, undefined, { x: 2 })]);
   assert.equal(dropped, 2);

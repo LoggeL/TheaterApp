@@ -40,6 +40,19 @@ class _Uplink implements PerfUplink {
   }
 }
 
+/// A stopwatch that reads [elapsed] from the test.
+class _FakeStopwatch implements Stopwatch {
+  _FakeStopwatch(this._now);
+  final Duration Function() _now;
+  late final Duration _start = _now();
+  @override
+  void start() => _start;
+  @override
+  Duration get elapsed => _now() - _start;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class _TestPage extends StatelessWidget {
   const _TestPage();
   @override
@@ -345,6 +358,20 @@ void main() {
       expect(before['srv'], hasLength(serverEdges.length + 1));
     });
 
+    test('a focus change is no pause', () {
+      t.clock = () => 10000000;
+      // A system dialog or another window took the focus during the call.
+      t.lifecycleChangedForTest(AppLifecycleState.inactive);
+      t.clock = () => 10200000;
+      t.lifecycleChangedForTest(AppLifecycleState.resumed);
+      t.clock = () => 10300000;
+      t.recordApi('POST', '/actions', 200, const Duration(milliseconds: 500));
+      final api = (t.buildReport()['api']! as List).single as Map;
+      expect(api['n'], 1);
+      expect(api['max'], 500);
+      expect(api, isNot(contains('susp')));
+    });
+
     test('a long frame right before the background is dropped', () {
       t.setRoot('today');
       t.clock = () => 2000000;
@@ -384,6 +411,34 @@ void main() {
       expect(worst['ms'], 90);
       expect(worst['b'], 30);
       expect(worst['ra'], 70);
+    });
+
+    test('FrameTimings are matched by frame where the stamp is the target', () {
+      // Android and iOS: the framework's stamp is the vsync target time, a
+      // refresh after FrameTiming's vsyncStart.
+      var vsync = 0, frame = 0;
+      t
+        ..vsyncClock = (() => vsync + 16700)
+        ..frameNumberClock = (() => frame);
+      for (final (n, at, start) in [
+        (10, 1000000, 5000000),
+        (11, 1016700, 5016700),
+        (12, 1106700, 5106700),
+        (13, 1123400, 5123400),
+      ]) {
+        frame = n;
+        vsync = start;
+        t.frameEnded(at, nextScheduled: true);
+      }
+      t
+        ..recordTiming(2, 3, 6, vsyncUs: 5000000, frame: 10)
+        ..recordTiming(4, 70, 80, vsyncUs: 5016700, frame: 11)
+        ..recordTiming(30, 5, 40, vsyncUs: 5106700, frame: 12)
+        ..recordTiming(9, 90, 99, vsyncUs: 5123400, frame: 13);
+      final worst = (t.buildReport()['worst']! as List).single as Map;
+      expect(worst['ms'], 90);
+      expect(worst['b'], 30);
+      expect(worst['ra'], 70, reason: 'the next frame is not this one');
     });
 
     test('a busy window stays below 4 KB', () {
@@ -657,6 +712,40 @@ void main() {
       ('/media/a', 200, 2.75, false),
     ]);
     expect(ApiClient.serverTimeOf('app;dur=12'), 12);
+
+    // A slow but steady download is no pause, however long it takes in
+    // all; one wait far beyond its timeout is.
+    var now = Duration.zero;
+    final previousWatch = ApiClient.stopwatch;
+    addTearDown(() => ApiClient.stopwatch = previousWatch);
+    ApiClient.stopwatch = () => _FakeStopwatch(() => now);
+    Stream<List<int>> chunks(List<int> gaps) async* {
+      for (final seconds in gaps) {
+        // Each chunk arrives after the previous one was taken.
+        await Future<void>.delayed(Duration.zero);
+        now += Duration(seconds: seconds);
+        yield [1, 2, 3];
+      }
+    }
+
+    final slow = ApiClient(
+      client: MockClient.streaming((request, _) async {
+        now += const Duration(seconds: 2);
+        return http.StreamedResponse(
+          chunks(
+            request.url.path.contains('steady') ? [20, 20, 20, 5] : [5, 45],
+          ),
+          200,
+        );
+      }),
+    );
+    seen.clear();
+    await slow.binary('https://theater.example', '/media/steady', token: 't');
+    await slow.binary('https://theater.example', '/media/frozen', token: 't');
+    expect(seen, [
+      ('/media/steady', 200, null, false),
+      ('/media/frozen', 200, null, true),
+    ]);
     expect(ApiClient.serverTimeOf('auth;dur=3'), isNull);
     expect(ApiClient.serverTimeOf('db;dur=1, app'), isNull);
     expect(ApiClient.serverTimeOf(null), isNull);

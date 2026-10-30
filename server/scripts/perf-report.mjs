@@ -72,11 +72,12 @@ const frameTable = (rows, key, { limit = 25, minFrames = 0 } = {}) => {
 /**
  * Whether a report shows a display throttled to 30 Hz (Safari in Low Power Mode or in a
  * background tab): an app window with a median near 33 ms although frames are cheap to build,
- * or a run with a median of at least 28 ms.
+ * or a run in the browser with a median of 28–35.5 ms, cheap frames where FrameTimings say so.
+ * A device too slow for 60 fps stays in its rows: only the browser throttles like this.
  */
-export function throttled(kind, frames) {
+export function throttled(kind, frames, platform) {
   const f = frames ?? {};
-  if (kind === 'stageRunner') return f.p50 >= 28;
+  if (kind === 'stageRunner') return platform === 'web' && f.p50 >= 28 && f.p50 <= 35.5 && f.n >= 100 && (!f.ft || f.b95 < 16);
   return f.p50 >= 31 && f.p50 <= 35.5 && f.n >= 100 && f.b95 < 16;
 }
 
@@ -218,7 +219,7 @@ const worstTable = (rows, limit) => {
 export function perfReport(db, { days = 7, now = new Date() } = {}) {
   const since = new Date(+now - days * dayMs).toISOString();
   const parsed = db.prepare('SELECT id, created_at, install_id, session_id, kind, platform, renderer, browser, os, pwa, app_version, app_build, data FROM perf_reports WHERE created_at >= ? ORDER BY created_at, id').all(since)
-    .map(r => { try { const data = JSON.parse(r.data); return { ...r, raw: r.data, data, throttled: throttled(r.kind, data.frames) }; } catch { return null; } }).filter(Boolean);
+    .map(r => { try { const data = JSON.parse(r.data); return { ...r, raw: r.data, data, throttled: throttled(r.kind, data.frames, r.platform) }; } catch { return null; } }).filter(Boolean);
   const { rows, dropped } = dedupeReports(parsed);
   const app = rows.filter(r => r.kind === 'app'), runs = rows.filter(r => r.kind === 'stageRunner');
   const installs = new Set(rows.map(r => r.install_id)), sessions = new Set(app.map(r => r.session_id).filter(Boolean));
@@ -227,7 +228,7 @@ export function perfReport(db, { days = 7, now = new Date() } = {}) {
     rows.length ? `Zeitraum der Daten: ${rows[0].created_at.slice(0, 16)} bis ${rows.at(-1).created_at.slice(0, 16)} UTC` : '_Keine Berichte im Zeitraum._', '',
     'Bildzeit = Abstand aufeinanderfolgender Bilder, solange die App ununterbrochen zeichnet (Pausen ohne angefordertes Bild zählen nicht). Prozentwerte: Anteil der Bilder über der Grenze. „>50 ms/min“: Ruckler über 50 ms je Minute aktiver Darstellung. Gruppen-Perzentile sind aus groben Histogrammen interpoliert (Näherung); Ruckel-Anteile und max sind exakt.'];
   if (!rows.length) return out.join('\n');
-  out.push('', `Bereinigt: ${dropped} doppelt gespeicherte Berichte entfernt. Auf 30 Hz gedrosselte Berichte (Median 31–35,5 ms bei Build p95 < 16 ms bzw. Läufe mit Median ≥ 28 ms, meist Safari im Stromsparmodus): App ${app.filter(r => r.throttled).length}, Bühnenlauf ${runs.filter(r => r.throttled).length}. Sie stehen je Tabelle in der Zeile „${throttledLabel}“ und fehlen in den übrigen Zeilen bei Bildern, Perzentilen und Ruckel-Anteilen; „>50 ms/min“ und „Berichte“ zählen sie mit.`);
+  out.push('', `Bereinigt: ${dropped} doppelt gespeicherte Berichte entfernt. Auf 30 Hz gedrosselte Berichte (Median 31–35,5 ms bei Build p95 < 16 ms bzw. Läufe im Browser mit Median 28–35,5 ms, meist Safari im Stromsparmodus): App ${app.filter(r => r.throttled).length}, Bühnenlauf ${runs.filter(r => r.throttled).length}. Sie stehen je Tabelle in der Zeile „${throttledLabel}“ und fehlen in den übrigen Zeilen bei Bildern, Perzentilen und Ruckel-Anteilen; „>50 ms/min“ und „Berichte“ zählen sie mit.`);
   out.push('', '## App: Bildzeiten nach Plattform und Renderer', frameTable(app, keys.platform));
   out.push('', '## App: nach Browser und Betriebssystem', frameTable(app, keys.browser));
   out.push('', '## App: Web installiert (PWA) oder im Browser-Tab', frameTable(app, keys.pwa));
