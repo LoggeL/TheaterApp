@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:theater_app/app/deep_links.dart';
 import 'package:theater_app/app/shell/app_navigation.dart';
 import 'package:theater_app/app/shell/app_section.dart';
 import 'package:theater_app/app/shell/status_banners.dart';
 import 'package:theater_app/core/app_controller.dart';
+import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/features/events/events.dart';
+import 'package:theater_app/features/me/me.dart';
 import 'package:theater_app/features/messages/messages.dart';
 import 'package:theater_app/features/polls/polls.dart';
 import 'package:theater_app/features/settings/settings.dart';
@@ -361,6 +364,101 @@ void main() {
       AppNavigationScope.maybeOf(shellContext(tester))!.value,
       AppSection.messages.index,
     );
+    await finish(tester, c);
+  });
+
+  testWidgets('the first frame builds only the start section', (tester) async {
+    setWidth(tester, 390);
+    final c = await pumpDemo(tester);
+    expect(find.byType(TodayScreen), findsOneWidget);
+    for (final type in [ScheduleScreen, CommunicationScreen, MyAreaScreen]) {
+      expect(find.byType(type, skipOffstage: false), findsNothing);
+    }
+    Finder tab(String label) => find.descendant(
+      of: find.byType(NavigationBar),
+      matching: find.text(label),
+    );
+
+    await tester.tap(tab('Termine'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ScheduleScreen), findsOneWidget);
+    expect(find.byType(MyAreaScreen, skipOffstage: false), findsNothing);
+    final schedule = tester.element(find.byType(ScheduleScreen));
+
+    // Visited sections stay built, with their state, while hidden.
+    await tester.tap(tab('Heute'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ScheduleScreen), findsNothing);
+    expect(
+      tester.element(find.byType(ScheduleScreen, skipOffstage: false)),
+      same(schedule),
+    );
+    await tester.tap(tab('Termine'));
+    await tester.pumpAndSettle();
+    expect(tester.element(find.byType(ScheduleScreen)), same(schedule));
+    expect(tester.takeException(), isNull);
+    await finish(tester, c);
+  });
+
+  testWidgets('the link that starts the app opens its page at once', (
+    tester,
+  ) async {
+    final c = await pumpDemo(tester);
+    final navigator = GlobalKey<NavigatorState>();
+    final messenger = GlobalKey<ScaffoldMessengerState>();
+    final selection = ValueNotifier(AppSection.today.index);
+    addTearDown(selection.dispose);
+    await tester.pumpWidget(
+      AppNavigationScope(
+        selection: selection,
+        controller: c,
+        child: MaterialApp(
+          navigatorKey: navigator,
+          scaffoldMessengerKey: messenger,
+          // iOS transitions, so the back swipe can be checked.
+          theme: ThemeData(platform: TargetPlatform.iOS),
+          home: const Scaffold(body: Text('Start')),
+        ),
+      ),
+    );
+    final router = DeepLinkRouter(
+      controller: c,
+      navigator: navigator,
+      messenger: messenger,
+      isMounted: () => true,
+    );
+
+    router.handle(AppTarget('events', c.events.first.id));
+    // First the section, a frame later the page.
+    expect(selection.value, AppSection.schedule.index);
+    expect(navigator.currentState!.canPop(), isFalse);
+    await tester.pump();
+    await tester.pump();
+    final page = find.byType(EventDetailScreen);
+    expect(page, findsOneWidget);
+    final route = ModalRoute.of(tester.element(page))!;
+    expect(route.transitionDuration, Duration.zero);
+    expect(route.animation!.status, AnimationStatus.completed);
+    expect(find.text('Start'), findsNothing);
+    // Going back still animates, and the iOS back swipe works.
+    expect(route.reverseTransitionDuration, greaterThan(Duration.zero));
+    await tester.dragFrom(const Offset(5, 300), const Offset(600, 0));
+    await tester.pumpAndSettle();
+    expect(find.byType(EventDetailScreen), findsNothing);
+    expect(find.text('Start'), findsOneWidget);
+
+    // Later links open with the usual transition.
+    router.handle(AppTarget('events', c.events.last.id));
+    await tester.pump();
+    // (Offstage for its first frame, while heroes are measured.)
+    expect(
+      ModalRoute.of(
+        tester.element(find.byType(EventDetailScreen, skipOffstage: false)),
+      )!.transitionDuration,
+      greaterThan(Duration.zero),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Start'), findsNothing);
     await finish(tester, c);
   });
 

@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:theater_app/core/app_controller.dart';
+import 'package:theater_app/data/demo_data.dart';
 import 'package:theater_app/data/local_store.dart';
 import 'package:theater_app/features/scripts/scripts.dart';
+
+import 'app_controller_test.dart' show TestServer, signIn;
 
 const script = ScriptDocument(
   productionId: 'test',
@@ -242,4 +246,172 @@ void main() {
       controller.dispose();
     },
   );
+
+  group('reading without rebuilding the app', () {
+    const id = DemoData.mainProductionId;
+    late TestServer server;
+    late MemoryLocalStore store;
+    late MemoryCredentialStore credentials;
+    var scriptRequests = 0;
+
+    setUp(() {
+      server = TestServer();
+      store = MemoryLocalStore();
+      credentials = MemoryCredentialStore();
+      scriptRequests = 0;
+      server.override = (request) {
+        if (request.url.path.contains('/script')) scriptRequests++;
+        return null;
+      };
+    });
+
+    Future<AppController> signedIn(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final controller = server.controller(
+        store: store,
+        credentials: credentials,
+      );
+      await signIn(controller);
+      return controller;
+    }
+
+    Future<void> open(WidgetTester tester, AppController controller) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScriptReaderScreen(controller: controller, productionId: id),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    String sceneLabel(WidgetTester tester) => tester
+        .widgetList<Text>(
+          find.descendant(of: find.byType(AppBar), matching: find.byType(Text)),
+        )
+        .map((text) => text.data)
+        .skip(1)
+        .first!;
+
+    testWidgets('scrolling across scenes notifies nobody and keeps the place', (
+      tester,
+    ) async {
+      final controller = await signedIn(tester);
+      await controller.loadScript(id);
+      await open(tester, controller);
+      final firstScene = sceneLabel(tester);
+      var notifications = 0;
+      controller.addListener(() => notifications++);
+
+      final list = find.byType(ScrollablePositionedList);
+      for (var i = 0; i < 6; i++) {
+        await tester.drag(list, const Offset(0, -500));
+        await tester.pumpAndSettle();
+      }
+      expect(sceneLabel(tester), isNot(firstScene));
+      await tester.pump(const Duration(seconds: 6));
+      expect(notifications, 0);
+      final saved = controller.preferences['reader.$id.lastCueId'];
+      expect(saved, isNotNull);
+
+      // Closing the reader stores the latest place without waiting.
+      await tester.drag(list, const Offset(0, -1500));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      final last = controller.preferences['reader.$id.lastCueId'];
+      expect(last, isNot(saved));
+      expect(notifications, 0);
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      controller.dispose();
+
+      final again = server.controller(store: store, credentials: credentials);
+      addTearDown(again.dispose);
+      await again.init();
+      expect(again.preferences['reader.$id.lastCueId'], last);
+    });
+
+    testWidgets('a stored script is fetched again only after it changed', (
+      tester,
+    ) async {
+      final controller = await signedIn(tester);
+      addTearDown(controller.dispose);
+      await controller.loadScript(id);
+      expect(scriptRequests, 1);
+      final document = controller.scripts[id];
+
+      await open(tester, controller);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await open(tester, controller);
+      expect(scriptRequests, 1);
+
+      // A new cast bumps the production's version: one quiet check. The
+      // same script comes back, so nothing is rebuilt or announced.
+      final production = (server.data['productions'] as List).first as Map;
+      expect(production['id'], id);
+      production['version'] = 2;
+      await controller.refresh();
+      var notifications = 0;
+      controller.addListener(() => notifications++);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await open(tester, controller);
+      expect(scriptRequests, 2);
+      expect(notifications, 0);
+      expect(controller.scripts[id], same(document));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await open(tester, controller);
+      expect(scriptRequests, 2);
+
+      // Asked for, the newest version is always fetched.
+      await controller.loadScript(id);
+      expect(scriptRequests, 3);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('an open reader checks again when a sync brings a change', (
+      tester,
+    ) async {
+      final controller = await signedIn(tester);
+      addTearDown(controller.dispose);
+      await controller.loadScript(id);
+      await open(tester, controller);
+      expect(scriptRequests, 1);
+
+      // Unrelated changes do not fetch.
+      await controller.refresh();
+      await tester.pumpAndSettle();
+      expect(scriptRequests, 1);
+
+      // A re-import while the reader is open: fetched once, quietly.
+      final production = (server.data['productions'] as List).first as Map;
+      production['version'] = 2;
+      await controller.refresh();
+      await tester.pumpAndSettle();
+      expect(scriptRequests, 2);
+      await controller.refresh();
+      await tester.pumpAndSettle();
+      expect(scriptRequests, 2);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('closing the reader after a switch saves nothing elsewhere', (
+      tester,
+    ) async {
+      final controller = await signedIn(tester);
+      addTearDown(controller.dispose);
+      await controller.loadScript(id);
+      await open(tester, controller);
+      await tester.drag(
+        find.byType(ScrollablePositionedList),
+        const Offset(0, -1500),
+      );
+      await tester.pumpAndSettle();
+
+      // Another account takes over before the reader closes.
+      await tester.runAsync(controller.startDemo);
+      expect(controller.isDemo, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(controller.preferences['reader.$id.lastCueId'], isNull);
+    });
+  });
 }

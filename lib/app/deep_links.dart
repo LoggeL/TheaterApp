@@ -31,6 +31,14 @@ class DeepLinkRouter {
   final bool Function() isMounted;
   AppTarget? _pendingTarget;
 
+  /// Time since the router (and thus the app) started.
+  final _age = Stopwatch()..start();
+  bool _handledAny = false;
+
+  /// How long after the start a first link counts as the app's launch
+  /// target (a notification tap that started the app).
+  static const launchWindow = Duration(seconds: 10);
+
   bool get hasPending => _pendingTarget != null;
 
   /// Removes and returns the waiting target, if any.
@@ -113,13 +121,27 @@ class DeepLinkRouter {
     if (target.attendance != null && target.recipientUid != null) {
       unawaited(_respondToTarget(target));
     }
+    // The link that launched the app: the page appears without a
+    // transition, a frame after its section, so the section's first build
+    // and the page's do not share one frame on a busy startup.
+    final launch = !_handledAny && _age.elapsed < launchWindow;
+    _handledAny = true;
     // One target at a time: the page opens above its section's start. A
     // page with unsaved input stays below the target instead.
     final context = navigator.currentContext!;
     final state = navigator.currentState!;
     selectSection(context, section);
     if (!hasUnsavedChanges(state)) state.popUntil((route) => route.isFirst);
-    openPage(context, page);
+    if (!launch) {
+      openPage(context, page);
+      return;
+    }
+    WidgetsBinding.instance.endOfFrame.then((_) {
+      final state = navigator.currentState;
+      if (isMounted() && state != null && state.mounted) {
+        openPage(state.context, page, animate: false);
+      }
+    });
   }
 
   Future<void> _respondToTarget(AppTarget target) async {

@@ -43,25 +43,111 @@ class SessionGate extends StatelessWidget {
     if (startupError != null) {
       return _StartupError(error: startupError!, onRetry: onRetry);
     }
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) => controller.user == null
-          ? controller.usesFirebase
-                // The bot check comes before the first sign-in on a device.
-                ? controller.needsBotCheck
-                      ? BotCheckScreen(controller: controller)
-                      : FirebaseWelcomeScreen(controller: controller)
-                : WelcomeScreen(controller: controller)
-          : !controller.hasAccess
-          ? ApprovalPendingScreen(controller: controller, devices: devices)
-          : controller.user!.mustChangePassword
-          ? PasswordScreen(controller: controller, requiredChange: true)
-          : AppShell(
-              controller: controller,
-              devices: devices,
-              promptForPush: promptForPush,
-              beforePushPrompt: beforePushPrompt,
-            ),
+    return _SessionPage(
+      controller: controller,
+      devices: devices,
+      promptForPush: promptForPush,
+      beforePushPrompt: beforePushPrompt,
+    );
+  }
+}
+
+/// What decides the home page; see [_SessionPageState._gate].
+typedef _Gate = ({
+  bool signedIn,
+  bool usesFirebase,
+  bool needsBotCheck,
+  bool hasAccess,
+  bool mustChangePassword,
+});
+
+/// The home page for the session. The sign-in and approval pages read the
+/// controller (errors, settings) and rebuild with every change. The app
+/// shell listens itself, so it is rebuilt here only when the page changes.
+class _SessionPage extends StatefulWidget {
+  const _SessionPage({
+    required this.controller,
+    required this.devices,
+    required this.promptForPush,
+    required this.beforePushPrompt,
+  });
+  final AppController controller;
+  final DeviceServices devices;
+  final bool promptForPush;
+  final Future<void> Function()? beforePushPrompt;
+
+  @override
+  State<_SessionPage> createState() => _SessionPageState();
+}
+
+class _SessionPageState extends State<_SessionPage> {
+  late _Gate _shown = _gate;
+
+  _Gate get _gate {
+    final c = widget.controller;
+    return (
+      signedIn: c.user != null,
+      usesFirebase: c.usesFirebase,
+      needsBotCheck: c.needsBotCheck,
+      hasAccess: c.hasAccess,
+      mustChangePassword: c.user?.mustChangePassword == true,
+    );
+  }
+
+  static bool _isShell(_Gate gate) =>
+      gate.signedIn && gate.hasAccess && !gate.mustChangePassword;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(_SessionPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_changed);
+      widget.controller.addListener(_changed);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    final gate = _gate;
+    if (gate != _shown || !_isShell(gate)) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller, gate = _shown = _gate;
+    if (!gate.signedIn) {
+      return gate.usesFirebase
+          // The bot check comes before the first sign-in on a device.
+          ? gate.needsBotCheck
+                ? BotCheckScreen(controller: controller)
+                : FirebaseWelcomeScreen(controller: controller)
+          : WelcomeScreen(controller: controller);
+    }
+    if (!gate.hasAccess) {
+      return ApprovalPendingScreen(
+        controller: controller,
+        devices: widget.devices,
+      );
+    }
+    if (gate.mustChangePassword) {
+      return PasswordScreen(controller: controller, requiredChange: true);
+    }
+    return AppShell(
+      controller: controller,
+      devices: widget.devices,
+      promptForPush: widget.promptForPush,
+      beforePushPrompt: widget.beforePushPrompt,
     );
   }
 }

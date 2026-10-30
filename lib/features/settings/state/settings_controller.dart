@@ -29,7 +29,14 @@ final Map<String, bool> _defaultReminders = Map.unmodifiable({
 
 /// Local preferences and reminder settings.
 extension SettingsController on AppController {
-  Future<void> setPreference(String key, Object? value) async {
+  /// Stores a local preference. Without [notify] nothing rebuilds: for
+  /// values only the screen setting them shows (the reader's position and
+  /// view), so scrolling a script does not rebuild the whole app.
+  Future<void> setPreference(
+    String key,
+    Object? value, {
+    bool notify = true,
+  }) async {
     if (_account == null) return;
     if (value == null) {
       _preferences.remove(key);
@@ -37,7 +44,7 @@ extension SettingsController on AppController {
       _preferences[key] = value;
     }
     final generation = _generation;
-    _notify();
+    if (notify) _notify();
     await _persist(generation, 'preferences', () => _preferences);
   }
 

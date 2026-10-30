@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 abstract final class StageTheme {
@@ -105,7 +106,16 @@ abstract final class StageTheme {
       brightness == Brightness.dark
       ? const Color(0xFF65311F)
       : const Color(0xFFFFE4D8);
-  static ThemeData build(Brightness brightness) {
+  static final _themes = <(Brightness, TargetPlatform), ThemeData>{};
+
+  /// The app theme for [brightness]. Built once per brightness (and target
+  /// platform, which the theme captures) and then shared: the seeded colour
+  /// scheme alone costs about a millisecond, too much for every build of a
+  /// screen that switches themes (the reader's stage mode).
+  static ThemeData build(Brightness brightness) =>
+      _themes[(brightness, defaultTargetPlatform)] ??= _create(brightness);
+
+  static ThemeData _create(Brightness brightness) {
     final dark = brightness == Brightness.dark;
     final scheme =
         ColorScheme.fromSeed(

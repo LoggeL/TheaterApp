@@ -2,15 +2,186 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/app/background_sync.dart';
+import 'package:theater_app/app/shell/app_navigation.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/data/api_client.dart';
 import 'package:theater_app/data/demo_data.dart';
+import 'package:theater_app/data/local_store.dart';
+import 'package:theater_app/features/events/events.dart';
+import 'package:theater_app/features/messages/messages.dart';
+import 'package:theater_app/features/today/today.dart';
 import 'package:theater_app/main.dart';
+import 'package:theater_app/shared/navigation.dart';
 
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
 
+/// Counts the builds per widget type while the test runs.
+Map<Type, int> countBuilds() {
+  final builds = <Type, int>{};
+  debugOnRebuildDirtyWidget = (element, _) => builds.update(
+    element.widget.runtimeType,
+    (n) => n + 1,
+    ifAbsent: () => 1,
+  );
+  return builds;
+}
+
 void main() {
+  setUpAll(() => initializeDateFormatting('de'));
+
+  testWidgets('a covered shell waits with its rebuild until it shows again', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.reset);
+    final c = AppController(
+      localStore: MemoryLocalStore(),
+      credentialStore: MemoryCredentialStore(),
+    );
+    await c.init();
+    await c.startDemo();
+    await tester.pumpWidget(
+      TheaterApp(controller: c, enableDeviceServices: false),
+    );
+    await tester.pumpAndSettle();
+    final shell = tester.element(find.byType(AppShell));
+    openPage(
+      shell,
+      EventDetailScreen(controller: c, eventId: c.events.first.id),
+    );
+    await tester.pumpAndSettle();
+
+    final builds = countBuilds();
+    await c.setPreference('test.change', 1);
+    await tester.pumpAndSettle();
+    await c.setPreference('test.change', 2);
+    await tester.pumpAndSettle();
+    // The page shows the change; the shell below and Heute do not build.
+    expect(builds[EventDetailScreen], greaterThan(0));
+    expect(builds[AppNavigationBar], isNull);
+    expect(builds[TodayScreen], isNull);
+
+    builds.clear();
+    Navigator.of(shell).pop();
+    await tester.pumpAndSettle();
+    // Uncovered: one rebuild catches up on both changes.
+    expect(builds[AppNavigationBar], 1);
+    expect(builds[TodayScreen], 1);
+    debugOnRebuildDirtyWidget = null;
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
+
+  testWidgets('an uncovered page catches up once, after the build', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.reset);
+    final c = AppController(
+      localStore: MemoryLocalStore(),
+      credentialStore: MemoryCredentialStore(),
+    );
+    await c.init();
+    await c.startDemo();
+    await tester.pumpWidget(
+      TheaterApp(controller: c, enableDeviceServices: false),
+    );
+    await tester.pumpAndSettle();
+    final builds = <String, int>{};
+    openPage(
+      tester.element(find.byType(AppShell)),
+      _BuildProbe(name: 'A', builds: builds),
+    );
+    await tester.pumpAndSettle();
+    openPage(
+      tester.element(find.byKey(const ValueKey('probe-A'))),
+      _BuildProbe(name: 'B', builds: builds),
+    );
+    await tester.pumpAndSettle();
+
+    builds.clear();
+    await c.setPreference('test.change', 1);
+    await tester.pumpAndSettle();
+    await c.setPreference('test.change', 2);
+    await tester.pumpAndSettle();
+    // Only the page on top shows the changes.
+    expect(builds, {'B': 2});
+
+    builds.clear();
+    Navigator.of(tester.element(find.byKey(const ValueKey('probe-B')))).pop();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    // Uncovered: one rebuild catches up on both changes.
+    expect(builds, {'A': 1});
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
+
+  testWidgets('a change rebuilds the shell, not the session gate', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.reset);
+    final c = AppController(
+      localStore: MemoryLocalStore(),
+      credentialStore: MemoryCredentialStore(),
+    );
+    await c.init();
+    await c.startDemo();
+    await tester.pumpWidget(
+      TheaterApp(controller: c, enableDeviceServices: false),
+    );
+    await tester.pumpAndSettle();
+    final builds = countBuilds();
+    await c.setPreference('test.change', 1);
+    await tester.pumpAndSettle();
+    // The shell's own listener rebuilds it once, the gate does not.
+    expect(builds[AppShell], isNull);
+    expect(builds[AppNavigationBar], 1);
+    expect(builds[TodayScreen], 1);
+    debugOnRebuildDirtyWidget = null;
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
+
+  testWidgets('a message counts as read once its page is in place', (
+    tester,
+  ) async {
+    final server = TestServer();
+    server.data['messages'] = [
+      {
+        'id': 'm1',
+        'title': 'Probe fällt aus',
+        'body': 'Heute keine Probe.',
+        'createdAt': '2026-09-12T08:00:00Z',
+        'read': false,
+      },
+    ];
+    final c = server.controller();
+    await signIn(c);
+    await tester.pumpWidget(
+      TheaterApp(controller: c, enableDeviceServices: false),
+    );
+    await tester.pumpAndSettle();
+    openPage(
+      tester.element(find.byType(AppShell)),
+      MessageDetailScreen(controller: c, message: c.messages.single),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    // Mid-transition: nothing sent yet.
+    expect(server.actionBodies, isEmpty);
+    await tester.pumpAndSettle();
+    expect(server.actionBodies.single['action'], 'message.read');
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
+
   test('queued message reads show in the projected messages', () async {
     final server = TestServer();
     server.data['messages'] = [
@@ -145,4 +316,17 @@ void main() {
       'Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an.',
     );
   });
+}
+
+/// A page that only counts its builds.
+class _BuildProbe extends StatelessWidget {
+  const _BuildProbe({required this.name, required this.builds});
+  final String name;
+  final Map<String, int> builds;
+
+  @override
+  Widget build(BuildContext context) {
+    builds.update(name, (n) => n + 1, ifAbsent: () => 1);
+    return Scaffold(key: ValueKey('probe-$name'), body: Text(name));
+  }
 }

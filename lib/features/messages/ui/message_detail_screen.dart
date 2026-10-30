@@ -85,7 +85,11 @@ class _MessageDetailScreenState extends State<MessageDetailScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // Marked as read once the page is in place: the receipt updates the
+    // whole app, which would otherwise stutter the page transition.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await routeTransitionDone(context);
       if (widget.message['read'] != true) {
         widget.controller
             .performAction({
