@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
 
@@ -1413,6 +1414,727 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   });
+
+  group('pictures take turns in the browser', () {
+    final webp = File(
+      'server/src/wardrobe/images/character-elena-thumb.webp',
+    ).readAsBytesSync();
+
+    String path(int i) => '/games/runner/skins/p$i.webp';
+
+    Future<(AppController, ui.Image)> paced(WidgetTester tester) async {
+      final image = (await tester.runAsync(
+        () => createTestImage(width: 8, height: 8),
+      ))!;
+      final codec = WardrobePictures.openCodec;
+      WardrobePictures.paced = true;
+      addTearDown(() {
+        WardrobePictures.paced = false;
+        WardrobePictures.openCodec = codec;
+        WardrobePictures.clear();
+      });
+      WardrobePictures.openCodec = (_, {width, height}) async => _Codec(image);
+      // Kept files: the media cache takes real time, frames do not wait.
+      for (var i = 0; i < 5; i++) {
+        WardrobePictures.keepFileForTest(path(i), webp);
+      }
+      return (await _signedIn(tester, (_) => null), image);
+    }
+
+    Future<void> settle(WidgetTester tester) async {
+      // Without a frame: frames are what hands the pictures out.
+      for (var i = 0; i < 8; i++) {
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        await tester.idle();
+      }
+    }
+
+    testWidgets('a WebP is decoded once, with the size from its header', (
+      tester,
+    ) async {
+      final (controller, image) = await paced(tester);
+      final opened = <(int?, int?)>[];
+      WardrobePictures.openCodec = (_, {width, height}) async {
+        opened.add((width, height));
+        return _Codec(image);
+      };
+      final load = WardrobePictures.load(controller, path(0));
+      final small = WardrobePictures.load(controller, path(1), maxPixels: 100);
+      // A little below the file's size: not worth a draw on a canvas.
+      final near = WardrobePictures.load(controller, path(2), maxPixels: 300);
+      await settle(tester);
+      for (var i = 0; i < 3; i++) {
+        await tester.pump();
+        await settle(tester);
+      }
+      expect(await Future.wait([load, small, near]), everyElement(isNotNull));
+      expect(opened, unorderedEquals([(null, null), (100, 100), (null, null)]));
+    });
+
+    testWidgets('at most two decode at the same time', (tester) async {
+      final (controller, image) = await paced(tester);
+      var running = 0, peak = 0;
+      final gates = <Completer<void>>[];
+      WardrobePictures.openCodec = (_, {width, height}) async {
+        peak = max(peak, ++running);
+        final gate = Completer<void>();
+        gates.add(gate);
+        await gate.future;
+        running--;
+        return _Codec(image);
+      };
+      final loads = [
+        for (var i = 0; i < 5; i++) WardrobePictures.load(controller, path(i)),
+      ];
+      await settle(tester);
+      expect(gates, hasLength(2));
+      for (var opened = 2; opened <= 5; opened++) {
+        gates.firstWhere((gate) => !gate.isCompleted).complete();
+        await settle(tester);
+        expect(gates, hasLength(min(opened + 1, 5)));
+      }
+      gates.last.complete();
+      await settle(tester);
+      for (var i = 0; i < 5; i++) {
+        await tester.pump();
+      }
+      expect(await Future.wait(loads), everyElement(isNotNull));
+      expect(peak, WardrobePictures.maxDecoding);
+    });
+
+    testWidgets('one picture per frame reaches the holders', (tester) async {
+      final (controller, _) = await paced(tester);
+      var arrived = 0;
+      for (var i = 0; i < 4; i++) {
+        WardrobePictures.load(controller, path(i)).then((_) => arrived++);
+      }
+      await settle(tester);
+      expect(arrived, 0);
+      expect(WardrobePictures.cached(path(0)), isNull, reason: 'held back');
+      for (var frame = 1; frame <= 4; frame++) {
+        await tester.pump();
+        expect(arrived, frame);
+      }
+      expect(WardrobePictures.cached(path(0)), isNotNull);
+      await tester.pump();
+      expect(tester.binding.hasScheduledFrame, isFalse);
+    });
+
+    testWidgets('a slow frame holds the next one back, but not for long', (
+      tester,
+    ) async {
+      final (controller, _) = await paced(tester);
+      var arrived = 0;
+      for (var i = 0; i < 3; i++) {
+        WardrobePictures.load(controller, path(i)).then((_) => arrived++);
+      }
+      await settle(tester);
+      // The distance between the frames tells, at once.
+      await tester.pump();
+      expect(arrived, 1, reason: 'nothing to measure on the first frame');
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(arrived, 2);
+      await tester.pump(const Duration(milliseconds: 40));
+      expect(arrived, 2);
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(arrived, 3);
+    });
+
+    testWidgets('frames getting quicker hold the pictures, but not for long', (
+      tester,
+    ) async {
+      final (controller, _) = await paced(tester);
+      var arrived = 0;
+      for (var i = 0; i < 3; i++) {
+        WardrobePictures.load(controller, path(i)).then((_) => arrived++);
+      }
+      await settle(tester);
+      await tester.pump();
+      expect(arrived, 1);
+      const held = [100, 70, 45];
+      expect(held, hasLength(WardrobePictures.maxHeldFrames));
+      for (final ms in held) {
+        await tester.pump(Duration(milliseconds: ms));
+        expect(arrived, 1);
+      }
+      await tester.pump(const Duration(milliseconds: 30));
+      expect(arrived, 2, reason: 'even if every frame is slow');
+    });
+
+    testWidgets('a display at 30 Hz does not wait out every frame', (
+      tester,
+    ) async {
+      final (controller, _) = await paced(tester);
+      var arrived = 0;
+      for (var i = 0; i < 3; i++) {
+        WardrobePictures.load(controller, path(i)).then((_) => arrived++);
+      }
+      await settle(tester);
+      await tester.pump();
+      expect(arrived, 1);
+      const frame = Duration(milliseconds: 33);
+      await tester.pump(frame);
+      expect(arrived, 1);
+      await tester.pump(frame);
+      expect(arrived, 2, reason: 'no quicker without a picture');
+    });
+
+    testWidgets('a pause between two bursts is not a slow frame', (
+      tester,
+    ) async {
+      final (controller, _) = await paced(tester);
+      var arrived = 0;
+      WardrobePictures.load(controller, path(0)).then((_) => arrived++);
+      await settle(tester);
+      await tester.pump();
+      expect(arrived, 1);
+      await tester.pump(const Duration(seconds: 5));
+      WardrobePictures.load(controller, path(1)).then((_) => arrived++);
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 5));
+      expect(arrived, 2);
+    });
+
+    testWidgets('cards still on screen go first', (tester) async {
+      final (controller, _) = await paced(tester);
+      final order = <int>[];
+      var onScreen = true;
+      WardrobePictures.load(
+        controller,
+        path(0),
+        shown: () => onScreen,
+      ).then((_) => order.add(0));
+      WardrobePictures.load(controller, path(1)).then((_) => order.add(1));
+      await settle(tester);
+      onScreen = false;
+      await tester.pump();
+      await tester.pump();
+      expect(order, [1, 0]);
+    });
+
+    testWidgets('a broken file leaves its place to the next one', (
+      tester,
+    ) async {
+      final (controller, _) = await paced(tester);
+      WardrobePictures.openCodec = (_, {width, height}) =>
+          Future.error(Exception('kaputt'));
+      final failed = [
+        for (var i = 0; i < 3; i++) WardrobePictures.load(controller, path(i)),
+      ];
+      await settle(tester);
+      expect(await Future.wait(failed), [null, null, null]);
+    });
+  });
+
+  group('reading a WebP header', () {
+    Uint8List file(String name) =>
+        File('server/src/wardrobe/images/$name').readAsBytesSync();
+
+    test('lossy, extended and lossless files', () {
+      // A backdrop has no alpha: plain lossy (VP8).
+      final lossy = file('backdrop-anno.webp');
+      expect(String.fromCharCodes(lossy, 12, 16), 'VP8 ');
+      expect(webpSize(lossy), (1024, 603));
+      // A portrait has one: extended (VP8X).
+      final extended = file('character-elena-portrait.webp');
+      expect(String.fromCharCodes(extended, 12, 16), 'VP8X');
+      expect(webpSize(extended), (512, 512));
+      expect(webpSize(file('character-elena-thumb.webp')), (384, 384));
+      // Lossless (VP8L): 14 bits each, minus one: 1124 by 577.
+      const w = 1124 - 1, h = 577 - 1;
+      final lossless = Uint8List(30)
+        ..setAll(0, 'RIFF'.codeUnits)
+        ..setAll(8, 'WEBPVP8L'.codeUnits)
+        ..[20] = 0x2f
+        ..[21] = w & 0xff
+        ..[22] = (w >> 8) | ((h & 3) << 6)
+        ..[23] = h >> 2
+        ..[24] = h >> 10;
+      expect(webpSize(lossless), (1124, 577));
+    });
+
+    test('anything else is no WebP', () async {
+      final image = await createTestImage(width: 4, height: 4);
+      final png = (await image.toByteData(format: ui.ImageByteFormat.png))!;
+      expect(webpSize(png.buffer.asUint8List()), isNull);
+      expect(webpSize(Uint8List(0)), isNull);
+      expect(webpSize(file('backdrop-anno.webp').sublist(0, 20)), isNull);
+      final other = file('backdrop-anno.webp')..[12] = 0x41;
+      expect(webpSize(other), isNull, reason: 'unknown chunk');
+      final broken = file('backdrop-anno.webp')..[23] = 0;
+      expect(webpSize(broken), isNull, reason: 'no start code');
+    });
+
+    test('smaller only from below three quarters of the size on', () {
+      expect(WardrobePictures.decodeSize(512, 512, null), isNull);
+      expect(WardrobePictures.decodeSize(512, 512, 600), isNull);
+      expect(WardrobePictures.decodeSize(512, 512, 400), isNull);
+      expect(WardrobePictures.decodeSize(512, 512, 200), (200, 200));
+      expect(WardrobePictures.decodeSize(512, 256, 200), (200, 100));
+    });
+  });
+
+  group('the costume stays dressed', () {
+    Wardrobe wearing(String character, {int meters = 2900}) {
+      final json = _wardrobeJson(
+        owned: ['maren', 'elena'],
+        selected: {'character': character},
+        meters: meters,
+      );
+      final items = jsonList(jsonMap(json['catalog'])['items']);
+      (items[4] as Map)['image'] = '/games/runner/skins/maren.webp?v=1';
+      (items[5] as Map)['image'] = '/games/runner/skins/elena.webp?v=1';
+      return Wardrobe.fromJson(json);
+    }
+
+    test('only what is worn makes a costume another one', () {
+      expect(outfitOf(wearing('maren')), outfitOf(wearing('maren', meters: 9)));
+      expect(outfitOf(wearing('maren')), isNot(outfitOf(wearing('elena'))));
+      expect(dressedOutfit(wearing('maren')), isNull, reason: 'not loaded');
+    });
+
+    test('the worn atlas stays when cards push the others out', () async {
+      final maxBytes = WardrobePictures.maxBytes;
+      addTearDown(() => WardrobePictures.maxBytes = maxBytes);
+      final picture = await createTestImage(width: 64, height: 64);
+      final png = (await picture.toByteData(
+        format: ui.ImageByteFormat.png,
+      ))!.buffer.asUint8List();
+      WardrobePictures.maxBytes = 64 * 64 * 4;
+      final server = TestServer();
+      server.data['capabilities'] = {
+        'features': ['stageRunner', 'runnerUnlocks'],
+      };
+      server.override = (request) =>
+          !_path(request).contains('/games/runner/skins/')
+          ? null
+          : Future.value(
+              http.Response.bytes(
+                png,
+                200,
+                headers: {'content-type': 'image/png'},
+              ),
+            );
+      final controller = server.controller();
+      addTearDown(controller.dispose);
+      await signIn(controller);
+      final atlas = await createTestImage(width: 1124, height: 577);
+      final backdrop = await createTestImage(width: 64, height: 32);
+      final w = wearing('maren');
+      await dressArt(RunnerArt.test(atlas, backdrop), w, controller);
+      final worn = w.worn(WardrobeKind.character)!.image!;
+      expect(WardrobePictures.isWorn(worn), isTrue);
+      expect(dressedOutfit(w), outfitOf(w));
+      await WardrobePictures.load(controller, '/games/runner/skins/a.webp');
+      await WardrobePictures.load(controller, '/games/runner/skins/b.webp');
+      expect(WardrobePictures.cached(worn), isNotNull);
+      // Not the one just loaded either: a card waits for it.
+      expect(WardrobePictures.cached('/games/runner/skins/a.webp'), isNull);
+      expect(WardrobePictures.cached('/games/runner/skins/b.webp'), isNotNull);
+    });
+
+    test('the optional cells are read once per picture, even anew', () async {
+      RunnerArt.forgetCells();
+      Future<ui.Image> decode() async {
+        final codec = await ui.instantiateImageCodec(
+          File(
+            'server/src/wardrobe/images/obstacles-creepshow.webp',
+          ).readAsBytesSync(),
+        );
+        return (await codec.getNextFrame()).image;
+      }
+
+      final image = await decode();
+      const path = '/games/runner/skins/obstacles-a.webp?v=1';
+      final found = await Future.wait([
+        RunnerArt.draws(image, RunnerSprite.pile, path: path),
+        RunnerArt.draws(image, RunnerSprite.tallCrate, path: path),
+      ]);
+      expect(found, [true, true]);
+      expect(RunnerArt.pixelReads, 1);
+      // Dropped from the cache and decoded again: the same file.
+      final again = await decode();
+      await RunnerArt.draws(again, RunnerSprite.pile, path: path);
+      await RunnerArt.draws(again, RunnerSprite.tallCrate, path: path);
+      expect(RunnerArt.pixelReads, 1);
+      // Without a path, per picture as before.
+      await RunnerArt.draws(image, RunnerSprite.pile);
+      await RunnerArt.draws(image, RunnerSprite.tallCrate);
+      expect(RunnerArt.pixelReads, 2);
+    });
+
+    test('a failed read is not kept: the next one tries again', () async {
+      RunnerArt.forgetCells();
+      for (final fail in [
+        () => throw StateError('read back failed'),
+        () => Future<ByteData?>.error(StateError('read back failed')),
+        () => Future<ByteData?>.value(),
+      ]) {
+        final image = _Unreadable(fail);
+        const path = '/games/runner/skins/obstacles-b.webp?v=1';
+        for (final at in [path, null]) {
+          for (var round = 1; round <= 2; round++) {
+            image.reads = 0;
+            final found = await Future.wait([
+              RunnerArt.draws(image, RunnerSprite.pile, path: at),
+              RunnerArt.draws(image, RunnerSprite.tallCrate, path: at),
+            ]);
+            expect(found, [false, false]);
+            expect(image.reads, 1, reason: 'shared, and tried anew each time');
+          }
+        }
+      }
+    });
+
+    testWidgets('opening the wardrobe waits for its entrance and does not '
+        'dress an unchanged costume', (tester) async {
+      final art = (await tester.runAsync(
+        () async => RunnerArt.test(
+          await createTestImage(width: 1124, height: 577),
+          await createTestImage(width: 64, height: 32),
+        ),
+      ))!;
+      RunnerArt.useForTest(art);
+      addTearDown(() => RunnerArt.useForTest(null));
+      final w = Wardrobe.fromJson(_wardrobeJson());
+      var fetched = 0;
+      final changed = <Wardrobe>[];
+      final controller = await _signedIn(tester, (request) {
+        if (!_path(request).endsWith('/games/runner/wardrobe')) return null;
+        fetched++;
+        return Future.value(jsonResponse(_wardrobeJson()));
+      });
+      final sound = _Sound();
+      final key = GlobalKey();
+      await _pump(tester, SizedBox(key: key));
+      Future<void> open({RunnerArt? dressed}) async {
+        unawaited(
+          openWardrobe(
+            key.currentContext!,
+            controller,
+            wardrobe: w,
+            dressed: dressed,
+            sound: sound,
+            onChanged: changed.add,
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(fetched, 0, reason: 'nothing during the entrance');
+        expect(find.byType(WardrobeScreen), findsOneWidget);
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pump();
+        await tester.pump();
+        await tester.pump();
+      }
+
+      dressCount = 0;
+      await open(dressed: art);
+      expect(fetched, 1);
+      expect(changed, hasLength(1));
+      expect(dressCount, 0, reason: 'the game dressed it already');
+      Navigator.of(key.currentContext!).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(WardrobeScreen), findsNothing);
+      fetched = 0;
+      await open();
+      expect(fetched, 1);
+      expect(dressCount, 1, reason: 'without the game\'s art it is dressed');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the game keeps its costume through the wardrobe', (
+      tester,
+    ) async {
+      final art = (await tester.runAsync(
+        () async => RunnerArt.test(
+          await createTestImage(width: 1124, height: 577),
+          await createTestImage(width: 64, height: 32),
+        ),
+      ))!;
+      RunnerArt.useForTest(art);
+      addTearDown(() => RunnerArt.useForTest(null));
+      var fetched = 0;
+      final controller = await _signedIn(tester, (request) {
+        final path = _path(request);
+        if (path.endsWith('/leaderboard') || path.endsWith('/month')) {
+          return Future.value(
+            jsonResponse({'players': 0, 'top': [], 'own': null}),
+          );
+        }
+        if (!path.endsWith('/games/runner/wardrobe')) return null;
+        fetched++;
+        return Future.value(jsonResponse(_wardrobeJson(crates: 0)));
+      });
+      dressCount = 0;
+      await _pump(
+        tester,
+        StageRunnerScreen(
+          controller: controller,
+          random: Random(3),
+          sound: _Sound(),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(fetched, 1);
+      expect(dressCount, 1);
+      await tester.tap(find.byKey(const ValueKey('runner-wardrobe')));
+      await tester.pumpAndSettle();
+      expect(find.byType(WardrobeScreen), findsOneWidget);
+      expect(fetched, 2, reason: 'refreshed after it came in');
+      expect(dressCount, 1, reason: 'the same costume is not dressed again');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('leaving before the entrance ended asks for nothing', (
+      tester,
+    ) async {
+      var fetched = 0;
+      final controller = await _signedIn(tester, (request) {
+        if (!_path(request).endsWith('/games/runner/wardrobe')) return null;
+        fetched++;
+        return Future.value(jsonResponse(_wardrobeJson()));
+      });
+      final key = GlobalKey();
+      await _pump(tester, SizedBox(key: key));
+      unawaited(
+        openWardrobe(
+          key.currentContext!,
+          controller,
+          wardrobe: Wardrobe.fromJson(_wardrobeJson()),
+          sound: _Sound(),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 20));
+      Navigator.of(key.currentContext!).pop();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      expect(fetched, 0);
+    });
+  });
+
+  group('cards load the picture of their size', () {
+    Widget card(WardrobeItem item, AppController c, {bool small = false}) =>
+        SizedBox(
+          width: 100,
+          height: 100,
+          child: WardrobeItemArt(item: item, controller: c, small: small),
+        );
+
+    const elena = WardrobeItem(
+      id: 'elena',
+      kind: WardrobeKind.character,
+      name: 'Elena',
+      rarity: 'gold',
+      image: '/games/runner/skins/character-elena.webp',
+      portrait: '/games/runner/skins/character-elena-portrait.webp',
+      thumb: '/games/runner/skins/character-elena-thumb.webp',
+    );
+    const stage = WardrobeItem(
+      id: 'anno',
+      kind: WardrobeKind.backdrop,
+      name: 'Anno 1146',
+      rarity: 'rot',
+      image: '/games/runner/skins/backdrop-anno.webp',
+      portrait: '/games/runner/skins/backdrop-anno-portrait.webp',
+    );
+
+    var requests = <String>[];
+
+    Future<(AppController, List<String>)> asking(WidgetTester tester) async {
+      final picture = (await tester.runAsync(
+        () => createTestImage(width: 8, height: 8),
+      ))!;
+      final png = (await tester.runAsync(
+        () => picture.toByteData(format: ui.ImageByteFormat.png),
+      ))!.buffer.asUint8List();
+      final asked = requests = <String>[];
+      final controller = await _signedIn(tester, (request) {
+        if (!_path(request).contains('/games/runner/skins/')) return null;
+        asked.add(_path(request).split('/').last);
+        return Future.value(
+          http.Response.bytes(png, 200, headers: {'content-type': 'image/png'}),
+        );
+      });
+      return (controller, asked);
+    }
+
+    Future<void> show(WidgetTester tester, Widget card) async {
+      await _pump(tester, card);
+      await tester.runAsync(() async {
+        // The session is read first, which takes real time; a second request
+        // would follow right behind the first.
+        for (var i = 0; i < 500 && requests.isEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pump();
+    }
+
+    testWidgets('the grid takes the thumbnail', (tester) async {
+      final (controller, asked) = await asking(tester);
+      await show(tester, card(elena, controller, small: true));
+      expect(asked, ['character-elena-thumb.webp']);
+    });
+
+    testWidgets('a silhouette takes the thumbnail as well', (tester) async {
+      final (controller, asked) = await asking(tester);
+      await show(
+        tester,
+        WardrobeItemArt(item: elena, controller: controller, hidden: true),
+      );
+      expect(asked, ['character-elena-thumb.webp']);
+    });
+
+    testWidgets('a large card takes the portrait', (tester) async {
+      final (controller, asked) = await asking(tester);
+      await show(tester, card(elena, controller));
+      expect(asked, ['character-elena-portrait.webp']);
+    });
+
+    testWidgets('a role has its own portrait, not the thumbnail', (
+      tester,
+    ) async {
+      final (controller, asked) = await asking(tester);
+      final role = elena.inRole(
+        const WardrobeVariant(
+          id: 'elena--anno',
+          name: 'Johanna',
+          image: '/games/runner/skins/character-elena--anno.webp',
+          portrait: '/games/runner/skins/character-elena--anno-portrait.webp',
+        ),
+      );
+      expect(role.thumb, isNull);
+      await show(tester, card(role, controller, small: true));
+      expect(asked, ['character-elena--anno-portrait.webp']);
+    });
+
+    testWidgets('a stage takes its portrait when small, itself when large', (
+      tester,
+    ) async {
+      final (controller, asked) = await asking(tester);
+      await show(tester, card(stage, controller, small: true));
+      expect(asked, ['backdrop-anno-portrait.webp']);
+      asked.clear();
+      await tester.pumpWidget(const SizedBox());
+      await show(tester, card(stage, controller));
+      expect(asked, ['backdrop-anno.webp']);
+    });
+
+    testWidgets('the crate waits only for the cards around the winner', (
+      tester,
+    ) async {
+      final picture = (await tester.runAsync(
+        () => createTestImage(width: 8, height: 8),
+      ))!;
+      final png = (await tester.runAsync(
+        () => picture.toByteData(format: ui.ImageByteFormat.png),
+      ))!.buffer.asUint8List();
+      final asked = <String>[];
+      final never = Completer<http.Response>();
+      final controller = await _signedIn(tester, (request) {
+        if (!_path(request).contains('/games/runner/skins/')) return null;
+        final name = _path(request).split('/').last;
+        asked.add(name);
+        final card = int.tryParse(RegExp(r'\d+').stringMatch(name) ?? '');
+        // Far cards hang, as on a slow connection.
+        if (card != null && (card - 48).abs() > 4) return never.future;
+        return Future.value(
+          http.Response.bytes(png, 200, headers: {'content-type': 'image/png'}),
+        );
+      });
+      final reel = [
+        for (var i = 0; i < 56; i++)
+          WardrobeItem(
+            id: 'card$i',
+            kind: WardrobeKind.character,
+            name: 'Karte $i',
+            rarity: 'hellblau',
+            portrait: '/games/runner/skins/card$i-portrait.webp',
+            thumb: '/games/runner/skins/card$i-thumb.webp',
+          ),
+      ];
+      await _pump(
+        tester,
+        CrateOpeningPage(
+          controller: controller,
+          wardrobe: Wardrobe.fromJson(_wardrobeJson()),
+          sound: _Sound(),
+          open: () async => CrateOpening(
+            item: reel[48],
+            reel: reel,
+            winnerIndex: 48,
+            wardrobe: Wardrobe.fromJson(_wardrobeJson()),
+          ),
+          random: Random(4),
+        ),
+      );
+      // Well within the 1.5 s the crate waits at most: no time passes here.
+      final spinning = find.byKey(const ValueKey('crate-reel'));
+      for (var i = 0; i < 300; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+        if (spinning.evaluate().isNotEmpty &&
+            asked.contains('card0-thumb.webp')) {
+          break;
+        }
+      }
+      expect(spinning, findsOneWidget);
+      expect(asked.take(9).toSet(), {
+        for (var i = 44; i <= 52; i++) 'card$i-thumb.webp',
+      }, reason: 'the cards around the winner go first');
+      expect(asked, contains('card48-portrait.webp'));
+      expect(asked, contains('card0-thumb.webp'));
+      expect(asked, isNot(contains('card0-portrait.webp')));
+      await tester.pumpWidget(const SizedBox());
+      never.complete(http.Response('', 404));
+      await tester.pump(const Duration(seconds: 40));
+    });
+  });
+}
+
+/// A picture whose pixels cannot be read back.
+class _Unreadable extends Fake implements ui.Image {
+  _Unreadable(this.fail);
+  final Future<ByteData?> Function() fail;
+  int reads = 0;
+  @override
+  int get width => 1124;
+  @override
+  int get height => 577;
+  @override
+  Future<ByteData?> toByteData({
+    ui.ImageByteFormat format = ui.ImageByteFormat.rawRgba,
+  }) {
+    reads++;
+    return fail();
+  }
+}
+
+/// A codec that gives [image] without decoding anything.
+class _Codec implements ui.Codec {
+  _Codec(this.image);
+  final ui.Image image;
+  @override
+  int get frameCount => 1;
+  @override
+  int get repetitionCount => 0;
+  @override
+  Future<ui.FrameInfo> getNextFrame() async => _Frame(image);
+  @override
+  void dispose() {}
+}
+
+class _Frame implements ui.FrameInfo {
+  _Frame(this.image);
+  @override
+  final ui.Image image;
+  @override
+  Duration get duration => Duration.zero;
 }
 
 /// Records the pictures and rounded boxes drawn; everything else is ignored.

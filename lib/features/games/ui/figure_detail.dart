@@ -807,6 +807,7 @@ class _FigureDetailPageState extends State<FigureDetailPage> {
                 controller: widget.controller,
                 art: _base,
                 worn: w.worn(other.kind)?.id == other.id,
+                small: true,
                 onTap: w.owns(other) ? () => _show(other) : null,
               ),
             );

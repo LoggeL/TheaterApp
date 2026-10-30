@@ -4,8 +4,10 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../../../core/app_controller.dart';
+import '../../../core/telemetry/perf_telemetry.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
 import 'stage_runner_art.dart';
@@ -75,6 +77,54 @@ const antiqueFilter = ColorFilter.matrix([
   0, 0, 0, 1, 0,
 ]);
 
+/// Width and height of a WebP file ([bytes]) from its header, without
+/// decoding it; null for anything else.
+(int, int)? webpSize(Uint8List bytes) {
+  bool tag(int at, String name) =>
+      String.fromCharCodes(bytes, at, at + 4) == name;
+  int number(int at, int length) {
+    var value = 0;
+    for (var i = length - 1; i >= 0; i--) {
+      value = value * 256 + bytes[at + i];
+    }
+    return value;
+  }
+
+  // The first chunk's body starts at 20; all three kinds have the size
+  // within its first ten bytes.
+  if (bytes.length < 30 || !tag(0, 'RIFF') || !tag(8, 'WEBP')) return null;
+  if (tag(12, 'VP8 ')) {
+    // Lossy: a frame tag of 3 bytes, the start code, 14 bits for each side.
+    if (number(23, 3) != 0x2a019d) return null;
+    return (number(26, 2) & 0x3fff, number(28, 2) & 0x3fff);
+  }
+  if (tag(12, 'VP8L')) {
+    // Lossless: a signature byte, then 14 bits for each side minus one.
+    if (bytes[20] != 0x2f) return null;
+    final sides = number(21, 4);
+    return (sides % 0x4000 + 1, (sides ~/ 0x4000) % 0x4000 + 1);
+  }
+  if (tag(12, 'VP8X')) {
+    // Extended: flags, three reserved bytes, 24 bits for each side minus one.
+    return (number(24, 3) + 1, number(27, 3) + 1);
+  }
+  return null;
+}
+
+/// A picture waiting for its turn, see [WardrobePictures.load].
+class _Turn {
+  _Turn(this.shown);
+  final bool Function()? shown;
+  final done = Completer<void>();
+}
+
+/// The next of [waiting]: the first one still on screen, else the first.
+_Turn? _nextTurn(List<_Turn> waiting) {
+  if (waiting.isEmpty) return null;
+  final i = waiting.indexWhere((turn) => turn.shown?.call() ?? true);
+  return waiting.removeAt(max(i, 0));
+}
+
 /// Pictures of the wardrobe from the server, decoded once and kept while
 /// they fit into [maxBytes]. Only what is worn or shown gets loaded; a
 /// failure (offline) is tried again next time.
@@ -91,6 +141,12 @@ const antiqueFilter = ColorFilter.matrix([
 /// file's hash (`?v=`), so a kept file never goes stale. A picture that
 /// failed is not asked for again before [failurePause] has passed: cards
 /// rebuild often, and each rebuild of one without its picture asked anew.
+///
+/// In the browser the pictures come one by one ([paced]): [maxDecoding]
+/// decode at the same time and one reaches the screen per frame, only after
+/// a frame that was on time ([frameBudgetMs]). Scrolling through a wardrobe
+/// with an empty cache would otherwise decode and upload dozens in a frame.
+/// Android is left alone: it decodes on its own threads.
 abstract final class WardrobePictures {
   // In the order of last use: the first one is dropped first.
   static final _images = <String, ui.Image>{};
@@ -113,10 +169,10 @@ abstract final class WardrobePictures {
   @visibleForTesting
   static int get fileBytes => _fileBytes;
 
-  /// Decoded bytes kept at most. A portrait takes 1 MB (512²), an atlas or
-  /// backdrop about 2.5 MB: about a screen of cards with the worn costume
-  /// and the reel of a crate. Less in the browser (the PWA), whose memory
-  /// a tab shares with everything else.
+  /// Decoded bytes kept at most. A portrait takes 1 MB (512²), a thumbnail
+  /// 0.6 MB (384²), an atlas or backdrop about 2.5 MB: more than a screen of
+  /// cards with the worn costume and the reel of a crate. Less in the browser
+  /// (the PWA), whose memory a tab shares with everything else.
   @visibleForTesting
   static int maxBytes = (kIsWeb ? 32 : 48) << 20;
 
@@ -140,11 +196,25 @@ abstract final class WardrobePictures {
     _images[path] = image;
     _bytes += _sizeOf(image);
     // Not disposed: a holder may still draw it; it goes with its last one.
-    while (_bytes > maxBytes && _images.length > 1) {
-      final first = _images.keys.first;
-      _bytes -= _sizeOf(_images.remove(first)!);
+    while (_bytes > maxBytes) {
+      final drop = _images.keys
+          .where((key) => key != path && !_worn.contains(key))
+          .firstOrNull;
+      if (drop == null) break;
+      _bytes -= _sizeOf(_images.remove(drop)!);
     }
   }
+
+  /// The pictures of the worn costume: they stay when the wardrobe's cards
+  /// push others out, as the game needs them again for the next dressing.
+  static Set<String> _worn = const {};
+
+  /// Makes [paths] the worn pictures, instead of those before.
+  static void wear(Iterable<String> paths) => _worn = paths.toSet();
+
+  /// Whether the picture at [path] stays (see [wear]), for tests.
+  @visibleForTesting
+  static bool isWorn(String path) => _worn.contains(path);
 
   /// The longest side, in device pixels, a portrait is decoded with on a
   /// screen of [devicePixelRatio]: enough for the largest card showing one
@@ -157,28 +227,34 @@ abstract final class WardrobePictures {
   /// this screen (without a view: as for a ratio of 3, i.e. full size).
   static Future<ui.Image?> loadPortrait(
     AppController controller,
-    String? path,
-  ) => load(
+    String? path, {
+    bool Function()? shown,
+  }) => load(
     controller,
     path,
     maxPixels: portraitPixels(
       ui.PlatformDispatcher.instance.implicitView?.devicePixelRatio ?? 3,
     ),
+    shown: shown,
   );
 
   /// The picture at [path]; [maxPixels] decodes it smaller if its longer
   /// side exceeds that (never larger). The first load of a path decides its
-  /// size, so a path is always loaded with the same [maxPixels].
+  /// size, so a path is always loaded with the same [maxPixels]. Where
+  /// pictures wait for their turn ([paced]), those [shown] says are still on
+  /// screen go first, and without it a picture counts as shown.
   static Future<ui.Image?> load(
     AppController controller,
     String? path, {
     int? maxPixels,
-  }) => _load(controller, path, maxPixels: maxPixels);
+    bool Function()? shown,
+  }) => _load(controller, path, maxPixels: maxPixels, shown: shown);
 
   static Future<ui.Image?> _load(
     AppController controller,
     String? path, {
     int? maxPixels,
+    bool Function()? shown,
     bool again = false,
   }) {
     if (path == null) return Future.value();
@@ -193,11 +269,17 @@ abstract final class WardrobePictures {
     }
     // A block body: an arrow would hand whenComplete the removed future,
     // which is this very one, and it would wait for itself.
-    return _loading[path] ??= _fetch(controller, path, maxPixels).whenComplete(
-      () {
-        _loading.remove(path);
-      },
-    );
+    return _loading[path] ??= _fetch(controller, path, maxPixels, shown)
+        .whenComplete(() {
+          _loading.remove(path);
+        });
+  }
+
+  /// [path] as if its file had been fetched before.
+  @visibleForTesting
+  static void keepFileForTest(String path, Uint8List bytes) {
+    _files[path] = bytes;
+    _fileBytes += bytes.length;
   }
 
   /// The file of [path]: kept from before, else from the server.
@@ -220,27 +302,16 @@ abstract final class WardrobePictures {
     AppController controller,
     String path,
     int? maxPixels,
+    bool Function()? shown,
   ) async {
     try {
       final bytes = await _file(controller, path);
-      final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-      final codec = await ui.instantiateImageCodecWithSize(
-        buffer,
-        getTargetSize: (w, h) {
-          final scale = maxPixels == null ? 1.0 : maxPixels / max(w, h);
-          return scale >= 1
-              ? const ui.TargetImageSize()
-              : ui.TargetImageSize(
-                  width: max(1, (w * scale).round()),
-                  height: max(1, (h * scale).round()),
-                );
-        },
-      );
-      final frame = await codec.getNextFrame();
-      codec.dispose();
+      final image = paced
+          ? await _decodeInTurn(bytes, maxPixels, shown)
+          : await _decode(bytes, maxPixels);
       _failedAt.remove(path);
-      _keep(path, frame.image);
-      return frame.image;
+      _keep(path, image);
+      return image;
     } catch (e) {
       if (kDebugMode) debugPrint('Bühnenlauf: Bild $path fehlt: $e');
       _failedAt[path] = DateTime.now();
@@ -249,6 +320,155 @@ abstract final class WardrobePictures {
       if (file != null) _fileBytes -= file.length;
       return null;
     }
+  }
+
+  /// Asks for the size first, which the engine answers from the file's
+  /// header on Android, but in the browser only by decoding it a first time.
+  static Future<ui.Image> _decode(Uint8List bytes, int? maxPixels) async {
+    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    final codec = await ui.instantiateImageCodecWithSize(
+      buffer,
+      getTargetSize: (w, h) {
+        final scale = maxPixels == null ? 1.0 : maxPixels / max(w, h);
+        return scale >= 1
+            ? const ui.TargetImageSize()
+            : ui.TargetImageSize(
+                width: max(1, (w * scale).round()),
+                height: max(1, (h * scale).round()),
+              );
+      },
+    );
+    final frame = await codec.getNextFrame();
+    codec.dispose();
+    return frame.image;
+  }
+
+  /// Whether pictures take turns (see the class).
+  @visibleForTesting
+  static bool paced = kIsWeb;
+
+  /// Pictures decoding at the same time, in the browser.
+  static const maxDecoding = 2;
+
+  /// A frame longer than this (ms) after the one before makes the next
+  /// picture wait a frame.
+  static const frameBudgetMs = 20.0;
+
+  /// Frames a picture gives way at most: the pictures come even while every
+  /// frame is slow.
+  static const maxHeldFrames = 3;
+
+  /// Below this share of the file's size a picture is decoded smaller. Just
+  /// below full size scaling saves little memory, but in the browser it costs
+  /// a draw on a canvas on the main thread.
+  static const minScale = .75;
+
+  /// Opens a codec for [bytes], in the browser; replaced in tests.
+  @visibleForTesting
+  static Future<ui.Codec> Function(Uint8List, {int? width, int? height})
+  openCodec = (bytes, {width, height}) => ui.instantiateImageCodec(
+    bytes,
+    targetWidth: width,
+    targetHeight: height,
+    allowUpscaling: false,
+  );
+
+  /// The size to decode a [width] by [height] picture with for [maxPixels],
+  /// null for the size of the file.
+  @visibleForTesting
+  static (int, int)? decodeSize(int width, int height, int? maxPixels) {
+    if (maxPixels == null) return null;
+    final scale = maxPixels / max(width, height);
+    if (scale >= minScale) return null;
+    return (max(1, (width * scale).round()), max(1, (height * scale).round()));
+  }
+
+  /// One decode in the browser. The size comes from the file's header: the
+  /// engine would decode the whole picture for it and then once more.
+  static Future<ui.Image> _decodeOnce(Uint8List bytes, int? maxPixels) async {
+    final size = webpSize(bytes);
+    if (size == null) return _decode(bytes, maxPixels);
+    final target = decodeSize(size.$1, size.$2, maxPixels);
+    final codec = await openCodec(bytes, width: target?.$1, height: target?.$2);
+    final frame = await codec.getNextFrame();
+    codec.dispose();
+    return frame.image;
+  }
+
+  static int _decoding = 0;
+  static final _decodeTurns = <_Turn>[];
+  static final _showTurns = <_Turn>[];
+  static bool _frameAsked = false;
+  static Duration? _lastFrame;
+  static double _lastFrameMs = 0;
+  static int _heldFrames = 0;
+
+  static Future<ui.Image> _decodeInTurn(
+    Uint8List bytes,
+    int? maxPixels,
+    bool Function()? shown,
+  ) async {
+    if (_decoding < maxDecoding) {
+      _decoding++;
+    } else {
+      // The one finishing hands its place on.
+      final turn = _Turn(shown);
+      _decodeTurns.add(turn);
+      await turn.done.future;
+    }
+    final ui.Image image;
+    try {
+      image = await _decodeOnce(bytes, maxPixels);
+    } finally {
+      final next = _nextTurn(_decodeTurns);
+      if (next == null) {
+        _decoding--;
+      } else {
+        next.done.complete();
+      }
+    }
+    final turn = _Turn(shown);
+    _showTurns.add(turn);
+    _askFrame();
+    await turn.done.future;
+    return image;
+  }
+
+  /// Hands out the next picture in a frame of its own. Asks for that frame
+  /// itself, as nothing may be going on on screen.
+  static void _askFrame() {
+    if (_frameAsked || _showTurns.isEmpty) return;
+    _frameAsked = true;
+    SchedulerBinding.instance
+      ..scheduleFrameCallback(_frame)
+      ..ensureVisualUpdate();
+  }
+
+  /// How long a frame took is its distance to the one before: known at once,
+  /// unlike the engine's FrameTimings, which come in batches of 100 ms on the
+  /// web, and the whole of it. The first frame of a burst has none (nothing
+  /// may have been going on), the following ones were asked for right here.
+  static void _frame(Duration now) {
+    _frameAsked = false;
+    final last = _lastFrame;
+    final ms = last == null ? 0.0 : (now - last).inMicroseconds / 1000;
+    // Held back and hardly quicker: the pictures are not why. A display at
+    // 30 Hz (a phone saving power) has every frame above the budget.
+    final slow =
+        ms > frameBudgetMs && (_heldFrames == 0 || ms < _lastFrameMs * .75);
+    _lastFrameMs = ms;
+    if (slow && _heldFrames < maxHeldFrames) {
+      _heldFrames++;
+    } else {
+      _heldFrames = 0;
+      final turn = _nextTurn(_showTurns);
+      if (turn != null) {
+        PerfTelemetry.markImage(1);
+        turn.done.complete();
+      }
+    }
+    _lastFrame = _showTurns.isEmpty ? null : now;
+    _askFrame();
   }
 
   /// Like [load], but a picture that fails (a dropped connection, a server
@@ -280,8 +500,91 @@ abstract final class WardrobePictures {
     _files.clear();
     _fileBytes = 0;
     _failedAt.clear();
+    _worn = const {};
+    _decoding = 0;
+    _decodeTurns.clear();
+    _showTurns.clear();
+    _frameAsked = false;
+    _lastFrame = null;
+    _lastFrameMs = 0;
+    _heldFrames = 0;
+    RunnerArt.forgetCells();
   }
 }
+
+/// What of a [Wardrobe] counts for [dressArt].
+class _Worn {
+  factory _Worn(Wardrobe wardrobe) {
+    WardrobeItem? worn(WardrobeKind kind) {
+      final item = wardrobe.worn(kind);
+      return item == null || item.isDefault ? null : item;
+    }
+
+    // The worn role of the character, if one is chosen.
+    final plain = worn(WardrobeKind.character);
+    final backdrop = worn(WardrobeKind.backdrop);
+    // A backdrop with obstacles of its own brings them along (the default
+    // stage keeps the game's own); otherwise the worn obstacle set counts.
+    final stageSet = backdrop?.obstacles;
+    return _Worn._(
+      plain?.inRole(wardrobe.variantOf(plain)),
+      plain != null && wardrobe.isShiny(plain),
+      backdrop,
+      stageSet,
+      stageSet == null ? worn(WardrobeKind.obstacles) : null,
+      worn(WardrobeKind.fx),
+    );
+  }
+  _Worn._(
+    this.character,
+    this.shiny,
+    this.backdrop,
+    this.stageSet,
+    this.obstacles,
+    this.fx,
+  );
+  final WardrobeItem? character, backdrop, obstacles, fx;
+  final bool shiny;
+  final String? stageSet;
+
+  /// The atlas of the obstacles.
+  String? get obstacleAtlas => stageSet ?? obstacles?.image;
+
+  /// The picture of each layer, those not worn null.
+  List<String?> get pictures => [
+    character?.image,
+    obstacleAtlas,
+    backdrop?.image,
+    backdrop?.collectibles,
+  ];
+}
+
+/// The costume [wardrobe] dresses the game in: equal for two wardrobes that
+/// [dressArt] would dress alike, whatever else changed between them.
+String outfitOf(Wardrobe wardrobe) {
+  final worn = _Worn(wardrobe);
+  return [
+    worn.character?.id,
+    worn.shiny,
+    worn.obstacles?.id,
+    worn.backdrop?.id,
+    worn.fx?.id,
+    ...worn.pictures,
+  ].join('|');
+}
+
+/// [outfitOf] for art that came out of [dressArt] as worn; null if a picture
+/// was missing, so that the next change dresses it again.
+String? dressedOutfit(Wardrobe wardrobe) =>
+    _Worn(wardrobe).pictures.every(
+      (path) => path == null || WardrobePictures.cached(path) != null,
+    )
+    ? outfitOf(wardrobe)
+    : null;
+
+/// How often [dressArt] ran, for tests.
+@visibleForTesting
+int dressCount = 0;
 
 /// The game's art in the worn costume of [wardrobe]. An atlas that does not
 /// load on a second try either ([WardrobePictures.loadOrRetry]) or does not
@@ -293,21 +596,12 @@ Future<RunnerArt> dressArt(
   Wardrobe wardrobe,
   AppController controller,
 ) async {
-  WardrobeItem? worn(WardrobeKind kind) {
-    final item = wardrobe.worn(kind);
-    return item == null || item.isDefault ? null : item;
-  }
-
-  // The worn role of the character, if one is chosen.
-  final plain = worn(WardrobeKind.character);
-  final character = plain?.inRole(wardrobe.variantOf(plain));
-  final shiny = plain != null && wardrobe.isShiny(plain);
-  final backdrop = worn(WardrobeKind.backdrop);
-  // A backdrop with obstacles of its own brings them along (the default
-  // stage keeps the game's own); otherwise the worn obstacle set counts.
-  final stageSet = backdrop?.obstacles;
-  final obstacles = stageSet == null ? worn(WardrobeKind.obstacles) : null;
-  final fx = worn(WardrobeKind.fx);
+  dressCount++;
+  final worn = _Worn(wardrobe);
+  final character = worn.character, backdrop = worn.backdrop;
+  final obstacles = worn.obstacles, stageSet = worn.stageSet;
+  final fx = worn.fx, shiny = worn.shiny;
+  WardrobePictures.wear(worn.pictures.nonNulls);
   bool fits(ui.Image? image) =>
       image != null &&
       image.width == base.atlas.width &&
@@ -336,9 +630,16 @@ Future<RunnerArt> dressArt(
   return base.dressed(
     runner: runner,
     obstacles: set,
-    ownPile: set != null && await RunnerArt.draws(set, RunnerSprite.pile),
+    ownPile:
+        set != null &&
+        await RunnerArt.draws(set, RunnerSprite.pile, path: worn.obstacleAtlas),
     ownTallCrate:
-        set != null && await RunnerArt.draws(set, RunnerSprite.tallCrate),
+        set != null &&
+        await RunnerArt.draws(
+          set,
+          RunnerSprite.tallCrate,
+          path: worn.obstacleAtlas,
+        ),
     pickups: fits(images[3]) ? images[3] : null,
     backdrop: images[2],
     runnerFilter: tintFilter(character?.tint),

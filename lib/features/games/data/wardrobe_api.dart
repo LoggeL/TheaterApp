@@ -249,6 +249,7 @@ class WardrobeItem {
     this.personId,
     this.image,
     this.portrait,
+    this.thumb,
     this.harness = const {},
     this.tint,
     this.effect,
@@ -303,6 +304,11 @@ class WardrobeItem {
   /// API paths of the full picture (atlas or backdrop) and of the square
   /// portrait for the cards.
   final String? image, portrait;
+
+  /// API path of the portrait at the size of the grid (384²); null for older
+  /// servers and items without one. Not in a role ([inRole]): that one has
+  /// its own portrait.
+  final String? thumb;
 
   /// A backdrop's own obstacle set (API path of an atlas in the layout of
   /// the game's one) and the colour of its border, the short curtain the
@@ -395,6 +401,7 @@ class WardrobeItem {
       personId: json['personId'] is num ? intValue(json['personId']) : null,
       image: path(json['image']),
       portrait: path(json['portrait']),
+      thumb: path(json['thumb']),
       harness: _harness(json['harness']),
       tint: json['tint'] is Map
           ? WardrobeTint.fromJson(jsonMap(json['tint']))

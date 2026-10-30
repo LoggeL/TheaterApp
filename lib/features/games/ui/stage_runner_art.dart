@@ -205,32 +205,77 @@ class RunnerArt {
   /// ([RunnerSprite.tallCrate]) instead of two crates; never the default art.
   final bool ownTallCrate;
 
-  /// Whether [image] draws anything in the cell of [sprite]: an optional
-  /// cell that an obstacle set may leave empty. Asked once per picture.
-  static Future<bool> draws(ui.Image image, RunnerSprite sprite) async {
-    final known = _draws[image]?[sprite];
-    if (known != null) return known;
-    final bytes = await image.toByteData();
-    var found = false;
-    if (bytes != null) {
-      final r = sprite.rect.intersect(
-        ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-      );
-      for (var y = r.top.toInt(); !found && y < r.bottom; y++) {
-        for (var x = r.left.toInt(); x < r.right; x++) {
-          // Alpha of the straight RGBA; a faint veil does not count.
-          if (bytes.getUint8((y * image.width + x) * 4 + 3) > 32) {
-            found = true;
-            break;
-          }
-        }
-      }
+  /// The cells an obstacle set may leave empty.
+  static const _optionalCells = [RunnerSprite.pile, RunnerSprite.tallCrate];
+
+  /// Whether [image] draws anything in the optional cell of [sprite]. Reading
+  /// the pixels back is slow (on the web it stalls the frame), so all optional
+  /// cells are looked at in one read, kept per [path] (the link carries the
+  /// file's hash) or, without one, per picture: a costume decoded anew does
+  /// not read again, and those asking at the same time share the read.
+  static Future<bool> draws(
+    ui.Image image,
+    RunnerSprite sprite, {
+    String? path,
+  }) async {
+    assert(_optionalCells.contains(sprite));
+    final cells = path == null
+        ? _cells[image] ??= _readCells(image)
+        : _cellsByPath[path] ??= _readCells(image);
+    final found = await cells;
+    if (found != null) return found[sprite] ?? false;
+    // Not readable just now: the next one tries again.
+    if (path == null) {
+      _cells[image] = null;
+    } else {
+      _cellsByPath.remove(path);
     }
-    (_draws[image] ??= {})[sprite] = found;
-    return found;
+    return false;
   }
 
-  static final _draws = Expando<Map<RunnerSprite, bool>>();
+  /// The optional cells of [image]; null if its pixels could not be read,
+  /// which the web engine reports with an error.
+  static Future<Map<RunnerSprite, bool>?> _readCells(ui.Image image) async {
+    pixelReads++;
+    final ByteData? bytes;
+    try {
+      bytes = await image.toByteData();
+    } catch (e) {
+      if (kDebugMode) debugPrint('Bühnenlauf: Atlas nicht lesbar: $e');
+      return null;
+    }
+    if (bytes == null) return null;
+    return {
+      for (final sprite in _optionalCells)
+        sprite: _drawn(bytes, image, sprite.rect),
+    };
+  }
+
+  static bool _drawn(ByteData bytes, ui.Image image, ui.Rect cell) {
+    final r = cell.intersect(
+      ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+    );
+    for (var y = r.top.toInt(); y < r.bottom; y++) {
+      for (var x = r.left.toInt(); x < r.right; x++) {
+        // Alpha of the straight RGBA; a faint veil does not count.
+        if (bytes.getUint8((y * image.width + x) * 4 + 3) > 32) return true;
+      }
+    }
+    return false;
+  }
+
+  static final _cells = Expando<Future<Map<RunnerSprite, bool>?>>();
+  static final _cellsByPath = <String, Future<Map<RunnerSprite, bool>?>>{};
+
+  /// How often the pixels of a picture were read back, for tests.
+  @visibleForTesting
+  static int pixelReads = 0;
+
+  /// Forgets what the cells were found to hold, with the pictures.
+  static void forgetCells() {
+    _cellsByPath.clear();
+    pixelReads = 0;
+  }
 
   /// Wire points of the worn character's own atlas that differ from
   /// [RunnerSprite.harness].
@@ -290,6 +335,13 @@ class RunnerArt {
 
   /// Already decoded art, without waiting.
   static RunnerArt? get loaded => _loaded;
+
+  /// Makes [art] the loaded art, null forgets it.
+  @visibleForTesting
+  static void useForTest(RunnerArt? art) {
+    _loaded = art;
+    _loading = art == null ? null : Future.value(art);
+  }
 
   static Future<RunnerArt?> load([AssetBundle? bundle]) =>
       _loading ??= _load(bundle ?? rootBundle);

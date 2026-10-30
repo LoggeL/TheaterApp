@@ -428,6 +428,7 @@ test('the bundled pictures have the sizes the app accepts', () => {
       const [w, h] = pictureSize(c.files.get(file(x.portrait)).bytes);
       assert.ok(w === h && w >= 256, `${x.portrait} is square`);
     }
+    if (x.thumb) named.add(file(x.thumb));
     // A backdrop's own obstacle set is an atlas like the obstacles' one.
     if (x.obstacles) {
       named.add(file(x.obstacles));
@@ -452,7 +453,7 @@ test('the bundled pictures have the sizes the app accepts', () => {
   // pictures so they can simply be switched on again.
   const folder = new URL('../src/wardrobe/images/', import.meta.url);
   const parked = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url))).items
-    .filter(x => x.disabled === true).flatMap(x => [x.image, x.portrait]).filter(Boolean);
+    .filter(x => x.disabled === true).flatMap(x => [x.image, x.portrait, x.portrait?.replace(/-portrait\.webp$/, '-thumb.webp')]).filter(Boolean);
   assert.deepEqual(readdirSync(folder).filter(f => !named.has(f) && !parked.includes(f)), []);
   const bytes = [...c.files.values()].filter(f => f.mime.startsWith('image/')).reduce((sum, f) => sum + f.bytes.length, 0);
   // 0.11.2: 159 pictures in use (42 characters, 34 role variants, 7 backdrops) were about 16 MB;

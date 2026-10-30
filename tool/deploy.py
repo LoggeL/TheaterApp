@@ -54,6 +54,8 @@ def main():
     # Refuse a rollout if the consistent database + referenced-media backup fails.
     run([sys.executable, 'tool/backup.py'])
     if not args.skip_build:
+        # CI checks this for what it builds; a build here has not been through CI.
+        run([sys.executable, 'tool/optimize-sprites.py', '--check'])
         run(['node', 'tool/configure.mjs', 'config/production.web.json'])
         # --wasm adds a dart2wasm/skwasm build for Chromium; Safari and Firefox keep dart2js with CanvasKit.
         run(['flutter', 'build', 'web', '--release', '--wasm', '--dart-define-from-file=config/production.web.json', '--pwa-strategy=none'])

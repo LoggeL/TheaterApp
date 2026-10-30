@@ -114,6 +114,7 @@ class EnsembleCard extends StatelessWidget {
                       wardrobe: wardrobe,
                       controller: controller,
                       art: art,
+                      small: true,
                       onTap: onReward == null ? null : () => onReward!(reward),
                     ),
                   )
@@ -555,6 +556,7 @@ class _EnsembleCelebrationState extends State<EnsembleCelebration>
                                         wardrobe: widget.wardrobe,
                                         controller: widget.controller,
                                         art: widget.art,
+                                        small: true,
                                       ),
                                       // The curtain opens on what was a
                                       // surprise until now.

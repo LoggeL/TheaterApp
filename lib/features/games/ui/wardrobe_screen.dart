@@ -29,6 +29,7 @@ Future<void> openWardrobe(
   BuildContext context,
   AppController controller, {
   Wardrobe? wardrobe,
+  RunnerArt? dressed,
   required RunnerSound sound,
   ValueChanged<Wardrobe>? onChanged,
 }) => openPage<void>(
@@ -36,6 +37,7 @@ Future<void> openWardrobe(
   WardrobeScreen(
     controller: controller,
     initial: wardrobe,
+    dressed: dressed,
     sound: sound,
     onChanged: onChanged,
   ),
@@ -134,6 +136,56 @@ String ensembleReachedText(EnsembleMilestone m) {
 /// "Gage" with a figure, "1 Gage".
 String gageText(int gage) => '${_number.format(gage)} Gage';
 
+/// Calls [onEntered] once, the frame after the page's route has come in. A
+/// widget of its own: reading the route ties this to every change of it (a
+/// page pushed on top), and this widget alone rebuilds then, not the page.
+class _AfterEntrance extends StatefulWidget {
+  const _AfterEntrance({required this.onEntered, required this.child});
+  final VoidCallback onEntered;
+  final Widget child;
+
+  @override
+  State<_AfterEntrance> createState() => _AfterEntranceState();
+}
+
+class _AfterEntranceState extends State<_AfterEntrance> {
+  Animation<double>? _entrance;
+
+  @override
+  void initState() {
+    super.initState();
+    // After the first frame: a pushed route's first frame is built offstage
+    // for its heroes, and until then its animation reads as complete.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final entrance = ModalRoute.of(context)?.animation;
+      if (entrance == null || entrance.isCompleted) {
+        widget.onEntered();
+      } else {
+        _entrance = entrance..addStatusListener(_changed);
+      }
+    });
+  }
+
+  void _changed(AnimationStatus status) {
+    if (!status.isCompleted) return;
+    _entrance?.removeStatusListener(_changed);
+    _entrance = null;
+    WidgetsBinding.instance.endOfFrame.then((_) {
+      if (mounted) widget.onEntered();
+    });
+  }
+
+  @override
+  void dispose() {
+    _entrance?.removeStatusListener(_changed);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 /// "Garderobe" of the stage runner: costume crates to open, the collection
 /// by kind with what is worn, and the statistics of the own runs.
 class WardrobeScreen extends StatefulWidget {
@@ -142,11 +194,18 @@ class WardrobeScreen extends StatefulWidget {
     required this.controller,
     required this.sound,
     this.initial,
+    this.dressed,
     this.onChanged,
   });
   final AppController controller;
   final RunnerSound sound;
+
+  /// What is known already (the game's wardrobe): the page is there at once
+  /// and the refresh waits until it has come in.
   final Wardrobe? initial;
+
+  /// The art in the costume of [initial], if the game has it.
+  final RunnerArt? dressed;
 
   /// Told about every new state, e.g. so the game wears the new costume.
   final ValueChanged<Wardrobe>? onChanged;
@@ -157,7 +216,13 @@ class WardrobeScreen extends StatefulWidget {
 
 class _WardrobeScreenState extends State<WardrobeScreen> {
   late Wardrobe? _wardrobe = widget.initial;
-  RunnerArt? _base = RunnerArt.loaded, _dressed;
+  RunnerArt? _base = RunnerArt.loaded;
+  late RunnerArt? _dressed = widget.dressed;
+
+  /// The costume of [_dressed], as [outfitOf] says; null for none yet.
+  late String? _outfit = widget.dressed == null || widget.initial == null
+      ? null
+      : outfitOf(widget.initial!);
   String? _error;
   bool _loading = false,
       _busy = false,
@@ -188,6 +253,10 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.initial == null) _start();
+  }
+
+  void _start() {
     _load();
     if (_base == null) {
       RunnerArt.load().then((art) {
@@ -217,12 +286,16 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     }
   }
 
-  /// The art in the worn costume, for the obstacles in the statistics.
+  /// The art in the worn costume, for the obstacles in the statistics; only
+  /// if it changed.
   Future<void> _dress() async {
     final base = _base, w = _wardrobe;
-    if (base == null || w == null) return;
+    if (base == null || w == null || outfitOf(w) == _outfit) return;
     final dressed = await dressArt(base, w, controller);
-    if (mounted && identical(w, _wardrobe)) setState(() => _dressed = dressed);
+    if (mounted && identical(w, _wardrobe)) {
+      setState(() => _dressed = dressed);
+      _outfit = dressedOutfit(w);
+    }
   }
 
   void _update(Wardrobe w) {
@@ -395,6 +468,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                       worn: worn,
                       animateShine: true,
                       showRole: false,
+                      small: true,
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -756,7 +830,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   @override
   Widget build(BuildContext context) {
     final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
-    return DefaultTabController(
+    final page = DefaultTabController(
       length: 3,
       child: Scaffold(
         appBar: AppBar(
@@ -819,6 +893,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               ),
       ),
     );
+    return widget.initial == null
+        ? page
+        : _AfterEntrance(onEntered: _start, child: page);
   }
 
   Widget _costumes(BuildContext context) {
@@ -1229,6 +1306,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
             art: _base,
             worn: items[i].id == worn,
             onTap: () => _details(items[i]),
+            small: true,
           ),
         ),
       ),
@@ -1571,6 +1649,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         art: _base,
         worn: items[i].id == worn,
         onTap: () => _details(items[i]),
+        small: true,
       ),
     ),
   );

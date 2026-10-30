@@ -14,6 +14,7 @@ import 'package:theater_app/features/games/ui/figure_detail.dart';
 import 'package:theater_app/features/games/ui/stage_runner_art.dart';
 import 'package:theater_app/features/games/ui/stage_runner_look.dart';
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
+import 'package:theater_app/features/games/ui/wardrobe_cards.dart';
 import 'package:theater_app/features/games/ui/wardrobe_overview.dart';
 import 'package:theater_app/features/games/ui/wardrobe_screen.dart';
 
@@ -605,6 +606,7 @@ void main() {
         const ValueKey('figure-role-character.elena--anno'),
       );
       expect(other, findsOneWidget);
+      expect(tester.widget<WardrobeCard>(other).small, isTrue);
       await tester.tap(other);
       await _settle(tester);
       expect(find.text('als Johanna · Anno 1146 2025'), findsWidgets);

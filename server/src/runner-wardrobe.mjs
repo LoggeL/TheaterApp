@@ -335,10 +335,14 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
     // The rarities it can be drawn through: only the exclusive ones if it has any.
     const exclusive = own.filter(id => rarity.get(id)?.exclusive);
     Object.defineProperty(item, 'drawnBy', { value: reward || unique ? [] : exclusive.length ? exclusive : own, enumerable: false });
-    // `image`: the atlas (or backdrop); `portrait`: a square picture for the cards.
+    // `image`: the atlas (or backdrop); `portrait`: a square picture for the cards; `thumb`: the
+    // portrait at the size of the grid (`<x>-thumb.webp`, made by tool/optimize-sprites.py, so it
+    // goes by name and not in the catalog; older apps ignore it).
     const image = picture(x.image), portrait = picture(x.portrait);
     if (image) item.image = image;
     if (portrait) item.portrait = portrait;
+    const thumb = portrait && /-portrait\.webp$/.test(x.portrait) ? picture(x.portrait.replace(/-portrait\.webp$/, '-thumb.webp')) : undefined;
+    if (thumb) item.thumb = thumb;
     // A backdrop's own obstacle set (`obstacles`: an atlas in the layout of the obstacles, only an
     // asset, never drawn or worn on its own) and the colour of its border, the short curtain the
     // game draws (`borderColor`). Both optional; older apps ignore them.
@@ -403,7 +407,7 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
   for (const [id, base] of baseOf) rolesOf.set(base, [...(rolesOf.get(base) ?? []), byId.get(id)]);
   // Files only ensemble rewards use (name → their ids): not served before a milestone reveals one.
   const users = new Map();
-  for (const x of items) for (const key of ['image', 'portrait', 'obstacles', 'collectibles', 'music']) {
+  for (const x of items) for (const key of ['image', 'portrait', 'thumb', 'obstacles', 'collectibles', 'music']) {
     const name = typeof x[key] === 'string' ? x[key].match(/\/skins\/([^?]+)/)?.[1] : null;
     if (name) users.set(name, [...(users.get(name) ?? []), x]);
   }
@@ -853,16 +857,27 @@ export function recordRun(t, personId, meters, hitBy, at = t.clock(), run = {}) 
   };
 }
 
-/** Runs [fn] once per Idempotency-Key: a repeated key returns the stored result. */
-function once(t, uid, prefix, requestId, action, fn) {
+/** The catalog as `view` gives it to the app asking ([roles], [unique]). */
+const catalogFor = (t, roles, unique) => a => view(t, progressOf(t, a.personId), roles, unique).catalog;
+
+/**
+ * Runs [fn] once per Idempotency-Key: a repeated key returns the stored result. The catalog of its
+ * `wardrobe` (about 130 KB, the same for everybody) is not stored: [catalogNow] (the account) puts
+ * the one of the moment back. Results stored with theirs come back as they are.
+ */
+function once(t, uid, prefix, requestId, action, fn, catalogNow) {
   if (typeof requestId !== 'string' || !requestId || requestId.length > 150) fail(400, 'Ein gültiger Änderungsschlüssel fehlt.');
   const key = prefix + requestId;
   return t.store.transaction(() => {
     const a = t.account(uid);
     const previous = t.store.db.prepare('SELECT result FROM requests WHERE uid=? AND request_id=?').get(uid, key);
-    if (previous) return JSON.parse(previous.result);
+    if (previous) {
+      const stored = JSON.parse(previous.result);
+      return stored.wardrobe && !stored.wardrobe.catalog ? { ...stored, wardrobe: { ...stored.wardrobe, catalog: catalogNow(a) } } : stored;
+    }
     const { result, subject } = fn(a);
-    t.store.db.prepare('INSERT INTO requests VALUES(?,?,?,?,?)').run(uid, key, action, JSON.stringify(result), t.clock().toISOString());
+    const { catalog: _, ...wardrobe } = result.wardrobe;
+    t.store.db.prepare('INSERT INTO requests VALUES(?,?,?,?,?)').run(uid, key, action, JSON.stringify({ ...result, wardrobe }), t.clock().toISOString());
     t.store.audit(uid, action, subject);
     return result;
   });
@@ -941,7 +956,7 @@ export function openCrate(t, uid, requestId, b = {}) {
     const aim = crate === 'costume' ? { target: target?.id ?? 'random' } : {};
     const result = { item: draw.item, ...reel(t, draw.item, open, items), outcome: { ...outcome, duplicate: draw.duplicate, shiny, rarity: draw.tier.id, crate, ...aim, ...(eventCrate ? { event: crateView(eventCrate) } : {}), ...(packCrate ? { packId: packCrate.releaseId, name: packCrate.name } : {}) }, wardrobe: view(t, saved, roles, unique) };
     return { result: roles ? result : olderAppOpening(c, result), subject: `${draw.item.id}${draw.duplicate ? ` ${outcome.type}` : ''}${shiny ? ' shiny' : ''}${target ? ` ${target.id}` : ''}` };
-  });
+  }, catalogFor(t, roles, unique));
 }
 
 /** POST /games/runner/trade `{ rarity }`: gage for a random missing item of the next rarity up. */
@@ -959,7 +974,7 @@ export function tradeGage(t, uid, requestId, b) {
     const next = t.store.put('runnerProgress', a.personId, settleUnlocks(t, { ...p, gage: p.gage - cost, owned: [...list(p.owned), item.id] }));
     const result = { item, outcome: { type: 'trade', rarity: target.id, cost }, wardrobe: view(t, next, b?.roles === true, b?.unique === true) };
     return { result: b?.roles === true ? result : olderAppDeal(c, result), subject: `${item.id} -${cost}` };
-  });
+  }, catalogFor(t, b?.roles === true, b?.unique === true));
 }
 
 /** POST /games/runner/buy `{ itemId }`: one chosen missing item for gage; not gold. */
@@ -977,7 +992,7 @@ export function buyItem(t, uid, requestId, b) {
     const next = t.store.put('runnerProgress', a.personId, settleUnlocks(t, { ...p, gage: p.gage - cost, owned: [...list(p.owned), item.id] }));
     const result = { item, outcome: { type: 'buy', rarity: item.rarity, cost }, wardrobe: view(t, next, b?.roles === true, b?.unique === true) };
     return { result: b?.roles === true ? result : olderAppDeal(c, result), subject: `${item.id} -${cost}` };
-  });
+  }, catalogFor(t, b?.roles === true, b?.unique === true));
 }
 
 /** PUT /games/runner/ensemble/seen `{ km }`: the celebration of milestones up to [km] was shown. */

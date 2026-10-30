@@ -11,6 +11,9 @@ const dir = new URL('../src/wardrobe/images/', import.meta.url);
 const atlas = { width: 1124, height: 577, alpha: true };
 const kinds = [
   { name: 'portrait', test: /^character-.+-portrait\.webp$/, width: 512, height: 512, alpha: true, budget: 80 << 10 },
+  // Made from the portraits and backdrops by tool/optimize-sprites.py, for the grid and the reel.
+  { name: 'thumbnail', test: /^character-.+-thumb\.webp$/, width: 384, height: 384, alpha: true, budget: 40 << 10 },
+  { name: 'backdrop portrait', test: /^backdrop-.+-portrait\.webp$/, width: 384, height: 384, alpha: false, budget: 32 << 10 },
   { name: 'character atlas', test: /^character-.+\.webp$/, ...atlas, budget: 180 << 10 },
   { name: 'obstacle set', test: /^obstacles-.+\.webp$/, ...atlas, budget: 120 << 10 },
   { name: 'collectible set', test: /^collectibles-.+\.webp$/, ...atlas, budget: 40 << 10 },

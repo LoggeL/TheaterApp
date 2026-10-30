@@ -45,6 +45,21 @@ class DeploymentPortabilityTests(unittest.TestCase):
         self.assertEqual(run.call_count, 1)
         self.assertEqual(pathlib.Path(run.call_args.args[0][1]).name, 'backup.py')
 
+    def test_outdated_card_pictures_stop_a_local_build(self):
+        steps = [None, RuntimeError('out of date')]
+        with patch('sys.argv', ['deploy.py']), patch.object(deploy, 'run', side_effect=steps) as run:
+            with self.assertRaisesRegex(RuntimeError, 'out of date'):
+                deploy.main()
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args.args[0][1:], ['tool/optimize-sprites.py', '--check'])
+
+    def test_a_ci_build_is_not_checked_again(self):
+        steps = [None, RuntimeError('stop here')]
+        with patch('sys.argv', ['deploy.py', '--skip-build']), patch.object(deploy, 'run', side_effect=steps) as run:
+            with self.assertRaisesRegex(RuntimeError, 'stop here'):
+                deploy.main()
+        self.assertEqual(run.call_args.args[0], ['node', 'tool/version-web.mjs'])
+
     def test_local_transport_requires_explicit_opt_in(self):
         config = {'sshKey': '~/.ssh/example', 'sshHost': 'homebox'}
         with patch.dict(os.environ, {}, clear=True):
