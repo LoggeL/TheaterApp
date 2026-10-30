@@ -47,7 +47,12 @@ class AppController extends ChangeNotifier {
         ? null
         : (uid) async {
             if (_identityPending) await _identityReady;
-            return identity.token(uid);
+            try {
+              return await identity.token(uid);
+            } catch (error) {
+              // A disabled or deleted account signs out like a 401.
+              throw identityTokenFailure(error) ?? error;
+            }
           };
   }
 
@@ -191,6 +196,10 @@ class AppController extends ChangeNotifier {
   Future<void>? _deviceRegistration;
   String? _deviceRegistrationToken;
   AppUser? _user;
+
+  /// The user in the stored Firebase sign-in, as last read or written; a
+  /// cache-first start shows it until the server answers.
+  JsonMap? _storedUser;
   JsonMap _baseSnapshot = {};
 
   /// [_baseSnapshot] with the queued changes applied; set by `_rebuild`.
@@ -338,7 +347,7 @@ class AppController extends ChangeNotifier {
       );
     } on ApiException catch (error) {
       // An expired session signs out here just like during a refresh.
-      if (error.isUnauthorized) await _expire(generation);
+      if (error.isUnauthorized) await _expire(generation, error);
       rethrow;
     }
     if (!_current(generation)) {

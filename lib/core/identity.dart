@@ -241,6 +241,29 @@ class FirebaseIdentity implements IdentityService {
   }
 }
 
+/// Firebase failing to hand out an ID token as the [ApiException] the
+/// controller handles: a disabled, deleted or revoked account ends the
+/// session (401), a missing connection is offline (retryable). Null for
+/// anything else.
+ApiException? identityTokenFailure(Object error) {
+  if (error is! FirebaseAuthException) return null;
+  return switch (error.code) {
+    'user-disabled' ||
+    'user-not-found' ||
+    'user-token-expired' ||
+    'invalid-user-token' => ApiException(
+      identityError(error),
+      statusCode: 401,
+      code: identitySessionEnded,
+    ),
+    'network-request-failed' => ApiException(identityError(error)),
+    _ => null,
+  };
+}
+
+/// [ApiException.code] of a session Firebase itself has ended.
+const identitySessionEnded = 'identity_session_ended';
+
 String identityError(Object error) {
   if (error is FirebaseAuthException) {
     return switch (error.code) {

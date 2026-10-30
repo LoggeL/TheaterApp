@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuthException;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -8,6 +9,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/app/shell/app_navigation.dart';
 import 'package:theater_app/app/shell/app_section.dart';
 import 'package:theater_app/core/app_controller.dart';
+import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/data/api_client.dart';
 import 'package:theater_app/data/demo_data.dart';
@@ -29,10 +31,26 @@ class GatedIdentity extends FakeIdentity {
   bool ready = false;
   int signOuts = 0;
 
+  /// Thrown by [token] instead of handing one out, like Firebase failing to
+  /// refresh the ID token; with [signOutOnTokenError] Firebase has also
+  /// dropped the sign-in by then.
+  Object? tokenError;
+  bool signOutOnTokenError = false;
+
   @override
   String? get uid => ready ? restoredUid : null;
   @override
   set uid(String? value) => restoredUid = value;
+
+  @override
+  Future<String> token(String expectedUid) async {
+    final error = tokenError;
+    if (error != null) {
+      if (signOutOnTokenError) restoredUid = null;
+      throw error;
+    }
+    return super.token(expectedUid);
+  }
 
   @override
   Future<void> initialize() async {
@@ -53,7 +71,7 @@ class GatedIdentity extends FakeIdentity {
 
 /// A Firebase server: `/auth/session`, `/snapshot`, `/actions`, `/devices`.
 class FirebaseServer {
-  String status = 'approved';
+  String status = 'approved', role = 'member';
   List<String> features = ['addressedToMe'];
   final requests = <String>[];
   Future<http.Response>? Function(http.Request)? override;
@@ -65,7 +83,7 @@ class FirebaseServer {
     'userId': uid,
     'displayName': 'Testmitglied',
     'email': uid,
-    'role': 'member',
+    'role': role,
     'status': status,
     'personId': status == 'approved' ? 1 : null,
     'identityReady': true,
@@ -102,6 +120,28 @@ class FirebaseServer {
       _ => jsonResponse({'ok': true}),
     };
   });
+}
+
+/// Counts push restores and holds each until [release].
+class RecordingDevices extends DeviceServices {
+  RecordingDevices(super.controller)
+    : super(onTarget: (_) {}, onForegroundMessage: (_) {});
+  final runs = <int>[];
+  final _gates = <Completer<void>>[];
+
+  @override
+  Future<void> runPushRestore() {
+    runs.add(controller.sessionEpoch);
+    final gate = Completer<void>();
+    _gates.add(gate);
+    return gate.future;
+  }
+
+  void release() {
+    for (final gate in _gates) {
+      if (!gate.isCompleted) gate.complete();
+    }
+  }
 }
 
 class Session {
@@ -426,6 +466,98 @@ void main() {
       expect(c.events, isEmpty);
       expect(session.credentials.value, isNull);
     });
+
+    for (final code in [
+      'user-disabled',
+      'user-not-found',
+      'user-token-expired',
+      'invalid-user-token',
+    ]) {
+      test('a Firebase account ended by $code signs out', () async {
+        final session = Session(FirebaseServer());
+        await session.signInOnce();
+        final identity = GatedIdentity(session.uid)
+          ..tokenError = FirebaseAuthException(code: code);
+        final c = session.controller(identity);
+        addTearDown(c.dispose);
+        await c.init();
+        expect(c.hasAccess, isTrue);
+        identity.release();
+        await c.refresh(silent: true);
+        await pumpEventQueue();
+        expect(c.user, isNull);
+        expect(c.hasAccess, isFalse);
+        expect(c.events, isEmpty);
+        expect(session.credentials.value, isNull);
+        expect(session.server.requests, isEmpty);
+        if (code == 'user-disabled') {
+          expect(c.error, 'Dieses Konto wurde gesperrt.');
+        }
+      });
+    }
+
+    test('a Firebase sign-in without network stays offline', () async {
+      final session = Session(FirebaseServer());
+      await session.signInOnce();
+      final identity = GatedIdentity(session.uid)
+        ..tokenError = FirebaseAuthException(code: 'network-request-failed');
+      final c = session.controller(identity);
+      addTearDown(c.dispose);
+      await c.init();
+      identity.release();
+      await c.refresh(silent: true);
+      expect(c.hasAccess, isTrue);
+      expect(c.events, isNotEmpty);
+      expect(c.isOffline, isTrue);
+      expect(c.error, 'Keine Verbindung zum Anmeldedienst.');
+      expect(session.credentials.value, isNotNull);
+    });
+
+    test('another error with the sign-in gone signs out', () async {
+      final session = Session(FirebaseServer());
+      await session.signInOnce();
+      final identity = GatedIdentity(session.uid)
+        ..tokenError = StateError('signed out meanwhile')
+        ..signOutOnTokenError = true;
+      final c = session.controller(identity);
+      addTearDown(c.dispose);
+      await c.init();
+      identity.release();
+      await c.refresh(silent: true);
+      await pumpEventQueue();
+      expect(c.user, isNull);
+      expect(c.events, isEmpty);
+      expect(session.credentials.value, isNull);
+    });
+
+    test('a role from a snapshot shows at the next start', () async {
+      final session = Session(FirebaseServer());
+      await session.signInOnce();
+      final first = session.controller(GatedIdentity(session.uid)..release());
+      await first.init();
+      await first.refresh(silent: true);
+      // Promoted between two access checks: only the snapshot says so.
+      session.server.role = 'admin';
+      await first.refresh(silent: true);
+      expect(first.user!.role, 'admin');
+      expect(session.server.count('GET', '/auth/session'), 1);
+      expect(jsonMap(session.credentials.value!['user'])['role'], 'admin');
+      first.dispose();
+      final identity = GatedIdentity(session.uid);
+      final c = session.controller(identity);
+      addTearDown(c.dispose);
+      await c.init();
+      expect(c.user!.role, 'admin');
+      final epoch = c.sessionEpoch;
+      var notified = 0;
+      c.addListener(() => notified++);
+      identity.release();
+      await c.refresh(silent: true);
+      // The start's access check confirms it without a change.
+      expect(c.sessionEpoch, epoch);
+      expect(c.user!.role, 'admin');
+      expect(notified, 0);
+    });
   });
 
   group('access check', () {
@@ -508,6 +640,49 @@ void main() {
     });
   });
 
+  group('push restore', () {
+    test('calls for one session share a run', () async {
+      final c = AppController(
+        localStore: MemoryLocalStore(),
+        credentialStore: MemoryCredentialStore(),
+      );
+      addTearDown(c.dispose);
+      await c.init();
+      final devices = RecordingDevices(c);
+      final first = devices.restorePush();
+      final second = devices.restorePush();
+      expect(devices.runs, [c.sessionEpoch]);
+      devices.release();
+      await Future.wait([first, second]);
+      // A finished run does not hold back the next one.
+      final third = devices.restorePush();
+      expect(devices.runs, hasLength(2));
+      devices.release();
+      await third;
+    });
+
+    test('a new session starts its own run', () async {
+      final c = AppController(
+        localStore: MemoryLocalStore(),
+        credentialStore: MemoryCredentialStore(),
+      );
+      addTearDown(c.dispose);
+      await c.init();
+      final devices = RecordingDevices(c);
+      final old = devices.restorePush();
+      final epoch = c.sessionEpoch;
+      await c.startDemo();
+      expect(c.sessionEpoch, greaterThan(epoch));
+      final next = devices.restorePush();
+      expect(devices.runs, [epoch, c.sessionEpoch]);
+      // Calls for the new session join its run, not the old one.
+      final joined = devices.restorePush();
+      expect(devices.runs, hasLength(2));
+      devices.release();
+      await Future.wait([old, next, joined]);
+    });
+  });
+
   group('app start', () {
     testWidgets('the shell shows before Firebase answers and keeps the tab', (
       tester,
@@ -542,7 +717,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('another Firebase account falls back to the welcome screen', (
+    testWidgets('a Firebase sign-out falls back to the welcome screen', (
       tester,
     ) async {
       final session = Session(FirebaseServer());
@@ -561,6 +736,34 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(AppShell), findsNothing);
       expect(find.byType(FirebaseWelcomeScreen), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('another Firebase account replaces the shown one', (
+      tester,
+    ) async {
+      final session = Session(FirebaseServer());
+      await tester.runAsync(session.signInOnce);
+      session.server.status = 'pending';
+      final identity = GatedIdentity('b@example.invalid');
+      final c = session.controller(identity);
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        TheaterApp(controller: c, enableDeviceServices: false),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(AppShell), findsOneWidget);
+      expect(c.user!.id, session.uid);
+      identity.release();
+      await tester.runAsync(() async {
+        await c.refresh();
+        await pumpEventQueue();
+      });
+      await tester.pumpAndSettle();
+      expect(c.user!.id, 'b@example.invalid');
+      expect(find.byType(AppShell), findsNothing);
+      expect(find.byType(ApprovalPendingScreen), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });

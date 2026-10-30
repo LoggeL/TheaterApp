@@ -189,7 +189,7 @@ extension SyncController on AppController {
         if (!_current(generation)) return;
         _error = _message(error);
         if (error is ApiException && error.isUnauthorized) {
-          await _expire(generation);
+          await _expire(generation, error);
           return;
         }
         if (error is! ApiException || error.retryable) {
@@ -428,6 +428,13 @@ extension SyncController on AppController {
       }
       _rebuild();
       await _persistCore(generation);
+      if (_identity != null && hasAccess && _current(generation)) {
+        try {
+          await _storeFirebaseUser(generation, _user!);
+        } catch (_) {
+          /* The next changed sync or access check writes it again. */
+        }
+      }
     } catch (error) {
       if (_current(generation) &&
           _identity != null &&
@@ -446,7 +453,7 @@ extension SyncController on AppController {
         _isOffline = error is ApiException && error.retryable;
         _error = _message(error);
         if (error is ApiException && error.isUnauthorized) {
-          await _expire(generation);
+          await _expire(generation, error);
         }
       }
     } finally {

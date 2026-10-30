@@ -254,6 +254,7 @@ class DeviceServices {
   String? _registeredToken;
   bool _firebaseReady = false;
   Future<void>? _pushInitialization, _pushRestore;
+  int? _pushRestoreEpoch;
   Future<void> start() async {
     if (kIsWeb) {
       final target = AppTarget.fromWebUri(Uri.base);
@@ -452,18 +453,24 @@ class DeviceServices {
   }
 
   /// Registers again at a start or account change when push was enabled.
-  /// Calls while one runs share it.
+  /// Calls for the same session share one run; a run that started for an
+  /// earlier session stops by itself, so a new session starts its own.
   Future<void> restorePush() {
+    final epoch = controller.sessionEpoch;
     final running = _pushRestore;
-    if (running != null) return running;
-    final task = _restorePush();
+    if (running != null && _pushRestoreEpoch == epoch) return running;
+    final task = runPushRestore();
     _pushRestore = task;
+    _pushRestoreEpoch = epoch;
     return task.whenComplete(() {
       if (identical(_pushRestore, task)) _pushRestore = null;
     });
   }
 
-  Future<void> _restorePush() async {
+  /// One run of [restorePush]; tests replace it.
+  @visibleForTesting
+  @protected
+  Future<void> runPushRestore() async {
     final session = controller.sessionEpoch;
     if (!Brand.pushEnabled ||
         controller.preferences['pushEnabled'] != true ||

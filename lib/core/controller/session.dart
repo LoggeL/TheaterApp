@@ -129,6 +129,7 @@ extension SessionController on AppController {
       return null;
     }
     _user = user;
+    _storedUser = user.toJson();
     _token = 'firebase:${user.id}';
     _account = account;
     await _hydrate(generation, state: state);
@@ -175,8 +176,12 @@ extension SessionController on AppController {
       await refresh(silent: true, accessChecked: true);
     } catch (error) {
       if (!_current(generation)) return;
-      if (error is ApiException && error.isUnauthorized) {
-        await _expire(generation);
+      // A Firebase token error becomes an ApiException (see
+      // [identityTokenFailure]); any other error with the sign-in gone
+      // ends the session as well.
+      if (error is ApiException && error.isUnauthorized ||
+          error is! ApiException && _identity!.uid != uid) {
+        await _expire(generation, error);
         return;
       }
       _isOffline = error is ApiException && error.retryable;
@@ -339,6 +344,7 @@ extension SessionController on AppController {
         jsonMap(saved['user'])['userId'] == uid &&
         saved['baseUrl'] == _apiBaseUrl) {
       _user = AppUser.fromJson(jsonMap(saved['user']));
+      _storedUser = _user!.toJson();
       if (_user!.isApproved) await _hydrate(generation);
     }
     try {
@@ -511,20 +517,30 @@ extension SessionController on AppController {
     }
     if (!_current(generation)) return;
     _accessCheckedAt = _clock();
-    if (changed) {
-      await _write(
-        () => _credentials.write({
-          'baseUrl': _apiBaseUrl,
-          'token': _token,
-          'user': next.toJson(),
-        }),
-      );
-      if (!_current(generation)) return;
-    }
+    await _storeFirebaseUser(generation, next);
+    if (!_current(generation)) return;
     _error = null;
     _isOffline = false;
     if (changed || !settled) _notify();
     if (refreshData && next.isApproved) await refresh(accessChecked: true);
+  }
+
+  /// Keeps the stored Firebase sign-in in step with the shown user, also
+  /// when a role or name arrives with a snapshot, so the next cache-first
+  /// start shows it. Writes only a change.
+  Future<void> _storeFirebaseUser(int generation, AppUser user) async {
+    final json = user.toJson();
+    final stored = _storedUser;
+    if (stored != null && _sameJson(stored, json)) return;
+    await _write(() async {
+      if (!_current(generation)) return;
+      await _credentials.write({
+        'baseUrl': _apiBaseUrl,
+        'token': _token,
+        'user': json,
+      });
+      _storedUser = json;
+    });
   }
 
   Future<void> changePassword(String current, String next) async {
@@ -650,6 +666,7 @@ extension SessionController on AppController {
     _token = null;
     _account = null;
     _user = null;
+    _storedUser = null;
     _expiresAt = null;
     _deviceToken = null;
     _deviceRegisteredAt = null;
@@ -685,7 +702,9 @@ extension SessionController on AppController {
     _customReminderMinutes = null;
   }
 
-  Future<void> _expire(int generation) async {
+  /// [cause] is the failed request's error; a session Firebase ended
+  /// (e.g. a disabled account) keeps its own message.
+  Future<void> _expire(int generation, [Object? cause]) async {
     if (!_current(generation)) return;
     // Keep the isolated durable outbox so logging into the same account can
     // continue it. Only explicit logout deliberately discards account data.
@@ -696,7 +715,9 @@ extension SessionController on AppController {
     if (!_current(generation)) return;
     ++_generation;
     _resetMemory();
-    _error = 'Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an.';
+    _error = cause is ApiException && cause.code == identitySessionEnded
+        ? cause.message
+        : 'Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an.';
     _notify();
   }
 
