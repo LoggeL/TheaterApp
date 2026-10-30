@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/models.dart';
+import 'http_client_io.dart'
+    if (dart.library.js_interop) 'http_client_web.dart';
 
 class ApiException implements Exception {
   const ApiException(
@@ -32,24 +34,61 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// Sees a request's method, path, status (0: no answer) and duration, the
+/// server's own time (`Server-Timing: app;dur`) when it sent one, and
+/// whether the call took longer than its timeouts allow (the app was frozen
+/// meanwhile, e.g. a tab in the background).
+typedef ApiObserver =
+    void Function(
+      String method,
+      String path,
+      int status,
+      Duration elapsed, {
+      double? serverMs,
+      bool overdue,
+    });
+
 /// API origin is configuration. Credentials never go to redirects or script URLs.
 class ApiClient {
   ApiClient({http.Client? client, this.timeout = const Duration(seconds: 20)})
-    : _client = client ?? http.Client();
+    : _client = client ?? createHttpClient();
   final http.Client _client;
   final Duration timeout;
   Future<String> Function(String expectedUid)? firebaseToken;
   static const pathPrefix = '/api/mobile/v1';
 
-  /// Sees every request's method, path, status (0: no answer) and duration;
-  /// set by the performance telemetry.
-  static void Function(
+  /// Sees every request; set by the performance telemetry.
+  static ApiObserver? observer;
+
+  /// Waiting for the bytes of a picture or sound may take this long, both
+  /// for the answer and between two chunks.
+  static const _binaryTimeout = Duration(seconds: 30);
+
+  /// The server's own time from `Server-Timing` (`app;dur=1.2`), or null.
+  static double? serverTimeOf(String? header) {
+    if (header == null) return null;
+    final match = RegExp(
+      r'(?:^|,)\s*app\s*;(?:[^,]*;)?\s*dur=([0-9]+(?:\.[0-9]+)?)',
+    ).firstMatch(header);
+    return match == null ? null : double.tryParse(match.group(1)!);
+  }
+
+  static void _observe(
     String method,
     String path,
     int status,
     Duration elapsed,
-  )?
-  observer;
+    String? serverTiming,
+    Duration budget,
+  ) => observer?.call(
+    method,
+    path,
+    status,
+    elapsed,
+    serverMs: serverTimeOf(serverTiming),
+    // A timer fires late only when the app was not running meanwhile.
+    overdue: elapsed > budget + const Duration(seconds: 1),
+  );
 
   static String normalizeBaseUrl(String input) {
     final uri = Uri.tryParse(input.trim());
@@ -115,12 +154,14 @@ class ApiClient {
     }
     final watch = Stopwatch()..start();
     var status = 0;
+    String? serverTiming;
     try {
       final response = await _client
           .send(request)
           .then(http.Response.fromStream)
           .timeout(timeout);
       status = response.statusCode;
+      serverTiming = response.headers['server-timing'];
       if (response.bodyBytes.length > 30 * 1024 * 1024) {
         throw const ApiException(
           'Die Serverantwort ist zu groß. Bitte die Produktion in kleinere Abschnitte aufteilen.',
@@ -159,7 +200,7 @@ class ApiClient {
         'Keine Verbindung zum Server. Bereits geladene Inhalte bleiben verfügbar.',
       );
     } finally {
-      observer?.call(method, path, status, watch.elapsed);
+      _observe(method, path, status, watch.elapsed, serverTiming, timeout);
     }
   }
 
@@ -184,11 +225,11 @@ class ApiClient {
       ..headers['Authorization'] = 'Bearer $actualToken';
     final watch = Stopwatch()..start();
     var status = 0;
+    String? serverTiming;
     try {
-      final response = await _client
-          .send(request)
-          .timeout(const Duration(seconds: 30));
+      final response = await _client.send(request).timeout(_binaryTimeout);
       status = response.statusCode;
+      serverTiming = response.headers['server-timing'];
       if (response.statusCode != 200) {
         final body = await response.stream.bytesToString().timeout(timeout);
         String message = 'Das Bild konnte nicht geladen werden.';
@@ -206,9 +247,7 @@ class ApiClient {
       }
       final chunks = <List<int>>[];
       var size = 0;
-      await for (final chunk in response.stream.timeout(
-        const Duration(seconds: 30),
-      )) {
+      await for (final chunk in response.stream.timeout(_binaryTimeout)) {
         size += chunk.length;
         if (size > 80 * 1024 * 1024) {
           throw const ApiException(
@@ -236,7 +275,15 @@ class ApiClient {
     } on http.ClientException {
       throw const ApiException('Keine Verbindung zur Fotogalerie.');
     } finally {
-      observer?.call('GET', path, status, watch.elapsed);
+      // The answer and then the body may each take the full timeout.
+      _observe(
+        'GET',
+        path,
+        status,
+        watch.elapsed,
+        serverTiming,
+        _binaryTimeout * 2,
+      );
     }
   }
 

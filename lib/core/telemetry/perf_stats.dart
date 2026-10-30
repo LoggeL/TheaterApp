@@ -13,6 +13,13 @@ const latencyEdges = <double>[
   50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 10000, //
 ];
 
+/// Upper bounds (ms, inclusive) of the server time buckets
+/// (`Server-Timing: app;dur`), finer than the latency ones because the
+/// server itself mostly needs a few milliseconds.
+const serverEdges = <double>[
+  1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, //
+];
+
 /// Index of the first bucket whose upper bound is at least [value].
 int bucketOf(List<double> edges, double value) {
   for (var i = 0; i < edges.length; i++) {
@@ -137,6 +144,10 @@ class WorstFrame {
   final double ms;
   final String? route, input, events;
 
+  /// The longest build and raster time (FrameTiming) of the frames around
+  /// this one; filled in when the engine reports them, a little later.
+  double? build, raster;
+
   /// Seconds since the app (or the run) started.
   final double? at;
 
@@ -150,6 +161,8 @@ class WorstFrame {
     'in': ?input,
     'ev': ?events,
     'm': ?meters,
+    if (build != null) 'b': _round(build!),
+    if (raster != null) 'ra': _round(raster!),
   };
 }
 
@@ -181,12 +194,30 @@ class WorstFrames {
 /// Latencies of one API call pattern.
 class LatencyStats {
   final _coarse = Int32List(latencyEdges.length + 1);
+  final _server = Int32List(serverEdges.length + 1);
   final _samples = <double>[];
-  int count = 0, errors = 0, offline = 0;
+  int count = 0, errors = 0, offline = 0, suspended = 0, _serverCount = 0;
   double max = 0;
 
-  void add(double ms, {bool error = false, bool isOffline = false}) {
+  /// One call of [ms]; [serverMs] is the server's own time when it sent
+  /// one. A [isSuspended] call spanned a pause of the app (background,
+  /// frozen tab): it only counts, its time says nothing about the network.
+  void add(
+    double ms, {
+    bool error = false,
+    bool isOffline = false,
+    bool isSuspended = false,
+    double? serverMs,
+  }) {
     count++;
+    if (serverMs != null) {
+      _serverCount++;
+      _server[bucketOf(serverEdges, serverMs)]++;
+    }
+    if (isSuspended) {
+      suspended++;
+      return;
+    }
     if (isOffline) {
       offline++;
     } else if (error) {
@@ -212,6 +243,8 @@ class LatencyStats {
     'n': count,
     'err': errors,
     'off': offline,
+    if (suspended > 0) 'susp': suspended,
+    if (_serverCount > 0) 'srv': List<int>.of(_server),
     if (_samples.isNotEmpty) ...{
       'p50': quantile(0.5)!.roundToDouble(),
       'p95': quantile(0.95)!.roundToDouble(),
@@ -234,17 +267,26 @@ const _idCollections = {
   'skins',
 };
 
+final _idLike = RegExp(r'[0-9.%:@]');
+final _fileType = RegExp(r'\.([a-z0-9]{2,4})$');
+
 /// The API [path] without ids or query, e.g. `/productions/:id/script`.
+/// Costume files keep their type (`/games/runner/skins/:id.webp`), so
+/// pictures and music can be told apart.
 String apiPathPattern(String path) {
   final clean = path.split('?').first;
   final segments = clean.split('/').where((s) => s.isNotEmpty).toList();
   for (var i = 0; i < segments.length; i++) {
     final s = segments[i];
-    final afterCollection = i > 0 && _idCollections.contains(segments[i - 1]);
+    final collection = i > 0 ? segments[i - 1] : null;
+    final afterCollection = _idCollections.contains(collection);
     // `/admin/feedback/<id>` and `/feedback/<id>` hold ids; a static word
     // after an id (`script`, `messages`) never contains digits or dots.
-    final looksLikeId = RegExp(r'[0-9.%:@]').hasMatch(s) || s.length > 24;
-    if (afterCollection || looksLikeId) segments[i] = ':id';
+    final looksLikeId = _idLike.hasMatch(s) || s.length > 24;
+    if (afterCollection || looksLikeId) {
+      final type = collection == 'skins' ? _fileType.firstMatch(s) : null;
+      segments[i] = type == null ? ':id' : ':id.${type.group(1)}';
+    }
   }
   return '/${segments.join('/')}';
 }

@@ -14,6 +14,8 @@ export class Store {
       -- Anonymous performance telemetry (perf-telemetry.mjs): grouping columns plus the trimmed report.
       CREATE TABLE IF NOT EXISTS perf_reports(id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, install_id TEXT NOT NULL, session_id TEXT, kind TEXT NOT NULL, platform TEXT NOT NULL, renderer TEXT, browser TEXT, os TEXT, pwa INTEGER, app_version TEXT, app_build TEXT, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS perf_reports_created ON perf_reports(created_at);
+      -- Finds a report sent twice (perf-telemetry.mjs); not UNIQUE, older rows hold duplicates.
+      CREATE INDEX IF NOT EXISTS perf_reports_session ON perf_reports(session_id);
     `);
   }
   get(kind, id) {

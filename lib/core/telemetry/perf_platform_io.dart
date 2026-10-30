@@ -50,6 +50,9 @@ Map<String, Object> currentContext() => const {};
 /// How the page was loaded; only on the web.
 Map<String, Object> startInfo() => const {};
 
+/// When the page first showed content; only on the web.
+double? firstPaintMs() => null;
+
 /// Page visibility callbacks exist only on the web; elsewhere the app
 /// lifecycle reports going to the background.
 void onPageHidden(void Function() hidden) {}
