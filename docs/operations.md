@@ -33,6 +33,14 @@ Zusätzlich gibt es eine unsichtbare Bot-Falle auf dem Botschutz-Bildschirm und 
 
 Eine Sperrung gilt für den nächsten geschützten Serverzugriff. Bereits offline gespeicherte Inhalte können technisch erst beim nächsten Kontakt widerrufen werden. Beim Abmelden oder Kontowechsel entfernt die App die lokalen Kontoinhalte.
 
+### Anmeldeprüfung
+
+Der Server prüft das Firebase-ID-Token bei jeder Anfrage lokal (Signatur, Ablauf, Projekt; die öffentlichen Schlüssel hält firebase-admin vor). Ob das Firebase-Konto deaktiviert oder seine Anmeldungen widerrufen wurden, fragt er bei Google ab und merkt sich die Antwort je Konto für 5 Minuten (`server/src/auth-cache.mjs`). Gleichzeitige Anfragen eines Kontos teilen sich eine Abfrage. Das spart je Anfrage den Google-Roundtrip von etwa 150–250 ms. Ohne Zwischenspeicher prüfen: Anmeldung (`POST /auth/session`), Abmeldung und ändernde Admin-Aufrufe (`/admin/*` außer GET). „Konto löschen“ und die automatische Löschung abgelehnter Konten verwerfen den gemerkten Stand vor und nach dem Löschen bei Firebase, danach wird das Token abgewiesen. Ein nur in der Firebase-Konsole deaktiviertes oder widerrufenes Konto behält dagegen bis zu 5 Minuten Zugriff. „Zugang sperren“ in der App wirkt wie bisher sofort, weil der Server die Freigabe bei jeder Anfrage aus der eigenen Datenbank liest. Mit `FIREBASE_AUTH_EMULATOR_HOST` fragt der Server bei jeder Anfrage nach.
+
+Ist Google nicht erreichbar (Netzfehler, Zeitüberschreitung, 5xx), nutzt der Server einen höchstens eine Stunde alten gemerkten Stand weiter. Fehlt er, antwortet die API mit 503, `Retry-After: 5` und `code: 'auth_unavailable'`, statt mit 401. Die App wiederholt die Anfrage dann, statt abzumelden. Abgelaufene, ungültige, widerrufene oder gelöschte Anmeldungen bleiben 401. Das Log zeigt dazu `Auth rejected: <Code>` bzw. `Auth unavailable: <Code>`.
+
+Jede API-Antwort trägt `Server-Timing: auth;dur=<ms>, app;dur=<ms>`. `auth` ist die Tokenprüfung, `app` die übrige Serverzeit bis zum Antwortkopf, einschließlich Einlesen des Anfragekörpers. Ohne Anmeldung (etwa `/config`) gibt es nur `app`. Für freigegebene Web-Origins steht der Header in `Access-Control-Expose-Headers`. Prüfen: `curl -s -o /dev/null -D - -H "Authorization: Bearer <Token>" https://app.kolpingtheater-ramsen.de/api/mobile/v1/snapshot | grep -i server-timing`. Bei einem Treffer im Zwischenspeicher liegt `auth` unter 1 ms, sonst bei der Dauer des Google-Roundtrips.
+
 ## Aktualisieren
 
 ### Geplante Spielinhalte
