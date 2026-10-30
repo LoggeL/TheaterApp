@@ -12,6 +12,7 @@ import '../../features/today/ui/today_screen.dart';
 import '../../shared/layout/breakpoints.dart';
 import '../../shared/layout/content_width.dart';
 import '../../shared/navigation.dart';
+import '../../shared/widgets/visible_listenable_builder.dart';
 import '../brand.dart';
 import '../platform/push_prompt.dart';
 import 'app_navigation.dart';
@@ -63,9 +64,11 @@ class _AppShellState extends State<AppShell> {
   void _openAdmin() =>
       openPage(context, AdminSectionPage(controller: widget.controller));
 
+  // Covered by a page, the shell skips the controller's changes and catches
+  // up with one rebuild when it is shown again.
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: widget.controller,
+  Widget build(BuildContext context) => VisibleListenableBuilder(
+    listenable: widget.controller,
     builder: (context, _) => _build(context),
   );
 
@@ -201,9 +204,10 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-/// One section of the shell. Hidden sections keep their state but pause:
-/// their tickers stop, and the shell's rebuilds pass them by until they are
-/// shown again.
+/// One section of the shell. A section is built the first time it is shown,
+/// so the first frame builds only the start section. Hidden sections keep
+/// their state but pause: their tickers stop, and the shell's rebuilds pass
+/// them by until they are shown again.
 class _TabSlot extends StatefulWidget {
   const _TabSlot({required this.active, required this.child});
   final bool active;
@@ -213,13 +217,16 @@ class _TabSlot extends StatefulWidget {
 }
 
 class _TabSlotState extends State<_TabSlot> {
-  late Widget _shown = widget.child;
+  Widget? _shown;
 
   @override
   Widget build(BuildContext context) {
     // The same widget instance again makes Flutter skip the whole subtree.
     if (widget.active) _shown = widget.child;
-    return TickerMode(enabled: widget.active, child: _shown);
+    return TickerMode(
+      enabled: widget.active,
+      child: _shown ?? const SizedBox.shrink(),
+    );
   }
 }
 
@@ -231,8 +238,8 @@ class AdminSectionPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Admin')),
-    body: AnimatedBuilder(
-      animation: controller,
+    body: VisibleListenableBuilder(
+      listenable: controller,
       builder: (context, _) =>
           ManagementScreen(controller: controller, embedded: true),
     ),

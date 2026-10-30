@@ -61,6 +61,12 @@ typedef _ViewFilters = ({
   bool showTechnical,
 });
 
+/// The scene shown in the title bar (and highlighted on desktops).
+typedef _VisibleScene = ({String? id, String label});
+
+/// The reader's stage theme per app theme, derived once.
+final _stageThemes = Expando<ThemeData>('stage reader theme');
+
 class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     with WidgetsBindingObserver {
   final _itemScroll = ItemScrollController();
@@ -68,6 +74,10 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
   Timer? _saveTimer;
+
+  /// The last cue in view, written at most every [_cueSaveInterval].
+  String? _pendingCueId;
+  static const _cueSaveInterval = Duration(seconds: 5);
   Timer? _searchTimer;
   late final LiveFocusController _live;
   late final CommentsRepository _comments;
@@ -90,8 +100,10 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   String? _activeCueId;
   String? _firstVisibleCueId;
   String? _loadError;
-  String _sceneLabel = '';
-  String? _visibleSceneId;
+
+  /// Changes while scrolling; only the widgets showing it rebuild.
+  final _scene = ValueNotifier<_VisibleScene>((id: null, label: ''));
+  String? get _visibleSceneId => _scene.value.id;
   String? _pinnedSceneId, _pinnedAtCueId;
   bool _autoScrolling = false;
   double _fontScale = 1;
@@ -149,11 +161,20 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     )..addListener(_rebuild);
     _positions.itemPositions.addListener(_onPositionsChanged);
     _document = widget.controller.scripts[widget.productionId];
+    _loading = _document == null;
     _selectAssignedRoles();
     _rebuildEntries();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      _load();
+      if (_document == null) {
+        _load();
+      } else {
+        // The stored script shows at once; whether the server has a newer
+        // one is checked once the page is in place.
+        _jumpToStart();
+        await routeTransitionDone(context);
+        if (mounted) _checkForUpdate();
+      }
       _comments.ensureLoaded();
     });
   }
@@ -161,6 +182,8 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _saveCue();
+    _scene.dispose();
     _searchTimer?.cancel();
     _live.dispose();
     _comments.dispose();
@@ -176,8 +199,13 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) =>
-      _live.setForeground(state == AppLifecycleState.resumed);
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _live.setForeground(state == AppLifecycleState.resumed);
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _saveCue();
+    }
+  }
 
   Future<void> _followFocus(String? cueId) async {
     if (cueId != null) {
@@ -187,11 +215,18 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     }
   }
 
-  Future<void> _preference(String key, Object? value) async {
+  /// Stores a reader setting. Settings only the reader shows pass
+  /// [notify] false, so changing them does not rebuild the app below.
+  Future<void> _preference(
+    String key,
+    Object? value, {
+    bool notify = true,
+  }) async {
     try {
       await widget.controller.setPreference(
         ReaderPreferences.key(widget.productionId, key),
         value,
+        notify: notify,
       );
     } catch (_) {
       if (mounted) _notice('Die Einstellung konnte nicht gespeichert werden.');
@@ -218,16 +253,7 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
         }
         _rebuildEntries();
       });
-      if (widget.initialCueId == null && widget.initialSceneId != null) {
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _jumpToScene(widget.initialSceneId!, animate: false),
-        );
-      } else if (_activeCueId != null) {
-        final destination = _activeCueId!;
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _jumpToCue(destination, animate: false),
-        );
-      }
+      _jumpToStart();
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -235,6 +261,44 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
           _loadError = 'Verbindung fehlgeschlagen. Bitte erneut versuchen.';
         });
       }
+    }
+  }
+
+  /// Scrolls to the requested scene or cue, else to the last place read.
+  void _jumpToStart() {
+    if (widget.initialCueId == null && widget.initialSceneId != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _jumpToScene(widget.initialSceneId!, animate: false),
+      );
+    } else if (_activeCueId != null) {
+      final destination = _activeCueId!;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _jumpToCue(destination, animate: false),
+      );
+    }
+  }
+
+  /// Fetches the script again only if it changed on the server, without a
+  /// progress bar. A new version replaces the text in place, keeping the
+  /// cue at the top in view.
+  Future<void> _checkForUpdate() async {
+    try {
+      await widget.controller.loadScript(widget.productionId, ifChanged: true);
+    } catch (_) {
+      return;
+    }
+    final loaded = widget.controller.scripts[widget.productionId];
+    if (!mounted || loaded == null || identical(loaded, _document)) return;
+    final anchor = _firstVisibleCueId;
+    setState(() {
+      _document = loaded;
+      _selectAssignedRoles();
+      _rebuildEntries();
+    });
+    await WidgetsBinding.instance.endOfFrame;
+    final index = _cueIndices[anchor];
+    if (mounted && index != null && _itemScroll.isAttached) {
+      _itemScroll.jumpTo(index: index);
     }
   }
 
@@ -290,17 +354,29 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
         ? _pinnedSceneId!
         : cue.sceneId;
     final label = sceneTitle(_document!, sceneId);
-    if ((_sceneLabel != label || _visibleSceneId != sceneId) && mounted) {
-      setState(() {
-        _sceneLabel = label;
-        _visibleSceneId = sceneId;
-      });
-    }
+    if (mounted) _scene.value = (id: sceneId, label: label);
+    _pendingCueId = cue.id;
+    _saveTimer ??= Timer(_cueSaveInterval, _saveCue);
+  }
+
+  /// Stores the last cue in view (see [_onPositionsChanged]), silently.
+  void _saveCue() {
     _saveTimer?.cancel();
-    _saveTimer = Timer(
-      const Duration(milliseconds: 650),
-      () => _preference('lastCueId', cue.id),
-    );
+    _saveTimer = null;
+    final cueId = _pendingCueId;
+    _pendingCueId = null;
+    if (cueId != null) _saveLastCue(cueId);
+  }
+
+  void _saveLastCue(String cueId) {
+    if (widget.controller.preferences[ReaderPreferences.key(
+          widget.productionId,
+          'lastCueId',
+        )] ==
+        cueId) {
+      return;
+    }
+    _preference('lastCueId', cueId, notify: false);
   }
 
   _ViewFilters _viewFilters() => (
@@ -311,10 +387,10 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   );
 
   Future<void> _persistView() async {
-    await _preference('mode', _mode.code);
-    await _preference('categories', _categories.toList());
-    await _preference('showDirections', _showDirections);
-    await _preference('showTechnical', _showTechnical);
+    await _preference('mode', _mode.code, notify: false);
+    await _preference('categories', _categories.toList(), notify: false);
+    await _preference('showDirections', _showDirections, notify: false);
+    await _preference('showTechnical', _showTechnical, notify: false);
   }
 
   /// Tells the member that a jump widened the view, with an undo.
@@ -374,12 +450,11 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     final sceneId = _document!.cues
         .firstWhere((cue) => cue.id == cueId)
         .sceneId;
-    setState(() {
-      _activeCueId = cueId;
-      _visibleSceneId = sceneId;
-    });
+    setState(() => _activeCueId = cueId);
+    _scene.value = (id: sceneId, label: _scene.value.label);
     await _scrollTo(index, alignment: 0.08, animate: animate);
-    _preference('lastCueId', cueId);
+    _pendingCueId = null;
+    _saveLastCue(cueId);
   }
 
   /// Scrolls to a scene. The reading mode changes only when the scene has
@@ -395,16 +470,13 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
         _revealed.clear();
         _rebuildEntries();
       });
-      await _preference('mode', _mode.code);
+      await _preference('mode', _mode.code, notify: false);
       _announceReveal(before);
       await WidgetsBinding.instance.endOfFrame;
       index = sceneIndex();
     }
     if (!mounted || index < 0) return;
-    setState(() {
-      _visibleSceneId = sceneId;
-      _sceneLabel = sceneTitle(_document!, sceneId);
-    });
+    _scene.value = (id: sceneId, label: sceneTitle(_document!, sceneId));
     await _scrollTo(index, alignment: 0.02, animate: animate);
   }
 
@@ -448,7 +520,7 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     setState(() {
       if (!_bookmarks.add(cueId)) _bookmarks.remove(cueId);
     });
-    _preference('bookmarks', _bookmarks.toList());
+    _preference('bookmarks', _bookmarks.toList(), notify: false);
   }
 
   void _selectAssignedRoles() {
@@ -470,8 +542,8 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
       }
       _rebuildEntries();
     });
-    _preference('mode', mode.code);
-    _preference('categories', _categories.toList());
+    _preference('mode', mode.code, notify: false);
+    _preference('categories', _categories.toList(), notify: false);
     if (mode.needsRoles && !_hasRoles) _showRoles();
   }
 
@@ -490,7 +562,7 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     if (!_stage) return parent;
     const stageSurface = Color(0xFF151719);
     final dark = StageTheme.build(Brightness.dark);
-    return dark.copyWith(
+    return _stageThemes[dark] ??= dark.copyWith(
       colorScheme: dark.colorScheme.copyWith(surface: stageSurface),
       scaffoldBackgroundColor: stageSurface,
       appBarTheme: dark.appBarTheme.copyWith(backgroundColor: stageSurface),
@@ -573,29 +645,32 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     bool desktopHeader,
   ) => AppBar(
     titleSpacing: 0,
-    title: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          _title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: desktopHeader ? 20 : 16,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        if (_sceneLabel.isNotEmpty)
+    title: ValueListenableBuilder(
+      valueListenable: _scene,
+      builder: (context, scene, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Text(
-            _sceneLabel,
+            _title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 12,
-              color: readerTheme.colorScheme.onSurfaceVariant,
+              fontSize: desktopHeader ? 20 : 16,
+              fontWeight: FontWeight.w700,
             ),
           ),
-      ],
+          if (scene.label.isNotEmpty)
+            Text(
+              scene.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: readerTheme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+        ],
+      ),
     ),
     actions: [
       if (desktopHeader && _document != null) ...[
@@ -787,7 +862,8 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
                 if (!_revealed.add(cue.id)) _revealed.remove(cue.id);
               }
             });
-            _preference('lastCueId', cue.id);
+            _pendingCueId = null;
+            _saveLastCue(cue.id);
             if (_live.directing) _live.publish(cue.id);
           },
           onBookmark: () => _toggleBookmark(cue.id),
