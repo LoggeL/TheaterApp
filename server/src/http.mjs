@@ -9,6 +9,7 @@ import { adminTicketView, closeOwnFeedback, markFeedbackRead, ownFeedback, ownTi
 import { CalendarFeedLimiter, calendarFeed, calendarFeedLink, resetCalendarFeed } from './calendar-feed.mjs';
 import { PerfTelemetry, perfTelemetry } from './perf-telemetry.mjs';
 import { formTemplates, messageForm, formSubmissions } from './forms.mjs';
+import { isTransientAuthError } from './auth-cache.mjs';
 
 // Content-addressed web files from tool/version-web.mjs never change under their name.
 // Entry points (index.html, workers, manifests) and unhashed files must stay revalidated.
@@ -19,10 +20,16 @@ const hashedWebFile = /^\/(?:main\.[a-f0-9]{16}\.dart\.(?:js|mjs|wasm)|(?:flutte
 // `clientIpHeader` names the proxy header with the client address for its attempt limit
 // (e.g. `cf-connecting-ip`). `appOrigin` is the public address of the app, used for the
 // personal calendar feed links (see calendar-feed.mjs).
+// `verifyToken(token, { fresh })` (auth-cache.mjs) may answer from a short revocation cache;
+// `fresh` asks for a current check where a stale one would matter: registration (POST
+// /auth/session), sign-out, changing `/admin/*` calls and the account administration actions
+// (`account.*` via POST /actions). Errors marked `transient` (Google unreachable) become 503,
+// every other one 401.
 export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null, appOrigin = null, calendarLimiter = new CalendarFeedLimiter(), perf = null }) {
   const origins = new Set(allowedOrigins);
   const telemetry = perf ?? new PerfTelemetry(defaultTheater.store);
-  const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
+  // Serialised before the head, so Server-Timing's `app` includes it.
+  const json = (res, status, value) => { const body = JSON.stringify(value); res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(body); };
   const readBody = async (req, route) => {
     let body = {}, length = 0; const chunks = [];
     for await (const chunk of req) { length += chunk.length; if (length > (route === '/media' ? 12 * 1024 * 1024 : route === '/telemetry/perf' ? perfTelemetry.maxBytes : 2 * 1024 * 1024)) throw new AppError(413, 'Die Anfrage ist zu groß.'); chunks.push(chunk); }
@@ -35,10 +42,23 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
     const origin = req.headers.origin;
-    if (origin && origins.has(origin)) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key'); res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS'); }
+    if (origin && origins.has(origin)) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key'); res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS'); res.setHeader('Access-Control-Expose-Headers', 'Server-Timing'); }
+    // Server-Timing on every API answer: `auth` is the token check, `app` everything else up to
+    // the response head (including reading the request body and serialising JSON answers). Read
+    // by the app's telemetry.
+    const timing = { start: performance.now(), auth: null };
+    const writeHead = res.writeHead;
+    res.writeHead = function (...args) {
+      if (timing.api) {
+        const end = performance.now(), app = end - timing.start - (timing.auth ?? 0);
+        this.setHeader('Server-Timing', `${timing.auth === null ? '' : `auth;dur=${timing.auth.toFixed(1)}, `}app;dur=${Math.max(0, app).toFixed(1)}`);
+      }
+      return writeHead.apply(this, args);
+    };
     try {
       const requestUrl = new URL(req.url, 'http://localhost');
       const path = decodeURIComponent(requestUrl.pathname).replace(/\/+$/, '') || '/';
+      timing.api = path.startsWith('/api/mobile/v1');
       if (path === '/api/healthz') return json(res, 200, { ok: true, service: 'theater-app', firebase: true, release: process.env.RELEASE_SHA ?? 'development' });
       // Public: calendar apps send no sign-in; the secret token in the path is the only proof.
       // Unknown tokens and accounts without access look the same (404).
@@ -82,8 +102,21 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (route === '/bot-check' && botCheck && req.method === 'POST') { const { answer, botTrap } = await readBody(req, route); return json(res, 200, botCheck.attempt(clientAddress(req, clientIpHeader), answer, botTrap)); }
       const token = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
       if (!token || token.length > 12000) throw new AppError(401, 'Bitte zuerst anmelden.');
-      let identity;
-      try { identity = await verifyToken(token); } catch { throw new AppError(401, 'Die Anmeldung ist abgelaufen oder wurde gesperrt.'); }
+      // Where a revoked or deleted login must not slip through a cached check. Account
+      // administration via /actions is only known after reading the body and checked again there.
+      const fresh = req.method !== 'GET' && (route === '/auth/session' || route === '/auth/logout' || route.startsWith('/admin/'));
+      const authenticate = async options => {
+        const authStart = performance.now();
+        try { return await verifyToken(token, options); } catch (e) {
+          if (isTransientAuthError(e)) {
+            console.warn('Auth unavailable:', e.code ?? e.name);
+            throw Object.assign(new AppError(503, 'Die Anmeldung kann gerade nicht geprüft werden. Bitte gleich erneut versuchen.', 'auth_unavailable'), { retryAfter: 5 });
+          }
+          console.warn('Auth rejected:', e?.code ?? e?.name);
+          throw new AppError(401, 'Die Anmeldung ist abgelaufen oder wurde gesperrt.');
+        } finally { timing.auth = (timing.auth ?? 0) + performance.now() - authStart; }
+      };
+      let identity = await authenticate({ fresh });
       if (!identity?.uid) throw new AppError(401, 'Ungültige Anmeldung.');
       if (review && identity.uid === review.uid) {
         ({ theater, scriptService, focusBridge, media } = review);
@@ -98,6 +131,11 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       }
       if (!['/auth/session', '/auth/logout', '/devices'].includes(route)) theater.account(identity.uid);
       const body = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await readBody(req, route) : {};
+      // Approving accounts and changing roles or rights: rare, so worth Google's current answer.
+      if (route === '/actions' && !fresh && typeof body.action === 'string' && body.action.startsWith('account.')) {
+        identity = await authenticate({ fresh: true });
+        if (!identity?.uid) throw new AppError(401, 'Ungültige Anmeldung.');
+      }
       if (route === '/auth/session' && ['GET', 'POST'].includes(req.method)) return json(res, 200, { user: theater.session(identity, req.method === 'POST' ? body.registrationName : undefined, botCheck?.evaluate(body.botCheckProof, body.botTrap)) });
       if (route === '/auth/logout' && req.method === 'POST') {
         for (const d of theater.store.all('devices').filter(d => d.uid === identity.uid && d.token === body.deviceToken)) theater.store.delete('devices', d.id);
