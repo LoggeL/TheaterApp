@@ -54,6 +54,8 @@ index = index
   .replace(/href="favicon(?:\.[a-f0-9]{16})?\.png"/, `href="${favicon}"`)
   .replace(/href="icons\/apple-touch-icon(?:\.[a-f0-9]{16})?\.png"/, `href="${touchIcon}"`)
   .replace(/href="manifest(?:\.[a-f0-9]{16})?\.json"/, `href="${manifestName}"`);
+// Cloudflare's Rocket Loader would otherwise rewrite the start scripts and add a round trip before Dart starts.
+if ([...index.matchAll(/<script\b[^>]*>/g)].some(([tag]) => !tag.includes('data-cfasync="false"'))) throw new Error('Every script in index.html needs data-cfasync="false".');
 await writeFile(new URL(mainName, root), main);
 if (wasm) { await writeFile(new URL(wasmName, root), wasm); await writeFile(new URL(wasmRuntimeName, root), wasmRuntime); }
 await writeFile(new URL(bootName, root), bootstrap);

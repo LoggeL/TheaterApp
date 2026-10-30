@@ -619,6 +619,8 @@ extension SessionController on AppController {
     _error = null;
     _notify();
     // Local removal is unconditional. Failed remote revocation is surfaced.
+    // The web worker's picture caches go as well, even when no request is sent.
+    unawaited(clearPrivateWebCaches());
     await _write(() async {
       await _credentials.clear();
       if (account != null) await _store.clearAccount(account);

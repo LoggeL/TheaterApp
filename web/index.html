@@ -35,9 +35,27 @@
 
   <title>Theater-App · Kolpingtheater Ramsen</title>
   <link rel="manifest" href="manifest.json">
+  <!-- Start screen until Flutter's first frame (removed by pwa.js); no external resources. -->
+  <style>
+    html { background: #F8F6F0; }
+    #theater-splash { position: fixed; inset: 0; z-index: -1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; pointer-events: none; }
+    #theater-splash svg { width: 72px; height: 72px; border-radius: 12px; }
+    #theater-splash .spinner { width: 32px; height: 32px; box-sizing: border-box; border: 4px solid #B83E1633; border-top-color: #B83E16; border-radius: 50%; animation: theater-spin 1s linear infinite; }
+    @keyframes theater-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { #theater-splash .spinner { animation-duration: 3s; } }
+    @media (prefers-color-scheme: dark) {
+      html { background: #171C19; }
+      #theater-splash .spinner { border-color: #FFA58433; border-top-color: #FFA584; }
+    }
+  </style>
 </head>
 <body>
-  <script src="pwa.js"></script>
+  <div id="theater-splash" aria-hidden="true">
+    <svg viewBox="0 0 24 24"><rect width="24" height="24" fill="#202823"/><path fill="#E96131" d="M3,3h18v3H3z M3,6h3v14H3z M18,6h3v14h-3z M3,20h18v2H3z M12,8l-4,9h8z"/></svg>
+    <div class="spinner"></div>
+  </div>
+  <!-- data-cfasync: Cloudflare Rocket Loader must not defer the app's own scripts. -->
+  <script data-cfasync="false" src="pwa.js"></script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader
@@ -46,6 +64,6 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script data-cfasync="false" src="flutter_bootstrap.js" async></script>
 </body>
 </html>

@@ -39,6 +39,14 @@
         return choice.outcome === 'accepted';
       } finally { notify(); }
     },
+    // Logging out removes the wardrobe pictures the service worker keeps per account (prefix as in
+    // theater-service-worker.js), also offline and on a page the worker does not control.
+    async clearPrivateCaches() {
+      const storage = window.caches;
+      if (!storage) return;
+      const keys = await storage.keys();
+      await Promise.all(keys.filter(key => key.startsWith('theater-skins-v1-')).map(key => storage.delete(key)));
+    },
   };
   window.addEventListener('beforeinstallprompt', event => {
     event.preventDefault();
@@ -54,13 +62,29 @@
     installed = standalone.matches || navigator.standalone === true;
     notify();
   });
+  // The static start screen in index.html stays until Flutter shows its first picture.
+  window.addEventListener('flutter-first-frame', () => {
+    window.document?.getElementById('theater-splash')?.remove();
+  }, {once: true});
   if ('serviceWorker' in navigator && window.isSecureContext) {
-    const version = document.querySelector('meta[name="theater-pwa-version"]')?.content;
-    // A build-specific query also avoids stale proxy responses for this stable URL.
-    navigator.serviceWorker.register(`theater-service-worker.js?v=${encodeURIComponent(version || 'development')}`, {
-      scope: './', updateViaCache: 'none',
-    }).then(registration => registration.update()).catch(() => {
-      // Installation and normal online use still work if offline storage is unavailable.
-    });
+    let registered = false;
+    // The worker's precache must not compete with the app's own start for the connection,
+    // so it starts after the first picture; a start that never gets there registers after 10 s.
+    const register = () => {
+      if (registered) return;
+      registered = true;
+      const version = window.document?.querySelector('meta[name="theater-pwa-version"]')?.content;
+      // A build-specific query also avoids stale proxy responses for this stable URL.
+      navigator.serviceWorker.register(`theater-service-worker.js?v=${encodeURIComponent(version || 'development')}`, {
+        scope: './', updateViaCache: 'none',
+      }).then(registration => registration.update()).catch(() => {
+        // Installation and normal online use still work if offline storage is unavailable.
+      });
+    };
+    window.addEventListener('flutter-first-frame', register, {once: true});
+    const idle = () => window.requestIdleCallback ? window.requestIdleCallback(register, {timeout: 2000}) : register();
+    const fallback = () => window.setTimeout(idle, 10000);
+    if (window.document?.readyState === 'complete') fallback();
+    else window.addEventListener('load', fallback, {once: true});
   }
 })();
