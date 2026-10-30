@@ -9,10 +9,10 @@ import { fileURLToPath } from 'node:url';
 import { Store } from '../src/store.mjs';
 import { Theater, apiFeatures } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
-import { PerfTelemetry, perfTelemetry, sanitizePerfReport } from '../src/perf-telemetry.mjs';
+import { PerfTelemetry, perfTelemetry, sanitizePerfReport, serverEdges } from '../src/perf-telemetry.mjs';
 import { purgeExpired, retention } from '../src/retention.mjs';
-import { histQuantile, perfReport } from '../scripts/perf-report.mjs';
-import { android, chromePwa, fixtureReports, runnerWeb } from './fixtures/perf-reports.mjs';
+import { dedupeReports, histQuantile, perfReport, throttled } from '../scripts/perf-report.mjs';
+import { android, chromePwa, fixtureReports, hist, runnerWeb, safari } from './fixtures/perf-reports.mjs';
 
 function setup(t) {
   const store = new Store(); t.after(() => store.close());
@@ -79,6 +79,56 @@ test('a report keeps only known, trimmed and clamped fields', () => {
   assert.deepEqual(sanitizePerfReport(runnerWeb).run, runnerWeb.run);
 });
 
+test('newer apps add optional fields; older reports stay valid', () => {
+  const srv = Array.from({ length: serverEdges.length + 1 }, (_, i) => (i === 2 ? 3 : 0));
+  const report = sanitizePerfReport({
+    ...android, rid: '0123456789abcdef',
+    startup: { ...android.startup, vis: 'hidden', hidden: true, fcp: 812.4, paint: 3 },
+    worst: [{ ms: 120, r: 'WardrobeScreen', t: 4, ev: 'skin,img', b: 31.24, ra: 70000, gap: 9 }],
+    api: [{ m: 'GET', p: '/games/runner/skins/:id.webp', n: 4, susp: 9, srv, h: hist({}).slice(0, 13) }, { m: 'GET', p: '/snapshot', n: 1, srv: [1, 2] }],
+  });
+  assert.equal(report.rid, '0123456789abcdef');
+  assert.deepEqual(report.startup, { ...android.startup, vis: 'hidden', hidden: true, fcp: 812 });
+  assert.deepEqual(report.worst, [{ ms: 120, r: 'WardrobeScreen', t: 4, ev: 'skin,img', b: 31.2, ra: 60000 }], 'unknown worst-frame fields are dropped');
+  assert.deepEqual(report.api[0].srv, srv);
+  assert.equal(report.api[0].susp, 4, 'never more paused calls than calls');
+  assert.equal(report.api[1].srv, undefined, 'a server histogram of the wrong length is dropped');
+  const run = sanitizePerfReport({ ...runnerWeb, run: { ...runnerWeb.run, snd: false, f0: 41.26, music: 'x' } }).run;
+  assert.deepEqual(run, { ...runnerWeb.run, snd: false, f0: 41.3 });
+  for (const rid of ['0123456789ABCDEF', '0123', 'g123456789abcdef', 7]) assert.equal(sanitizePerfReport({ ...android, rid }).rid, undefined, `${rid}`);
+  assert.equal(sanitizePerfReport({ ...android, startup: { ...android.startup, vis: 'gone', hidden: 'yes' } }).startup.vis, undefined);
+  // An older app sends none of them.
+  assert.deepEqual(sanitizePerfReport(android).api, android.api);
+  assert.equal(sanitizePerfReport(android).rid, undefined);
+});
+
+test('a report sent twice is stored once and still answered with 204', async t => {
+  const { app, rows, perf, clock, store } = setup(t);
+  const send = await serve(t, app, { perf });
+  assert.equal((await send('sam', android)).status, 204);
+  assert.equal((await send('sam', android)).status, 204, 'same session and sequence number');
+  assert.equal(rows().length, 1);
+  assert.equal((await send('sam', { ...android, seq: 1 })).status, 204);
+  assert.equal(rows().length, 2, 'the next report of the session');
+  // With a report id the id decides, also without a session.
+  const withId = { ...chromePwa, rid: 'aaaaaaaaaaaaaaaa' };
+  assert.equal(perf.record('kim', withId), true);
+  assert.equal(perf.record('kim', withId), false);
+  const { session, ...sessionless } = { ...withId, rid: 'bbbbbbbbbbbbbbbb', install: 'e'.repeat(32) };
+  assert.ok(session);
+  assert.equal(perf.record('kim', sessionless), true);
+  assert.equal(perf.record('kim', sessionless), false);
+  // Older apps without a session and report id cannot be told apart and are all kept.
+  const { session: _, ...old } = { ...safari };
+  assert.equal(perf.record('lou', old), true);
+  assert.equal(perf.record('lou', old), true);
+  // The same report three days later counts again (the lookup only goes back that far).
+  clock.now = new Date(+clock.now + perfTelemetry.dedupeDays * 864e5 + 1);
+  assert.equal(perf.record('sam', android), true);
+  assert.equal(rows().length, 7);
+  assert.ok(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='perf_reports_session'").get());
+});
+
 test('reports that are not ours are rejected', () => {
   assert.equal(sanitizePerfReport(null), null);
   assert.equal(sanitizePerfReport([]), null);
@@ -124,15 +174,15 @@ test('reports of the review account stay out of the data', async t => {
 
 test('reports are limited per installation and per account', t => {
   const { perf, rows, clock } = setup(t);
-  for (let i = 0; i < perfTelemetry.perInstallPerHour; i++) assert.equal(perf.record('sam', android), true);
-  assert.equal(perf.record('sam', android), false, 'the installation sent enough this hour');
+  for (let i = 0; i < perfTelemetry.perInstallPerHour; i++) assert.equal(perf.record('sam', { ...android, seq: i }), true);
+  assert.equal(perf.record('sam', { ...android, seq: 99 }), false, 'the installation sent enough this hour');
   // Fresh installation ids do not get around the account limit.
   let accepted = 0;
   for (let i = 0; i < perfTelemetry.perAccountPerHour; i++) if (perf.record('sam', { ...android, install: `${i}`.padStart(32, 'f') })) accepted++;
   assert.equal(accepted, perfTelemetry.perAccountPerHour - perfTelemetry.perInstallPerHour - 1, 'rejected attempts count against the account');
   assert.equal(perf.record('kim', chromePwa), true, 'other accounts are not affected');
   clock.now = new Date(+clock.now + perfTelemetry.windowMs + 1);
-  assert.equal(perf.record('sam', android), true, 'the window slides');
+  assert.equal(perf.record('sam', { ...android, seq: 100 }), true, 'the window slides');
   assert.equal(rows().length, perfTelemetry.perAccountPerHour + 1);
 });
 
@@ -196,4 +246,94 @@ test('the report script reads the database read-only', async t => {
   const { stdout: none } = await promisify(execFile)(process.execPath, [script, empty]);
   assert.match(none, /Keine Berichte im Zeitraum/);
   await assert.rejects(promisify(execFile)(process.execPath, [script]), /Aufruf/);
+});
+
+// A historical row as the old server stored it, bypassing the duplicate check.
+const insertRaw = (store, at, report) => store.db.prepare(`INSERT INTO perf_reports(created_at, install_id, session_id, kind, platform, renderer, browser, os, pwa, app_version, app_build, data)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(at, report.install, report.session ?? null, report.kind, report.device.platform, report.device.renderer ?? null, report.device.browser ?? null,
+  report.device.os ?? null, report.device.pwa === undefined ? null : report.device.pwa ? 1 : 0, report.app.version, report.app.build ?? null, JSON.stringify(sanitizePerfReport(report)));
+
+test('30-Hz windows, duplicates and start frames are recognized', () => {
+  // Safari at 30 Hz: a median of 33 ms although the frames are cheap to build.
+  const slow = { kind: 'app', frames: { n: 400, p50: 33.3, b95: 6 } };
+  assert.equal(throttled(slow.kind, slow.frames), true);
+  assert.equal(throttled('app', { ...slow.frames, b95: 22 }), false, 'expensive frames are real jank');
+  assert.equal(throttled('app', { ...slow.frames, n: 40 }), false);
+  assert.equal(throttled('app', { ...slow.frames, p50: 16.7 }), false);
+  const step = { n: 1800, p50: 28.4 };
+  assert.equal(throttled('stageRunner', step, 'web'), true);
+  assert.equal(throttled('stageRunner', { ...step, ft: 1800, b95: 4 }, 'web'), true);
+  assert.equal(throttled('stageRunner', { ...step, p50: 16.7 }, 'web'), false);
+  assert.equal(throttled('stageRunner', { ...step, n: 40 }, 'web'), false);
+  assert.equal(throttled('stageRunner', { ...step, p50: 45 }, 'web'), false);
+  // A game loop too expensive for 60 fps is real jank, in the browser and on Android.
+  assert.equal(throttled('stageRunner', { ...step, p50: 33, ft: 1800, b95: 24 }, 'web'), false, 'expensive frames are real jank');
+  assert.equal(throttled('stageRunner', { ...step, p50: 33 }, 'android'), false);
+  const row = (id, session, seq, data = { seq }) => ({ install_id: id, session_id: session, data, raw: JSON.stringify(data) });
+  const { rows, dropped } = dedupeReports([row('a', 's', 0), row('a', 's', 0), row('a', 's', 1), row('b', 's', 0), row('c', null, undefined, { x: 1 }), row('c', null, undefined, { x: 1 }), row('c', null, undefined, { x: 2 })]);
+  assert.equal(dropped, 2);
+  assert.equal(rows.length, 5);
+});
+
+test('the report leaves out duplicates, 30-Hz windows and start frames', t => {
+  const { store } = setup(t);
+  const day = '2026-10-22T10:00:00.000Z';
+  const frames = (counts, extra) => { const h = hist(counts), n = h.reduce((a, b) => a + b, 0), above = from => h.slice(from).reduce((a, b) => a + b, 0); return { n, ms: n * 20, p50: 16.7, p95: 24, p99: 40, max: 120, j25: above(9), j50: above(11), j100: above(13), h, ...extra }; };
+  const base = { v: 1, install: '1'.repeat(32), session: '2'.repeat(16), app: { version: '0.13.1' } };
+  const ios = { platform: 'web', renderer: 'canvaskit', browser: 'Safari 26.6', os: 'iOS 18.7', mobile: true, pwa: true };
+  // A Safari window at 30 Hz (all frames 25–33 ms) next to a normal one; the normal one twice.
+  const fast = { ...base, kind: 'app', seq: 0, up: 100, device: ios, frames: frames({ 6: 900, 9: 90, 11: 10 }, { b95: 5 }), routes: [{ r: 'today', ...frames({ 6: 900, 9: 90, 11: 10 }) }],
+    startup: { kind: 'cached', preMs: 800, firstFrameMs: 32000, readyMs: 32500, dataMs: 2000 }, worst: [{ ms: 400, r: 'today', t: 99.8 }, { ms: 300, r: 'today', t: 40, ev: 'skin' }] };
+  const slow = { ...base, kind: 'app', seq: 1, up: 400, device: ios, frames: frames({ 9: 1000, 11: 6 }, { p50: 33.1, b95: 7 }), routes: [{ r: 'today', ...frames({ 9: 1000, 11: 6 }) }] };
+  // Two runs of the session: both start with a slow first frame, the second also at 30 Hz.
+  const run = (seq, extra) => ({ ...base, kind: 'stageRunner', seq, device: ios, frames: frames({ 6: 2000, 11: 4 }), run: { ms: 60000, m: 500, end: 'crash' },
+    worst: [{ ms: 200, t: 0, m: 0, ev: 'sound,obstacle' }, { ms: 90, t: 20, m: 200, ev: 'sound' }, { ms: 60, t: 30, m: 300 }], ...extra });
+  for (const [report, times] of [[fast, 2], [slow, 1], [run(2), 1], [run(3, { frames: frames({ 9: 2000, 11: 4 }, { p50: 33 }), run: { ms: 60000, m: 500, end: 'crash', snd: true } }), 2]]) {
+    for (let i = 0; i < times; i++) insertRaw(store, day, report);
+  }
+  const text = perfReport(store.db, { days: 7, now: new Date('2026-10-24T12:00:00Z') });
+  const section = title => text.split('\n## ').find(x => x.startsWith(title)).trim();
+  assert.match(text, /Berichte: 4 \(App 2, Bühnenlauf 2\)/);
+  assert.match(text, /Bereinigt: 2 doppelt gespeicherte Berichte entfernt\. .*App 1, Bühnenlauf 1\./);
+  // The 30-Hz window has its own row; the platform row keeps only the normal frames for the
+  // percentiles and shares, but counts its janks per minute (16 janks in 2006 × 20 ms).
+  assert.equal(section('App: Bildzeiten nach Plattform'), [
+    'App: Bildzeiten nach Plattform und Renderer',
+    '| Gruppe | Inst. | Berichte | Bilder | Min. aktiv | p50 ms | p95 ms | p99 ms | max ms | >25 ms | >50 ms | >100 ms | >50 ms/min |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| web · canvaskit | 1 | 2 | 1000 | 0.3 | 17.1 | 29.4 | 33 | 120 | 10.0 % | 1.0 % | 0 % | 23.93 |',
+    '| 30 Hz (gedrosselt) | 1 | 1 | 1006 | 0.3 | 29 | 32.6 | 33 | 120 | 100.0 % | 0.60 % | 0 % | 17.89 |',
+  ].join('\n'));
+  assert.match(section('App: nach System und Modus'), /\| iOS\/iPadOS · standalone \| 1 \| 2 \| 1000 \|/);
+  assert.match(section('App: nach Bildschirm (alle'), /\| today \| 1 \| 2 \| 1000 \|[^\n]*\n\| 30 Hz \(gedrosselt\) \| 1 \| 1 \| 1006 \|/);
+  // A first frame after 32 s is a hidden page, not a slow start.
+  assert.match(section('Start'), /\| web · canvaskit · cached · erstes Bild > 10 s \| 1 \| 1 \| 800 \/ 800 \| 32000 \/ 32000 \|/);
+  assert.equal(section('Bühnenlauf').split('### ').find(x => x.startsWith('Häufigste')).trim(), [
+    'Häufigste Ruckel-Auslöser (4 Ruckler ≥50 ms aus den je 5 schlimmsten pro Lauf, ohne 2 Startbilder)',
+    '| Ereignis im Ruckel-Bild (≥50 ms) | Ruckler | Anteil |',
+    '|---|---|---|',
+    '| sound | 2 | 50.0 % |',
+    '| (kein Ereignis im Bild) | 2 | 50.0 % |',
+    '| Startbild (erster Lauf der Sitzung) | 1 | 16.7 % aller |',
+    '| Startbild (späterer Lauf) | 1 | 16.7 % aller |',
+  ].join('\n'));
+  // Its only run with sound is throttled: the group stays, without percentiles.
+  assert.match(section('Bühnenlauf'), /### nach Ton\n[^]*\| Ton an \| 1 \| 1 \| 0 \| 0 \| – \| – \| – \| 0 \| – \| – \| – \| 5\.99 \|\n\| 30 Hz \(gedrosselt\) \| 1 \| 1 \| 2004 \|/);
+  const worst = section('Schlimmste Ruckler');
+  assert.match(worst, /\| 400 \| today \|[^\n]*\| 100 s nach Start · vor Hintergrund \|/);
+  assert.match(worst, /\| 300 \| today \|[^\n]*\| skin \| 40 s nach Start \|/);
+  assert.match(worst, /\| 200 \| stageRunner \|[^\n]*\| 0 s · 0 m · Startbild \|/);
+  assert.match(section('App: Ereignisse'), /\| skin \| 1 \| 50\.0 % \|/);
+});
+
+test('the report shows server time, paused calls and frame timings once apps send them', t => {
+  const { store } = setup(t);
+  const srv = Array.from({ length: serverEdges.length + 1 }, (_, i) => (i === 1 ? 4 : 0));
+  insertRaw(store, '2026-10-22T10:00:00.000Z', { ...chromePwa, startup: { ...chromePwa.startup, fcp: 1500, hidden: true },
+    api: [{ ...chromePwa.api[0], susp: 1, srv }], worst: [{ ms: 140, r: 'today', t: 3.2, ev: 'img', b: 12, ra: 30 }] });
+  const text = perfReport(store.db, { days: 7, now: new Date('2026-10-24T12:00:00Z') });
+  assert.match(text, /\| Aufruf \| Inst\. \| Anzahl \| p50 ms \| p95 ms \| max ms \| Fehler \| offline \| Server p50 ms \| Server p95 ms \| pausiert \|/);
+  assert.match(text, /\| GET \/snapshot \| 1 \| 2 \| [\d.]+ \| [\d.]+ \| 2600 \| 0 % \| 50\.0 % \| 1\.5 \| 1\.9 \| 50\.0 % \|/);
+  assert.match(text, /\| web · skwasm · cached · verdeckt \| 1 \| 1 \| 1900 \/ 1900 \| 1500 \/ 1500 \| 450 \/ 450 \|/);
+  assert.match(text, /\| 140 \| today \|[^\n]*\| img \| 3 s nach Start \| 12 \/ 30 \|/);
 });

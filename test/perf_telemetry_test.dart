@@ -1,11 +1,15 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:theater_app/core/telemetry/perf_stats.dart';
 import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/core/telemetry/perf_telemetry.dart';
+import 'package:theater_app/data/api_client.dart';
 import 'package:theater_app/features/settings/settings.dart';
 import 'package:theater_app/shared/navigation.dart';
 
@@ -20,14 +24,33 @@ class _Uplink implements PerfUplink {
   bool featuresKnown = true;
   Set<String> features = {PerfTelemetry.feature};
   Object? failure;
+
+  /// Sends after this many reports never finish (the page was closed).
+  int? hangAfter;
   final sent = <Map<String, Object?>>[];
   @override
   bool supports(String feature) => features.contains(feature);
   @override
   Future<void> send(Map<String, Object?> report) async {
     if (failure != null) throw failure!;
+    if (hangAfter != null && sent.length >= hangAfter!) {
+      return Completer<void>().future;
+    }
     sent.add(jsonDecode(jsonEncode(report)) as Map<String, Object?>);
   }
+}
+
+/// A stopwatch that reads [elapsed] from the test.
+class _FakeStopwatch implements Stopwatch {
+  _FakeStopwatch(this._now);
+  final Duration Function() _now;
+  late final Duration _start = _now();
+  @override
+  void start() => _start;
+  @override
+  Duration get elapsed => _now() - _start;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 class _TestPage extends StatelessWidget {
@@ -106,10 +129,20 @@ void main() {
         '/productions/:id/script',
       );
       expect(apiPathPattern('/admin/events/7f3c9a'), '/admin/events/:id');
+      // Costume files keep their type; older apps sent `/skins/:id`.
       expect(
         apiPathPattern('/games/runner/skins/character-logge.webp?v=ab12'),
+        '/games/runner/skins/:id.webp',
+      );
+      expect(
+        apiPathPattern('/games/runner/skins/backdrop-anno.m4a?v=1'),
+        '/games/runner/skins/:id.m4a',
+      );
+      expect(
+        apiPathPattern('/games/runner/skins/character-logge'),
         '/games/runner/skins/:id',
       );
+      expect(apiPathPattern('/media/photo.webp'), '/media/:id');
       expect(
         apiPathPattern('/galleries/g1/assets/a9/original'),
         '/galleries/:id/assets/:id/original',
@@ -266,6 +299,148 @@ void main() {
       expect(api['GET /productions/:id/script'], containsPair('err', 1));
     });
 
+    test('a slow frame lists all events of the last second', () {
+      t
+        ..clock = (() => 1000000)
+        ..mark('route')
+        ..clock = (() => 1500000)
+        ..recordApi(
+          'GET',
+          '/games/runner/skins/character-logge.webp?v=1',
+          200,
+          const Duration(milliseconds: 80),
+        )
+        ..clock = (() => 1600000);
+      PerfTelemetry.markImage(1);
+      t.mark('img');
+      animate(t, 1900000, [70]);
+      t.clock = null;
+      expect(
+        (t.buildReport()['worst']! as List).single,
+        containsPair('ev', 'route,skin,img'),
+      );
+    });
+
+    test('API calls across a pause only count as paused', () {
+      t.clock = () => 10000000;
+      t.recordApi(
+        'GET',
+        '/snapshot',
+        200,
+        const Duration(milliseconds: 300),
+        serverMs: 2.4,
+      );
+      // The app went to the background and came back during the next call.
+      t.lifecycleChangedForTest(AppLifecycleState.paused);
+      t.clock = () => 12000000;
+      t.lifecycleChangedForTest(AppLifecycleState.resumed);
+      t.clock = () => 14000000;
+      t.recordApi('GET', '/snapshot', 200, const Duration(seconds: 6));
+      // A timer that fired far too late: the tab was frozen.
+      t.recordApi(
+        'GET',
+        '/snapshot',
+        0,
+        const Duration(seconds: 109),
+        overdue: true,
+      );
+      t.recordApi('GET', '/snapshot', 200, const Duration(milliseconds: 280));
+      final api = (t.buildReport()['api']! as List).single as Map;
+      expect(api['n'], 3, reason: 'the window was closed in the background');
+      expect(api['susp'], 2);
+      expect(api['off'], 0, reason: 'a frozen call is no offline call');
+      expect(api['max'], 280);
+      final reports = t.queue;
+      final before = (reports.single['api']! as List).single as Map;
+      expect(before['n'], 1);
+      expect(before, isNot(contains('susp')));
+      expect(before['srv'], [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      expect(before['srv'], hasLength(serverEdges.length + 1));
+    });
+
+    test('a focus change is no pause', () {
+      t.clock = () => 10000000;
+      // A system dialog or another window took the focus during the call.
+      t.lifecycleChangedForTest(AppLifecycleState.inactive);
+      t.clock = () => 10200000;
+      t.lifecycleChangedForTest(AppLifecycleState.resumed);
+      t.clock = () => 10300000;
+      t.recordApi('POST', '/actions', 200, const Duration(milliseconds: 500));
+      final api = (t.buildReport()['api']! as List).single as Map;
+      expect(api['n'], 1);
+      expect(api['max'], 500);
+      expect(api, isNot(contains('susp')));
+    });
+
+    test('a long frame right before the background is dropped', () {
+      t.setRoot('today');
+      t.clock = () => 2000000;
+      animate(t, 1000000, [16.7, 400]);
+      t.clock = () => 1416700 + 100000;
+      t.lifecycleChangedForTest(AppLifecycleState.hidden);
+      final dropped = t.queue.single['frames']! as Map;
+      expect(dropped['n'], 1);
+      expect(dropped['max'], 16.7);
+      expect(t.queue.single, isNot(contains('worst')));
+      t.lifecycleChangedForTest(AppLifecycleState.resumed);
+      // Drawing on after a long frame shows it was the app's own.
+      t.clock = null;
+      animate(t, 20000000, [16.7, 400, 16.7]);
+      final kept = t.buildReport()['frames']! as Map;
+      expect(kept['n'], 3);
+      expect(kept['max'], 400);
+    });
+
+    test('slow frames get the build and raster time of their frames', () {
+      var vsync = 0;
+      t.vsyncClock = () => vsync;
+      vsync = 5000000;
+      t.frameEnded(1000000, nextScheduled: true);
+      vsync = 5016700;
+      t.frameEnded(1016700, nextScheduled: true);
+      vsync = 5106700;
+      t.frameEnded(1106700, nextScheduled: true);
+      // FrameTimings come later and in a batch: the previous frame, the
+      // slow one, and one after it.
+      t
+        ..recordTiming(2, 3, 6, vsyncUs: 5000000)
+        ..recordTiming(4, 70, 80, vsyncUs: 5016700)
+        ..recordTiming(30, 5, 40, vsyncUs: 5106700)
+        ..recordTiming(9, 9, 20, vsyncUs: 5200000);
+      final worst = (t.buildReport()['worst']! as List).single as Map;
+      expect(worst['ms'], 90);
+      expect(worst['b'], 30);
+      expect(worst['ra'], 70);
+    });
+
+    test('FrameTimings are matched by frame where the stamp is the target', () {
+      // Android and iOS: the framework's stamp is the vsync target time, a
+      // refresh after FrameTiming's vsyncStart.
+      var vsync = 0, frame = 0;
+      t
+        ..vsyncClock = (() => vsync + 16700)
+        ..frameNumberClock = (() => frame);
+      for (final (n, at, start) in [
+        (10, 1000000, 5000000),
+        (11, 1016700, 5016700),
+        (12, 1106700, 5106700),
+        (13, 1123400, 5123400),
+      ]) {
+        frame = n;
+        vsync = start;
+        t.frameEnded(at, nextScheduled: true);
+      }
+      t
+        ..recordTiming(2, 3, 6, vsyncUs: 5000000, frame: 10)
+        ..recordTiming(4, 70, 80, vsyncUs: 5016700, frame: 11)
+        ..recordTiming(30, 5, 40, vsyncUs: 5106700, frame: 12)
+        ..recordTiming(9, 90, 99, vsyncUs: 5123400, frame: 13);
+      final worst = (t.buildReport()['worst']! as List).single as Map;
+      expect(worst['ms'], 90);
+      expect(worst['b'], 30);
+      expect(worst['ra'], 70, reason: 'the next frame is not this one');
+    });
+
     test('a busy window stays below 4 KB', () {
       final random = Random(7);
       for (var r = 0; r < PerfTelemetry.maxRoutes; r++) {
@@ -348,6 +523,48 @@ void main() {
       expect(jsonEncode(report), isNot(contains('uid')));
       expect(t.queue, isEmpty);
       expect(store.values['perf.queue'], isNull);
+    });
+
+    test('every report gets its own id', () async {
+      t.closeWindow();
+      animate(t, 9000000, [16.7]);
+      t.closeWindow();
+      final ids = t.queue.map((r) => r['rid']).toSet();
+      expect(ids, hasLength(2));
+      expect(ids, everyElement(matches(RegExp(r'^[a-f0-9]{16}$'))));
+    });
+
+    test('a page closed while sending sends nothing twice', () async {
+      for (var i = 0; i < 3; i++) {
+        animate(t, 10000000 * (i + 2), [16.7]);
+        t.closeWindow();
+      }
+      uplink.hangAfter = 1;
+      unawaited(t.flush());
+      await pumpEventQueue();
+      expect(uplink.sent, hasLength(1));
+      // The page is gone now; the next start reads what was saved.
+      final saved = jsonDecode(store.values['perf.queue']!) as List;
+      expect(saved, hasLength(2), reason: 'the first window was sent');
+      final next = _Uplink();
+      final restarted = PerfTelemetry(store: store, random: Random(9))
+        ..startForTest(uplink: next, restoreQueue: true);
+      // A report queued before the saved ones were read neither replaces
+      // nor doubles them.
+      animate(restarted, 1000000, [16.7]);
+      restarted.closeWindow();
+      await pumpEventQueue();
+      expect(jsonDecode(store.values['perf.queue']!), hasLength(2));
+      await restarted.restoreForTest();
+      expect(restarted.queue, hasLength(3));
+      expect(jsonDecode(store.values['perf.queue']!), hasLength(3));
+      await restarted.restoreForTest();
+      expect(restarted.queue, hasLength(3), reason: 'read twice, kept once');
+      await restarted.flush();
+      await restarted.flush();
+      final ids = [...uplink.sent, ...next.sent].map((r) => r['rid']).toList();
+      expect(ids, hasLength(4));
+      expect(ids.toSet(), hasLength(4));
     });
 
     test('without the feature reports are dropped', () async {
@@ -441,6 +658,97 @@ void main() {
       {'ms': 30, 't': 0.4, 'ev': 'crash', 'm': 4},
     ]);
     expect(PerfRunEvent.describe(0), isNull);
+  });
+
+  test('the start frame of a run carries only the start', () async {
+    final uplink = _Uplink();
+    final t = PerfTelemetry(store: MemoryPerfStore(), random: Random(5))
+      ..startForTest(uplink: uplink);
+    final run = t.beginRun()
+      ..mark(PerfRunEvent.start)
+      ..mark(PerfRunEvent.sound)
+      ..mark(PerfRunEvent.obstacle)
+      ..clear()
+      ..frame(240, seconds: 0, meters: 0)
+      ..mark(PerfRunEvent.sound)
+      ..clear()
+      ..frame(60, seconds: 1, meters: 9);
+    run.finish(
+      duration: const Duration(seconds: 3),
+      meters: 9,
+      sound: false,
+      firstStepMs: 240.04,
+    );
+    await t.flush();
+    expect(uplink.sent.single['run'], containsPair('snd', false));
+    expect(uplink.sent.single['run'], containsPair('f0', 240));
+    expect(uplink.sent.single['worst'], [
+      {'ms': 240, 't': 0, 'ev': 'start', 'm': 0},
+      {'ms': 60, 't': 1, 'm': 9},
+    ]);
+    expect(PerfRunEvent.describe(PerfRunEvent.start | 1), 'pickup,start');
+  });
+
+  test('the API client reports server time and frozen calls', () async {
+    final seen = <(String, int, double?, bool)>[];
+    final previous = ApiClient.observer;
+    addTearDown(() => ApiClient.observer = previous);
+    ApiClient.observer =
+        (method, path, status, elapsed, {serverMs, overdue = false}) =>
+            seen.add((path, status, serverMs, overdue));
+    final api = ApiClient(
+      client: MockClient(
+        (request) async => http.Response(
+          '{}',
+          200,
+          headers: {'server-timing': 'auth;dur=0.4, app;desc="x";dur=2.75'},
+        ),
+      ),
+    );
+    await api.request('https://theater.example', 'GET', '/snapshot');
+    await api.binary('https://theater.example', '/media/a', token: 't');
+    expect(seen, [
+      ('/snapshot', 200, 2.75, false),
+      ('/media/a', 200, 2.75, false),
+    ]);
+    expect(ApiClient.serverTimeOf('app;dur=12'), 12);
+
+    // A slow but steady download is no pause, however long it takes in
+    // all; one wait far beyond its timeout is.
+    var now = Duration.zero;
+    final previousWatch = ApiClient.stopwatch;
+    addTearDown(() => ApiClient.stopwatch = previousWatch);
+    ApiClient.stopwatch = () => _FakeStopwatch(() => now);
+    Stream<List<int>> chunks(List<int> gaps) async* {
+      for (final seconds in gaps) {
+        // Each chunk arrives after the previous one was taken.
+        await Future<void>.delayed(Duration.zero);
+        now += Duration(seconds: seconds);
+        yield [1, 2, 3];
+      }
+    }
+
+    final slow = ApiClient(
+      client: MockClient.streaming((request, _) async {
+        now += const Duration(seconds: 2);
+        return http.StreamedResponse(
+          chunks(
+            request.url.path.contains('steady') ? [20, 20, 20, 5] : [5, 45],
+          ),
+          200,
+        );
+      }),
+    );
+    seen.clear();
+    await slow.binary('https://theater.example', '/media/steady', token: 't');
+    await slow.binary('https://theater.example', '/media/frozen', token: 't');
+    expect(seen, [
+      ('/media/steady', 200, null, false),
+      ('/media/frozen', 200, null, true),
+    ]);
+    expect(ApiClient.serverTimeOf('auth;dur=3'), isNull);
+    expect(ApiClient.serverTimeOf('db;dur=1, app'), isNull);
+    expect(ApiClient.serverTimeOf(null), isNull);
   });
 
   test('a recorder without telemetry measures nothing', () {

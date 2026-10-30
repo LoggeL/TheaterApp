@@ -8,6 +8,9 @@
 export const frameEdges = Object.freeze([4, 8, 10, 12, 14, 16, 18, 20, 25, 33, 50, 67, 100, 150, 250, 500, 1000]);
 // Upper bounds (ms) of the API latency buckets.
 export const latencyEdges = Object.freeze([50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 10000]);
+// Upper bounds (ms) of the server time buckets (`Server-Timing: app;dur`): finer, because the
+// server itself mostly needs a few milliseconds. Same length as the latency histogram.
+export const serverEdges = Object.freeze([1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]);
 export const perfTelemetry = Object.freeze({
   maxBytes: 16 * 1024,
   perInstallPerHour: 30,
@@ -18,6 +21,8 @@ export const perfTelemetry = Object.freeze({
   maxRoutes: 16,
   maxApi: 20,
   maxWorst: 5,
+  // A report sent twice (e.g. the app closed while sending) is stored once within this window.
+  dedupeDays: 3,
 });
 
 const kinds = ['app', 'stageRunner'];
@@ -41,6 +46,7 @@ const str = (v, max, allowed = /[^\w .:/()+,;-]/g) => {
 };
 const oneOf = (v, values) => values.includes(v) ? v : undefined;
 const id = v => typeof v === 'string' && /^[A-Za-z0-9-]{16,64}$/.test(v) ? v : undefined;
+const reportId = v => typeof v === 'string' && /^[a-f0-9]{16}$/.test(v) ? v : undefined;
 const hist = (v, length) => Array.isArray(v) && v.length === length && v.every(x => Number.isInteger(x) && x >= 0 && x <= 1e7) ? v : undefined;
 /** Drops undefined fields; returns undefined for an empty object. */
 const compact = o => {
@@ -67,12 +73,16 @@ const frames = v => {
 };
 const route = v => str(v, 48, /[^\w.:-]/g);
 const events = v => str(v, 64, /[^\w,.:-]/g);
-const worst = v => isObject(v) && ms(v.ms) !== undefined ? compact({ ms: ms(v.ms), r: route(v.r), t: num(v.t, 1e7), in: str(v.in, 12, /[^\w-]/g), ev: events(v.ev), m: int(v.m, 1e7) }) : undefined;
+// `b`/`ra`: the longest build and raster time (FrameTiming) of the frames around the jank (`r` is
+// the screen).
+const worst = v => isObject(v) && ms(v.ms) !== undefined ? compact({ ms: ms(v.ms), r: route(v.r), t: num(v.t, 1e7), in: str(v.in, 12, /[^\w-]/g), ev: events(v.ev), m: int(v.m, 1e7), b: ms(v.b), ra: ms(v.ra) }) : undefined;
 const api = v => {
   if (!isObject(v)) return undefined;
   const m = oneOf(v.m, methods), p = str(v.p, 80, /[^\w/:.-]/g), n = int(v.n, 1e6);
   if (!m || !p?.startsWith('/') || !n) return undefined;
-  return compact({ m, p, n, err: int(v.err, n), off: int(v.off, n), p50: num(v.p50, 120000), p95: num(v.p95, 120000), max: num(v.max, 120000), h: hist(v.h, latencyEdges.length + 1) });
+  // `srv`: histogram of the server's own time (serverEdges); `susp`: calls the app spent (partly)
+  // in the background or frozen, left out of the latency histogram.
+  return compact({ m, p, n, err: int(v.err, n), off: int(v.off, n), susp: int(v.susp, n), p50: num(v.p50, 120000), p95: num(v.p95, 120000), max: num(v.max, 120000), h: hist(v.h, latencyEdges.length + 1), srv: hist(v.srv, serverEdges.length + 1) });
 };
 
 /**
@@ -85,7 +95,7 @@ export function sanitizePerfReport(body) {
   if (!kind || !install) return null;
   const d = obj(body.device), a = obj(body.app), s = obj(body.startup), r = obj(body.run);
   const report = compact({
-    v: 1, kind, install, session: id(body.session), seq: int(body.seq, 1e5),
+    v: 1, kind, install, session: id(body.session), seq: int(body.seq, 1e5), rid: reportId(body.rid),
     // Window length and its end in seconds since the app started.
     span: int(body.span, 864e5), up: num(body.up, 1e7),
     device: compact({
@@ -95,12 +105,15 @@ export function sanitizePerfReport(body) {
       net: str(d.net, 16, /[^\w-]/g), mode: oneOf(d.mode, ['release', 'profile', 'debug']),
     }),
     app: compact({ version: str(a.version, 20, /[^\w.+-]/g), build: str(a.build, 12, /[^\w.-]/g) }),
-    startup: compact({ kind: str(s.kind, 16, /[^\w-]/g), nav: str(s.nav, 16, /[^\w-]/g), preMs: int(s.preMs, 6e5), firstFrameMs: int(s.firstFrameMs, 6e5), readyMs: int(s.readyMs, 6e5), dataMs: int(s.dataMs, 6e5) }),
+    // `vis`: page visibility at the start; `hidden`: hidden before the first frame; `fcp`: first
+    // contentful paint (web, ms since the navigation).
+    startup: compact({ kind: str(s.kind, 16, /[^\w-]/g), nav: str(s.nav, 16, /[^\w-]/g), vis: oneOf(s.vis, ['visible', 'hidden', 'prerender']), hidden: bool(s.hidden), preMs: int(s.preMs, 6e5), fcp: int(s.fcp, 6e5), firstFrameMs: int(s.firstFrameMs, 6e5), readyMs: int(s.readyMs, 6e5), dataMs: int(s.dataMs, 6e5) }),
     frames: frames(body.frames),
     routes: list(body.routes, perfTelemetry.maxRoutes, x => { const f = frames(x), name = route(x?.r); return f && name ? { r: name, ...f } : undefined; }),
     worst: list(body.worst, perfTelemetry.maxWorst, worst),
     api: list(body.api, perfTelemetry.maxApi, api),
-    run: kind === 'stageRunner' ? compact({ ms: int(r.ms, 864e5), m: int(r.m, 1e7), score: int(r.score, 1e8), character: route(r.character), backdrop: route(r.backdrop), fx: route(r.fx), end: str(r.end, 16, /[^\w-]/g) }) : undefined,
+    // `snd`: sound on; `f0`: the first step of the run in ms.
+    run: kind === 'stageRunner' ? compact({ ms: int(r.ms, 864e5), m: int(r.m, 1e7), score: int(r.score, 1e8), character: route(r.character), backdrop: route(r.backdrop), fx: route(r.fx), end: str(r.end, 16, /[^\w-]/g), snd: bool(r.snd), f0: ms(r.f0) }) : undefined,
   });
   if (!report.frames && !report.startup && !report.api?.length) return null;
   return report;
@@ -131,10 +144,24 @@ export class PerfTelemetry {
     if (!report) return false;
     // The account limit is checked first so one account cannot flood with fresh installation ids.
     if (!this.limiter.take(`a:${uid}`, perfTelemetry.perAccountPerHour) || !this.limiter.take(`i:${report.install}`, perfTelemetry.perInstallPerHour)) return false;
+    if (this.stored(report)) return false;
     const d = report.device ?? {};
     this.store.db.prepare(`INSERT INTO perf_reports(created_at, install_id, session_id, kind, platform, renderer, browser, os, pwa, app_version, app_build, data)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(new Date(this.clock()).toISOString(), report.install, report.session ?? null, report.kind, d.platform ?? 'other', d.renderer ?? null,
       d.browser ?? null, d.os ?? null, d.pwa === undefined ? null : d.pwa ? 1 : 0, report.app?.version ?? null, report.app?.build ?? null, JSON.stringify(report));
     return true;
+  }
+
+  /**
+   * Whether `report` arrived before: the same report id or, for apps without one, the same
+   * session and sequence number of the installation in the last `dedupeDays`. Reports without a
+   * session (older apps) are never matched.
+   */
+  stored({ install, session, seq, rid }) {
+    const since = new Date(this.clock() - perfTelemetry.dedupeDays * 864e5).toISOString();
+    const where = (field, value) => this.store.db.prepare(`SELECT 1 FROM perf_reports WHERE ${session ? 'session_id=? AND ' : ''}install_id=? AND created_at>=? AND json_extract(data,'$.${field}')=? LIMIT 1`)
+      .get(...(session ? [session] : []), install, since, value);
+    if (rid) return !!where('rid', rid);
+    return !!session && seq !== undefined && !!where('seq', seq);
   }
 }

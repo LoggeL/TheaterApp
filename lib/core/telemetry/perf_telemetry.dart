@@ -52,7 +52,8 @@ class MemoryPerfStore implements PerfStore {
 }
 
 /// What happened in a frame of the stage runner, as bits for
-/// [PerfRunRecorder.mark].
+/// [PerfRunRecorder.mark]. [start] is the run's first step: setting up the
+/// game and starting the music.
 abstract final class PerfRunEvent {
   static const pickup = 1,
       sound = 2,
@@ -60,7 +61,8 @@ abstract final class PerfRunEvent {
       debut = 8,
       skin = 16,
       crash = 32,
-      curtain = 64;
+      curtain = 64,
+      start = 128;
   static const _names = [
     'pickup',
     'sound',
@@ -69,6 +71,7 @@ abstract final class PerfRunEvent {
     'skin',
     'crash',
     'curtain',
+    'start',
   ];
 
   /// e.g. `pickup,sound`; null for no event.
@@ -99,6 +102,11 @@ class PerfRunRecorder {
   /// work done in a frame shows up in the time until the following one.
   void mark(int event) => _events |= event;
 
+  /// Forgets the events noted for the next frame except
+  /// [PerfRunEvent.start]: what setting up a run marks (the first obstacle,
+  /// a sound) belongs to the start, not to the game.
+  void clear() => _events &= PerfRunEvent.start;
+
   /// One game-loop step of [ms] since the previous one, [seconds] and
   /// [meters] into the run.
   void frame(double ms, {required double seconds, required int meters}) {
@@ -113,14 +121,14 @@ class PerfRunRecorder {
     if (ms >= 5000) return;
     frames.add(ms);
     if (_worst.qualifies(ms)) {
-      _worst.offer(
-        WorstFrame(
-          ms,
-          at: seconds,
-          meters: meters,
-          events: PerfRunEvent.describe(_events),
-        ),
+      final worst = WorstFrame(
+        ms,
+        at: seconds,
+        meters: meters,
+        events: PerfRunEvent.describe(_events),
       );
+      _worst.offer(worst);
+      owner?._awaitTimings(worst, ms);
     }
     _events = 0;
   }
@@ -132,7 +140,8 @@ class PerfRunRecorder {
   }
 
   /// Ends the run and queues its report. [end] is how it ended, e.g.
-  /// `crash` or `quit`.
+  /// `crash` or `quit`; [sound] whether sound was on, [firstStepMs] the
+  /// run's first game-loop step.
   void finish({
     required Duration duration,
     required int meters,
@@ -141,6 +150,8 @@ class PerfRunRecorder {
     String? backdrop,
     String? fx,
     String end = 'crash',
+    bool? sound,
+    double? firstStepMs,
   }) {
     if (_done) return;
     _done = true;
@@ -152,6 +163,8 @@ class PerfRunRecorder {
       'backdrop': ?backdrop,
       'fx': ?fx,
       'end': end,
+      'snd': ?sound,
+      if (firstStepMs != null) 'f0': (firstStepMs * 10).roundToDouble() / 10,
     });
   }
 
@@ -181,6 +194,24 @@ Map<String, Object> _timingJson(
     'r95': r(raster.quantile(0.95)),
     if (total != null) 't95': r(total.quantile(0.95)),
   };
+}
+
+/// A frame longer than [PerfTelemetry._holdMs] kept back for a moment: if
+/// the app goes to the background right after it, it measured the way out.
+class _HeldFrame {
+  _HeldFrame(this.ms, this.atUs, this.route, this.worst);
+  final double ms;
+  final int atUs;
+  final _RouteStats route;
+  final WorstFrame? worst;
+}
+
+/// A worst frame waiting for the engine's FrameTimings of the frames whose
+/// vsync stamp ([PerfTelemetry._vsyncNow]) lies between [fromUs] and [toUs].
+class _AwaitedTiming {
+  _AwaitedTiming(this.frame, this.fromUs, this.toUs);
+  final WorstFrame frame;
+  final int fromUs, toUs;
 }
 
 class _RouteStats {
@@ -226,6 +257,27 @@ class PerfTelemetry {
   @visibleForTesting
   int Function()? clock;
   int _now() => clock?.call() ?? _clock.elapsedMicroseconds;
+
+  /// The current frame's vsync time stamp in the engine's clock (the one
+  /// of FrameTiming), -1 when unknown; tests can replace it.
+  @visibleForTesting
+  int Function()? vsyncClock;
+  int _vsyncNow() =>
+      vsyncClock?.call() ??
+      (_testing
+          ? -1
+          : SchedulerBinding
+                .instance
+                .currentSystemFrameTimeStamp
+                .inMicroseconds);
+
+  /// The current frame's number (the one of FrameTiming), -1 when unknown;
+  /// tests can replace it.
+  @visibleForTesting
+  int Function()? frameNumberClock;
+  int _frameNumberNow() =>
+      frameNumberClock?.call() ??
+      (_testing ? -1 : ui.PlatformDispatcher.instance.frameData.frameNumber);
   late final NavigatorObserver navigatorObserver = _PerfRouteObserver(this);
   PerfUplink? _uplink;
   bool _active = false, _flushing = false;
@@ -245,10 +297,22 @@ class PerfTelemetry {
   Map<String, Object> _device = const {};
   final _queue = <Map<String, Object?>>[];
 
+  /// Ids of the last reports sent, so a saved queue read back late does not
+  /// bring them back.
+  final _sentIds = <Object?>[];
+
+  /// Whether the saved queue was read at the start; until then reports
+  /// queued meanwhile are not saved over it.
+  bool _queueRead = false;
+
   // Start.
-  double? _preMs, _firstFrameMs, _readyMs, _dataMs;
+  double? _preMs, _firstFrameMs, _readyMs, _dataMs, _fcpMs;
   Map<String, Object> _startInfo = const {};
   bool _startupSent = false;
+
+  /// Whether the page or app was hidden before its first frame: the start
+  /// then waited for the user, not for the app.
+  bool _hiddenAtStart = false;
 
   // The current window.
   int _windowStartUs = 0;
@@ -260,12 +324,46 @@ class PerfTelemetry {
   final _api = <String, LatencyStats>{};
 
   // Frame sampling, in microseconds of [_now].
-  int _lastFrameUs = -1, _inputAt = -1, _lastInputUs = -1, _lastEventUs = -1;
+  int _lastFrameUs = -1, _inputAt = -1, _lastInputUs = -1;
   bool _continuous = false, _suspended = false;
+
+  /// Frames longer than this are held back until the next frame shows the
+  /// app is still in the foreground; within [_holdUs] before going to the
+  /// background they are dropped.
+  static const _holdMs = 250.0, _holdUs = 300000;
+  _HeldFrame? _held;
+
+  /// Worst frames waiting for their FrameTimings, which the engine reports
+  /// in batches and late (on Android about once a second).
+  final _awaited = List<_AwaitedTiming?>.filled(32, null);
+  int _awaitedNext = 0, _awaitedCount = 0;
+
+  /// The vsync stamps of the last frames by frame number. The framework's
+  /// stamp is not FrameTiming's vsyncStart: on Android and iOS it is the
+  /// frame's target time a refresh later, on the web the browser's frame
+  /// time, which can lie well before the engine reads its clock. A timing
+  /// is matched by its frame's own stamp, otherwise shifted by the last
+  /// known difference.
+  final _stampFrames = List<int>.filled(256, -1);
+  final _stampsUs = List<int>.filled(256, 0);
+  int _stampOffsetUs = 0;
 
   /// Counts trips to the background, so a run skips the step across one.
   int _epoch = 0;
-  String? _lastInput, _lastEvent;
+
+  /// When the app last went to the background or came back from it
+  /// ([_now]); an API call across that time measured the pause.
+  int _pausedUs = -1;
+
+  /// Whether the app is hidden or paused: only coming back from there is a
+  /// return, not `inactive` → `resumed` (a dialog of the system, the
+  /// notification shade, a browser window losing focus).
+  bool _inBackground = false;
+  String? _lastInput;
+
+  /// When each app event (`route`, `api`, `skin`, `img`, `resume`) last
+  /// happened ([_now]); a slow frame lists all of the last second.
+  final _eventAt = <String, int>{};
   String _rootName = 'start';
   String? _pageName;
   _RouteStats? _route;
@@ -350,6 +448,9 @@ class PerfTelemetry {
     _resetWindow();
     _routes.clear();
     _route = null;
+    _held = null;
+    _awaited.fillRange(0, _awaited.length, null);
+    _awaitedCount = 0;
     _queue.clear();
     // Start times measured before switching off are not sent later.
     _startupSent = true;
@@ -363,6 +464,8 @@ class PerfTelemetry {
     enabled.value = on;
     if (on) {
       _install = _hex(16);
+      // Switching off deleted the saved queue.
+      _queueRead = true;
       if (available && !_active) {
         _activate();
         _resetWindow();
@@ -392,10 +495,17 @@ class PerfTelemetry {
     return enabled.value;
   }
 
-  /// For tests: measures without engine hooks or timers.
+  /// For tests: measures without engine hooks or timers. With
+  /// [restoreQueue] the saved queue waits for [restoreForTest], as at a
+  /// real start.
   @visibleForTesting
-  void startForTest({required PerfUplink uplink, Map<String, Object>? device}) {
+  void startForTest({
+    required PerfUplink uplink,
+    Map<String, Object>? device,
+    bool restoreQueue = false,
+  }) {
     _testing = true;
+    _queueRead = !restoreQueue;
     _active = enabled.value;
     _uplink = uplink;
     _clock.start();
@@ -408,6 +518,10 @@ class PerfTelemetry {
   @visibleForTesting
   Future<void> loadForTest() => _load();
 
+  /// For tests: reads the saved installation id and queue.
+  @visibleForTesting
+  Future<void> restoreForTest() => _restore();
+
   Future<void> _load() async {
     if (!await _loadEnabled()) {
       if (!_active) return;
@@ -417,6 +531,7 @@ class PerfTelemetry {
         await _store.write('perf.install', null);
         await _store.write('perf.queue', null);
       } catch (_) {}
+      _queueRead = true;
       return;
     }
     // Switched off (and maybe on again) while the choice was read.
@@ -437,14 +552,27 @@ class PerfTelemetry {
       }
       final queued = await _store.read('perf.queue');
       if (queued != null) {
-        for (final r in jsonDecode(queued) as List) {
-          if (r is Map<String, Object?>) _queue.add(r);
+        // Reports queued while this was read were saved already and come
+        // back here: the report id keeps each one once.
+        final known = {for (final r in _queue) r['rid'], ..._sentIds};
+        final saved = [
+          for (final r in jsonDecode(queued) as List)
+            if (r is Map<String, Object?> &&
+                (r['rid'] == null || !known.contains(r['rid'])))
+              r,
+        ];
+        _queue.insertAll(0, saved);
+        while (_queue.length > maxQueue) {
+          _queue.removeAt(0);
         }
       }
     } catch (_) {
       // A damaged store only costs old reports.
       if (_install.isEmpty) _install = _hex(16);
     }
+    _queueRead = true;
+    // Saves the merged queue (reports queued meanwhile were not saved).
+    await _persist();
   }
 
   /// Device details; [atStart] also the process age before Dart started.
@@ -520,9 +648,22 @@ class PerfTelemetry {
 
   /// Notes an app event (e.g. `route`, `api`, `resume`) as context for a
   /// following slow frame.
-  void mark(String event) {
-    _lastEvent = event;
-    _lastEventUs = _now();
+  void mark(String event) => _eventAt[event] = _now();
+
+  /// [count] pictures were handed to the screen in this frame (decoded
+  /// costumes in the wardrobe); a slow frame then lists `img`.
+  static void markImage(int count) {
+    if (count > 0 && instance._active) instance.mark('img');
+  }
+
+  /// The events of the last second before [nowUs], e.g. `route,api`.
+  String? _eventsBefore(int nowUs) {
+    String? out;
+    for (final e in _eventAt.entries) {
+      if (e.value <= nowUs - 1000000) continue;
+      out = out == null ? e.key : '$out,${e.key}';
+    }
+    return out;
   }
 
   /// The app shows content (from the cache or the first sync).
@@ -584,6 +725,7 @@ class PerfTelemetry {
   /// the input. Other frames (after idle pauses) are not sampled.
   @visibleForTesting
   void frameEnded(int nowUs, {required bool nextScheduled}) {
+    _noteStamp();
     double? sample;
     String? input;
     if (!_suspended) {
@@ -604,19 +746,92 @@ class PerfTelemetry {
   }
 
   void _record(double ms, int nowUs, String? input) {
-    _frames.add(ms);
-    _currentRoute().frames.add(ms);
+    _commitHeld();
+    final route = _currentRoute();
+    WorstFrame? worst;
     if (_worst.qualifies(ms)) {
-      final recent = nowUs - 1000000;
-      _worst.offer(
-        WorstFrame(
-          ms,
-          route: routeName,
-          at: nowUs / 1e6,
-          input: input ?? (_lastInputUs > recent ? _lastInput : null),
-          events: _lastEventUs > recent ? _lastEvent : null,
-        ),
+      worst = WorstFrame(
+        ms,
+        route: routeName,
+        at: nowUs / 1e6,
+        input: input ?? (_lastInputUs > nowUs - 1000000 ? _lastInput : null),
+        events: _eventsBefore(nowUs),
       );
+      _awaitTimings(worst, ms);
+    }
+    if (ms > _holdMs) {
+      _held = _HeldFrame(ms, nowUs, route, worst);
+    } else {
+      _add(ms, route, worst);
+    }
+  }
+
+  void _add(double ms, _RouteStats route, WorstFrame? worst) {
+    _frames.add(ms);
+    route.frames.add(ms);
+    if (worst != null) _worst.offer(worst);
+  }
+
+  /// Counts the held frame: the app went on drawing after it.
+  void _commitHeld() {
+    final held = _held;
+    if (held == null) return;
+    _held = null;
+    _add(held.ms, held.route, held.worst);
+  }
+
+  /// Notes [worst] (of [ms], ending in the current frame) for the build and
+  /// raster times of the frames that began meanwhile.
+  void _awaitTimings(WorstFrame worst, double ms) {
+    final vsync = _vsyncNow();
+    if (vsync < 0) return;
+    // Timings are matched by their frames' stamps (see [_stampOf]): the
+    // window is generous by 2 ms on both sides only for rounding.
+    if (_awaited[_awaitedNext] == null) _awaitedCount++;
+    _awaited[_awaitedNext] = _AwaitedTiming(
+      worst,
+      vsync - (ms * 1000).round() - 2000,
+      vsync + 2000,
+    );
+    _awaitedNext = (_awaitedNext + 1) % _awaited.length;
+  }
+
+  /// Notes the current frame's vsync stamp under its number.
+  void _noteStamp() {
+    final frame = _frameNumberNow();
+    if (frame < 0) return;
+    final stamp = _vsyncNow();
+    if (stamp < 0) return;
+    _stampFrames[frame % _stampFrames.length] = frame;
+    _stampsUs[frame % _stampsUs.length] = stamp;
+  }
+
+  /// The vsync stamp of [frame], whose FrameTiming began at [vsyncStartUs].
+  int _stampOf(int frame, int vsyncStartUs) {
+    if (frame >= 0 && _stampFrames[frame % _stampFrames.length] == frame) {
+      final stamp = _stampsUs[frame % _stampsUs.length];
+      _stampOffsetUs = stamp - vsyncStartUs;
+      return stamp;
+    }
+    return vsyncStartUs + _stampOffsetUs;
+  }
+
+  /// Gives the worst frames around [vsyncUs] (a frame's vsync stamp) the
+  /// longest [build] and [raster] time.
+  void _matchTiming(int vsyncUs, double build, double raster) {
+    if (_awaitedCount == 0) return;
+    for (var i = 0; i < _awaited.length; i++) {
+      final a = _awaited[i];
+      if (a == null) continue;
+      if (vsyncUs > a.toUs + 1000000) {
+        // Timings arrive in order: nothing for this one will come.
+        _awaited[i] = null;
+        _awaitedCount--;
+      } else if (vsyncUs >= a.fromUs && vsyncUs <= a.toUs) {
+        final f = a.frame;
+        f.build = max(f.build ?? 0, build);
+        f.raster = max(f.raster ?? 0, raster);
+      }
     }
   }
 
@@ -640,6 +855,14 @@ class PerfTelemetry {
         ui.FramePhase.vsyncStart,
       );
       _timing(build, raster, total, route, run);
+      _matchTiming(
+        _stampOf(
+          t.frameNumber,
+          t.timestampInMicroseconds(ui.FramePhase.vsyncStart),
+        ),
+        build,
+        raster,
+      );
     }
   }
 
@@ -651,10 +874,19 @@ class PerfTelemetry {
       (t.timestampInMicroseconds(end) - t.timestampInMicroseconds(start)) /
       1000;
 
-  /// One FrameTiming: build, raster and total span in ms.
+  /// One FrameTiming: build, raster and total span in ms, for the frame
+  /// [frame] that began (vsyncStart) at [vsyncUs].
   @visibleForTesting
-  void recordTiming(double build, double raster, double total) =>
-      _timing(build, raster, total, _currentRoute(), _run);
+  void recordTiming(
+    double build,
+    double raster,
+    double total, {
+    int vsyncUs = -1,
+    int frame = -1,
+  }) {
+    _timing(build, raster, total, _currentRoute(), _run);
+    if (vsyncUs >= 0) _matchTiming(_stampOf(frame, vsyncUs), build, raster);
+  }
 
   void _timing(
     double build,
@@ -675,19 +907,42 @@ class PerfTelemetry {
   // API.
 
   /// Called by [ApiClient] for every request; [status] 0 means no answer.
-  void recordApi(String method, String path, int status, Duration elapsed) {
+  /// A call that was [overdue] or across a trip to the background only
+  /// counts as paused (`susp`): it measured the pause, not the network.
+  void recordApi(
+    String method,
+    String path,
+    int status,
+    Duration elapsed, {
+    double? serverMs,
+    bool overdue = false,
+  }) {
     if (!_active || path.startsWith('/telemetry/')) return;
     final pattern = apiPathPattern(path);
     final ms = elapsed.inMicroseconds / 1000;
+    final now = _now();
+    final paused =
+        overdue ||
+        (_pausedUs >= 0 && _pausedUs >= now - elapsed.inMicroseconds);
     if (_api.length < 40 || _api.containsKey('$method $pattern')) {
       _api
           .putIfAbsent('$method $pattern', LatencyStats.new)
-          .add(ms, error: status >= 400, isOffline: status == 0);
+          .add(
+            ms,
+            error: status >= 400,
+            isOffline: status == 0,
+            isSuspended: paused,
+            serverMs: serverMs,
+          );
     }
     if (pattern == '/snapshot' && status >= 200 && status < 300) {
       _dataMs ??= _ms();
     }
-    if (status != 0) mark('api');
+    // Costume pictures and sounds are decoded after the answer: their own
+    // event tells them apart from data.
+    if (status != 0) {
+      mark(pattern.startsWith('/games/runner/skins/') ? 'skin' : 'api');
+    }
   }
 
   // Stage runner.
@@ -758,10 +1013,14 @@ class PerfTelemetry {
             : pre > 5000
             ? 'warm'
             : 'cold');
+    _fcpMs ??= platform.firstPaintMs();
     return {
       'kind': ?kind,
       'nav': ?_startInfo['nav'],
+      'vis': ?_startInfo['vis'],
+      if (_hiddenAtStart) 'hidden': true,
       if (pre != null) 'preMs': pre.round(),
+      if (_fcpMs != null) 'fcp': _fcpMs!.round(),
       'firstFrameMs': _firstFrameMs!.round(),
       if (_readyMs != null) 'readyMs': _readyMs!.round(),
       if (_dataMs != null) 'dataMs': _dataMs!.round(),
@@ -774,6 +1033,7 @@ class PerfTelemetry {
   /// The report of the current window (frames, screens, API, start).
   @visibleForTesting
   Map<String, Object?> buildReport() {
+    _commitHeld();
     final routes =
         _routes.entries.where((e) => e.value.frames.count > 0).toList()..sort(
           (a, b) => b.value.frames.count.compareTo(a.value.frames.count),
@@ -848,6 +1108,7 @@ class PerfTelemetry {
   /// Ends the current window and queues its report (dropped in the demo).
   @visibleForTesting
   void closeWindow() {
+    _commitHeld();
     if (!_active || !_hasWindowData) return;
     if (_uplink?.isDemo == true) {
       _resetWindow();
@@ -861,7 +1122,8 @@ class PerfTelemetry {
 
   void _enqueue(Map<String, Object?> report) {
     if (!_active) return;
-    _queue.add(fit(report));
+    // The id lets the server and [_restore] keep a report sent twice once.
+    _queue.add(fit({...report, 'rid': _hex(8)}));
     while (_queue.length > maxQueue) {
       _queue.removeAt(0);
     }
@@ -869,6 +1131,7 @@ class PerfTelemetry {
   }
 
   Future<void> _persist() async {
+    if (!_queueRead) return;
     try {
       await _store.write(
         'perf.queue',
@@ -902,9 +1165,13 @@ class PerfTelemetry {
         // Reports queued before the id was loaded get it now.
         if (report['install'] == '') report['install'] = _install;
         await uplink.send(report);
-        _queue.removeAt(0);
+        _queue.remove(report);
+        _sentIds.add(report['rid']);
+        if (_sentIds.length > 32) _sentIds.removeAt(0);
+        // Saved after every report: a page closed while sending would
+        // otherwise send the earlier ones again on the next start.
+        await _persist();
       }
-      await _persist();
     } catch (_) {
       // Offline or signed out: the reports wait for the next try.
       await _persist();
@@ -922,15 +1189,24 @@ class PerfTelemetry {
     unawaited(flush());
   }
 
+  @visibleForTesting
+  void lifecycleChangedForTest(AppLifecycleState state) =>
+      _lifecycleChanged(state);
+
   void _lifecycleChanged(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _epoch++;
+      if (_inBackground) {
+        _inBackground = false;
+        _epoch++;
+        _pausedUs = _now();
+        mark('resume');
+      }
       _suspended = false;
       _continuous = false;
       _lastFrameUs = -1;
-      mark('resume');
     } else if (state == AppLifecycleState.hidden ||
         state == AppLifecycleState.paused) {
+      _inBackground = true;
       _suspended = true;
       _continuous = false;
       _background();
@@ -939,7 +1215,12 @@ class PerfTelemetry {
 
   void _background() {
     if (!_active) return;
+    if (_firstFrameMs == null) _hiddenAtStart = true;
+    final now = _now(), held = _held;
+    // A long frame right before this measured the way into the background.
+    if (held != null && now - held.atUs < _holdUs) _held = null;
     _epoch++;
+    _pausedUs = now;
     _suspended = true;
     _continuous = false;
     closeWindow();
