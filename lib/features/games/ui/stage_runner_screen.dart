@@ -621,7 +621,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       _line = curtainLine(
         _game.hitBy,
         _lines,
-        obstacleCrashLines: _art?.obstacleCrashLines ?? const {},
+        obstacleCrashLines: _art?.crashLines(tall: _game.hitTall) ?? const {},
       );
     });
     final start = _start;
@@ -1850,10 +1850,6 @@ class _StagePainter extends CustomPainter {
     canvas.drawLine(Offset(0, floorY), Offset(w, floorY), _edgePaint);
   }
 
-  /// A crate too tall for one crate picture: two crates, or the obstacle
-  /// set's own tall one.
-  static bool _tall(Rect rect) => rect.height > rect.width * 1.35;
-
   void _obstacle(
     Canvas canvas,
     RunnerArt a,
@@ -1863,13 +1859,22 @@ class _StagePainter extends CustomPainter {
     double floorY,
   ) {
     switch (o.kind) {
-      case ObstacleKind.crate when a.ownTallCrate && _tall(rect):
+      case ObstacleKind.crate when a.ownTallCrate && o.tall:
         // One tall picture over the whole hitbox: the cell is as high as
         // the tall crates are on average, so it is never stretched much.
         _sprite(canvas, a, RunnerSprite.tallCrate, rect);
+      case ObstacleKind.crate when a.ownTallCrate:
+        // The set shows its picture at one height: a low crate is the
+        // game's own, not the crate cell of the set.
+        canvas.drawImageRect(
+          a.atlas,
+          RunnerSprite.crate.rect,
+          rect,
+          a.obstaclePaint,
+        );
       case ObstacleKind.crate:
         // A tall pile is two crates, so none gets stretched much.
-        if (_tall(rect)) {
+        if (o.tall) {
           final half = rect.height / 2;
           _sprite(
             canvas,

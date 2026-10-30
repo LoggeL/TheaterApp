@@ -52,10 +52,11 @@ enum RunnerSprite {
   // crates.
   pile(966, 386, 154, 150),
   // A tall crate in one picture (Creepshow's tall brain-swap chair), for
-  // crates higher than 1.35 times their width; its shape, 1.57 times as high
-  // as wide, lies in the middle of those, so it is stretched or squeezed by
-  // at most a sixth. Only obstacle sets that draw something here have one
-  // ([RunnerArt.ownTallCrate]); the others put two crates on each other.
+  // crates higher than 1.35 times their width ([Obstacle.tall]); its shape,
+  // 1.57 times as high as wide, lies in the middle of those, so it is
+  // stretched or squeezed by at most a sixth. Only obstacle sets that draw
+  // something here have one ([RunnerArt.ownTallCrate]); their low crates are
+  // the game's own, and the others put two crates on each other.
   tallCrate(4, 360, 136, 214);
 
   const RunnerSprite(this.x, this.y, this.width, this.height);
@@ -203,7 +204,21 @@ class RunnerArt {
 
   /// Whether the obstacle set draws a tall crate in one picture
   /// ([RunnerSprite.tallCrate]) instead of two crates; never the default art.
+  /// It then shows that picture at this height only: its low crates are the
+  /// game's own from [atlas], which is decoded whatever is worn, as dressing
+  /// starts from it.
   final bool ownTallCrate;
+
+  /// The closing lines of a run that ended on a crate [tall] or not. The line
+  /// of a set with [ownTallCrate] is about that picture; a low crate is the
+  /// game's own and keeps the game's own line.
+  Map<ObstacleKind, String> crashLines({required bool tall}) =>
+      ownTallCrate && !tall
+      ? {
+          for (final MapEntry(:key, :value) in obstacleCrashLines.entries)
+            if (key != ObstacleKind.crate) key: value,
+        }
+      : obstacleCrashLines;
 
   /// The cells an obstacle set may leave empty.
   static const _optionalCells = [RunnerSprite.pile, RunnerSprite.tallCrate];

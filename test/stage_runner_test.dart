@@ -815,18 +815,21 @@ void main() {
     });
 
     testWidgets('a tall crate is one picture, else two crates', (tester) async {
-      final (atlas, set) = (await tester.runAsync(
+      final (atlas, set, backdrop) = (await tester.runAsync(
         () async => (
           await createTestImage(width: 1124, height: 577),
           await createTestImage(width: 1124, height: 577),
+          await createTestImage(width: 64, height: 64),
         ),
       ))!;
-      final base = RunnerArt.test(atlas, atlas);
+      final base = RunnerArt.test(atlas, backdrop);
       final game = StageRunner(random: Random(1))
         ..obstacles.clear()
         ..pickups.clear();
-      // Which cells of the obstacle set are drawn for a crate [height] high.
-      List<Rect> crate(RunnerArt art, double height) {
+      // Which cells of [from] are drawn for a crate [height] high, the
+      // obstacle set's by default; the game's own atlas also holds the
+      // runner, so of that one only the crates count.
+      List<Rect> crate(RunnerArt art, double height, {ui.Image? from}) {
         game.obstacles
           ..clear()
           ..add(
@@ -836,9 +839,12 @@ void main() {
               ..top = StageRunner.floor - height
               ..bottom = StageRunner.floor,
           );
-        final canvas = _DrawnCells(set);
+        final canvas = _DrawnCells(from ?? set);
         stagePainterFor(game, art).paint(canvas, const Size(640, 400));
-        return canvas.cells;
+        return [
+          for (final cell in canvas.cells)
+            if (from == null || cell == RunnerSprite.crate.rect) cell,
+        ];
       }
 
       final own = base.dressed(obstacles: set, ownTallCrate: true);
@@ -848,9 +854,77 @@ void main() {
       expect(crate(own, .17), [RunnerSprite.tallCrate.rect]);
       expect(crate(plain, .22), crates);
       expect(crate(plain, .17), crates);
-      // A low crate is one crate either way.
-      expect(crate(own, .14), [RunnerSprite.crate.rect]);
+      expect(crate(own, .22, from: atlas), isEmpty);
+      expect(crate(own, .17, from: atlas), isEmpty);
+      expect(crate(plain, .22, from: atlas), isEmpty);
+      // A low crate is one crate: the set's, unless it has a tall one; that
+      // shows at one height only and leaves low crates to the game's own.
       expect(crate(plain, .14), [RunnerSprite.crate.rect]);
+      expect(crate(plain, .14, from: atlas), isEmpty);
+      expect(crate(own, .14), isEmpty);
+      expect(crate(own, .14, from: atlas), [RunnerSprite.crate.rect]);
+      // The default art draws its own, low and tall as before.
+      expect(crate(base, .14, from: atlas), [RunnerSprite.crate.rect]);
+      expect(crate(base, .22, from: atlas), crates);
+    });
+
+    testWidgets('the crash line fits the crate that was hit', (tester) async {
+      final image = (await tester.runAsync(
+        () => createTestImage(width: 1124, height: 577),
+      ))!;
+      const chair = 'Probe gesessen im Hirntauschinator.';
+      const crate = 'Über die Requisitenkiste gestolpert.';
+      const lines = {
+        ObstacleKind.crate: chair,
+        ObstacleKind.pile: 'Der Sarkophag war schon belegt.',
+      };
+      // How a run ends on a crate [height] high.
+      StageRunner crash(double height) {
+        final game = StageRunner(random: Random(1))..update(1e-4);
+        game.obstacles
+          ..clear()
+          ..add(
+            Obstacle()
+              ..left = game.runnerWorldX
+              ..width = .12
+              ..top = StageRunner.floor - height
+              ..bottom = StageRunner.floor,
+          );
+        return game..update(1e-4);
+      }
+
+      Set<String> said(RunnerArt art, double height) {
+        final game = crash(height), random = Random(3);
+        expect(game.hitBy, ObstacleKind.crate);
+        return {
+          for (var i = 0; i < 80; i++)
+            curtainLine(
+              game.hitBy,
+              random,
+              obstacleCrashLines: art.crashLines(tall: game.hitTall),
+            ),
+        };
+      }
+
+      final base = RunnerArt.test(image, image);
+      final own = base.dressed(
+        obstacles: image,
+        ownTallCrate: true,
+        obstacleCrashLines: lines,
+      );
+      expect(said(own, .22), allOf(contains(chair), isNot(contains(crate))));
+      expect(said(own, .17), allOf(contains(chair), isNot(contains(crate))));
+      expect(said(own, .14), allOf(contains(crate), isNot(contains(chair))));
+      // The other lines of the set stay, whatever the height.
+      expect(own.crashLines(tall: false), {
+        ObstacleKind.pile: 'Der Sarkophag war schon belegt.',
+      });
+      // A set without a tall crate shows its crate at every height, and so
+      // does a Creepshow that could not read its cells, as old apps do.
+      final other = base.dressed(obstacles: image, obstacleCrashLines: lines);
+      expect(other.crashLines(tall: false), lines);
+      expect(said(other, .14), contains(chair));
+      expect(said(base, .14), contains(crate));
     });
 
     testWidgets('only obstacle sets that draw one have one', (tester) async {

@@ -93,6 +93,10 @@ class Obstacle {
   double phase = 0;
 
   double get right => left + width;
+
+  /// Too high for one crate picture, so a crate is drawn differently. Only
+  /// a question of the drawing and of what the closing line calls it.
+  bool get tall => bottom - top > width * 1.35;
 }
 
 class Pickup {
@@ -197,6 +201,9 @@ class StageRunner {
 
   /// What ended the run, for the closing line.
   ObstacleKind? hitBy;
+
+  /// Whether that obstacle was [Obstacle.tall].
+  bool hitTall = false;
 
   /// How many of the [debuts] the score has reached.
   int unlocked = 0;
@@ -339,6 +346,7 @@ class StageRunner {
             o.bottom > y - hh) {
           over = true;
           hitBy = o.kind;
+          hitTall = o.tall;
           vy = 0;
           break;
         }
