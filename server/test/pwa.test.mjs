@@ -197,6 +197,8 @@ test('API, authorized media and mutations bypass the worker; online navigation u
   assert.equal(await (await request(runtime, '/', {mode: 'navigate'})).text(), 'current network app');
   // Other private API files, even with a version, stay with the network.
   assert.equal(request(runtime, '/api/mobile/v1/media/abc/?v=1', {headers: new Headers({Authorization: `Bearer ${jwt('member')}`})}), undefined);
+  // The admins' pictures of unreleased and secret skins never reach the wardrobe's cache.
+  assert.equal(request(runtime, '/api/mobile/v1/admin/runner/skins/character-secret.webp?v=abc123', {headers: new Headers({Authorization: `Bearer ${jwt('admin')}`})}), undefined);
 });
 test('worker precaches the renderer the Flutter loader starts with and keeps another one once loaded', async () => {
   const build = {version: 'new', assets: ['/index.html'], fresh: ['/index.html'], renderers: {

@@ -356,7 +356,7 @@ void main() {
           'Lorbeerkranz',
           'Datenchip',
           'Dolch',
-          'Daumenschraube',
+          'Büste des Grafen',
           'Ausgestopfter Falke',
         ].map(collectiblePlural),
         [
@@ -370,7 +370,7 @@ void main() {
           'Lorbeerkränze',
           'Datenchips',
           'Dolche',
-          'Daumenschrauben',
+          'Büsten des Grafen',
           'Ausgestopfte Falken',
         ],
       );
@@ -406,6 +406,17 @@ void main() {
         collect('rose', 1).textFor({'rose': 'Dolch'}),
         'Sammle 1 Dolch in einem Lauf',
       );
+      // Only the head of the name changes.
+      const bust = {'mask': 'Büste des Grafen'};
+      expect(
+        collect('mask', 1).textFor(bust),
+        'Sammle 1 Büste des Grafen in einem Lauf',
+      );
+      expect(
+        collect('mask', 3).textFor(bust),
+        'Sammle 3 Büsten des Grafen in einem Lauf',
+      );
+      expect(collect('mask', 3).unitFor(bust), 'Büsten des Grafen');
       // Without a name of the backdrop (or a blank one) the server's text.
       expect(collect('mask', 3).textFor(names), 'Sammle 3 Rosen in einem Lauf');
       expect(

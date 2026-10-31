@@ -36,7 +36,7 @@ const _plurals = {
   'Herz': 'Herzen',
   'Mond': 'Monde',
   'Dolch': 'Dolche',
-  'Daumenschraube': 'Daumenschrauben',
+  'Büste des Grafen': 'Büsten des Grafen',
   'Falke': 'Falken',
   'Ausgestopfter Falke': 'Ausgestopfte Falken',
 };

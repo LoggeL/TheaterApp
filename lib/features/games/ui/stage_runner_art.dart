@@ -57,11 +57,49 @@ enum RunnerSprite {
   // stretched or squeezed by at most a sixth. Only obstacle sets that draw
   // something here have one ([RunnerArt.ownTallCrate]); their low crates are
   // the game's own, and the others put two crates on each other.
-  tallCrate(4, 360, 136, 214);
+  tallCrate(4, 360, 136, 214),
+  // The cells of a set with its own scenery ([RunnerArt.ownScenery]). They
+  // lie where the game's own atlas has poses and pickups, which an obstacle
+  // set does not hold ([RunnerSprite.scenery]). The crate cell then is what
+  // stands in place of one crate; two crates are [twoCrates], as high as
+  // [tallCrate] is, and the pile of three [threeCrates], shaped like [pile].
+  twoCrates(4, 4, 126, 200),
+  threeCrates(134, 4, 190, 196),
+  // A gap as a guillotine: the blade at the lower edge of the border, the
+  // block at the upper edge of the flat, whatever their height, and between
+  // them and towards the fly loft and the floor the timber of [guillotine]:
+  // an upright at either side of it, in stretchable vertical grain.
+  guillotineBlade(621, 4, 170, 113),
+  guillotineBlock(621, 121, 170, 85),
+  guillotine(330, 4, 130, 196);
 
   const RunnerSprite(this.x, this.y, this.width, this.height);
   final double x, y, width, height;
   ui.Rect get rect => ui.Rect.fromLTWH(x, y, width, height);
+
+  /// The cells only a set with its own scenery has: never drawn from the
+  /// game's own atlas, so they may lie over a pose or a pickup there.
+  static const scenery = [
+    twoCrates,
+    threeCrates,
+    guillotineBlade,
+    guillotineBlock,
+    guillotine,
+  ];
+
+  /// The bookcase of a set with its own scenery, in the flat's cell: between
+  /// [shelfTop] and [shelfFoot] lie [shelves] rows, [shelfHeight] pixels each,
+  /// which repeat as far as a flat is high. The cell is squeezed by
+  /// [shelfStretch] to hold a whole bookcase for older apps, which stretch
+  /// it as a flat.
+  static const shelves = 3,
+      shelfTop = 125.0,
+      shelfHeight = 65.0,
+      shelfFoot = 40.0,
+      shelfStretch = 1.71;
+
+  /// The uprights take this much of the width of [guillotine] on either side.
+  static const guillotineUpright = 1 / 6;
 
   /// Stage heights per pixel of the runner's poses, all drawn alike.
   static const stagePerPixel = .155 / 200;
@@ -109,19 +147,27 @@ enum RunnerSprite {
 
   /// The sprite that shows an obstacle kind, e.g. in the statistics; null
   /// for the velvet border, which is drawn. A pile is crates, unless the
-  /// obstacle set has [ownPile].
-  static RunnerSprite? ofObstacle(ObstacleKind kind, {bool ownPile = false}) =>
-      switch (kind) {
-        ObstacleKind.crate => crate,
-        ObstacleKind.flat => flat,
-        ObstacleKind.lamp => lamp,
-        ObstacleKind.border => null,
-        ObstacleKind.sandbag => sandbag,
-        ObstacleKind.drum => drum,
-        ObstacleKind.pile => ownPile ? pile : crate,
-        ObstacleKind.truss => truss,
-        ObstacleKind.drop => drop,
-      };
+  /// obstacle set has [ownPile] or [ownScenery], which also has a border.
+  static RunnerSprite? ofObstacle(
+    ObstacleKind kind, {
+    bool ownPile = false,
+    bool ownScenery = false,
+  }) => switch (kind) {
+    ObstacleKind.crate => crate,
+    ObstacleKind.flat => flat,
+    ObstacleKind.lamp => lamp,
+    ObstacleKind.border => ownScenery ? guillotineBlade : null,
+    ObstacleKind.sandbag => sandbag,
+    ObstacleKind.drum => drum,
+    ObstacleKind.pile =>
+      ownScenery
+          ? threeCrates
+          : ownPile
+          ? pile
+          : crate,
+    ObstacleKind.truss => truss,
+    ObstacleKind.drop => drop,
+  };
 }
 
 enum RunnerLayer { runner, obstacles, pickups }
@@ -149,7 +195,9 @@ class RunnerArt {
       obstacleCrashLines = const {},
       pickupNames = const {},
       ownPile = false,
-      ownTallCrate = false;
+      ownTallCrate = false,
+      ownScenery = false,
+      sceneryCrashLines = const {};
 
   /// Art from already decoded pictures, for tests.
   @visibleForTesting
@@ -171,6 +219,8 @@ class RunnerArt {
     this.pickupNames = const {},
     this.ownPile = false,
     this.ownTallCrate = false,
+    this.ownScenery = false,
+    this.sceneryCrashLines = const {},
   });
 
   /// The game's own atlas and the shown backdrop.
@@ -209,19 +259,59 @@ class RunnerArt {
   /// starts from it.
   final bool ownTallCrate;
 
-  /// The closing lines of a run that ended on a crate [tall] or not. The line
-  /// of a set with [ownTallCrate] is about that picture; a low crate is the
-  /// game's own and keeps the game's own line.
-  Map<ObstacleKind, String> crashLines({required bool tall}) =>
-      ownTallCrate && !tall
-      ? {
-          for (final MapEntry(:key, :value) in obstacleCrashLines.entries)
-            if (key != ObstacleKind.crate) key: value,
+  /// Whether the obstacle set draws all of its scenery by itself, seen by
+  /// [RunnerSprite.threeCrates] and never partly so: a picture for one, two
+  /// and three crates ([RunnerSprite.crate], [RunnerSprite.twoCrates],
+  /// [RunnerSprite.threeCrates]), a flat in shelves and a gap as a guillotine.
+  /// The cells [ownPile] and [ownTallCrate] then stay for older apps. Hitboxes
+  /// and physics stay the same. Never the default art.
+  final bool ownScenery;
+
+  /// The closing lines that only fit [ownScenery]; [ownSceneryLines] are the
+  /// keys. They are in `obstacleCrashLines` of the catalog, whose plain
+  /// obstacle kinds stay what older apps show.
+  final Map<String, String> sceneryCrashLines;
+
+  static const ownSceneryLines = ['twoCrates', 'threeCrates', 'guillotine'];
+
+  /// The closing lines of a run that ended on a crate [tall] or not, and in
+  /// a [gap] or not. The line of a set with [ownTallCrate] is about that
+  /// picture; a low crate is the game's own and keeps the game's own line. A
+  /// set with [ownScenery] has a line for each of its pictures.
+  Map<ObstacleKind, String> crashLines({required bool tall, bool gap = false}) {
+    if (ownScenery) {
+      final lines = {...obstacleCrashLines};
+      void say(ObstacleKind kind, String key) {
+        final line = sceneryCrashLines[key];
+        if (line == null) {
+          lines.remove(kind);
+        } else {
+          lines[kind] = line;
         }
-      : obstacleCrashLines;
+      }
+
+      if (tall) say(ObstacleKind.crate, 'twoCrates');
+      say(ObstacleKind.pile, 'threeCrates');
+      if (gap) {
+        say(ObstacleKind.border, 'guillotine');
+        say(ObstacleKind.flat, 'guillotine');
+      }
+      return lines;
+    }
+    return ownTallCrate && !tall
+        ? {
+            for (final MapEntry(:key, :value) in obstacleCrashLines.entries)
+              if (key != ObstacleKind.crate) key: value,
+          }
+        : obstacleCrashLines;
+  }
 
   /// The cells an obstacle set may leave empty.
-  static const _optionalCells = [RunnerSprite.pile, RunnerSprite.tallCrate];
+  static const _optionalCells = [
+    RunnerSprite.pile,
+    RunnerSprite.tallCrate,
+    RunnerSprite.threeCrates,
+  ];
 
   /// Whether [image] draws anything in the optional cell of [sprite]. Reading
   /// the pixels back is slow (on the web it stalls the frame), so all optional
@@ -314,6 +404,8 @@ class RunnerArt {
     Map<PickupKind, String> pickupNames = const {},
     bool ownPile = false,
     bool ownTallCrate = false,
+    bool ownScenery = false,
+    Map<String, String> sceneryCrashLines = const {},
   }) => RunnerArt._dressed(
     atlas,
     backdrop ?? this.backdrop,
@@ -330,6 +422,8 @@ class RunnerArt {
     pickupNames: pickups == null ? const {} : pickupNames,
     ownPile: obstacles != null && ownPile,
     ownTallCrate: obstacles != null && ownTallCrate,
+    ownScenery: obstacles != null && ownScenery,
+    sceneryCrashLines: obstacles == null ? const {} : sceneryCrashLines,
   );
 
   ui.Image imageOf(RunnerSprite sprite) => switch (sprite.layer) {

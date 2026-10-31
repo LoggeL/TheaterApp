@@ -982,6 +982,414 @@ void main() {
     });
   });
 
+  group('a scenery of its own', () {
+    const size = Size(640, 400);
+    final s = stageLayout(size, 1).s;
+    const floor = StageRunner.floor;
+
+    Obstacle obstacle(
+      ObstacleKind kind,
+      double width,
+      double top,
+      double bottom,
+    ) => Obstacle()
+      ..kind = kind
+      ..left = .2
+      ..width = width
+      ..top = top
+      ..bottom = bottom;
+
+    /// The two parts of a gap of [gap] around [center].
+    List<Obstacle> gapAt(double center, double gap) => [
+      obstacle(ObstacleKind.border, .09, 0, center - gap / 2)
+        ..gap = true
+        ..anchor = center + gap / 2,
+      obstacle(ObstacleKind.flat, .09, center + gap / 2, floor)..gap = true,
+    ];
+
+    /// What of the picture [set] is drawn for [obstacles].
+    _DrawnCells paint(RunnerArt art, ui.Image set, List<Obstacle> obstacles) {
+      final game = StageRunner(random: Random(1))
+        ..obstacles.clear()
+        ..pickups.clear();
+      game.obstacles.addAll(obstacles);
+      final canvas = _DrawnCells(set);
+      stagePainterFor(game, art).paint(canvas, size);
+      return canvas;
+    }
+
+    List<Obstacle> pile(double height) => [
+      obstacle(ObstacleKind.pile, .22, floor - height / 2, floor),
+      obstacle(ObstacleKind.pile, .11, floor - height, floor - height / 2),
+    ];
+
+    /// A dressed art with the scenery, and what it would be without.
+    Future<(RunnerArt, RunnerArt, ui.Image)> arts(WidgetTester tester) async {
+      final (atlas, set, backdrop) = (await tester.runAsync(
+        () async => (
+          await createTestImage(width: 1124, height: 577),
+          await createTestImage(width: 1124, height: 577),
+          await createTestImage(width: 64, height: 64),
+        ),
+      ))!;
+      final base = RunnerArt.test(atlas, backdrop);
+      return (
+        base.dressed(
+          obstacles: set,
+          ownPile: true,
+          ownTallCrate: true,
+          ownScenery: true,
+        ),
+        base.dressed(obstacles: set, ownPile: true, ownTallCrate: true),
+        set,
+      );
+    }
+
+    test('its icons are its own, others keep theirs', () {
+      expect(
+        RunnerSprite.ofObstacle(ObstacleKind.pile, ownScenery: true),
+        RunnerSprite.threeCrates,
+      );
+      expect(
+        RunnerSprite.ofObstacle(
+          ObstacleKind.pile,
+          ownPile: true,
+          ownScenery: true,
+        ),
+        RunnerSprite.threeCrates,
+      );
+      expect(
+        RunnerSprite.ofObstacle(ObstacleKind.border, ownScenery: true),
+        RunnerSprite.guillotineBlade,
+      );
+      expect(RunnerSprite.ofObstacle(ObstacleKind.border), isNull);
+      for (final sprite in RunnerSprite.scenery) {
+        expect(sprite.layer, RunnerLayer.obstacles);
+      }
+    });
+
+    testWidgets('one, two and three crates are one picture each', (
+      tester,
+    ) async {
+      final (own, old, set) = await arts(tester);
+      List<Rect> cells(RunnerArt art, List<Obstacle> o) =>
+          paint(art, set, o).cells;
+      Obstacle crate(double height) =>
+          obstacle(ObstacleKind.crate, .12, floor - height, floor);
+
+      // The heights a crate gets, on both sides of the line at 1.35.
+      for (final height in [.13, .14, .16]) {
+        expect(crate(height).tall, isFalse);
+        expect(cells(own, [crate(height)]), [RunnerSprite.crate.rect]);
+      }
+      for (final height in [.17, .2, .22]) {
+        expect(crate(height).tall, isTrue);
+        expect(cells(own, [crate(height)]), [RunnerSprite.twoCrates.rect]);
+        expect(cells(old, [crate(height)]), [RunnerSprite.tallCrate.rect]);
+      }
+      for (final height in [.2, .26]) {
+        expect(cells(own, pile(height)), [RunnerSprite.threeCrates.rect]);
+        expect(cells(old, pile(height)), [RunnerSprite.pile.rect]);
+      }
+      // Without the scenery a low crate stays the game's own.
+      expect(cells(old, [crate(.14)]), isEmpty);
+    });
+
+    testWidgets('a flat alone is whole shelves at every height', (
+      tester,
+    ) async {
+      final (own, old, set) = await arts(tester);
+      const cell = RunnerSprite.flat;
+      final topEnd = cell.y + RunnerSprite.shelfTop;
+      final footStart = cell.y + cell.height - RunnerSprite.shelfFoot;
+      expect(
+        RunnerSprite.shelfTop +
+            RunnerSprite.shelves * RunnerSprite.shelfHeight +
+            RunnerSprite.shelfFoot,
+        cell.height,
+      );
+      var last = 0;
+      for (final height in [.3, .36, .42, .48, .52]) {
+        final flat = obstacle(ObstacleKind.flat, .07, floor - height, floor);
+        final drawn = paint(own, set, [flat]);
+        final rows = [for (var i = 1; i < drawn.cells.length - 1; i++) i];
+        expect(rows, isNotEmpty);
+        expect(rows.length, greaterThanOrEqualTo(last));
+        last = rows.length;
+        expect(drawn.cells.first.bottom, topEnd);
+        expect(drawn.cells.last.top, footStart);
+        for (final i in rows) {
+          // A whole shelf, cut at its boards, hardly stretched.
+          final src = drawn.cells[i], dst = drawn.places[i];
+          expect(src.height, RunnerSprite.shelfHeight);
+          expect(
+            (src.top - topEnd) % RunnerSprite.shelfHeight,
+            0,
+            reason: '$src',
+          );
+          expect(src.left, cell.x);
+          expect(src.right, cell.x + cell.width);
+          final natural =
+              src.height * RunnerSprite.shelfStretch * dst.width / cell.width;
+          expect(dst.height / natural, inInclusiveRange(.7, 1.3));
+        }
+        // Without a seam, down to the floor.
+        for (var i = 1; i < drawn.places.length; i++) {
+          expect(
+            drawn.places[i].top,
+            closeTo(drawn.places[i - 1].bottom, 1e-6),
+          );
+        }
+        expect(drawn.places.first.top, closeTo(flat.top * s, 1e-6));
+        expect(drawn.places.last.bottom, closeTo(floor * s, 1e-6));
+        expect(
+          drawn.cells.any(
+            (c) =>
+                c == RunnerSprite.guillotineBlade.rect ||
+                c == RunnerSprite.guillotineBlock.rect,
+          ),
+          isFalse,
+        );
+      }
+      // Other sets stretch their flat as ever, in three slices.
+      final flat = obstacle(ObstacleKind.flat, .07, floor - .4, floor);
+      expect(paint(old, set, [flat]).cells, hasLength(3));
+    });
+
+    testWidgets('a gap is a guillotine whatever its height', (tester) async {
+      final (own, old, set) = await arts(tester);
+      const blade = RunnerSprite.guillotineBlade;
+      const block = RunnerSprite.guillotineBlock;
+      const timber = RunnerSprite.guillotine;
+      Rect? bladeSize, blockSize;
+      for (final gap in [.32, .42, .52]) {
+        final lowest = StageRunner.ceiling + gap / 2 + .04;
+        final highest = floor - gap / 2 - .04;
+        for (final center in [lowest, (lowest + highest) / 2, highest]) {
+          final parts = gapAt(center, gap);
+          final drawn = paint(own, set, parts);
+          final bladeAt = drawn.places[drawn.cells.indexOf(blade.rect)];
+          // The block may be cut, so it is found by where its cell starts.
+          final blockIndex = drawn.cells.indexWhere(
+            (c) => c.topLeft == block.rect.topLeft,
+          );
+          final blockAt = drawn.places[blockIndex];
+          final top = parts.first.bottom * s, low = parts.last.top * s;
+          // The blade and the block stay at the edges of the gap.
+          expect(bladeAt.bottom, closeTo(top, 1e-6));
+          expect(blockAt.top, closeTo(low, 1e-6));
+          // And the same size, whatever the height; a block lower than it
+          // is high would be cut, never squeezed.
+          bladeSize ??= bladeAt;
+          blockSize ??= blockAt;
+          expect(bladeAt.width, closeTo(bladeSize.width, 1e-6));
+          expect(bladeAt.height, closeTo(bladeSize.height, 1e-6));
+          expect(blockAt.width, closeTo(blockSize.width, 1e-6));
+          expect(
+            blockAt.height / drawn.cells[blockIndex].height,
+            closeTo(blockSize.height / block.height, 1e-6),
+          );
+          // Nothing reaches below the floor.
+          for (final place in drawn.places) {
+            expect(place.bottom, lessThanOrEqualTo(floor * s + 1e-6));
+          }
+          // The uprights run on through the gap: they reach from above
+          // the blade to the block, at the sides of the timber.
+          final uprights = [
+            for (var i = 0; i < drawn.cells.length; i++)
+              if (drawn.cells[i].top == timber.y &&
+                  drawn.cells[i].width < timber.width)
+                drawn.places[i],
+          ];
+          expect(uprights, hasLength(2));
+          for (final upright in uprights) {
+            expect(upright.top, lessThan(top));
+            expect(upright.bottom, closeTo(low, 1e-6));
+          }
+        }
+      }
+      // Without the scenery a gap stays a border and a flat.
+      final plain = paint(old, set, gapAt(.5, .4));
+      expect(plain.cells, isNot(contains(blade.rect)));
+      expect(plain.cells, isNot(contains(block.rect)));
+      expect(plain.cells, hasLength(3));
+    });
+
+    testWidgets('its low block is cut at the floor', (tester) async {
+      final (own, _, set) = await arts(tester);
+      final parts = gapAt(floor - .32 / 2 - .04, .32);
+      final drawn = paint(own, set, parts);
+      const block = RunnerSprite.guillotineBlock;
+      final i = drawn.cells.lastIndexWhere((c) => c.left == block.x);
+      expect(drawn.cells[i].top, block.y);
+      expect(drawn.cells[i].height, lessThan(block.height));
+      expect(drawn.places[i].bottom, closeTo(floor * s, 1e-6));
+    });
+
+    test('the course marks its gaps and nothing else', () {
+      final game = StageRunner(random: Random(7))..invincible = true;
+      var gaps = 0;
+      for (var i = 0; i < 60 * 90; i++) {
+        game.update(1 / 60);
+        for (var j = 0; j < game.obstacles.length; j++) {
+          final o = game.obstacles[j];
+          if (o.kind == ObstacleKind.border) {
+            gaps++;
+            expect(o.gap, isTrue);
+            final flat = game.obstacles[j + 1];
+            expect(flat.kind, ObstacleKind.flat);
+            expect(flat.gap, isTrue);
+            expect(o.anchor, flat.top);
+            expect(
+              flat.top - o.bottom,
+              moreOrLessEquals(
+                StageRunner.gapHeight(o.left * RunnerRules.metersPerUnit),
+              ),
+            );
+          } else if (o.kind != ObstacleKind.flat) {
+            // Spare obstacles of a gap do not carry it along.
+            expect(o.gap, isFalse);
+          } else {
+            // A gap's flat is wider than one that stands alone.
+            expect(o.gap, o.width == .09);
+          }
+        }
+      }
+      expect(gaps, greaterThan(0));
+    });
+
+    test('a crash remembers the gap', () {
+      StageRunner crash(Obstacle o) {
+        final game = StageRunner(random: Random(1))..update(1e-4);
+        game.obstacles
+          ..clear()
+          ..add(o..left = game.runnerWorldX);
+        return game..update(1e-4);
+      }
+
+      final inGap = crash(obstacle(ObstacleKind.flat, .09, 0, 1)..gap = true);
+      expect(inGap.hitBy, ObstacleKind.flat);
+      expect(inGap.hitGap, isTrue);
+      final alone = crash(obstacle(ObstacleKind.flat, .07, 0, 1));
+      expect(alone.hitBy, ObstacleKind.flat);
+      expect(alone.hitGap, isFalse);
+    });
+
+    testWidgets('the crash line fits the picture that was hit', (tester) async {
+      final image = (await tester.runAsync(
+        () => createTestImage(width: 1124, height: 577),
+      ))!;
+      const chair = 'Probe gesessen im Hirntauschinator.';
+      const coffin = 'Der Sarkophag war schon belegt.';
+      const tub = 'Kopfüber in die Badewanne.';
+      const blade = 'Die Guillotine hat kurzen Prozess gemacht.';
+      const books = 'Vom Bücherregal erschlagen.';
+      const lines = {
+        ObstacleKind.crate: chair,
+        ObstacleKind.pile: coffin,
+        ObstacleKind.flat: books,
+      };
+      final own = RunnerArt.test(image, image).dressed(
+        obstacles: image,
+        ownPile: true,
+        ownTallCrate: true,
+        ownScenery: true,
+        obstacleCrashLines: lines,
+        sceneryCrashLines: const {
+          'twoCrates': coffin,
+          'threeCrates': tub,
+          'guillotine': blade,
+        },
+      );
+      expect(own.crashLines(tall: false)[ObstacleKind.crate], chair);
+      expect(own.crashLines(tall: true)[ObstacleKind.crate], coffin);
+      expect(own.crashLines(tall: false)[ObstacleKind.pile], tub);
+      expect(own.crashLines(tall: false)[ObstacleKind.flat], books);
+      expect(own.crashLines(tall: false)[ObstacleKind.border], isNull);
+      final gap = own.crashLines(tall: false, gap: true);
+      expect(gap[ObstacleKind.flat], blade);
+      expect(gap[ObstacleKind.border], blade);
+
+      // A catalog without these lines says nothing wrong.
+      final bare = RunnerArt.test(
+        image,
+        image,
+      ).dressed(obstacles: image, ownScenery: true, obstacleCrashLines: lines);
+      expect(bare.crashLines(tall: true), isNot(contains(ObstacleKind.crate)));
+      expect(bare.crashLines(tall: false), isNot(contains(ObstacleKind.pile)));
+
+      // Sets without the scenery keep the catalog's lines.
+      final old = RunnerArt.test(image, image).dressed(
+        obstacles: image,
+        ownPile: true,
+        obstacleCrashLines: lines,
+        sceneryCrashLines: const {'threeCrates': tub},
+      );
+      expect(old.crashLines(tall: true, gap: true), lines);
+    });
+
+    testWidgets('only Creepshow draws one, and all of it', (tester) async {
+      final found = await tester.runAsync(() async {
+        final out = <String, (bool, List<String>)>{};
+        final files = Directory('server/src/wardrobe/images')
+            .listSync()
+            .whereType<File>()
+            .where((f) => RegExp(r'/obstacles-[^/]+\.webp$').hasMatch(f.path));
+        for (final f in files) {
+          final codec = await ui.instantiateImageCodec(f.readAsBytesSync());
+          final image = (await codec.getNextFrame()).image;
+          final bytes = (await image.toByteData())!;
+          final drawn = [
+            for (final sprite in RunnerSprite.scenery)
+              if (_anyPixel(bytes, image.width, sprite.rect)) sprite.name,
+          ];
+          out[f.uri.pathSegments.last] = (
+            await RunnerArt.draws(image, RunnerSprite.threeCrates),
+            drawn,
+          );
+        }
+        return out;
+      });
+      expect(found!.length, greaterThan(5));
+      for (final MapEntry(:key, :value) in found.entries) {
+        final creepshow = key == 'obstacles-creepshow.webp';
+        expect(value.$1, creepshow, reason: key);
+        expect(
+          value.$2,
+          creepshow
+              ? RunnerSprite.scenery.map((s) => s.name).toList()
+              : isEmpty,
+          reason: key,
+        );
+      }
+    });
+
+    testWidgets('the game’s own art never has one', (tester) async {
+      final art = (await tester.runAsync(() async {
+        Future<ui.Image> decode(String name) async {
+          final data = await rootBundle.load('assets/games/stage_runner/$name');
+          final codec = await ui.instantiateImageCodec(
+            data.buffer.asUint8List(),
+          );
+          return (await codec.getNextFrame()).image;
+        }
+
+        return RunnerArt.test(
+          await decode('atlas.webp'),
+          await decode('backdrop.webp'),
+        );
+      }))!;
+      expect(art.ownScenery, isFalse);
+      expect(art.dressed(ownScenery: true).ownScenery, isFalse);
+      expect(
+        art
+            .dressed(sceneryCrashLines: const {'guillotine': 'x'})
+            .sceneryCrashLines,
+        isEmpty,
+      );
+    });
+  });
+
   group('hidden entry', () {
     Future<void> myArea(WidgetTester tester) async {
       final server = TestServer();
@@ -1943,7 +2351,9 @@ void main() {
       });
       final (width, height, bytes) = atlas!;
 
-      // Every picture lies inside the atlas and none overlaps another.
+      // Every picture lies inside the atlas and none overlaps another; the
+      // cells of a set's own scenery only keep clear of the other obstacles,
+      // as a set holds no poses and no pickups.
       for (final sprite in RunnerSprite.values) {
         expect(
           Rect.fromLTWH(
@@ -1957,6 +2367,14 @@ void main() {
         );
         for (final other in RunnerSprite.values) {
           if (other.index <= sprite.index) continue;
+          final scenery =
+              RunnerSprite.scenery.contains(sprite) ||
+              RunnerSprite.scenery.contains(other);
+          if (scenery &&
+              (sprite.layer != RunnerLayer.obstacles ||
+                  other.layer != RunnerLayer.obstacles)) {
+            continue;
+          }
           final overlap = sprite.rect.intersect(other.rect);
           expect(
             overlap.width <= 0 || overlap.height <= 0,
@@ -3100,14 +3518,31 @@ void main() {
 }
 
 /// Records the cells drawn from one atlas [of]; everything else is ignored.
+/// Whether anything shows in [cell] of the straight RGBA [bytes] of a picture
+/// [width] wide.
+bool _anyPixel(ByteData bytes, int width, Rect cell) {
+  for (var y = cell.top.toInt(); y < cell.bottom; y++) {
+    for (var x = cell.left.toInt(); x < cell.right; x++) {
+      if (bytes.getUint8((y * width + x) * 4 + 3) > 32) return true;
+    }
+  }
+  return false;
+}
+
 class _DrawnCells implements Canvas {
   _DrawnCells(this.of);
   final ui.Image of;
   final cells = <Rect>[];
 
+  /// Where each of [cells] went.
+  final places = <Rect>[];
+
   @override
   void drawImageRect(ui.Image image, Rect src, Rect dst, Paint paint) {
-    if (image == of) cells.add(src);
+    if (image == of) {
+      cells.add(src);
+      places.add(dst);
+    }
   }
 
   @override

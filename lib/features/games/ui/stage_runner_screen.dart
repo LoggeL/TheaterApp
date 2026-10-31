@@ -621,7 +621,9 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       _line = curtainLine(
         _game.hitBy,
         _lines,
-        obstacleCrashLines: _art?.crashLines(tall: _game.hitTall) ?? const {},
+        obstacleCrashLines:
+            _art?.crashLines(tall: _game.hitTall, gap: _game.hitGap) ??
+            const {},
       );
     });
     final start = _start;
@@ -1859,6 +1861,23 @@ class _StagePainter extends CustomPainter {
     double floorY,
   ) {
     switch (o.kind) {
+      case ObstacleKind.crate when a.ownScenery && o.tall:
+        // Two crates' height: one tall picture over the whole hitbox.
+        _sprite(canvas, a, RunnerSprite.twoCrates, rect);
+      case ObstacleKind.crate when a.ownScenery:
+        // One crate: the set's picture, as wide as it needs to stay upright.
+        final width = rect.width * 1.12;
+        _sprite(
+          canvas,
+          a,
+          RunnerSprite.crate,
+          Rect.fromLTRB(
+            rect.center.dx - width / 2,
+            rect.top,
+            rect.center.dx + width / 2,
+            rect.bottom,
+          ),
+        );
       case ObstacleKind.crate when a.ownTallCrate && o.tall:
         // One tall picture over the whole hitbox: the cell is as high as
         // the tall crates are on average, so it is never stretched much.
@@ -1891,8 +1910,14 @@ class _StagePainter extends CustomPainter {
         } else {
           _sprite(canvas, a, RunnerSprite.crate, rect);
         }
+      case ObstacleKind.flat when a.ownScenery && o.gap:
+        _guillotineBase(canvas, a, rect);
+      case ObstacleKind.flat when a.ownScenery:
+        _shelves(canvas, a, rect);
       case ObstacleKind.flat:
         _flat(canvas, a, rect);
+      case ObstacleKind.border when a.ownScenery:
+        _guillotineTop(canvas, a, rect, (o.anchor - o.bottom) * s);
       case ObstacleKind.border:
         _velvetPiece(canvas, rect, s, a.border);
       case ObstacleKind.lamp:
@@ -1941,14 +1966,14 @@ class _StagePainter extends CustomPainter {
           Rect.fromCircle(center: Offset.zero, radius: r),
         );
         canvas.restore();
-      case ObstacleKind.pile when a.ownPile:
+      case ObstacleKind.pile when a.ownPile || a.ownScenery:
         // One picture over both parts, drawn with the lower one (the upper
         // one is as high and stands on it); the hitboxes stay the same.
         if (o.bottom >= StageRunner.floor) {
           _sprite(
             canvas,
             a,
-            RunnerSprite.pile,
+            a.ownScenery ? RunnerSprite.threeCrates : RunnerSprite.pile,
             Rect.fromLTRB(
               rect.left,
               rect.top - rect.height,
@@ -2079,6 +2104,122 @@ class _StagePainter extends CustomPainter {
       sprite.height,
       rect.bottom - foot,
       rect.bottom,
+    );
+  }
+
+  /// A set's flat as a bookcase: its top and foot keep their shape, and
+  /// between them are as many whole shelves as fit, so that no book gets
+  /// stretched much at any height.
+  void _shelves(Canvas canvas, RunnerArt a, Rect rect) {
+    final sprite = RunnerSprite.flat, src = sprite.rect;
+    final width = rect.width * 1.35;
+    final scale = width / sprite.width * RunnerSprite.shelfStretch;
+    final left = rect.center.dx - width / 2;
+    const rows = RunnerSprite.shelves, rowHeight = RunnerSprite.shelfHeight;
+    const topCap = RunnerSprite.shelfTop, footCap = RunnerSprite.shelfFoot;
+    final top = topCap * scale, foot = footCap * scale;
+    void slice(double srcTop, double srcBottom, double dstTop, double dstEnd) =>
+        canvas.drawImageRect(
+          a.imageOf(sprite),
+          Rect.fromLTRB(
+            src.left,
+            src.top + srcTop,
+            src.right,
+            src.top + srcBottom,
+          ),
+          Rect.fromLTRB(left, dstTop, left + width, dstEnd),
+          a.paintOf(sprite),
+        );
+    final middle = rect.height - top - foot;
+    if (middle <= 0) {
+      slice(0, sprite.height, rect.top, rect.bottom);
+      return;
+    }
+    final count = max(1, (middle / (rowHeight * scale)).round());
+    final row = middle / count;
+    slice(0, topCap, rect.top, rect.top + top);
+    for (var i = 0; i < count; i++) {
+      final from = topCap + (i % rows) * rowHeight;
+      final y = rect.top + top + i * row;
+      slice(from, from + rowHeight, y, y + row);
+    }
+    slice(
+      sprite.height - footCap,
+      sprite.height,
+      rect.bottom - foot,
+      rect.bottom,
+    );
+  }
+
+  /// How much wider than its hitbox the timber of a guillotine is, like a flat.
+  static const _guillotineWidth = 1.35;
+
+  /// The upper part of a guillotine, where a border is: its timber up to the
+  /// fly loft and only as far as the back of the blade, so that the blade's
+  /// slant shows; the uprights on past it over the [gap] below; and at the
+  /// lower edge the blade, the same size at any height of the gap.
+  void _guillotineTop(Canvas canvas, RunnerArt a, Rect rect, double gap) {
+    final width = rect.width * _guillotineWidth;
+    final left = rect.center.dx - width / 2;
+    final cell = RunnerSprite.guillotine;
+    final blade = RunnerSprite.guillotineBlade;
+    final height = width * blade.height / blade.width;
+    final back = rect.bottom - height * .75;
+    if (back > rect.top) {
+      _sprite(
+        canvas,
+        a,
+        cell,
+        Rect.fromLTRB(left, rect.top, left + width, back),
+      );
+    }
+    const upright = RunnerSprite.guillotineUpright;
+    for (final side in [0.0, 1 - upright]) {
+      canvas.drawImageRect(
+        a.imageOf(cell),
+        Rect.fromLTWH(
+          cell.x + cell.width * side,
+          cell.y,
+          cell.width * upright,
+          cell.height,
+        ),
+        Rect.fromLTRB(
+          left + width * side,
+          max(rect.top, back),
+          left + width * (side + upright),
+          rect.bottom + max(0.0, gap),
+        ),
+        a.paintOf(cell),
+      );
+    }
+    _sprite(
+      canvas,
+      a,
+      blade,
+      Rect.fromLTWH(left, rect.bottom - height, width, height),
+    );
+  }
+
+  /// The lower part of a guillotine, where the flat below a border is: its
+  /// timber down to the floor, and at its upper edge the block, which stays
+  /// the same size; on a flat lower than the block, its lower part is cut.
+  void _guillotineBase(Canvas canvas, RunnerArt a, Rect rect) {
+    final width = rect.width * _guillotineWidth;
+    final left = rect.center.dx - width / 2;
+    _sprite(
+      canvas,
+      a,
+      RunnerSprite.guillotine,
+      Rect.fromLTRB(left, rect.top, left + width, rect.bottom),
+    );
+    final block = RunnerSprite.guillotineBlock;
+    final height = width * block.height / block.width;
+    final shown = min(1.0, rect.height / height);
+    canvas.drawImageRect(
+      a.imageOf(block),
+      Rect.fromLTWH(block.x, block.y, block.width, block.height * shown),
+      Rect.fromLTWH(left, rect.top, width, height * shown),
+      a.paintOf(block),
     );
   }
 

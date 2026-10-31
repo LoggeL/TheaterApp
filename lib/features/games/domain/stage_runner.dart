@@ -81,8 +81,9 @@ class Obstacle {
   /// the runner is past it.
   bool counted = false, passed = false;
 
-  /// Where a drum's left edge is when the runner gets to it, or the middle
-  /// height of a drop's lower edge.
+  /// Where a drum's left edge is when the runner gets to it, the middle
+  /// height of a drop's lower edge, or for a border where the gap below it
+  /// ends.
   double anchor = 0;
 
   /// When the runner gets to a drum, in seconds of the run: it is at
@@ -91,6 +92,10 @@ class Obstacle {
 
   /// Where a drop is in its ride up and down, in radians.
   double phase = 0;
+
+  /// A part of a gap: a border or the flat below it. Only a question of the
+  /// drawing and of what the closing line calls it.
+  bool gap = false;
 
   double get right => left + width;
 
@@ -204,6 +209,9 @@ class StageRunner {
 
   /// Whether that obstacle was [Obstacle.tall].
   bool hitTall = false;
+
+  /// Whether that obstacle was part of a gap ([Obstacle.gap]).
+  bool hitGap = false;
 
   /// How many of the [debuts] the score has reached.
   int unlocked = 0;
@@ -347,6 +355,7 @@ class StageRunner {
           over = true;
           hitBy = o.kind;
           hitTall = o.tall;
+          hitGap = o.gap;
           vy = 0;
           break;
         }
@@ -404,7 +413,8 @@ class StageRunner {
       ..bottom = bottom
       ..falling = false
       ..counted = false
-      ..passed = false;
+      ..passed = false
+      ..gap = false;
     obstacles.add(o);
     return o;
   }
@@ -489,8 +499,11 @@ class StageRunner {
             .clamp(_lastGapCenter - reach, _lastGapCenter + reach)
             .clamp(lowest, highest)
             .toDouble();
-        _obstacle(ObstacleKind.border, x, width, 0, center - gap / 2);
-        _obstacle(ObstacleKind.flat, x, width, center + gap / 2, floor);
+        _obstacle(ObstacleKind.border, x, width, 0, center - gap / 2)
+          ..gap = true
+          ..anchor = center + gap / 2;
+        _obstacle(ObstacleKind.flat, x, width, center + gap / 2, floor).gap =
+            true;
         _lastGapX = x;
         _lastGapCenter = center;
         safeY = center;

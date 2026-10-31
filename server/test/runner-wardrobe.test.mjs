@@ -413,6 +413,10 @@ test('the bundled pictures have the sizes the app accepts', () => {
     crate: 'Probe gesessen im Hirntauschinator.',
     pile: 'Der Sarkophag war schon belegt.',
     drop: 'Die fleischfressende Pflanze hatte Hunger.',
+    flat: 'Vom Bücherregal erschlagen. Bildung ist gefährlich.',
+    twoCrates: 'Der Sarkophag war schon belegt.',
+    threeCrates: 'Kopfüber in die Badewanne. Das Wasser war kalt.',
+    guillotine: 'Die Guillotine hat kurzen Prozess gemacht.',
   });
   const named = new Set();
   // Role figures are characters like any other: same atlas, same square portrait.

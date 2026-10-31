@@ -640,6 +640,13 @@ Future<RunnerArt> dressArt(
           RunnerSprite.tallCrate,
           path: worn.obstacleAtlas,
         ),
+    ownScenery:
+        set != null &&
+        await RunnerArt.draws(
+          set,
+          RunnerSprite.threeCrates,
+          path: worn.obstacleAtlas,
+        ),
     pickups: fits(images[3]) ? images[3] : null,
     backdrop: images[2],
     runnerFilter: tintFilter(character?.tint),
@@ -655,6 +662,11 @@ Future<RunnerArt> dressArt(
       if (stageSet != null)
         for (final kind in ObstacleKind.values)
           kind: ?backdrop?.obstacleCrashLines[kind.name],
+    },
+    sceneryCrashLines: {
+      if (stageSet != null)
+        for (final key in RunnerArt.ownSceneryLines)
+          key: ?backdrop?.obstacleCrashLines[key],
     },
     pickupNames: {
       for (final kind in PickupKind.values)

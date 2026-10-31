@@ -94,6 +94,9 @@ export const runnerUnlocks = Object.freeze({
 export const wardrobeKinds = Object.freeze(['character', 'backdrop', 'obstacles', 'fx']);
 // How runs end, as the client's `ObstacleKind` names; anything else counts as `unknown`.
 export const runnerObstacleKinds = Object.freeze(['crate', 'flat', 'lamp', 'border', 'sandbag', 'drum', 'pile', 'truss', 'drop']);
+// Closing lines for what a backdrop's own scenery shows instead of crates and a gap; older apps ask
+// for the obstacle kinds only.
+const runnerSceneryLines = Object.freeze(['twoCrates', 'threeCrates', 'guillotine']);
 export const crateRequestPrefix = 'runner-crate:';
 export const tradeRequestPrefix = 'runner-trade:';
 export const buyRequestPrefix = 'runner-buy:';
@@ -354,7 +357,7 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
     if (x.obstacleCrashLines !== undefined) {
       const lines = x.obstacleCrashLines;
       if (x.kind !== 'backdrop' || !lines || typeof lines !== 'object' || Array.isArray(lines)
-        || Object.entries(lines).some(([k, v]) => !runnerObstacleKinds.includes(k) || typeof v !== 'string' || !v.trim())) bad(`obstacleCrashLines of ${x.id}`);
+        || Object.entries(lines).some(([k, v]) => !(runnerObstacleKinds.includes(k) || runnerSceneryLines.includes(k)) || typeof v !== 'string' || !v.trim())) bad(`obstacleCrashLines of ${x.id}`);
       item.obstacleCrashLines = { ...lines };
     }
     if (x.borderColor !== undefined) {
@@ -415,7 +418,11 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
   // Files only unique figures use: served only to those who unlocked one of them.
   const uniqueFiles = new Map([...users].filter(([, xs]) => xs.every(x => x.unique)).map(([name, xs]) => [name, xs.map(x => x.id)]));
   const { crateTargets, targetItems } = crateTargetsOf(collectible, rarity, data?.crates, picture, bad);
-  return { rarities, departments, items, collectible, uniques, uniqueRarity, byId, files, rewardFiles, uniqueFiles, rarity, dupes, ensemble, roleFigures, baseOf, rolesOf, crateTargets, targetItems, defaults: Object.fromEntries(wardrobeKinds.map(k => [k, items.find(x => x.kind === k && x.default).id])) };
+  const result = { rarities, departments, items, collectible, uniques, uniqueRarity, byId, files, rewardFiles, uniqueFiles, rarity, dupes, ensemble, roleFigures, baseOf, rolesOf, crateTargets, targetItems, defaults: Object.fromEntries(wardrobeKinds.map(k => [k, items.find(x => x.kind === k && x.default).id])) };
+  // The raw entries and their folder, only for the admins' full view (runner-admin-catalog.mjs), which
+  // also lists the `disabled` ones; never part of what members get (not enumerable, not spread).
+  Object.defineProperty(result, 'source', { value: { data, imageDir }, enumerable: false });
+  return result;
 }
 
 // Crate targets (`runnerCrateTargets`): a crate of the own runs is opened as the Zufallskiste (all

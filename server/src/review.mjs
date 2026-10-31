@@ -1,8 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { Store } from './store.mjs';
-import { Theater } from './theater.mjs';
+import { AppError, Theater } from './theater.mjs';
 import { MediaService } from './media.mjs';
 import { Immich } from './immich.mjs';
+
+// The store's reviewer is an admin of the sample data, but the wardrobe is the real one: the admins'
+// Skin-Viewer would show every unreleased and secret figure. So it is neither announced nor served.
+class ReviewTheater extends Theater {
+  snapshot(uid) {
+    const data = super.snapshot(uid);
+    return { ...data, capabilities: { ...data.capabilities, features: data.capabilities.features.filter(f => f !== 'runnerAdminCatalog') } };
+  }
+  runnerAdminCatalog() { throw new AppError(403, 'Hierfür ist ein Admin-Zugang erforderlich.'); }
+  runnerAdminSkin() { throw new AppError(403, 'Hierfür ist ein Admin-Zugang erforderlich.'); }
+}
 
 // The reviewer uses the normal authenticated API with a separate database and
 // media directory. Only an exact, server-configured Firebase UID selects it.
@@ -10,7 +21,7 @@ export function createReviewServices({ uid, email, databasePath, mediaDirectory,
   if (!uid || !email || !databasePath || !mediaDirectory) throw new Error('Incomplete review configuration');
   const fixture = JSON.parse(readFileSync(new URL('./review-data.json', import.meta.url), 'utf8'));
   const store = new Store(databasePath);
-  const theater = new Theater(store, { pushEnabled });
+  const theater = new ReviewTheater(store, { pushEnabled });
   if (!store.get('settings', 'reviewSeeded')) store.transaction(() => {
     for (const kind of ['members', 'events', 'productions']) {
       for (const item of fixture.snapshot[kind]) store.put(kind, item.id, { ...item, version: 1 });

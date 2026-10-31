@@ -987,7 +987,11 @@ class _ObstaclePainter extends CustomPainter {
     );
     final inner = rect.deflate(size.width * .14);
     final a = art;
-    final sprite = RunnerSprite.ofObstacle(kind, ownPile: a?.ownPile ?? false);
+    final sprite = RunnerSprite.ofObstacle(
+      kind,
+      ownPile: a?.ownPile ?? false,
+      ownScenery: a?.ownScenery ?? false,
+    );
     if (sprite == null || a == null) {
       // The velvet border with its gold fringe (or no pictures at all).
       final cloth = Rect.fromLTWH(
