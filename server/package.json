@@ -25,6 +25,9 @@
   "overrides": {
     "gaxios": {
       "uuid": "^11.1.1"
+    },
+    "@google-cloud/firestore-api": {
+      "google-gax": "^6.0.1"
     }
   }
 }
