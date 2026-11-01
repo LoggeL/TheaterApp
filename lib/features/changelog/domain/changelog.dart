@@ -27,11 +27,17 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
-    version: '0.13.3',
-    date: '31. Oktober 2026',
+    version: '0.13.4',
+    date: '1. November 2026',
     items: [
+      'Für die Theaterleitung: Du kannst einen Passwort-Link erzeugen und persönlich weitergeben, wenn jemand sein E-Mail-Postfach nicht öffnen kann.',
       'Verbesserungen an Darstellung und Sammlung.',
     ],
+  ),
+  ChangelogEntry(
+    version: '0.13.3',
+    date: '31. Oktober 2026',
+    items: ['Verbesserungen an Darstellung und Sammlung.'],
   ),
   ChangelogEntry(
     version: '0.13.2',

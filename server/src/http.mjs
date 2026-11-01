@@ -10,6 +10,7 @@ import { CalendarFeedLimiter, calendarFeed, calendarFeedLink, resetCalendarFeed 
 import { PerfTelemetry, perfTelemetry } from './perf-telemetry.mjs';
 import { formTemplates, messageForm, formSubmissions } from './forms.mjs';
 import { isTransientAuthError } from './auth-cache.mjs';
+import { createPasswordResetLink } from './password-reset.mjs';
 
 // Content-addressed web files from tool/version-web.mjs never change under their name.
 // Entry points (index.html, workers, manifests) and unhashed files must stay revalidated.
@@ -25,7 +26,7 @@ const hashedWebFile = /^\/(?:main\.[a-f0-9]{16}\.dart\.(?:js|mjs|wasm)|(?:flutte
 // /auth/session), sign-out, changing `/admin/*` calls and the account administration actions
 // (`account.*` via POST /actions). Errors marked `transient` (Google unreachable) become 503,
 // every other one 401.
-export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null, appOrigin = null, calendarLimiter = new CalendarFeedLimiter(), perf = null }) {
+export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, passwordResetAuth = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null, appOrigin = null, calendarLimiter = new CalendarFeedLimiter(), perf = null }) {
   const origins = new Set(allowedOrigins);
   const telemetry = perf ?? new PerfTelemetry(defaultTheater.store);
   // Serialised before the head, so Server-Timing's `app` includes it.
@@ -232,6 +233,8 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
         const document = await scriptService.getScript(production.id);
         return json(res, 200, theater.importScript(identity.uid, production, document));
       }
+      const passwordReset = route.match(/^\/admin\/accounts\/([^/]+)\/password-reset-link$/);
+      if (passwordReset && req.method === 'POST') return json(res, 200, await createPasswordResetLink(theater, identity.uid, passwordReset[1], body.version, theater === defaultTheater ? passwordResetAuth : null));
       const account = route.match(/^\/admin\/accounts\/([^/]+)$/);
       if (account && req.method === 'DELETE') return json(res, 200, await theater.deleteAccount(identity.uid, account[1], body.version, theater === defaultTheater ? deleteIdentity : null));
       const detail = route.match(/^\/admin\/events\/([^/]+)$/);

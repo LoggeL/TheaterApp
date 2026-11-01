@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/date_symbol_data_local.dart';
@@ -133,6 +135,216 @@ void _clearSnackBars(WidgetTester tester) => ScaffoldMessenger.of(
 
 void main() {
   setUpAll(() => initializeDateFormatting('de'));
+
+  testWidgets('admins generate and copy a password link only on request', (
+    tester,
+  ) async {
+    final server = TestServer()..userId = 'admin';
+    _features(server, ['accountPasswordResetLink']);
+    _serve(server, _withSam(), []);
+    final fallback = server.override!;
+    final requests = <http.Request>[];
+    const link = 'https://auth.example.test/__/auth/action?oobCode=test-code';
+    server.override = (request) {
+      if (request.url.path.contains('/password-reset-link')) {
+        requests.add(request);
+        return Future.value(jsonResponse({'link': link}));
+      }
+      return fallback(request);
+    };
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String;
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final controller = await _pump(
+      tester,
+      server,
+      (c) => AccountsAdminScreen(controller: c),
+    );
+    await _menu(tester, '2');
+    await tester.tap(find.text('Passwort-Link erzeugen…'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.text('sam@example.test'), findsWidgets);
+    expect(requests, isEmpty);
+    await tester.tap(find.text('Link erzeugen'));
+    await tester.pumpAndSettle();
+    expect(requests.single.method, 'POST');
+    expect(
+      requests.single.url.path,
+      '/api/mobile/v1/admin/accounts/sam/password-reset-link/',
+    );
+    expect(jsonDecode(requests.single.body), {'version': 3});
+    expect(find.text(link), findsOneWidget);
+    await tester.tap(find.text('Link kopieren'));
+    await tester.pumpAndSettle();
+    expect(copied, link);
+    expect(find.text('Kopiert'), findsOneWidget);
+    expect(controller.outbox, isEmpty);
+    await tester.tap(find.text('Schließen'));
+    await tester.pumpAndSettle();
+    expect(find.text(link), findsNothing);
+    expect(requests, hasLength(1));
+    await _menu(tester, '1');
+    expect(find.text('Passwort-Link erzeugen…'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the person editor offers the same link dialog on a phone', (
+    tester,
+  ) async {
+    final server = TestServer();
+    _features(server, ['accountPasswordResetLink']);
+    _serve(server, _withSam(), []);
+    final controller = await _pump(
+      tester,
+      server,
+      (c) => AccountsAdminScreen(controller: c, initialPersonId: 2),
+      size: const Size(390, 844),
+    );
+    await tester.tap(_inRow('2', 'Sam'));
+    await tester.pumpAndSettle();
+    final action = find.byKey(const ValueKey('access-password-reset'));
+    await tester.ensureVisible(action);
+    await tester.tap(action);
+    await tester.pumpAndSettle();
+    expect(find.text('Passwort-Link erzeugen'), findsOneWidget);
+    expect(find.text('Link erzeugen').hitTestable(), findsOneWidget);
+    expect(controller.outbox, isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('older servers do not offer password links', (tester) async {
+    final server = TestServer();
+    _serve(server, _withSam(), []);
+    await _pump(tester, server, (c) => AccountsAdminScreen(controller: c));
+    await _menu(tester, '2');
+    expect(find.text('Passwort-Link erzeugen…'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('password link errors stay in the dialog and can be retried', (
+    tester,
+  ) async {
+    final server = TestServer();
+    _features(server, ['accountPasswordResetLink']);
+    _serve(server, _withSam(), []);
+    final fallback = server.override!;
+    var attempts = 0;
+    server.override = (request) {
+      if (request.url.path.contains('/password-reset-link')) {
+        attempts++;
+        return Future.value(
+          attempts == 1
+              ? jsonResponse({
+                  'error': 'Firebase gerade nicht erreichbar.',
+                }, 503)
+              : jsonResponse({'link': 'https://auth.example.test/reset'}),
+        );
+      }
+      return fallback(request);
+    };
+    final controller = await _pump(
+      tester,
+      server,
+      (c) => AccountsAdminScreen(controller: c),
+    );
+    await _menu(tester, '2');
+    await tester.tap(find.text('Passwort-Link erzeugen…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Link erzeugen'));
+    await tester.pumpAndSettle();
+    expect(find.text('Firebase gerade nicht erreichbar.'), findsOneWidget);
+    expect(find.text('Link kopieren'), findsNothing);
+    expect(controller.outbox, isEmpty);
+    await tester.tap(find.text('Link erzeugen'));
+    await tester.pumpAndSettle();
+    expect(attempts, 2);
+    expect(find.text('Link kopieren'), findsOneWidget);
+    expect(find.text('Firebase gerade nicht erreichbar.'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('password links cannot be queued offline', (tester) async {
+    final server = TestServer();
+    _features(server, ['accountPasswordResetLink']);
+    _serve(server, _withSam(), []);
+    final controller = await _pump(
+      tester,
+      server,
+      (c) => AccountsAdminScreen(controller: c),
+    );
+    await _menu(tester, '2');
+    await tester.tap(find.text('Passwort-Link erzeugen…'));
+    await tester.pumpAndSettle();
+    server.offline = true;
+    await controller.refresh();
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Zum Erzeugen des Links brauchst du eine Verbindung.'),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Link erzeugen'),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(controller.outbox, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('while generating a link the button cannot submit again', (
+    tester,
+  ) async {
+    final server = TestServer();
+    _features(server, ['accountPasswordResetLink']);
+    _serve(server, _withSam(), []);
+    final fallback = server.override!;
+    final pending = Completer<http.Response>();
+    var attempts = 0;
+    server.override = (request) {
+      if (request.url.path.contains('/password-reset-link')) {
+        attempts++;
+        return pending.future;
+      }
+      return fallback(request);
+    };
+    await _pump(tester, server, (c) => AccountsAdminScreen(controller: c));
+    await _menu(tester, '2');
+    await tester.tap(find.text('Passwort-Link erzeugen…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Link erzeugen'));
+    await tester.pump();
+    final generate = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(FilledButton),
+    );
+    expect(tester.widget<FilledButton>(generate).onPressed, isNull);
+    await tester.tap(generate);
+    expect(attempts, 1);
+    pending.complete(jsonResponse({'link': 'https://auth.example.test/reset'}));
+    await tester.pumpAndSettle();
+    expect(find.text('Link kopieren'), findsOneWidget);
+    expect(attempts, 1);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('admins delete an account only after confirmation', (
     tester,

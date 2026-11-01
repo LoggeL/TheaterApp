@@ -7,6 +7,7 @@ import '../data/accounts_api.dart';
 import '../domain/account_roster.dart';
 import 'access_actions.dart';
 import 'access_widgets.dart';
+import 'password_reset_dialog.dart';
 
 /// "App-Zugang" of the person editor: status, rights and login of the
 /// person's account with every access action, or "Konto verknüpfen" when
@@ -94,6 +95,13 @@ class _PersonAccessSectionState extends State<PersonAccessSection> {
           ),
           icon: const Icon(Icons.admin_panel_settings_outlined),
           label: const Text('Rechte bearbeiten…'),
+        ),
+      if (!own && a != null && accountPasswordResetAvailable(c, a))
+        OutlinedButton.icon(
+          key: const ValueKey('access-password-reset'),
+          onPressed: () => showPasswordResetLink(context, c, a),
+          icon: const Icon(Icons.key_outlined),
+          label: const Text('Passwort-Link erzeugen…'),
         ),
       if (!own && a?['status'] == 'approved')
         OutlinedButton.icon(

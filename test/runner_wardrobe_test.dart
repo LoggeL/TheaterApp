@@ -202,6 +202,151 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
   setUp(WardrobePictures.clear);
 
+  group('ready crates', () {
+    const features = [
+      'stageRunner',
+      'runnerUnlocks',
+      'runnerDupes',
+      'runnerMissions',
+      'runnerEnsemble',
+      'runnerEventCrates',
+      'runnerPackGoals',
+    ];
+    JsonMap rewards({bool available = true}) =>
+        _wardrobeJson(
+          crates: available ? 1 : 0,
+          progress: {
+            'missionCrates': available ? 2 : 0,
+            'ensembleCrates': available ? 1 : 0,
+          },
+        )..addAll({
+          'ensemble': {
+            'meters': 12000,
+            'next': {'km': 20, 'name': 'Nächstes Ziel'},
+            'crates': available ? 1 : 0,
+          },
+          'eventCrates': [
+            if (available) {'eventId': 'probe', 'title': 'Probe Akt 2'},
+          ],
+          'packGoals': [
+            {
+              'releaseId': 'freiheit',
+              'name': 'Traum von Freiheit',
+              'reached': true,
+              'crates': available ? 3 : 0,
+            },
+          ],
+        });
+
+    Future<List<JsonMap>> open(
+      WidgetTester tester, {
+      bool available = true,
+      List<String> supported = features,
+    }) async {
+      final bodies = <JsonMap>[];
+      final json = rewards(available: available);
+      final controller = await _signedIn(tester, (request) {
+        final path = _path(request);
+        if (path.endsWith('/wardrobe')) {
+          return Future.value(jsonResponse(json));
+        }
+        if (path.endsWith('/crates')) {
+          bodies.add(jsonMap(jsonDecode(request.body)));
+          return Future.value(
+            jsonResponse({'error': 'Test der Kistenart'}, 409),
+          );
+        }
+        return null;
+      }, features: supported);
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StageTheme.build(Brightness.light),
+          home: WardrobeScreen(controller: controller, sound: _Sound()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      await tester.pumpAndSettle();
+      return bodies;
+    }
+
+    testWidgets('missions and ensemble rewards are visible above all details', (
+      tester,
+    ) async {
+      await open(tester);
+      final ready = find.byKey(const ValueKey('wardrobe-ready-crates'));
+      expect(ready, findsOneWidget);
+      for (final id in [
+        'mission',
+        'ensemble',
+        'own',
+        'event-probe',
+        'pack-freiheit',
+      ]) {
+        expect(
+          find.byKey(ValueKey('wardrobe-ready-$id')).hitTestable(),
+          findsOneWidget,
+        );
+      }
+      expect(find.text('Missionskiste öffnen (2)'), findsOneWidget);
+      expect(
+        find.text('Set-Kiste öffnen: Traum von Freiheit (3)'),
+        findsOneWidget,
+      );
+      // No mission or ensemble section has to be unfolded to reach a crate.
+      expect(find.byKey(const ValueKey('runner-missions')), findsNothing);
+      expect(find.byKey(const ValueKey('ensemble-card')), findsNothing);
+      expect(tester.getTopLeft(ready).dy, lessThan(170));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    for (final (id, body) in <(String, JsonMap)>[
+      ('mission', {'dupes': true, 'crate': 'mission'}),
+      ('ensemble', {'dupes': true, 'crate': 'ensemble'}),
+      ('own', {'dupes': true}),
+      ('event-probe', {'dupes': true, 'crate': 'event', 'eventId': 'probe'}),
+      ('pack-freiheit', {'dupes': true, 'crate': 'pack', 'packId': 'freiheit'}),
+    ]) {
+      testWidgets('the visible $id action opens the correct crate', (
+        tester,
+      ) async {
+        final bodies = await open(tester);
+        await tester.tap(find.byKey(ValueKey('wardrobe-ready-$id')));
+        await tester.pumpAndSettle();
+        expect(bodies, [body]);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+
+    testWidgets('without available crates there is no empty rewards block', (
+      tester,
+    ) async {
+      await open(tester, available: false);
+      expect(find.byKey(const ValueKey('wardrobe-ready-crates')), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('unsupported rewards stay hidden', (tester) async {
+      await open(tester, supported: const ['stageRunner', 'runnerUnlocks']);
+      expect(find.byKey(const ValueKey('wardrobe-ready-own')), findsOneWidget);
+      for (final id in [
+        'mission',
+        'ensemble',
+        'event-probe',
+        'pack-freiheit',
+      ]) {
+        expect(find.byKey(ValueKey('wardrobe-ready-$id')), findsNothing);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
   group('reel', () {
     test('starts fast, brakes long, slides past and settles on the card', () {
       final reel = CrateReel(winner: 48, landing: .3);

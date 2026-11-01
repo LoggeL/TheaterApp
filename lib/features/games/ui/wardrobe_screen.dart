@@ -986,6 +986,10 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       key: const PageStorageKey('wardrobe-rewards'),
       padding: pagePadding(context, maxWidth: 640, top: 16),
       children: [
+        if (_readyCrates(w) case final ready?) ...[
+          ready,
+          const SizedBox(height: 12),
+        ],
         _crates(context, w),
         const SizedBox(height: 12),
         CrateBalanceCard(
@@ -1065,6 +1069,84 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         ],
         const SizedBox(height: 32),
       ],
+    );
+  }
+
+  /// Every available crate has a direct action before progress, statistics
+  /// and folded goal sections, including rewards from earlier days.
+  Widget? _readyCrates(Wardrobe w) {
+    final actions = <({String id, String label, IconData icon, VoidCallback open})>[
+      if (_missions && w.progress.missionCrates > 0)
+        (
+          id: 'mission',
+          label:
+              'Missionskiste öffnen${w.progress.missionCrates > 1 ? ' (${w.progress.missionCrates})' : ''}',
+          icon: Icons.flag_outlined,
+          open: () => _open(mission: true),
+        ),
+      if (_ensemble && w.ensemble != null && w.progress.ensembleCrates > 0)
+        (
+          id: 'ensemble',
+          label:
+              'Ensemble-Kiste öffnen${w.progress.ensembleCrates > 1 ? ' (${w.progress.ensembleCrates})' : ''}',
+          icon: Icons.groups_outlined,
+          open: () => _open(ensemble: true),
+        ),
+      if (w.progress.crates > 0 && (_dupes || !w.progress.complete))
+        (
+          id: 'own',
+          label:
+              'Kostümkiste öffnen${w.progress.crates > 1 ? ' (${w.progress.crates})' : ''}',
+          icon: Icons.inventory_2_outlined,
+          open: _openOwn,
+        ),
+      if (_eventCrates)
+        for (final event in w.eventCrates)
+          (
+            id: 'event-${event.eventId}',
+            label: '${eventCrateTitle(event)} öffnen',
+            icon: Icons.event_available,
+            open: () => _open(event: event),
+          ),
+      if (_packs)
+        for (final goal in w.packGoals)
+          if (goal.crates > 0)
+            (
+              id: 'pack-${goal.releaseId}',
+              label:
+                  'Set-Kiste öffnen: ${goal.name}${goal.crates > 1 ? ' (${goal.crates})' : ''}',
+              icon: Icons.collections_outlined,
+              open: () => _open(packGoal: goal),
+            ),
+    ];
+    if (actions.isEmpty) return null;
+    return Card(
+      key: const ValueKey('wardrobe-ready-crates'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Kisten bereit',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            for (final action in actions) ...[
+              const SizedBox(height: 8),
+              FilledButton.tonalIcon(
+                key: ValueKey('wardrobe-ready-${action.id}'),
+                style: FilledButton.styleFrom(
+                  alignment: Alignment.centerLeft,
+                  minimumSize: const Size(0, 48),
+                ),
+                onPressed: _busy ? null : action.open,
+                icon: Icon(action.icon),
+                label: Text(action.label),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
