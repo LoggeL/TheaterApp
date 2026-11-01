@@ -14,7 +14,9 @@ stamp=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
 remote=f'/tmp/theater-backup-{stamp}.sqlite'
 js=f"import {{DatabaseSync,backup}} from 'node:sqlite';const db=new DatabaseSync('/data/theater.sqlite');await backup(db,{json.dumps(remote)});db.close();"
 subprocess.run(ssh+[f'docker exec {shlex.quote(name)} node --input-type=module -e {shlex.quote(js)}'],check=True)
-folder=root/'.secrets/backups';folder.mkdir(parents=True,exist_ok=True,mode=0o700)
+# THEATER_BACKUP_DIR keeps backups outside a checkout that automation may recreate (HomeBox auto-deploy).
+folder=Path(os.environ['THEATER_BACKUP_DIR']).expanduser() if os.environ.get('THEATER_BACKUP_DIR') else root/'.secrets/backups'
+folder.mkdir(parents=True,exist_ok=True,mode=0o700)
 dest=folder/f'theater-{stamp}.sqlite'
 with dest.open('xb') as f:
  os.chmod(dest,0o600)

@@ -108,7 +108,7 @@ test('Legacy opens with the 10th light blue figure, and once open it stays open'
   // them later (pictures withdrawn, rarities moved) does not close it again.
   const rarities = [
     { id: 'hellblau', name: 'Hellblau', color: '#5E98D9', weight: 45, gage: 10 },
-    { id: 'legacy', name: 'Legacy', color: '#A47A4B', weight: 6, gage: 50, requires: { rarity: 'hellblau', kind: 'character', count: 10 } },
+    { id: 'legacy', name: 'Legacy', color: '#A47A4B', weight: 21, gage: 15, requires: { rarity: 'hellblau', kind: 'character', count: 10 } },
   ];
   const defaults = ['character', 'backdrop', 'obstacles', 'fx'].map(kind => ({ id: `${kind}.0`, kind, name: kind, rarity: 'hellblau', default: true }));
   const people = Array.from({ length: 12 }, (_, i) => ({ id: `h${i}`, kind: 'character', name: `H${i}`, rarity: 'hellblau' }));
@@ -131,7 +131,10 @@ test('a crate draws the rarity by the new weights (seeded, 30 000 draws)', () =>
   // Mulberry32: the same numbers every run.
   let seed = 20261024;
   const random = () => { seed = (seed + 0x6D2B79F5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
-  assert.deepEqual(c.rarities.map(r => [r.id, r.weight]), [['hellblau', 45], ['blau', 22], ['technik', 10], ['pink', 12], ['legacy', 6], ['rot', 3.5], ['gold', 1.5]]);
+  // Legacy ranks right above light blue (not rarer than blue per figure); the others as before.
+  assert.deepEqual(c.rarities.map(r => [r.id, r.weight]), [['hellblau', 45], ['legacy', 21], ['blau', 22], ['technik', 10], ['pink', 12], ['rot', 3.5], ['gold', 1.5]]);
+  const total = c.rarities.reduce((sum, r) => sum + r.weight, 0), lockedTotal = total - c.rarity.get('legacy').weight;
+  assert.deepEqual([total, lockedTotal], [115, 94]);
   const owned = new Set(Object.values(c.defaults));
   const count = (open, n = 30000) => {
     const seen = {};
@@ -139,13 +142,13 @@ test('a crate draws the rarity by the new weights (seeded, 30 000 draws)', () =>
     return Object.fromEntries(Object.entries(seen).map(([id, k]) => [id, k / n]));
   };
   const near = (share, expected, what) => assert.ok(Math.abs(share - expected) < 0.008, `${what}: ${share} vs ${expected}`);
-  // Legacy open: the shares are the weights (they add up to 100).
+  // Legacy open: the shares are the weights (of 115).
   const all = count(new Set(c.rarities.map(r => r.id)));
-  for (const r of c.rarities) near(all[r.id] ?? 0, r.weight / 100, r.id);
+  for (const r of c.rarities) near(all[r.id] ?? 0, r.weight / total, r.id);
   // Legacy locked: its chance goes to the others.
   const locked = count(openRarities(c, owned));
   assert.equal(locked.legacy, undefined);
-  for (const r of c.rarities.filter(r => r.id !== 'legacy')) near(locked[r.id], r.weight / 94, r.id);
+  for (const r of c.rarities.filter(r => r.id !== 'legacy')) near(locked[r.id], r.weight / lockedTotal, r.id);
   // New packs change pool sizes. Per-item chances must stay in rarity order both before and
   // after every scheduled release, as well as in the complete bundled catalog. Tuning only for
   // the final catalog could make a blue figure rarer than a technician before a later launch.

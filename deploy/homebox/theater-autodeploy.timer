@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Theater-App main for a validated release every minute
+
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+Unit=theater-autodeploy.service
+
+[Install]
+WantedBy=timers.target

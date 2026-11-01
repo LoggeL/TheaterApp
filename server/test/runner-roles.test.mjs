@@ -46,14 +46,14 @@ test('every actor figure of the bundled catalog has role, play and year; technic
   assert.deepEqual(['elena', 'elena--anno', 'elena--schicksal', 'louis', 'sebastian', 'sebastian--anno', 'raphael--schicksal', 'jonas', 'maren', 'nele--anno', 'anton', 'theo--schicksal'].map(id => at(`character.${id}`)?.rarity),
     ['gold', 'gold', 'rot', 'gold', 'rot', 'rot', 'legacy', 'rot', 'technik', 'gold', 'legacy', 'legacy']);
   // Raphael is a former member: all his roles are legacy, whatever they weigh.
-  assert.deepEqual(raw.filter(x => x.personId === 24).map(x => x.rarity), ['legacy', 'legacy', 'legacy']);
+  assert.deepEqual(raw.filter(x => x.personId === 24).map(x => x.rarity), ['legacy', 'legacy', 'legacy', 'legacy']);
   assert.deepEqual([at('character.maren').role, at('character.maren').play], ['Bühnentechnik', undefined]);
   assert.deepEqual([at('character.jonas').role, at('character.jonas').departments], ['Vetter Viktor', ['licht']]);
   assert.deepEqual(['role', 'play', 'year', 'name'].map(k => at('character.raphael--schicksal')[k]), ['Hades', 'Schicksalsfäden', 2025, 'Raphael']);
   // Figures with a picture take part; the others wait for it (Romeo und Julia, earlier plays).
   // Nexus (2024) came in with 24 figures: 10 light blue, 2 blue, 3 pink, 6 legacy, 2 red, 1 gold.
   const count = id => c.collectible.filter(x => x.kind === 'character' && x.rarity === id).length;
-  assert.deepEqual(['hellblau', 'blau', 'technik', 'pink', 'legacy', 'rot', 'gold'].map(count), [33, 18, 8, 17, 16, 13, 8]);
+  assert.deepEqual(['hellblau', 'legacy', 'blau', 'technik', 'pink', 'rot', 'gold'].map(count), [33, 16, 18, 8, 17, 13, 8]);
   assert.ok(raw.filter(x => x.id.endsWith('--romeo-julia')).every(x => x.disabled === true));
   const nexus = raw.filter(x => x.id.endsWith('--nexus'));
   // Logge's role "KI" is gone: the AI is a unique figure (character.unique-ki-nexus).

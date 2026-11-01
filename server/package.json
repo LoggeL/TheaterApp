@@ -11,7 +11,9 @@
     "dev": "node --env-file-if-exists=.env --watch src/index.mjs",
     "test": "node --test test/*.test.mjs",
     "emulators": "firebase emulators:start --only auth --project demo-theater-app --config ../firebase.json",
-    "bootstrap-admin": "node --env-file-if-exists=.env scripts/bootstrap-admin.mjs"
+    "bootstrap-admin": "node --env-file-if-exists=.env scripts/bootstrap-admin.mjs",
+    "runner-review": "node scripts/runner-review.mjs",
+    "runner-review:serve": "node scripts/runner-review.mjs --serve"
   },
   "dependencies": {
     "firebase-admin": "^14.4.0",

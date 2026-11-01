@@ -4,6 +4,7 @@ import '../../../app/brand.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/device_services.dart';
 import '../../../core/telemetry/perf_telemetry.dart';
+import '../../games/games.dart' show adminSkinsAvailable, openAdminSkinViewer;
 import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/layout/content_width.dart';
@@ -423,6 +424,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SectionTitle('Datenschutz'),
             _PerfSwitch(widget.perf ?? PerfTelemetry.instance),
+            // Only for admins, and only where the server offers it: the
+            // Skin-Viewer of the stage runner. Nobody else sees the entry,
+            // and the server answers its requests for admins only.
+            if (adminSkinsAvailable(controller)) ...[
+              const SectionTitle('Admin'),
+              Card(
+                child: ListTile(
+                  key: const ValueKey('admin-skin-viewer'),
+                  leading: const Icon(Icons.checkroom_outlined),
+                  title: const Text('Bühnenlauf-Skins'),
+                  subtitle: const Text(
+                    'Alle Figuren, Kulissen und Hindernis-Sets mit Status, '
+                    'auch disabled, geplante und gated',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => openAdminSkinViewer(context, controller),
+                ),
+              ),
+            ],
           ],
         ),
       );

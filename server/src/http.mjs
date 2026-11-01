@@ -9,6 +9,7 @@ import { adminTicketView, closeOwnFeedback, markFeedbackRead, ownFeedback, ownTi
 import { CalendarFeedLimiter, calendarFeed, calendarFeedLink, resetCalendarFeed } from './calendar-feed.mjs';
 import { PerfTelemetry, perfTelemetry } from './perf-telemetry.mjs';
 import { formTemplates, messageForm, formSubmissions } from './forms.mjs';
+import { createPasswordResetLink } from './password-reset.mjs';
 
 // Content-addressed web files from tool/version-web.mjs never change under their name.
 // Entry points (index.html, workers, manifests) and unhashed files must stay revalidated.
@@ -19,7 +20,7 @@ const hashedWebFile = /^\/(?:main\.[a-f0-9]{16}\.dart\.(?:js|mjs|wasm)|(?:flutte
 // `clientIpHeader` names the proxy header with the client address for its attempt limit
 // (e.g. `cf-connecting-ip`). `appOrigin` is the public address of the app, used for the
 // personal calendar feed links (see calendar-feed.mjs).
-export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null, appOrigin = null, calendarLimiter = new CalendarFeedLimiter(), perf = null }) {
+export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, passwordResetAuth = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null, appOrigin = null, calendarLimiter = new CalendarFeedLimiter(), perf = null }) {
   const origins = new Set(allowedOrigins);
   const telemetry = perf ?? new PerfTelemetry(defaultTheater.store);
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
@@ -175,6 +176,13 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
         const cache = requestUrl.searchParams.get('v') === file.hash ? 'private, max-age=31536000, immutable' : 'private, no-cache';
         res.writeHead(200, { 'Content-Type': file.mime, 'Content-Length': file.bytes.length, 'Cache-Control': cache, Vary: 'Authorization, Origin' }); res.end(file.bytes); return;
       }
+      // The admins' Skin-Viewer (runner-admin-catalog.mjs): never cached beyond the admin's device.
+      if (route === '/admin/runner/catalog' && req.method === 'GET') return json(res, 200, theater.runnerAdminCatalog(identity.uid));
+      const adminSkin = route.match(/^\/admin\/runner\/skins\/([^/]+)$/);
+      if (adminSkin && req.method === 'GET') {
+        const file = theater.runnerAdminSkin(identity.uid, adminSkin[1]);
+        res.writeHead(200, { 'Content-Type': file.mime, 'Content-Length': file.bytes.length, 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Authorization, Origin' }); res.end(file.bytes); return;
+      }
       if (route === '/admin/accounts' && req.method === 'GET') return json(res, 200, theater.adminData(identity.uid));
       if (route === '/admin/email' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.emailEnabled, jobs: theater.store.all('emailJobs').slice(-50).map(({ acceptedRecipientIds, failedRecipientIds, ...job }) => job) }); }
       if (route === '/admin/push' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.pushEnabled, devices: theater.store.all('devices').map(({ token, ...d }) => d), jobs: theater.store.all('pushJobs').slice(-50).map(({ acceptedDeviceIds, ...j }) => j) }); }
@@ -186,6 +194,8 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
         const document = await scriptService.getScript(production.id);
         return json(res, 200, theater.importScript(identity.uid, production, document));
       }
+      const passwordReset = route.match(/^\/admin\/accounts\/([^/]+)\/password-reset-link$/);
+      if (passwordReset && req.method === 'POST') return json(res, 200, await createPasswordResetLink(theater, identity.uid, passwordReset[1], body.version, theater === defaultTheater ? passwordResetAuth : null));
       const account = route.match(/^\/admin\/accounts\/([^/]+)$/);
       if (account && req.method === 'DELETE') return json(res, 200, await theater.deleteAccount(identity.uid, account[1], body.version, theater === defaultTheater ? deleteIdentity : null));
       const detail = route.match(/^\/admin\/events\/([^/]+)$/);

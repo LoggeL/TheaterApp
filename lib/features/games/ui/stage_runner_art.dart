@@ -44,7 +44,19 @@ enum RunnerSprite {
   flat(961, 4, 159, 360),
   drum(713, 208, 150, 150),
   truss(152, 386, 420, 64),
-  drop(479, 4, 128, 176);
+  drop(479, 4, 128, 176),
+  // A pile in one picture (Creepshow's sarcophagus), shaped like its two
+  // hitboxes: the lower half as wide as the cell, the upper half over its
+  // middle half. Only obstacle sets that draw something here have one
+  // ([RunnerArt.ownPile]); the others, the game's own atlas, too, pile up
+  // crates.
+  pile(966, 386, 154, 150),
+  // A tall crate in one picture (Creepshow's tall brain-swap chair), for
+  // crates higher than 1.35 times their width; its shape, 1.57 times as high
+  // as wide, lies in the middle of those, so it is stretched or squeezed by
+  // at most a sixth. Only obstacle sets that draw something here have one
+  // ([RunnerArt.ownTallCrate]); the others put two crates on each other.
+  tallCrate(4, 360, 136, 214);
 
   const RunnerSprite(this.x, this.y, this.width, this.height);
   final double x, y, width, height;
@@ -95,18 +107,20 @@ enum RunnerSprite {
   };
 
   /// The sprite that shows an obstacle kind, e.g. in the statistics; null
-  /// for the velvet border, which is drawn.
-  static RunnerSprite? ofObstacle(ObstacleKind kind) => switch (kind) {
-    ObstacleKind.crate => crate,
-    ObstacleKind.flat => flat,
-    ObstacleKind.lamp => lamp,
-    ObstacleKind.border => null,
-    ObstacleKind.sandbag => sandbag,
-    ObstacleKind.drum => drum,
-    ObstacleKind.pile => crate,
-    ObstacleKind.truss => truss,
-    ObstacleKind.drop => drop,
-  };
+  /// for the velvet border, which is drawn. A pile is crates, unless the
+  /// obstacle set has [ownPile].
+  static RunnerSprite? ofObstacle(ObstacleKind kind, {bool ownPile = false}) =>
+      switch (kind) {
+        ObstacleKind.crate => crate,
+        ObstacleKind.flat => flat,
+        ObstacleKind.lamp => lamp,
+        ObstacleKind.border => null,
+        ObstacleKind.sandbag => sandbag,
+        ObstacleKind.drum => drum,
+        ObstacleKind.pile => ownPile ? pile : crate,
+        ObstacleKind.truss => truss,
+        ObstacleKind.drop => drop,
+      };
 }
 
 enum RunnerLayer { runner, obstacles, pickups }
@@ -132,7 +146,9 @@ class RunnerArt {
       effect = null,
       border = null,
       obstacleCrashLines = const {},
-      pickupNames = const {};
+      pickupNames = const {},
+      ownPile = false,
+      ownTallCrate = false;
 
   /// Art from already decoded pictures, for tests.
   @visibleForTesting
@@ -152,6 +168,8 @@ class RunnerArt {
     this.border,
     this.obstacleCrashLines = const {},
     this.pickupNames = const {},
+    this.ownPile = false,
+    this.ownTallCrate = false,
   });
 
   /// The game's own atlas and the shown backdrop.
@@ -179,6 +197,41 @@ class RunnerArt {
   /// Closing lines for the loaded obstacle set; empty for the default art.
   final Map<ObstacleKind, String> obstacleCrashLines;
 
+  /// Whether the obstacle set draws a pile in one picture
+  /// ([RunnerSprite.pile]) instead of crates; never the default art.
+  final bool ownPile;
+
+  /// Whether the obstacle set draws a tall crate in one picture
+  /// ([RunnerSprite.tallCrate]) instead of two crates; never the default art.
+  final bool ownTallCrate;
+
+  /// Whether [image] draws anything in the cell of [sprite]: an optional
+  /// cell that an obstacle set may leave empty. Asked once per picture.
+  static Future<bool> draws(ui.Image image, RunnerSprite sprite) async {
+    final known = _draws[image]?[sprite];
+    if (known != null) return known;
+    final bytes = await image.toByteData();
+    var found = false;
+    if (bytes != null) {
+      final r = sprite.rect.intersect(
+        ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      );
+      for (var y = r.top.toInt(); !found && y < r.bottom; y++) {
+        for (var x = r.left.toInt(); x < r.right; x++) {
+          // Alpha of the straight RGBA; a faint veil does not count.
+          if (bytes.getUint8((y * image.width + x) * 4 + 3) > 32) {
+            found = true;
+            break;
+          }
+        }
+      }
+    }
+    (_draws[image] ??= {})[sprite] = found;
+    return found;
+  }
+
+  static final _draws = Expando<Map<RunnerSprite, bool>>();
+
   /// Wire points of the worn character's own atlas that differ from
   /// [RunnerSprite.harness].
   final Map<RunnerSprite, ui.Offset> harness;
@@ -199,6 +252,8 @@ class RunnerArt {
     ui.Color? border,
     Map<ObstacleKind, String> obstacleCrashLines = const {},
     Map<PickupKind, String> pickupNames = const {},
+    bool ownPile = false,
+    bool ownTallCrate = false,
   }) => RunnerArt._dressed(
     atlas,
     backdrop ?? this.backdrop,
@@ -213,6 +268,8 @@ class RunnerArt {
     border: border,
     obstacleCrashLines: obstacles == null ? const {} : obstacleCrashLines,
     pickupNames: pickups == null ? const {} : pickupNames,
+    ownPile: obstacles != null && ownPile,
+    ownTallCrate: obstacles != null && ownTallCrate,
   );
 
   ui.Image imageOf(RunnerSprite sprite) => switch (sprite.layer) {

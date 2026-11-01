@@ -407,7 +407,13 @@ test('the bundled catalog is valid and ships only finished costumes', () => {
 
 test('the bundled pictures have the sizes the app accepts', () => {
   const c = bundledCatalog(), sizes = { character: [1124, 577], obstacles: [1124, 577], backdrop: [1024, 603] };
-  assert.deepEqual(c.byId.get('backdrop.creepshow').obstacleCrashLines, { sandbag: 'Der Kronleuchter hatte Vorfahrt.' });
+  assert.deepEqual(c.byId.get('backdrop.creepshow').obstacleCrashLines, {
+    sandbag: 'Der Kronleuchter hatte Vorfahrt.',
+    drum: 'Vom Buntglasfenster überrollt.',
+    crate: 'Probe gesessen im Hirntauschinator.',
+    pile: 'Der Sarkophag war schon belegt.',
+    drop: 'Die fleischfressende Pflanze hatte Hunger.',
+  });
   const named = new Set();
   // Role figures are characters like any other: same atlas, same square portrait.
   const pictured = c.items;

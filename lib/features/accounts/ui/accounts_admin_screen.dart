@@ -16,6 +16,7 @@ import '../../ensemble/admin/member_editor_screen.dart';
 import '../data/accounts_api.dart';
 import '../domain/account_roster.dart';
 import 'access_actions.dart';
+import 'password_reset_dialog.dart';
 import 'access_widgets.dart';
 
 /// "Personen & Zugänge": waiting registrations on top, then every person
@@ -233,6 +234,11 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
     };
     // The own access is changed by another admin; only the person remains.
     final items = <PopupMenuEntry<String>>[
+      if (!own && a != null && accountPasswordResetAvailable(c, a))
+        const PopupMenuItem(
+          value: 'passwordReset',
+          child: Text('Passwort-Link erzeugen…'),
+        ),
       if (!own && a != null && accountRightsEditable(c, a))
         const PopupMenuItem(value: 'rights', child: Text('Rechte bearbeiten…')),
       if (!own && a?['status'] == 'approved')
@@ -253,6 +259,7 @@ class _AccountsAdminScreenState extends State<AccountsAdminScreen> {
         : PopupMenuButton<String>(
             tooltip: 'Zugang verwalten',
             onSelected: (s) => switch (s) {
+              'passwordReset' => showPasswordResetLink(context, c, a!),
               'rights' => _run(
                 () => showAccountRightsSheet(
                   context,
