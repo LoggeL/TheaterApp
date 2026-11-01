@@ -696,20 +696,24 @@ export function tradeTarget(c, owned, open, from) {
   return c.rarities.find(r => r.rank > from && open.has(r.id) && c.collectible.some(x => x.drawnBy.includes(r.id) && !owned.has(x.id))) ?? null;
 }
 /**
- * A trade into [target] costs `tradeDupes` duplicates of the rarity right below it, also when it
- * was reached past complete rarities: a cheap rarity never buys a dear one (gold stays at 5 × red).
+ * The rarity a trade into [target] is paid in: the [open] one right below it. A complete rarity
+ * counts, so a cheap rarity never buys a dear one (gold stays at 5 × red); a locked one does not
+ * (Legacy before it opens: Blau costs light blue duplicates, not Legacy ones).
  */
-export const tradeCost = (c, target) => c.dupes.tradeDupes * c.rarities[target.rank - 1].gage;
+const tradeSource = (c, open, target) => c.rarities.slice(0, target.rank).findLast(r => open.has(r.id)) ?? null;
+/** A trade into [target] costs `tradeDupes` duplicates of its [tradeSource]. */
+export const tradeCost = (c, target, open) => c.dupes.tradeDupes * (tradeSource(c, open, target)?.gage ?? 0);
 /** One chosen missing item costs `buyDupes` duplicates of its main rarity; null if it cannot be bought. */
 export const buyCost = (c, item) => {
   const r = c.rarity.get(item.rarity);
   return r?.buyable && r.gage > 0 ? c.dupes.buyDupes * r.gage : null;
 };
 
-/** The trades on offer: one per open rarity with something missing, from the rarity below it. */
+/** The trades on offer: one per open rarity with something missing, from the open rarity below it. */
 function tradeOptions(c, owned, open) {
-  return c.rarities.filter(r => r.rank > 0 && c.rarities[r.rank - 1].gage > 0 && tradeTarget(c, owned, open, r.rank - 1)?.id === r.id)
-    .map(r => ({ from: c.rarities[r.rank - 1].id, to: r.id, cost: tradeCost(c, r) }));
+  return c.rarities.map(r => ({ r, from: tradeSource(c, open, r) }))
+    .filter(({ r, from }) => from && from.gage > 0 && tradeTarget(c, owned, open, from.rank)?.id === r.id)
+    .map(({ r, from }) => ({ from: from.id, to: r.id, cost: tradeCost(c, r, open) }));
 }
 
 /** Runs, metres and how they ended; runs before the breakdown existed are counted honestly apart. */
@@ -974,7 +978,7 @@ export function tradeGage(t, uid, requestId, b) {
     const p = progressOf(t, a.personId), owned = ownedIds(t, p), open = openFor(c, p, owned);
     const target = tradeTarget(c, owned, open, from.rank);
     if (!target) fail(409, 'Darüber fehlt dir nichts mehr.', 'nothing_to_trade');
-    const cost = tradeCost(c, target);
+    const cost = tradeCost(c, target, open);
     if (!(cost > 0)) fail(409, 'Diese Stufe bringt keine Gage.', 'nothing_to_trade');
     if ((p.gage ?? 0) < cost) fail(409, 'Dafür reicht die Gage noch nicht.', 'not_enough_gage');
     const item = pickOne(c.collectible.filter(x => x.drawnBy.includes(target.id) && !owned.has(x.id)), t.random);

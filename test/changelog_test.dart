@@ -136,7 +136,13 @@ void main() {
       tester.getTopLeft(current).dy,
       lessThan(tester.getTopLeft(previous).dy),
     );
-    expect(find.text(changelog.first.items.first), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.ancestor(of: current, matching: find.byType(Card)),
+        matching: find.text(changelog.first.items.first),
+      ),
+      findsOneWidget,
+    );
 
     await tester.pumpWidget(const SizedBox());
     controller.dispose();

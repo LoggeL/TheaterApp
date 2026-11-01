@@ -154,16 +154,27 @@ test('a trade turns five duplicates into a random missing item of the next rarit
   assert.ok(!view().owned.includes('h2'));
 });
 
-test('trades skip a locked rarity', t => {
+test('trades skip a locked rarity, also in their price', t => {
+  // Like the bundled catalog: Legacy (gated by light blue figures) between light blue and blue.
   const catalog = loadCatalog({
-    rarities: [rarities[0], { id: 'legacy', name: 'Legacy', color: '#A47A4B', weight: 8, gage: 50, requires: { rarity: 'hell', kind: 'character' } }, { id: 'rot', name: 'Rot', color: '#EB4B4B', weight: 4, gage: 80 }],
-    items: [...defaults, basic[0], { id: 'l1', kind: 'character', name: 'Anton', rarity: 'legacy' }, { id: 'r1', kind: 'fx', name: 'Rot', rarity: 'rot' }],
+    rarities: [rarities[0], { id: 'legacy', name: 'Legacy', color: '#A47A4B', weight: 8, gage: 15, requires: { rarity: 'hell', kind: 'character' } }, rarities[1]],
+    items: [...defaults, ...basic.slice(0, 2), { id: 'l1', kind: 'character', name: 'Anton', rarity: 'legacy' }, { id: 'b1', kind: 'character', name: 'Blau', rarity: 'blau' }, { id: 'b2', kind: 'fx', name: 'Blau 2', rarity: 'blau' }],
   });
-  const { app, patch, view } = setup(t, { catalog });
+  const { app, own, patch, view } = setup(t, { catalog });
   patch(() => ({ gage: 250 }));
+  // Locked: Legacy is not on the way up, Blau costs five light blue duplicates as before.
   assert.deepEqual(view().lockedRarities, ['legacy']);
-  assert.deepEqual(view().trades, [{ from: 'legacy', to: 'rot', cost: 250 }]);
-  assert.equal(app.runnerTrade('sam', 'x', { rarity: 'hell' }).item.id, 'r1');
+  assert.deepEqual(view().trades, [{ from: 'hell', to: 'blau', cost: 50 }]);
+  assert.deepEqual(app.runnerTrade('sam', 'x', { rarity: 'hell' }).outcome, { type: 'trade', rarity: 'blau', cost: 50 });
+  // Open: light blue leads to Legacy, Legacy to Blau.
+  own('h1', 'h2');
+  assert.deepEqual(view().lockedRarities, []);
+  assert.deepEqual(view().trades, [{ from: 'hell', to: 'legacy', cost: 50 }, { from: 'legacy', to: 'blau', cost: 75 }]);
+  assert.equal(app.runnerTrade('sam', 'y', { rarity: 'hell' }).item.id, 'l1');
+  // Legacy complete: still five Legacy duplicates for Blau, also when asked from light blue.
+  assert.deepEqual(view().trades, [{ from: 'legacy', to: 'blau', cost: 75 }]);
+  assert.deepEqual(app.runnerTrade('sam', 'z', { rarity: 'hell' }).outcome, { type: 'trade', rarity: 'blau', cost: 75 });
+  assert.equal(view().gage.balance, 250 - 50 - 50 - 75);
 });
 
 test('one chosen missing item costs ten duplicates of its rarity; gold is not for sale', t => {
@@ -207,7 +218,7 @@ test('broken duplicate settings are refused', () => {
 
 test('the bundled catalog pays gage in every rarity and keeps gold out of the shop', () => {
   const c = bundledCatalog();
-  assert.deepEqual(c.rarities.map(r => r.gage), [10, 20, 30, 40, 50, 80, 200]);
+  assert.deepEqual(c.rarities.map(r => [r.id, r.gage]), [['hellblau', 10], ['legacy', 15], ['blau', 20], ['technik', 30], ['pink', 40], ['rot', 80], ['gold', 200]]);
   assert.deepEqual(c.rarities.filter(r => !r.buyable).map(r => r.id), ['gold']);
   // Missionskisten (Tagesmissionen) and the Zufallskiste shine a bit more often than an aimed crate.
   assert.deepEqual(c.dupes, { shinyChance: { costume: 0.05, targeted: 0.03, ensemble: 0.03, event: 0.03, mission: 0.05 }, tradeDupes: 5, buyDupes: 10 });

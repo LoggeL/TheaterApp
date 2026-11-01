@@ -174,6 +174,46 @@ test('a partially prepared set stays hidden after its date until every sprite is
   assert.ok(ready.catalog.items.some(x => x.id === 'future.b'));
 });
 
+test('prepared atlas files never publish disabled roles or activate their scheduled pack', t => {
+  const { app, store, clock, sam, play } = setup(t);
+  const prepared = {
+    ...data,
+    items: data.items.map(x => releases[0].itemIds.includes(x.id)
+      ? { ...x, disabled: true, image: 'figure.webp', portrait: 'figure.webp' }
+      // Only the disabled roles reference this existing fixture file in this test.
+      : x.id === 'future.map' ? { ...x, image: undefined } : x),
+  };
+  // Prove that both prepared image references resolve. Keeping them disabled is the only reason
+  // they stay out of the published catalog; this must also hold after the scheduled date passes.
+  const enabledControl = loadCatalog({ ...prepared, items: prepared.items.map(x => ({ ...x, disabled: false })) }, fixtures);
+  assert.ok(releases[0].itemIds.every(id => enabledControl.byId.get(id).image && enabledControl.byId.get(id).portrait));
+  assert.ok(enabledControl.files.has('figure.webp'));
+  app.runnerCatalog = loadCatalog(prepared, fixtures);
+  app.runnerWardrobe('sam');
+  store.put('runnerProgress', sam, { ...store.get('runnerProgress', sam), owned: ['future.a'], selected: { character: 'future.a' } });
+  for (const offset of [-1, 0, 1]) {
+    clock.at = new Date(Date.parse(startsAt) + offset);
+    for (const roles of [false, true]) {
+      const view = app.runnerWardrobe('sam', { roles });
+      assert.deepEqual(view.packGoals, []);
+      assert.equal(view.progress.packCrates, 0);
+      assert.ok(!JSON.stringify(view).includes('future.a'));
+      assert.ok(!JSON.stringify(view).includes('future.b'));
+      assert.equal(view.selected.character, 'character.default');
+      assert.ok(!view.crateTargets.some(x => x.play === 'Future'));
+    }
+    assert.ok(releases[0].itemIds.every(id => !app.runnerCatalog.byId.has(id)));
+    assert.ok(app.runnerCatalog.collectible.every(x => !releases[0].itemIds.includes(x.id)));
+    assert.throws(() => app.runnerSkin('sam', 'figure.webp'), { status: 404 });
+    assert.throws(() => app.runnerOutfit('sam', { kind: 'character', itemId: 'future.a', roles: true }), { status: 404 });
+    assert.throws(() => app.runnerOpenCrate('sam', `disabled-target-${offset}`, { target: 'play:future', dupes: true, roles: true }), { code: 'unknown_target' });
+  }
+  const { result } = play('sam', 1000);
+  assert.deepEqual(result.progress.packGoals, []);
+  assert.equal(result.progress.packCrates, 0);
+  assert.equal(store.get('runnerPackGoals', 'new-pack'), null);
+});
+
 test('a new unique waits for its full scheduled pack instead of unlocking from historical roles alone', t => {
   const { app, clock, store, sam } = setup(t);
   clock.at = new Date(startsAt);

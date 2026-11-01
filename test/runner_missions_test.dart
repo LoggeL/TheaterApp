@@ -357,6 +357,7 @@ void main() {
           'Datenchip',
           'Dolch',
           'Büste des Grafen',
+          'Daumenschraube',
           'Ausgestopfter Falke',
         ].map(collectiblePlural),
         [
@@ -371,6 +372,7 @@ void main() {
           'Datenchips',
           'Dolche',
           'Büsten des Grafen',
+          'Daumenschrauben',
           'Ausgestopfte Falken',
         ],
       );
