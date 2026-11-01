@@ -262,7 +262,8 @@ for (const x of items.filter(i => i.kind === 'character')) {
 }
 
 // Character sheets in images/ that no catalog entry names (new art not entered yet).
-for (const file of readdirSync(imageDir).filter(f => /^character-.+\.webp$/.test(f) && !f.endsWith('-portrait.webp')).sort()) {
+// Thumbnails are generated from portraits; they are never standalone atlases.
+for (const file of readdirSync(imageDir).filter(f => /^character-.+\.webp$/.test(f) && !f.endsWith('-portrait.webp') && !f.endsWith('-thumb.webp')).sort()) {
   if (referenced.has(file)) continue;
   const own = await picture(file), portraitName = file.replace(/\.webp$/, '-portrait.webp');
   const portrait = existsSync(resolve(imageDir, portraitName)) ? await picture(portraitName) : null;
