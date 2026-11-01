@@ -696,19 +696,6 @@ void main() {
       expect(find.text('Ensemble-Ziel erreicht!'), findsNothing);
       await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
       await _settle(tester);
-      // Ready crates precede the folded goals. Scroll the lazy list until
-      // the ensemble section is built before trying to open it.
-      await tester.scrollUntilVisible(
-        find.byKey(const PageStorageKey('wardrobe-ensemble-section')),
-        200,
-        scrollable: find
-            .descendant(
-              of: find.byKey(const PageStorageKey('wardrobe-rewards')),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
-      await _settle(tester);
       await tester.tap(
         find.byKey(const PageStorageKey('wardrobe-ensemble-section')),
       );
@@ -770,6 +757,19 @@ void main() {
       tester.view.physicalSize = const Size(400, 800);
       await _settle(tester);
       await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      await _settle(tester);
+      // Ready crates precede the folded goals. Scroll the lazy list until
+      // the ensemble section is built before trying to open it.
+      await tester.scrollUntilVisible(
+        find.byKey(const PageStorageKey('wardrobe-ensemble-section')),
+        200,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const PageStorageKey('wardrobe-rewards')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       await _settle(tester);
       await tester.tap(
         find.byKey(const PageStorageKey('wardrobe-ensemble-section')),
