@@ -213,6 +213,14 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
         const cache = requestUrl.searchParams.get('v') === file.hash ? 'private, max-age=31536000, immutable' : 'private, no-cache';
         res.writeHead(200, { 'Content-Type': file.mime, 'Content-Length': file.bytes.length, 'Cache-Control': cache, Vary: 'Authorization, Origin' }); res.end(file.bytes); return;
       }
+      // The admins' Skin-Viewer (runner-admin-catalog.mjs). Unlike the members' pictures above, these
+      // are never kept: no browser cache, and the service worker only stores the members' route.
+      if (route === '/admin/runner/catalog' && req.method === 'GET') return json(res, 200, theater.runnerAdminCatalog(identity.uid));
+      const adminSkin = route.match(/^\/admin\/runner\/skins\/([^/]+)$/);
+      if (adminSkin && req.method === 'GET') {
+        const file = theater.runnerAdminSkin(identity.uid, adminSkin[1]);
+        res.writeHead(200, { 'Content-Type': file.mime, 'Content-Length': file.bytes.length, 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Authorization, Origin' }); res.end(file.bytes); return;
+      }
       if (route === '/admin/accounts' && req.method === 'GET') return json(res, 200, theater.adminData(identity.uid));
       if (route === '/admin/email' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.emailEnabled, jobs: theater.store.all('emailJobs').slice(-50).map(({ acceptedRecipientIds, failedRecipientIds, ...job }) => job) }); }
       if (route === '/admin/push' && req.method === 'GET') { theater.account(identity.uid, true); return json(res, 200, { configured: theater.pushEnabled, devices: theater.store.all('devices').map(({ token, ...d }) => d), jobs: theater.store.all('pushJobs').slice(-50).map(({ acceptedDeviceIds, ...j }) => j) }); }

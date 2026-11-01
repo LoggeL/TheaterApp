@@ -415,7 +415,11 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
   // Files only unique figures use: served only to those who unlocked one of them.
   const uniqueFiles = new Map([...users].filter(([, xs]) => xs.every(x => x.unique)).map(([name, xs]) => [name, xs.map(x => x.id)]));
   const { crateTargets, targetItems } = crateTargetsOf(collectible, rarity, data?.crates, picture, bad);
-  return { rarities, departments, items, collectible, uniques, uniqueRarity, byId, files, rewardFiles, uniqueFiles, rarity, dupes, ensemble, roleFigures, baseOf, rolesOf, crateTargets, targetItems, defaults: Object.fromEntries(wardrobeKinds.map(k => [k, items.find(x => x.kind === k && x.default).id])) };
+  const result = { rarities, departments, items, collectible, uniques, uniqueRarity, byId, files, rewardFiles, uniqueFiles, rarity, dupes, ensemble, roleFigures, baseOf, rolesOf, crateTargets, targetItems, defaults: Object.fromEntries(wardrobeKinds.map(k => [k, items.find(x => x.kind === k && x.default).id])) };
+  // The raw entries and their folder, only for the admins' full view (runner-admin-catalog.mjs), which
+  // also lists the `disabled` ones; never part of what members get (not enumerable, not spread).
+  Object.defineProperty(result, 'source', { value: { data, imageDir }, enumerable: false });
+  return result;
 }
 
 // Crate targets (`runnerCrateTargets`): a crate of the own runs is opened as the Zufallskiste (all

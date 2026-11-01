@@ -34,4 +34,10 @@ test('review UID isolates reads, writes, media, accounts and script source from 
   assert.equal((await call('reviewer', '/media/production-image')).status, 404);
   assert.equal((await call('unknown', '/snapshot')).status, 403);
   assert.equal(store.account('reviewer'), null);
+  // The reviewer is an admin of the sample data, but the wardrobe is the real one: no Skin-Viewer.
+  assert(real.capabilities.features.includes('runnerAdminCatalog'));
+  assert(!demo.capabilities.features.includes('runnerAdminCatalog'));
+  assert.equal((await call('reviewer', '/admin/runner/catalog')).status, 403);
+  assert.equal((await call('reviewer', '/admin/runner/skins/character-unique-beatrice.webp')).status, 403);
+  assert.equal((await call('owner', '/admin/runner/catalog')).status, 200);
 });

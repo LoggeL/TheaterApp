@@ -10,6 +10,7 @@ import { autoCheckins, eventCrateNotice, forgetEventCrates, settleCheckinCrate }
 import { buyItem, bundledCatalog, collectionBoard, ensembleSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
 import { bundledContentReleases, parseContentReleases, releasedCatalog, releaseIsActive } from './runner-content-releases.mjs';
 import { packGoalsView } from './runner-pack-goals.mjs';
+import { adminRunnerCatalog, adminRunnerSkin } from './runner-admin-catalog.mjs';
 import { forgetMonthScores, periodBoard, rankedBoard, recordMonthRun } from './runner-monthly.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { archiveForm, attachForm, checkFormSubmissionOpen, forgetFormGenerations, forgetFormSubmissions, formStatus, saveForm, submitForm, withdrawForm } from './forms.mjs';
@@ -43,7 +44,7 @@ export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
 export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -497,6 +498,11 @@ export class Theater {
   runnerMissionReroll(uid, requestId, b) { return rerollMission(this, uid, requestId, b); }
   runnerOutfit(uid, b) { return selectOutfit(this, uid, b); }
   runnerSkin(uid, name) { return skinFile(this, uid, name); }
+  // The admins' Skin-Viewer (runner-admin-catalog.mjs): every entry and picture, admins only. Its
+  // base is the catalog with every release's items, before any is hidden.
+  get runnerBaseCatalog() { return this._runnerCatalog; }
+  runnerAdminCatalog(uid) { return adminRunnerCatalog(this, uid); }
+  runnerAdminSkin(uid, name) { return adminRunnerSkin(this, uid, name); }
   /** Top list of active people with a score above zero; equal scores share a rank, the earlier best comes first. */
   runnerBoard(a) {
     return rankedBoard(this, a, this.store.all('runnerScores').map(x => ({ personId: x.personId, score: x.best, at: x.bestAt })));
