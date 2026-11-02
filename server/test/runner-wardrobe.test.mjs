@@ -83,7 +83,7 @@ test('runs add their points; the reply tells how far the next crate is', t => {
   const first = play({ score: 1400, meters: 700 });
   assert.deepEqual(first.progress, {
     meters: 2800, earned: 0, opened: 0, crates: 0, previousAt: 0, nextAt: 3000, poolSize: 3, complete: false, ensembleCrates: 0, dupes: true, runMeters: 700, bonusMeters: 0, bonusOpen: false, missionMeters: 0, missionCrates: 0, eventCrates: 0,
-    packCrates: 0, packGoals: [],
+    packCrates: 0, packGoals: [], galaCrates: 0,
     unit: 'points', points: { total: 2800, base: 0, runs: 1400, bonus: 1400, missions: 0 },
     gained: 700, bonus: 700, missionBonus: 0, newCrates: 0, gainedPoints: { run: 1400, bonus: 1400, missions: 0 },
   });
@@ -445,13 +445,19 @@ test('the bundled pictures have the sizes the app accepts', () => {
     }
   }
   // The crates of the choice (runnerCrateTargets): closed and open on one 512² canvas, a 96² particle.
-  for (const t of c.crateTargets) {
-    const file = path => path && decodeURIComponent(path.slice(path.lastIndexOf('/') + 1).split('?')[0]);
+  const file = path => path && decodeURIComponent(path.slice(path.lastIndexOf('/') + 1).split('?')[0]);
+  for (const t of [...c.crateTargets, c.galaCrate]) {
     for (const [field, size] of [['image', [512, 512]], ['openImage', [512, 512]], ['fxImage', [96, 96]]]) {
       if (!t[field]) continue;
       named.add(file(t[field]));
       assert.deepEqual(pictureSize(c.files.get(file(t[field])).bytes), size, t[field]);
     }
+  }
+  // The masks of the Monatsgala.
+  assert.deepEqual(Object.keys(c.galaMasks), ['gold', 'silver', 'bronze']);
+  for (const path of Object.values(c.galaMasks)) {
+    named.add(file(path));
+    assert.deepEqual(pictureSize(c.files.get(file(path)).bytes), [256, 256], path);
   }
   // Every picture in the folder is used, and together they stay light. Disabled entries keep their
   // pictures so they can simply be switched on again.

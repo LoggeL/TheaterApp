@@ -61,6 +61,15 @@ bool cratePointsAvailable(AppController controller) =>
 bool crateTargetsAvailable(AppController controller) =>
     dupesAvailable(controller) && controller.supports('runnerCrateTargets');
 
+/// The Monatsgala (`runnerMonthlyGala`): prizes from the Monatsrangliste, the
+/// Gala-Kisten (they open with duplicates) and the masks of the winners.
+bool monthlyGalaAvailable(AppController controller) =>
+    dupesAvailable(controller) && controller.supports('runnerMonthlyGala');
+
+/// Crates bought with gage and opened at once (`runnerGageCrates`).
+bool gageCratesAvailable(AppController controller) =>
+    dupesAvailable(controller) && controller.supports('runnerGageCrates');
+
 /// What the app tells the server it knows, for every wardrobe request.
 Map<String, Object> _wardrobeFlags(AppController controller) => {
   if (roleFiguresAvailable(controller)) 'roles': true,
@@ -78,6 +87,156 @@ class EventCrate {
     eventId: textValue(json['eventId']),
     title: textValue(json['title']),
     startsAt: DateTime.tryParse(textValue(json['startsAt']))?.toLocal(),
+  );
+}
+
+/// The mask of a place on the podium of the Monatsgala.
+enum GalaTrophy {
+  gold('Goldene Maske', Color(0xFFE4AE39)),
+  silver('Silberne Maske', Color(0xFFA9B1B8)),
+  bronze('Bronzene Maske', Color(0xFFB07A45));
+
+  const GalaTrophy(this.title, this.color);
+  final String title;
+  final Color color;
+
+  /// The trophy the server names; null for none or one this app does not know.
+  static GalaTrophy? of(Object? name) =>
+      GalaTrophy.values.where((t) => t.name == name).firstOrNull;
+}
+
+/// A trophy of the own: which mask, from the gala of which month (`YYYY-MM`).
+class GalaTrophyWon {
+  const GalaTrophyWon({required this.month, required this.trophy});
+  final String month;
+  final GalaTrophy trophy;
+}
+
+/// What the wardrobe tells of the Monatsgala, all of it the person's own: the
+/// Gala-Kisten waiting, the trophies (the newest first), the month whose
+/// celebration was not shown yet, and how crate and masks look.
+class GalaState {
+  const GalaState({
+    this.crates = 0,
+    this.unseen,
+    this.trophies = const [],
+    this.crate,
+    this.masks = const {},
+  });
+  final int crates;
+  final String? unseen;
+  final List<GalaTrophyWon> trophies;
+
+  /// The Gala-Kiste's look; no target of the own crates, only its pictures.
+  final CrateTarget? crate;
+
+  /// The masks' pictures; a mask without one is drawn as a coloured icon.
+  final Map<GalaTrophy, String> masks;
+
+  factory GalaState.fromJson(JsonMap json) {
+    final masks = jsonMap(json['masks']);
+    return GalaState(
+      crates: intValue(json['crates']),
+      unseen: json['unseen'] is String ? json['unseen'] as String : null,
+      trophies: [
+        for (final t in jsonList(json['trophies']))
+          if (t is Map)
+            if (GalaTrophy.of(t['trophy']) case final trophy?)
+              GalaTrophyWon(month: textValue(t['month']), trophy: trophy),
+      ],
+      crate: json['crate'] is Map
+          ? CrateTarget.fromJson(jsonMap(json['crate']))
+          : null,
+      masks: {
+        for (final t in GalaTrophy.values)
+          if (masks[t.name] is String) t: masks[t.name] as String,
+      },
+    );
+  }
+}
+
+/// A place on the podium of the Monatsgala. Equal scores share a rank.
+class GalaPodiumEntry {
+  const GalaPodiumEntry({
+    required this.rank,
+    required this.name,
+    required this.score,
+    required this.trophy,
+    this.me = false,
+  });
+  final int rank, score;
+  final String name;
+  final GalaTrophy trophy;
+
+  /// The signed-in member's own place.
+  final bool me;
+}
+
+/// What the Monatsgala brought the member. [prize] is `gold`, `silver`,
+/// `bronze`, `climber` or `applause`; exactly one per person.
+class GalaOwnPrize {
+  const GalaOwnPrize({
+    required this.rank,
+    required this.score,
+    required this.prize,
+    this.crates = 0,
+    this.gage = 0,
+    this.trophy,
+    this.previous,
+  });
+  final int rank, score, crates, gage;
+  final String prize;
+  final GalaTrophy? trophy;
+
+  /// The Aufsteiger's best of the month before.
+  final int? previous;
+
+  factory GalaOwnPrize.fromJson(JsonMap json) => GalaOwnPrize(
+    rank: intValue(json['rank']),
+    score: intValue(json['score']),
+    prize: textValue(json['prize']),
+    crates: intValue(json['crates']),
+    gage: intValue(json['gage']),
+    trophy: GalaTrophy.of(json['trophy']),
+    previous: json['previous'] is num ? intValue(json['previous']) : null,
+  );
+}
+
+/// The latest gala as its celebration shows it: frozen on the server.
+class MonthlyGala {
+  const MonthlyGala({
+    required this.month,
+    required this.monthName,
+    this.players = 0,
+    this.podium = const [],
+    this.own,
+  });
+  final String month, monthName;
+  final int players;
+  final List<GalaPodiumEntry> podium;
+
+  /// Null for who was not on the month's list.
+  final GalaOwnPrize? own;
+
+  factory MonthlyGala.fromJson(JsonMap json) => MonthlyGala(
+    month: textValue(json['month']),
+    monthName: textValue(json['monthName']),
+    players: intValue(json['players']),
+    podium: [
+      for (final e in jsonList(json['podium']))
+        if (e is Map)
+          if (GalaTrophy.of(e['trophy']) case final trophy?)
+            GalaPodiumEntry(
+              rank: intValue(e['rank']),
+              name: textValue(e['name']),
+              score: intValue(e['score']),
+              trophy: trophy,
+              me: e['me'] == true,
+            ),
+    ],
+    own: json['own'] is Map
+        ? GalaOwnPrize.fromJson(jsonMap(json['own']))
+        : null,
   );
 }
 
@@ -552,11 +711,15 @@ class DupeRules {
     this.shinyChances = const {'costume': .03, 'ensemble': .03},
     this.tradeDupes = 5,
     this.buyDupes = 10,
+    this.crateGage,
   });
 
   /// The chance of a shine per crate kind (`costume`, `ensemble`, …).
   final Map<String, double> shinyChances;
   final int tradeDupes, buyDupes;
+
+  /// The price of a crate bought with gage; null from older servers.
+  final int? crateGage;
 
   /// The chance of a shine in a crate of [kind]; a kind not listed has
   /// the chance of the own costume crate, like on the server.
@@ -570,6 +733,9 @@ class DupeRules {
     shinyChances: _shinyChances(json['shinyChance']),
     tradeDupes: json['tradeDupes'] is num ? intValue(json['tradeDupes']) : 5,
     buyDupes: json['buyDupes'] is num ? intValue(json['buyDupes']) : 10,
+    crateGage: json['crateGage'] is num && intValue(json['crateGage']) > 0
+        ? intValue(json['crateGage'])
+        : null,
   );
 
   // One number for all kinds (older servers) or one per kind.
@@ -757,6 +923,7 @@ class RunnerProgress {
     this.missions,
     this.eventCrates = 0,
     this.packCrates = 0,
+    this.galaCrates = 0,
     this.points,
     this.gainedPoints,
   }) : runMeters = runMeters ?? meters;
@@ -777,6 +944,9 @@ class RunnerProgress {
 
   /// Set-Kisten earned through skin-pack goals (`runnerPackGoals`).
   final int packCrates;
+
+  /// Gala-Kisten waiting (`runnerMonthlyGala`).
+  final int galaCrates;
 
   /// Crate metres from Tagesmissionen in total (part of [meters]) and
   /// Missionskisten waiting (`runnerMissions`).
@@ -813,7 +983,12 @@ class RunnerProgress {
   /// All crates waiting: the own, the ensemble's, the missions' and the
   /// events'.
   int get waiting =>
-      crates + ensembleCrates + missionCrates + eventCrates + packCrates;
+      crates +
+      ensembleCrates +
+      missionCrates +
+      eventCrates +
+      packCrates +
+      galaCrates;
 
   /// Whether a crate of the own metres can be opened now.
   bool get canOpen => crates > 0 && (dupes || !complete);
@@ -859,6 +1034,7 @@ class RunnerProgress {
         : null,
     eventCrates: intValue(json['eventCrates']),
     packCrates: intValue(json['packCrates']),
+    galaCrates: intValue(json['galaCrates']),
     points: json['unit'] == 'points' && json['points'] is Map
         ? CratePoints.fromJson(jsonMap(json['points']))
         : null,
@@ -903,7 +1079,7 @@ class GainedPoints {
 }
 
 /// What a crate of the own runs can be opened as (`runnerCrateTargets`).
-enum CrateTargetKind { random, tech, play }
+enum CrateTargetKind { random, tech, play, gala }
 
 /// A crate of the own runs as the Zufallskiste, the Technik-Kiste or aimed at
 /// one play: its pool's progress ([owned] of [total], [locked] of them not to
@@ -1403,6 +1579,7 @@ class Wardrobe {
     this.packGoals = const [],
     this.uniqueFigures,
     this.crateTargets = const [],
+    this.gala = const GalaState(),
     this.gift,
     this.hiddenDefaults = const {},
     this.dupeCounts = const {},
@@ -1450,6 +1627,9 @@ class Wardrobe {
 
   /// Termin-Kisten waiting, the earliest event first (`runnerEventCrates`).
   final List<EventCrate> eventCrates;
+
+  /// The own part of the Monatsgala; empty for older servers.
+  final GalaState gala;
 
   /// Only released packs, including completed goals and their waiting crates.
   final List<PackGoal> packGoals;
@@ -1616,6 +1796,9 @@ class Wardrobe {
         for (final e in jsonList(json['eventCrates']))
           if (e is Map) EventCrate.fromJson(jsonMap(e)),
       ],
+      gala: json['gala'] is Map
+          ? GalaState.fromJson(jsonMap(json['gala']))
+          : const GalaState(),
       packGoals: [
         for (final goal in jsonList(json['packGoals']))
           if (goal is Map) PackGoal.fromJson(jsonMap(goal)),
@@ -1824,6 +2007,8 @@ String crateKey([Random? random]) {
 /// Opens a crate of the own metres, or an Ensemble-Kiste with [ensemble].
 /// With [dupes] (`runnerDupes`) the server may answer with a duplicate.
 /// [event] opens a Termin-Kiste: the one of [eventId], else the earliest.
+/// [gala] opens the earliest Gala-Kiste (`runnerMonthlyGala`).
+/// [gage] buys a crate and opens it at once (`runnerGageCrates`), also aimed.
 /// [target] aims a crate of the own runs (`runnerCrateTargets`); without it
 /// (or `random`) it is the Zufallskiste, as for older apps.
 Future<CrateOpening> openCrate(
@@ -1833,6 +2018,8 @@ Future<CrateOpening> openCrate(
   bool ensemble = false,
   bool mission = false,
   bool event = false,
+  bool gala = false,
+  bool gage = false,
   String? eventId,
   String? target,
   String? packId,
@@ -1845,10 +2032,17 @@ Future<CrateOpening> openCrate(
       if (ensemble) 'crate': 'ensemble',
       if (mission) 'crate': 'mission',
       if (event) 'crate': 'event',
+      if (gala) 'crate': 'gala',
+      if (gage) 'crate': 'gage',
       if (packId != null) 'crate': 'pack',
       'packId': ?packId,
       if (event && eventId != null) 'eventId': eventId,
-      if (target != null && !ensemble && !mission && !event && packId == null)
+      if (target != null &&
+          !ensemble &&
+          !mission &&
+          !event &&
+          !gala &&
+          packId == null)
         'target': target,
       ..._wardrobeFlags(controller),
     },
@@ -1914,6 +2108,24 @@ Future<Wardrobe> markEnsembleSeen(AppController controller, num km) async =>
         '/games/runner/ensemble/seen',
         method: 'PUT',
         body: {'km': km, ..._wardrobeFlags(controller)},
+      ),
+    );
+
+/// The latest Monatsgala; null before the first one.
+Future<MonthlyGala?> loadGala(AppController controller) async {
+  final data = await controller.remote('/games/runner/gala');
+  return data['gala'] is Map
+      ? MonthlyGala.fromJson(jsonMap(data['gala']))
+      : null;
+}
+
+/// The celebration of the Monatsgala [month] was shown.
+Future<Wardrobe> markGalaSeen(AppController controller, String month) async =>
+    Wardrobe.fromJson(
+      await controller.remote(
+        '/games/runner/gala/seen',
+        method: 'PUT',
+        body: {'month': month, ..._wardrobeFlags(controller)},
       ),
     );
 

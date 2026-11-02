@@ -29,6 +29,8 @@ Future<Wardrobe?> showCrateOpening(
   bool ensemble = false,
   bool mission = false,
   bool event = false,
+  bool gala = false,
+  bool gage = false,
   EventCrate? eventCrate,
   PackGoal? packGoal,
   CrateTarget? target,
@@ -45,6 +47,8 @@ Future<Wardrobe?> showCrateOpening(
       ensemble: ensemble,
       mission: mission,
       event: event,
+      gala: gala,
+      gage: gage,
       eventCrate: eventCrate,
       packGoal: packGoal,
       target: target,
@@ -74,6 +78,8 @@ class CrateOpeningPage extends StatefulWidget {
     this.ensemble = false,
     this.mission = false,
     this.event = false,
+    this.gala = false,
+    this.gage = false,
     this.eventCrate,
     this.packGoal,
     this.target,
@@ -101,6 +107,13 @@ class CrateOpeningPage extends StatefulWidget {
   /// A Termin-Kiste: [eventCrate] if one was chosen, else the earliest.
   final bool event;
   final EventCrate? eventCrate;
+
+  /// A Gala-Kiste of the Monatsgala, the earliest waiting.
+  final bool gala;
+
+  /// A crate bought with gage: each one is paid and confirmed on its own, so
+  /// it offers no "Nächste Kiste".
+  final bool gage;
 
   /// A contributor reward restricted to this release's skin set.
   final PackGoal? packGoal;
@@ -145,6 +158,10 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   /// The target of the crate opening now; "Nächste Kiste" may choose another.
   late CrateTarget? _target = _own ? widget.target : null;
 
+  /// The crate with a look of its own: it opens its own way before the reel.
+  CrateTarget? get _look =>
+      _target ?? (widget.gala ? _wardrobe.gala.crate : null);
+
   // Keep the key after a failed reply: retrying must return this opening,
   // even if the server already consumed its crate before the connection failed.
   String _openingKey = crateKey();
@@ -156,6 +173,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
       !widget.ensemble &&
       !widget.mission &&
       !widget.event &&
+      !widget.gala &&
       widget.packGoal == null;
   bool _changed = false, _wearing = false;
   String? _error;
@@ -202,6 +220,8 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                 ensemble: widget.ensemble,
                 mission: widget.mission,
                 event: widget.event,
+                gala: widget.gala,
+                gage: widget.gage,
                 eventId: _eventCrate?.eventId,
                 target: _target?.id,
                 packId: widget.packGoal?.releaseId,
@@ -211,7 +231,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
       _wardrobe = opening.wardrobe;
       _changed = true;
       _eventCrate = null;
-      if (_target != null) {
+      if (_look != null) {
         // The crate opens its own way first, then the reel runs.
         widget.sound.play(RunnerSfx.whoosh);
         setState(() {
@@ -381,7 +401,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
           behavior: HitTestBehavior.opaque,
           onTap: _skip,
           child: switch (_phase) {
-            _Phase.opening when _target != null => _unboxing(context, false),
+            _Phase.opening when _look != null => _unboxing(context, false),
             _Phase.unboxing => _unboxing(context, true),
             _Phase.opening => _opening(context),
             _Phase.failed => _failed(context),
@@ -401,6 +421,8 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         Text(
           widget.packGoal != null
               ? 'Die Set-Kiste geht auf …'
+              : widget.gala
+              ? 'Die Gala-Kiste geht auf …'
               : widget.event
               ? 'Die Termin-Kiste geht auf …'
               : widget.mission
@@ -417,7 +439,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   /// A crate of the own runs in its own look: wobbling while the server
   /// draws, then [opening] it its own way (see [CrateMotion]).
   Widget _unboxing(BuildContext context, bool opening) {
-    final target = _target!;
+    final target = _look!;
     final quick = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     final size = min(220.0, MediaQuery.sizeOf(context).shortestSide * .5);
     return Center(
@@ -499,6 +521,8 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                       ? 'Aus der Kiste:'
                       : widget.packGoal != null
                       ? 'Set-Kiste · ${result.outcome.packName ?? widget.packGoal!.name}'
+                      : widget.gala
+                      ? 'Gala-Kiste'
                       : widget.event
                       ? eventCrateTitle(result.outcome.event ?? _eventCrate)
                       : widget.mission
@@ -564,8 +588,12 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         _wardrobe.worn(item.kind)?.id == item.id &&
         (role == null || _wardrobe.variantOf(item)?.id == role.id);
     final p = _wardrobe.progress;
-    final left = widget.packGoal != null
+    final left = widget.gage
+        ? 0
+        : widget.packGoal != null
         ? _wardrobe.packGoal(widget.packGoal!.releaseId)?.crates ?? 0
+        : widget.gala
+        ? _wardrobe.gala.crates
         : widget.event
         ? _wardrobe.eventCrates.length
         : widget.mission
@@ -579,6 +607,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
             widget.ensemble ||
             widget.mission ||
             widget.event ||
+            widget.gala ||
             p.dupes ||
             !p.complete);
     final line = outcome.type == 'new' && outcome.shiny

@@ -5,6 +5,8 @@ import '../../../app/theme/stage_theme.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../data/leaderboard_api.dart';
 import '../data/runner_menu_preferences.dart';
+import '../data/wardrobe_api.dart' show GalaTrophy;
+import 'gala.dart';
 
 final _number = NumberFormat.decimalPattern('de');
 
@@ -471,6 +473,7 @@ class RunnerRankingCard extends StatefulWidget {
     this.collectionLoading = false,
     this.collectionError,
     this.onRetryCollection,
+    this.maskOf,
   });
   final RunnerBoardView view;
   final ValueChanged<RunnerBoardView> onView;
@@ -500,6 +503,9 @@ class RunnerRankingCard extends StatefulWidget {
   final bool collectionLoading;
   final String? collectionError;
   final VoidCallback? onRetryCollection;
+
+  /// The mask of the last Monatsgala beside a name; a coloured icon without.
+  final Widget Function(GalaTrophy trophy)? maskOf;
 
   /// Rows before "Alle anzeigen".
   static const shortList = 10;
@@ -724,6 +730,10 @@ class _RunnerRankingCardState extends State<RunnerRankingCard> {
           name: e.name,
           own: mine(e),
           trailing: _number.format(e.score),
+          mask: switch (e.trophy) {
+            final t? => widget.maskOf?.call(t) ?? GalaMask(trophy: t, size: 20),
+            null => null,
+          },
         ),
       ),
       if (own == null)
@@ -794,11 +804,15 @@ class _RankRow extends StatelessWidget {
     required this.trailing,
     this.shiny = 0,
     this.fraction,
+    this.mask,
   });
   final int rank, shiny;
   final String name, trailing;
   final bool own;
   final double? fraction;
+
+  /// The mask of the last Monatsgala, beside the name.
+  final Widget? mask;
 
   static const _medals = {
     1: Color(0xFFE4AE39),
@@ -851,11 +865,18 @@ class _RankRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  name,
-                  style: style,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        style: style,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (mask != null) ...[const SizedBox(width: 6), mask!],
+                  ],
                 ),
                 if (fraction != null)
                   Padding(

@@ -22,6 +22,7 @@ import '../data/score_outbox.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
 import 'ensemble_card.dart' show EnsembleStrip;
+import 'gala.dart';
 import 'missions_card.dart';
 import 'runner_menu.dart';
 import 'stage_runner_art.dart';
@@ -363,6 +364,17 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       if (!mounted || _wardrobe != null) return;
       setState(() => _wardrobe = w);
       await _dress();
+      if (mounted && _phase == _Phase.intro) {
+        await celebrateGala(
+          context,
+          controller: controller,
+          wardrobe: w,
+          sound: _sound,
+          onChanged: (next) {
+            if (mounted) setState(() => _wardrobe = next);
+          },
+        );
+      }
     } catch (e) {
       if (kDebugMode) debugPrint('Bühnenlauf: Garderobe nicht geladen: $e');
     }
@@ -1130,6 +1142,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     collectionLoading: _loadingCollection,
     collectionError: _collectionError,
     onRetryCollection: _loadCollection,
+    maskOf: (trophy) => GalaMask(
+      trophy: trophy,
+      path: _wardrobe?.gala.masks[trophy],
+      controller: controller,
+      size: 20,
+    ),
   );
 
   /// The stage's painter, kept across rebuilds (its laid-out texts and

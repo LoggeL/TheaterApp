@@ -15,15 +15,20 @@ class LeaderboardEntry {
     required this.personId,
     required this.name,
     required this.score,
+    this.trophy,
   });
   final int rank, personId, score;
   final String name;
+
+  /// The mask of the last Monatsgala, until the next one; null for the others.
+  final GalaTrophy? trophy;
 
   factory LeaderboardEntry.fromJson(JsonMap json) => LeaderboardEntry(
     rank: intValue(json['rank']),
     personId: intValue(json['personId']),
     name: textValue(json['name']),
     score: intValue(json['score']),
+    trophy: GalaTrophy.of(json['trophy']),
   );
 }
 

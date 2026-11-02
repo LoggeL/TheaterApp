@@ -14,9 +14,17 @@ import { berlinParts, fromBerlin } from './event-series.mjs';
 //   are not known; those people join the month's list with their next run.
 // - Same rules as the all-time list: active members with a score above zero, by their current
 //   name; equal scores share a rank, the earlier best comes first.
+// - A month's result stays: the second source of `monthEntries` is the all-time record, whose
+//   `bestAt` leaves a month with the next all-time best. That run therefore writes the old best as
+//   the record of its month if that record does not hold it yet, or whoever had no other run in the
+//   month (before these records began) would drop out of it, and out of the Monatsgala.
+// - A run belongs to the month the server counts it in (`runnerScore`: its clock when the result
+//   arrives, no time from the client), so no late result can reach a month already over.
+// - The winners of the last Monatsgala (runner-gala.mjs) carry their `trophy` in both lists.
 
 const fail = (status, message, code) => { throw new AppError(status, message, code); };
 export const monthScoresKind = 'runnerMonthScores';
+export const monthAwardsKind = 'runnerMonthAwards';
 const pad = n => String(n).padStart(2, '0');
 
 /** `YYYY-MM` of the Europe/Berlin calendar month of an instant. */
@@ -35,10 +43,19 @@ export function monthBounds(month) {
  */
 export function recordMonthRun(t, personId, score, when, scores) {
   const month = berlinMonth(when), id = `${month}:${personId}`;
+  keepPastBest(t, personId, month, score, scores);
   const seeded = scores?.bestAt && scores.best > 0 && berlinMonth(scores.bestAt) === month ? { best: scores.best, bestAt: scores.bestAt } : { best: 0, bestAt: null };
   const old = t.store.get(monthScoresKind, id) ?? { ...seeded, rounds: 0 };
   const improved = score > (old.best ?? 0);
   return t.store.put(monthScoresKind, id, { personId, month, best: improved ? score : old.best, bestAt: improved ? when : old.bestAt, rounds: (old.rounds ?? 0) + 1, lastPlayedAt: when });
+}
+
+/** Before a new all-time best moves `bestAt` on: the old best stays its month's (see above). */
+function keepPastBest(t, personId, month, score, scores) {
+  if (!scores?.bestAt || !(scores.best > 0) || score <= scores.best) return;
+  const past = berlinMonth(scores.bestAt), id = `${past}:${personId}`, record = t.store.get(monthScoresKind, id);
+  if (past === month || record?.best >= scores.best) return;
+  t.store.put(monthScoresKind, id, { personId, month: past, best: scores.best, bestAt: scores.bestAt, rounds: record?.rounds ?? 0, lastPlayedAt: record?.lastPlayedAt ?? scores.bestAt });
 }
 
 /** Removes the person's month records (with the person). */
@@ -47,20 +64,29 @@ export function forgetMonthScores(s, personId) {
 }
 
 /**
- * The list of [entries] (`{ personId, score, at }`) for account [a]: active members with a score
- * above zero, equal scores share a rank, the earlier best comes first.
+ * All of [entries] (`{ personId, score, at }`) on the list: active members with a score above zero,
+ * equal scores share a rank, the earlier best comes first.
  */
-export function rankedBoard(t, a, entries) {
+export function rankedPlayers(t, entries) {
   const members = new Map(t.store.all('members').filter(m => m.active === true).map(m => [m.id, m]));
-  const ranked = entries.filter(x => x.score > 0 && members.has(x.personId))
+  return entries.filter(x => x.score > 0 && members.has(x.personId))
     .sort((x, y) => y.score - x.score || String(x.at).localeCompare(String(y.at)) || x.personId - y.personId)
     .map((x, i, all) => ({ rank: all.findIndex(o => o.score === x.score) + 1, personId: x.personId, name: members.get(x.personId).name, score: x.score, achievedAt: x.at }));
+}
+
+/** The frozen result of the last Monatsgala (runner-gala.mjs), or null; ids are `YYYY-MM`. */
+export const latestGala = t => t.store.all(monthAwardsKind).at(-1) ?? null;
+
+/** The list for account [a]; the winners of the last gala with their `trophy`, until the next one. */
+export function rankedBoard(t, a, entries) {
+  const trophies = new Map((latestGala(t)?.placements ?? []).filter(x => x.trophy).map(x => [x.personId, x.trophy]));
+  const ranked = rankedPlayers(t, entries).map(x => trophies.has(x.personId) ? { ...x, trophy: trophies.get(x.personId) } : x);
   const own = ranked.find(x => x.personId === a.personId) ?? null;
   return { players: ranked.length, top: ranked.slice(0, stageRunner.leaderboardSize), own };
 }
 
 /** Each person's best of [month]: their month record, or an all-time best set in that month. */
-function monthEntries(t, month) {
+export function monthEntries(t, month) {
   const best = new Map();
   const take = (personId, score, at) => {
     const cur = best.get(personId);

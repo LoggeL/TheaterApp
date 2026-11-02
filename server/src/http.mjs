@@ -206,6 +206,8 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (route === '/games/runner/missions/reroll' && req.method === 'POST') return json(res, 200, theater.runnerMissionReroll(identity.uid, req.headers['idempotency-key'], body));
       if (route === '/games/runner/ensemble/seen' && req.method === 'PUT') return json(res, 200, theater.runnerEnsembleSeen(identity.uid, body));
       if (route === '/games/runner/unique/seen' && req.method === 'PUT') return json(res, 200, theater.runnerUniqueSeen(identity.uid, body));
+      if (route === '/games/runner/gala' && req.method === 'GET') return json(res, 200, theater.runnerGala(identity.uid));
+      if (route === '/games/runner/gala/seen' && req.method === 'PUT') return json(res, 200, theater.runnerGalaSeen(identity.uid, body));
       if (route === '/games/runner/outfit' && req.method === 'PUT') return json(res, 200, theater.runnerOutfit(identity.uid, body));
       const skin = route.match(/^\/games\/runner\/skins\/([^/]+)$/);
       if (skin && req.method === 'GET') {

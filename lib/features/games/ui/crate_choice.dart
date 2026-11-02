@@ -45,6 +45,7 @@ String crateTargetSubtitle(CrateTarget t) => switch (t.kind) {
     'Alles aus dem Fundus, auch Bühnenbilder und Effekte',
   CrateTargetKind.tech => 'Nur die Technik',
   CrateTargetKind.play => 'Nur Rollen aus ${t.title}',
+  CrateTargetKind.gala => 'Alles aus dem Fundus',
 };
 
 /// The choice: one card per target, the Zufallskiste first, with picture,
@@ -454,7 +455,8 @@ class CrateFallback extends StatelessWidget {
               switch (target.kind) {
                 CrateTargetKind.random => Icons.casino_outlined,
                 CrateTargetKind.tech => Icons.build_outlined,
-                CrateTargetKind.play => Icons.theater_comedy_outlined,
+                CrateTargetKind.play ||
+                CrateTargetKind.gala => Icons.theater_comedy_outlined,
               },
               size: 16,
               color: Colors.black87,

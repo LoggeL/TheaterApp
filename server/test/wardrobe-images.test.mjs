@@ -22,6 +22,7 @@ const kinds = [
   // with its lid above, and a small sprite of the particles they throw.
   { name: 'crate particles', test: /^crate-.+-fx\.webp$/, width: 96, height: 96, alpha: true, budget: 8 << 10 },
   { name: 'crate', test: /^crate-.+\.webp$/, width: 512, height: 512, alpha: true, budget: 72 << 10 },
+  { name: 'gala mask', test: /^trophy-mask-.+\.webp$/, width: 256, height: 256, alpha: true, budget: 24 << 10 },
 ];
 
 /** The chunks of a WebP file by tag and its canvas size. */

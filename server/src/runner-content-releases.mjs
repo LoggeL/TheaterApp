@@ -50,7 +50,8 @@ export function releasedCatalog(base, releases, at) {
   const targetItems = new Map([...base.targetItems].map(([id, pool]) => [id, pool.filter(x => byId.has(x.id))]));
   const crateTargets = base.crateTargets.filter(x => x.id === 'random' || targetItems.get(x.id)?.length);
   for (const id of targetItems.keys()) if (!crateTargets.some(x => x.id === id)) targetItems.delete(id);
-  const allowedFiles = filesOf([...items, ...crateTargets]);
+  // The Gala-Kiste and the masks belong to no release: their pictures stay whatever is hidden.
+  const allowedFiles = filesOf([...items, ...crateTargets, base.galaCrate, ...Object.values(base.galaMasks).map(image => ({ image }))]);
   const restrictedFiles = map => new Map([...map].map(([name, ids]) => [name, ids.filter(id => byId.has(id))]).filter(([name, ids]) => allowedFiles.has(name) && ids.length));
   const baseOf = new Map([...base.baseOf].filter(([id, parent]) => byId.has(id) && byId.has(parent)));
   const rolesOf = new Map();

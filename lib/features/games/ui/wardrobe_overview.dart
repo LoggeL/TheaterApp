@@ -249,6 +249,9 @@ class CollectionSummaryCard extends StatelessWidget {
     this.onCrates,
     this.gage,
     this.onTrade,
+    this.crateOffer,
+    this.crateMissing,
+    this.onBuyCrate,
   });
   final WardrobeOverview overview;
   final int waitingCrates;
@@ -257,6 +260,11 @@ class CollectionSummaryCard extends StatelessWidget {
   /// Shown with duplicates (`runnerDupes`) only.
   final String? gage;
   final VoidCallback? onTrade;
+
+  /// A crate for gage (`runnerGageCrates`): the offer, what the balance lacks
+  /// (then it stays disabled, like while [onBuyCrate] is null).
+  final String? crateOffer, crateMissing;
+  final VoidCallback? onBuyCrate;
 
   @override
   Widget build(BuildContext context) {
@@ -459,6 +467,27 @@ class CollectionSummaryCard extends StatelessWidget {
                   ),
               ],
             ),
+            if (crateOffer case final offer?) ...[
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonalIcon(
+                  key: const ValueKey('wardrobe-buy-crate'),
+                  onPressed: crateMissing == null ? onBuyCrate : null,
+                  icon: const Icon(Icons.shopping_bag_outlined),
+                  label: Text(offer),
+                ),
+              ),
+              if (crateMissing case final missing?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    missing,
+                    key: const ValueKey('wardrobe-buy-crate-missing'),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+            ],
             if (overview.gift case final gift?) ...[
               const SizedBox(height: 6),
               Row(

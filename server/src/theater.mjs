@@ -7,11 +7,12 @@ import { feedbackList, feedbackTicketsMigrationId, forgetFeedbackAccount, forget
 import { checkRunStats, missions, rerollMission } from './runner-missions.mjs';
 import { findRound, finishRound, startRound } from './runner-rounds.mjs';
 import { autoCheckins, eventCrateNotice, forgetEventCrates, settleCheckinCrate } from './runner-event-crates.mjs';
-import { buyItem, bundledCatalog, collectionBoard, ensembleSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
+import { buyItem, bundledCatalog, collectionBoard, ensembleSeen, galaSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
 import { bundledContentReleases, parseContentReleases, releasedCatalog, releaseIsActive } from './runner-content-releases.mjs';
 import { packGoalsView } from './runner-pack-goals.mjs';
 import { adminRunnerCatalog, adminRunnerSkin } from './runner-admin-catalog.mjs';
 import { forgetMonthScores, periodBoard, rankedBoard, recordMonthRun } from './runner-monthly.mjs';
+import { forgetGala, galaView } from './runner-gala.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { archiveForm, attachForm, checkFormSubmissionOpen, forgetFormGenerations, forgetFormSubmissions, formStatus, saveForm, submitForm, withdrawForm } from './forms.mjs';
 
@@ -44,7 +45,7 @@ export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
 export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink', 'runnerMonthlyGala', 'runnerGageCrates']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -493,6 +494,9 @@ export class Theater {
   runnerBuy(uid, requestId, b) { return buyItem(this, uid, requestId, b); }
   runnerEnsembleSeen(uid, b) { return ensembleSeen(this, uid, b); }
   runnerUniqueSeen(uid, b) { return uniqueSeen(this, uid, b); }
+  // The Monatsgala lives in runner-gala.mjs.
+  runnerGala(uid) { return galaView(this, uid); }
+  runnerGalaSeen(uid, b) { return galaSeen(this, uid, b); }
   // Tagesmissionen live in runner-missions.mjs.
   runnerMissions(uid) { return missions(this, uid); }
   runnerMissionReroll(uid, requestId, b) { return rerollMission(this, uid, requestId, b); }
@@ -1465,6 +1469,7 @@ export class Theater {
     forgetFormGenerations(s, marker => marker.personId === personId);
     s.delete('runnerScores', personId); s.delete('runnerRounds', personId); s.delete('runnerProgress', personId); s.delete('runnerMissions', personId);
     forgetMonthScores(s, personId);
+    forgetGala(s, personId);
     // Keep anonymous shared progress, remove the deleted member's personal set-goal records.
     for (const x of s.all('runnerPackContributions').filter(x => x.personId === personId)) s.delete('runnerPackContributions', `${x.releaseId}:${personId}`);
     forgetEventCrates(s, personId);

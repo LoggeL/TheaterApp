@@ -14,6 +14,7 @@ import 'crate_opening.dart';
 import 'event_crates_card.dart';
 import 'ensemble_card.dart';
 import 'figure_detail.dart';
+import 'gala.dart';
 import 'missions_card.dart';
 import 'pack_goals_card.dart';
 import 'stage_runner_art.dart';
@@ -236,6 +237,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   bool get _bonus => dailyBonusAvailable(controller);
   bool get _missions => missionsAvailable(controller);
   bool get _eventCrates => eventCratesAvailable(controller);
+  bool get _gala => monthlyGalaAvailable(controller);
+  bool get _gageCrates => gageCratesAvailable(controller);
   bool get _packs => packGoalsAvailable(controller);
   bool get _unique => uniqueFiguresAvailable(controller);
   bool get _targets => crateTargetsAvailable(controller);
@@ -247,6 +250,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         (_missions ? w.progress.missionCrates : 0) +
         (_ensemble && w.ensemble != null ? w.progress.ensembleCrates : 0) +
         (_eventCrates ? w.eventCrates.length : 0) +
+        (_gala ? w.gala.crates : 0) +
         (_packs ? w.packCrates : 0);
   }
 
@@ -307,6 +311,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   Future<void> _open({
     bool ensemble = false,
     bool mission = false,
+    bool gala = false,
+    bool gage = false,
     EventCrate? event,
     PackGoal? packGoal,
     CrateTarget? target,
@@ -321,6 +327,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       art: _base,
       ensemble: ensemble,
       mission: mission,
+      gala: gala,
+      gage: gage,
       event: event != null,
       eventCrate: event,
       packGoal: packGoal,
@@ -683,6 +691,29 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     await _deal(() => buyItem(controller, item));
   }
 
+  /// A crate for gage: the same choice as a crate of the own runs, then the
+  /// confirmation every purchase has, then it opens at once.
+  Future<void> _buyCrate(int price) async {
+    final w = _wardrobe!;
+    CrateTarget? target;
+    if (_targets && w.crateTargets.isNotEmpty) {
+      target = await chooseCrateTarget(
+        context,
+        controller: controller,
+        wardrobe: w,
+        art: _base,
+      );
+      if (target == null || !mounted) return;
+    }
+    final ok = await _confirm(
+      'Kiste kaufen?',
+      '${target?.name ?? 'Eine Kiste'} für ${gageText(price)}. Danach bleiben ${gageText(w.gage - price)}.',
+      'Für ${gageText(price)} kaufen',
+    );
+    if (!ok || !mounted) return;
+    await _open(gage: true, target: target);
+  }
+
   /// The Tauschvertrag: one of the offered trades, then a confirmation.
   Future<void> _trade() async {
     final w = _wardrobe!;
@@ -910,6 +941,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         : kinds.firstOrNull;
     final overview = WardrobeOverview.of(w, unique: _unique);
     final plays = overview.plays;
+    final price = _gageCrates ? w.catalog.dupes.crateGage : null;
     return CustomScrollView(
       key: const PageStorageKey('wardrobe-costumes'),
       slivers: [
@@ -922,6 +954,15 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               onCrates: () => DefaultTabController.of(context).animateTo(1),
               gage: _dupes ? gageText(w.gage) : null,
               onTrade: _dupes && !_busy ? _trade : null,
+              crateOffer: price == null
+                  ? null
+                  : 'Kiste kaufen · ${gageText(price)}',
+              crateMissing: price != null && w.gage < price
+                  ? 'Dir fehlen noch ${gageText(price - w.gage)}.'
+                  : null,
+              onBuyCrate: price == null || _busy
+                  ? null
+                  : () => _buyCrate(price),
             ),
           ),
         ),
@@ -1004,6 +1045,8 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               ('Ensemble-Kiste', 'Ensemble-Kisten', w.progress.ensembleCrates),
             if (_eventCrates && w.eventCrates.isNotEmpty)
               ('Termin-Kiste', 'Termin-Kisten', w.eventCrates.length),
+            if (_gala && w.gala.crates > 0)
+              ('Gala-Kiste', 'Gala-Kisten', w.gala.crates),
             if (_packs && w.packCrates > 0)
               ('Set-Kiste', 'Set-Kisten', w.packCrates),
           ],
@@ -1025,6 +1068,15 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
           EventCratesCard(
             crates: w.eventCrates,
             onOpen: _busy ? null : (e) => _open(event: e),
+          ),
+        ],
+        if (_gala && (w.gala.crates > 0 || w.gala.trophies.isNotEmpty)) ...[
+          const SizedBox(height: 12),
+          GalaVitrineCard(
+            gala: w.gala,
+            controller: controller,
+            art: _base,
+            onOpen: _busy ? null : () => _open(gala: true),
           ),
         ],
         if (_missions) ...[
@@ -1108,6 +1160,14 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
             icon: Icons.event_available,
             open: () => _open(event: event),
           ),
+      if (_gala && w.gala.crates > 0)
+        (
+          id: 'gala',
+          label:
+              'Gala-Kiste öffnen${w.gala.crates > 1 ? ' (${w.gala.crates})' : ''}',
+          icon: Icons.theater_comedy_outlined,
+          open: () => _open(gala: true),
+        ),
       if (_packs)
         for (final goal in w.packGoals)
           if (goal.crates > 0)
@@ -1960,6 +2020,7 @@ bool crateWaiting(Wardrobe? w) =>
         w.progress.ensembleCrates > 0 ||
         w.progress.missionCrates > 0 ||
         w.eventCrates.isNotEmpty ||
+        w.gala.crates > 0 ||
         w.packCrates > 0);
 
 /// A small "Garderobe" button with the number of waiting crates.

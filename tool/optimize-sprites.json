@@ -466,6 +466,9 @@
   "server/src/wardrobe/images/collectibles-nexus.webp": {"sha256": "584b6ff15a43bacd97a0378c8f1ad2e9ab4a996744e86152bf41b95d444dcd99", "before": 19922, "method": "alpha 4", "ssim": 0.99997},
   "server/src/wardrobe/images/collectibles-romeo-julia.webp": {"sha256": "e5538df3fbb59d02d0fa788b874ccd3e77165178b654af96f372abc7980c653d", "before": 18824, "method": "alpha 4", "ssim": 0.99995},
   "server/src/wardrobe/images/collectibles-schicksal.webp": {"sha256": "623ee063cd55f452d85ed13faffcbd3c07453b6a6387b09f1c13c748835d4e63", "before": 22642, "method": "alpha 4", "ssim": 0.99994},
+  "server/src/wardrobe/images/crate-gala-fx.webp": {"sha256": "e5383010430b9482d8a527a5ffd8682b0837902ab4b7dda0895ae89a98964dd6", "before": 4690, "method": "alpha 4", "ssim": 0.9999},
+  "server/src/wardrobe/images/crate-gala-open.webp": {"sha256": "3ef94167be15cec3d03e297f0a7a5b61ff6ee3173f2d037fcde1aa37c146eb53", "before": 63530, "method": "alpha 4", "ssim": 0.9999},
+  "server/src/wardrobe/images/crate-gala.webp": {"sha256": "73a4b81a53021338920a81cc0d935a163d92028a6ed815f5e6009d38e11d9ba7", "before": 58180, "method": "alpha 4", "ssim": 0.99994},
   "server/src/wardrobe/images/crate-play-anno-1146-fx.webp": {"sha256": "bec3cfee2f3272a77c50910991e7326ba61107da6ee3f2c30e06e4023e7b2835", "before": 4282, "method": "unchanged"},
   "server/src/wardrobe/images/crate-play-anno-1146-open.webp": {"sha256": "9799325986f0bf9ca9c37cdb8507bffec14c9ecd9b2ab1676ef15954e3d13351", "before": 47058, "method": "unchanged"},
   "server/src/wardrobe/images/crate-play-anno-1146.webp": {"sha256": "a703e8e891ae82cfe26b395f2bcc7df31a31ec25d64bad560a2daed2e72813d7", "before": 39588, "method": "unchanged"},
@@ -491,5 +494,8 @@
   "server/src/wardrobe/images/obstacles-hell.webp": {"sha256": "0f656a03ea1f7a34d6e5b0df6e071e0e38d58f3131d9f21d70784bb70078528b", "before": 90842, "method": "alpha 4", "ssim": 0.99998},
   "server/src/wardrobe/images/obstacles-nexus.webp": {"sha256": "9316978c2a33c53d008edaed3af1522956c536b4f1b4b07ef638d7ad1b282915", "before": 72392, "method": "alpha 4", "ssim": 0.99997},
   "server/src/wardrobe/images/obstacles-romeo-julia.webp": {"sha256": "cab6452f94db5e848c4c1aceea90d19be77713070785be750b5dc2b4be82edda", "before": 91814, "method": "alpha 4", "ssim": 0.99998},
-  "server/src/wardrobe/images/obstacles-schicksal.webp": {"sha256": "415184490d1ac3553ada795faef794389d493058542ed540a25a6af897e084cd", "before": 76888, "method": "alpha 4", "ssim": 0.99998}
+  "server/src/wardrobe/images/obstacles-schicksal.webp": {"sha256": "415184490d1ac3553ada795faef794389d493058542ed540a25a6af897e084cd", "before": 76888, "method": "alpha 4", "ssim": 0.99998},
+  "server/src/wardrobe/images/trophy-mask-bronze.webp": {"sha256": "bdb07497475453a0f3ef842b3eac64bbc4be37279e02f3ef14d2471115189da2", "before": 21122, "method": "alpha 4", "ssim": 0.99993},
+  "server/src/wardrobe/images/trophy-mask-gold.webp": {"sha256": "8f1f20e37e99111dfb9a9310a8b58947e1f542ad3d4818bc742908f84c9fe634", "before": 21442, "method": "alpha 4", "ssim": 0.99991},
+  "server/src/wardrobe/images/trophy-mask-silver.webp": {"sha256": "e92e4809230e656dafd0a8137ad497998ff9848477204330e990f5eabb118650", "before": 18734, "method": "lossy q92", "ssim": 0.99838}
 }
