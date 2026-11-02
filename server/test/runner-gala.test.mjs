@@ -52,9 +52,14 @@ function setup(t, { start = '2026-10-29T12:00:00Z', pushEnabled = true, random =
   };
   const open = (uid, body = {}, id = `open-${++n}`) => app.runnerOpenCrate(uid, id, { dupes: true, crate: 'gala', roles: true, ...body });
   const gala = month => store.get(monthAwardsKind, month);
-  const jobs = () => store.all('pushJobs').filter(j => j.title === 'Der Vorhang hebt sich');
+  /** The push and e-mail jobs [fn] adds; setting up accounts queues its own. */
+  const queuedBy = fn => {
+    const ids = kind => new Set(store.all(kind).map(j => j.id)), push = ids('pushJobs'), email = ids('emailJobs');
+    fn();
+    return [...store.all('pushJobs').filter(j => !push.has(j.id)), ...store.all('emailJobs').filter(j => !email.has(j.id))];
+  };
   const places = month => gala(month).placements.map(x => [x.personId, x.rank, x.prize, x.crates, x.gage]);
-  return { store, app, make, clock, action, person, at, play, runs, open, gala, jobs, places };
+  return { store, app, make, clock, action, person, at, play, runs, open, gala, queuedBy, places };
 }
 
 const four = s => ['anna', 'ben', 'cleo', 'dora'].map(uid => s.person(uid));
@@ -108,32 +113,56 @@ test('repeated runs and a restart give nothing twice; later changes leave the ga
   assert.equal(JSON.stringify(s.gala('2026-10')), frozen);
   assert.deepEqual(s.app.runnerWardrobe('dora').gage, { balance: 50, earned: 50 });
   assert.equal(s.app.runnerWardrobe('anna').gala.crates, 3);
-  assert.equal(s.jobs().length, 1);
 });
 
-test('a server down at the opening catches up, every month once and in order, one push for the newest', t => {
-  const s = setup(t); four(s);
+test('a server down at the opening catches up, every month once and in order', t => {
+  const s = setup(t), [anna] = four(s);
   s.runs({ anna: 400, ben: 300 });
   s.at('2026-11-20T10:00:00Z'); s.runs({ cleo: 500, dora: 450 });
   s.at('2027-01-03T02:00:00Z'); settleGala(s.app);
   assert.deepEqual([s.gala('2026-10')?.month, s.gala('2026-11')?.month, s.gala('2026-12')?.month], ['2026-10', '2026-11', '2026-12']);
   assert.equal(s.gala('2026-12').placements.length, 0);
-  // The newest month had no players: no push at all, and none for the months before.
-  assert.equal(s.jobs().length, 0);
+  assert.deepEqual(s.gala('2026-10').placements.map(x => x.personId).slice(0, 1), [anna]);
   assert.equal(s.gala('2026-10').closedAt, '2027-01-03T02:00:00.000Z');
 });
 
-test('catching up pushes once, for the newest month', t => {
+test('closing a month queues no push and no e-mail, also with push on and when catching up several months', async t => {
+  const s = setup(t, { pushEnabled: true }); four(s);
+  for (const uid of ['anna', 'ben', 'cleo', 'dora']) s.store.put('devices', uid, { id: uid, uid, token: `token-${uid}`, platform: 'android' });
+  s.runs({ anna: 400, ben: 300 });
+  // One month on its own, at the opening, and again later: nothing queued.
+  assert.deepEqual(s.queuedBy(() => { s.at(octoberOpens); settleGala(s.app); settleGala(s.app); }), []);
+  // Two months caught up at once, the newest with players: still nothing.
+  s.at('2026-11-20T10:00:00Z'); s.runs({ cleo: 500, dora: 450 });
+  s.at('2026-12-20T10:00:00Z'); s.runs({ anna: 200 });
+  assert.deepEqual(s.queuedBy(() => { s.at('2027-01-03T12:00:00Z'); settleGala(s.app); }), []);
+  // After a restart on the same database neither.
+  assert.deepEqual(s.queuedBy(() => settleGala(s.make())), []);
+  for (const month of ['2026-10', '2026-11', '2026-12']) {
+    assert.ok(s.gala(month).placements.length > 0);
+    assert.equal('pushedAt' in s.gala(month), false);
+    assert.equal('recipients' in s.gala(month), false);
+  }
+  // The delivery has nothing to send for the gala either.
+  for (const job of s.store.all('pushJobs')) s.store.delete('pushJobs', job.id);
+  const sent = [];
+  await deliverPush(s.app, { sendEachForMulticast: async m => { sent.push(...m.tokens); return { responses: m.tokens.map(() => ({ success: true })) }; } });
+  assert.deepEqual(sent, []);
+});
+
+test('an older record with pushedAt and recipients reads as any other and is left as it is', t => {
   const s = setup(t), [anna, ben] = four(s);
-  s.runs({ anna: 400 });
-  s.at('2026-11-20T10:00:00Z'); s.runs({ ben: 300 });
-  s.at('2026-12-02T08:00:00Z'); settleGala(s.app);
-  const [job, ...more] = s.jobs();
-  assert.deepEqual(more, []);
-  assert.equal(job.body, 'Die Gala des Monats November ist eröffnet.');
-  assert.deepEqual(job.recipientPersonIds, [ben]);
-  assert.equal(s.gala('2026-10').recipients, undefined);
-  assert.deepEqual(s.gala('2026-10').placements.map(x => x.personId), [anna]);
+  s.runs({ anna: 400, ben: 300 });
+  s.at(octoberOpens); settleGala(s.app);
+  const old = { ...s.gala('2026-10'), pushedAt: octoberOpens, recipients: 2 };
+  s.store.put(monthAwardsKind, '2026-10', old);
+  assert.deepEqual(s.queuedBy(() => { settleGala(s.app); settleGala(s.make()); }), []);
+  assert.deepEqual(s.gala('2026-10'), old);
+  const view = s.app.runnerGala('anna').gala;
+  assert.deepEqual([view.month, view.monthName, view.players, view.own.prize], ['2026-10', 'Oktober', 2, 'gold']);
+  assert.equal(JSON.stringify(view).includes('recipients'), false);
+  assert.equal(JSON.stringify(view).includes('pushedAt'), false);
+  assert.deepEqual(s.app.runnerLeaderboard('ben').top.map(x => [x.personId, x.trophy]), [[anna, 'gold'], [ben, 'silver']]);
 });
 
 test('the start is the constant: months before it have no gala', t => {
@@ -236,41 +265,13 @@ test('a score of zero is no participation', t => {
   s.runs({ anna: 0, ben: 10 });
   s.at(octoberOpens); settleGala(s.app);
   assert.deepEqual(s.gala('2026-10').placements.map(x => x.name), ['ben']);
-  assert.deepEqual(s.jobs()[0].recipientPersonIds, [s.store.account('ben').personId]);
 });
 
-test('one neutral push to the participants, kind direct, without a deep link; none without push', t => {
-  const s = setup(t), [anna, ben] = four(s);
-  s.runs({ anna: 400, ben: 300 });
-  s.at(octoberOpens); settleGala(s.app); settleGala(s.app);
-  const [job, ...more] = s.jobs();
-  assert.deepEqual(more, []);
-  assert.equal(job.body, 'Die Gala des Monats Oktober ist eröffnet.');
-  assert.equal(job.pushKind, 'direct');
-  assert.deepEqual(job.data, {});
-  assert.deepEqual(job.recipientPersonIds.sort((x, y) => x - y), [anna, ben].sort((x, y) => x - y));
-  assert.equal(JSON.stringify(job).includes('Bühnenlauf'), false);
-  assert.equal(s.gala('2026-10').recipients, 2);
-  assert.deepEqual(s.store.all('emailJobs'), []);
-
+test('without push the gala closes all the same', t => {
   const quiet = setup(t, { pushEnabled: false }); four(quiet);
   quiet.runs({ anna: 400 });
-  quiet.at(octoberOpens); settleGala(quiet.app);
+  assert.deepEqual(quiet.queuedBy(() => { quiet.at(octoberOpens); settleGala(quiet.app); }), []);
   assert.equal(quiet.gala('2026-10').placements.length, 1);
-  assert.equal(quiet.gala('2026-10').recipients, undefined);
-  assert.deepEqual(quiet.store.all('pushJobs'), []);
-});
-
-test('the person switched off "Pushes der Leitung": the delivery leaves them out', async t => {
-  const s = setup(t), [, ben] = four(s);
-  s.runs({ anna: 400, ben: 300 });
-  s.store.put('reminders', ben, { personId: ben, direct: false });
-  for (const uid of ['anna', 'ben']) s.store.put('devices', uid, { id: uid, uid, token: `token-${uid}`, platform: 'android' });
-  for (const job of s.store.all('pushJobs')) s.store.delete('pushJobs', job.id);
-  s.at(octoberOpens); settleGala(s.app);
-  const sent = [];
-  await deliverPush(s.app, { sendEachForMulticast: async m => { sent.push(...m.tokens); return { responses: m.tokens.map(() => ({ success: true })) }; } });
-  assert.deepEqual(sent, ['token-anna']);
 });
 
 test('the masks of the last gala show in both lists until the next gala', t => {

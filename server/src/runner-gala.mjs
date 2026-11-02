@@ -1,19 +1,19 @@
 import { latestGala, monthAwardsKind, monthEntries, rankedPlayers } from './runner-monthly.mjs';
 import { fromBerlin } from './event-series.mjs';
-import { dropRecipients } from './runner-drop-push.mjs';
 import { creditGage, shinyChanceOf } from './runner-wardrobe.mjs';
 
 // "Monatsgala" of the stage runner (`runnerMonthlyGala`): at the end of each month the players get
 // prizes from the Monatsrangliste (runner-monthly.mjs). No game limit: this only rewards.
 //
-// - When: a month's gala opens at 10:00 Berlin on the first of the next month (`galaOpensAt`), so no
-//   push wakes anybody at midnight. The job (`settleGala`) runs with the push worker every 15 s; a
-//   server that was down catches up, every month in order, and only the newest month it closes
-//   pushes. Months before `galaFirstMonth` never have a gala; moving that one line moves the start.
+// - When: a month's gala opens at 10:00 Berlin on the first of the next month (`galaOpensAt`). The
+//   job (`settleGala`) runs with the push worker every 15 s; a server that was down catches up,
+//   every month in order. Months before `galaFirstMonth` never have a gala; moving that one line
+//   moves the start.
 // - Frozen: store kind `runnerMonthAwards`, id = month, written once in one transaction with all its
-//   prizes and the push (`{ month, opensAt, closedAt, players, placements, pushedAt?, recipients? }`).
-//   Later changes of the list change nothing, nothing is given twice, also not after a restart. A
-//   month with nobody on the list gets its record too, without a push.
+//   prizes (`{ month, opensAt, closedAt, players, placements }`). Later changes of the list change
+//   nothing, nothing is given twice, also not after a restart. A month with nobody on the list gets
+//   its record too. Records of October 2026 may still carry `pushedAt` and `recipients` from the
+//   push it had then; nothing reads them.
 // - Late results: a run counts for the month its result reaches the server (`runnerScore`, no client
 //   time; a result older than `roundTtlMs` is rejected), so results from the app's outbox and runs
 //   still open at midnight belong to the new month. The time until 10:00 is not there for them:
@@ -38,9 +38,8 @@ import { creditGage, shinyChanceOf } from './runner-wardrobe.mjs';
 //   played gets none. Apps from before ignore all of it; their Applaus shows as gage.
 // - Deleting a person (`forgetGala`) removes their prizes and their entry of every record; the
 //   others keep their rank, `players` stays a mere count.
-// - Push: one job to the month's participants among `dropRecipients`, `pushKind: 'direct'` as the
-//   Drop-Push ("Pushes der Leitung" switches it off), neutral text without the game, no deep link
-//   (`data: {}`). Without `pushEnabled` the gala still closes, and no push follows later.
+// - No push: the gala is found in the game (the celebration on the next opening), never announced
+//   by a push, also not with `pushEnabled` or when catching up.
 
 /** The first month with a gala (`YYYY-MM`). */
 export const galaFirstMonth = '2026-10';
@@ -103,8 +102,8 @@ function placement(x, climber) {
   return { ...x, prize: won.prize, ...(won.trophy ? { trophy: won.trophy } : {}), crates: won.crates, gage: won.gage, ...(won === galaPrizes.climber ? { previous: climber.previous } : {}) };
 }
 
-/** Writes the record of [month] with all its prizes; [announce]: the push goes out with it. */
-function closeMonth(t, month, now, announce) {
+/** Writes the record of [month] with all its prizes; no push. */
+function closeMonth(t, month, now) {
   const s = t.store;
   if (s.get(monthAwardsKind, month)) return;
   const ranked = rankedPlayers(t, monthEntries(t, month));
@@ -114,17 +113,14 @@ function closeMonth(t, month, now, announce) {
     if (x.crates) s.put(prizesKind, key(month, x.personId), { month, personId: x.personId, prize: x.prize, ...(x.trophy ? { trophy: x.trophy } : {}), crates: x.crates, opened: 0 });
     if (x.gage) creditGage(t, x.personId, x.gage);
   }
-  const at = now.toISOString(), players = new Set(placements.map(x => x.personId));
-  const recipients = announce && t.pushEnabled ? [...new Set(dropRecipients(t))].filter(id => players.has(id)) : [];
-  if (recipients.length) t.enqueuePush({ title: 'Der Vorhang hebt sich', body: `Die Gala des Monats ${monthNames[+month.slice(5) - 1]} ist eröffnet.`, data: {}, recipientPersonIds: recipients, pushKind: 'direct' });
-  s.put(monthAwardsKind, month, { month, opensAt: galaOpensAt(month), closedAt: at, players: placements.length, placements, ...(recipients.length ? { pushedAt: at, recipients: recipients.length } : {}) });
+  s.put(monthAwardsKind, month, { month, opensAt: galaOpensAt(month), closedAt: now.toISOString(), players: placements.length, placements });
 }
 
 /** The job, run with the push worker: closes every month due; repeated calls change nothing. */
 export function settleGala(t, now = t.clock()) {
-  const s = t.store, due = dueMonths(now);
+  const s = t.store;
   // Each month in a transaction of its own that reads the record again; none while nothing is due.
-  for (const month of due.filter(month => !s.get(monthAwardsKind, month))) s.transaction(() => closeMonth(t, month, now, month === due.at(-1)));
+  for (const month of dueMonths(now).filter(month => !s.get(monthAwardsKind, month))) s.transaction(() => closeMonth(t, month, now));
 }
 
 const ownPrizes = (t, personId) => t.store.all(prizesKind).filter(x => x.personId === personId);
