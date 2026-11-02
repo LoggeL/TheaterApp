@@ -182,6 +182,13 @@ void main() {
       ('r-2', b.score),
       ('r-1', a.score),
     ]);
+    // A resend says the same about the run as the first try, also what the
+    // missions need, fixed when the curtain fell.
+    expect(scores[2]['missionStats'], scores[0]['missionStats']);
+    expect(
+      jsonMap(scores[2]['missionStats'])['beforePickup'],
+      a.metersBeforePickup,
+    );
     expect(find.textContaining('werden nachgetragen'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });

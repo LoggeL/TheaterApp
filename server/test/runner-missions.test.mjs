@@ -221,6 +221,101 @@ test('implausible statistics count for no mission, the run counts as before', t 
   assert.deepEqual(next.missions.missions.map(m => m.done), [true, true, true]);
 });
 
+test('without a pickup: what is collected after the target does not take the mission back', t => {
+  const { app, store, sam, play, give } = setup(t);
+  give(sam, [{ type: 'noPickup', target: 100 }, { type: 'collect', kind: 'rose', target: 3 }, { type: 'distance', target: 5000 }]);
+  // The reported run: 120 m without a pickup, then four roses until the end at 300 m.
+  const run = play(300, { stats: { rose: 4, ground: 0, ceiling: 0, beforePickup: 120 } });
+  assert.deepEqual(run.missions.missions.map(m => [m.type, m.progress, m.done]), [['noPickup', 100, true], ['collect', 3, true], ['distance', 300, false]]);
+  assert.deepEqual(run.missions.completed, ['easy', 'medium']);
+  assert.equal(run.missionBonus, 450 + 900);
+  // The pickups after the target still count: for the points and the bests.
+  assert.equal(run.gainedPoints.run, 320);
+  assert.deepEqual([store.get('runnerScores', sam).best, store.get('runnerMissions', sam).best.rose], [320, 4]);
+  // A made mission stays made, also with a later run that collects from the start.
+  const next = play(300, { stats: { rose: 4, ground: 0, ceiling: 0, beforePickup: 0 } });
+  assert.deepEqual([next.missions.missions[0].progress, next.missions.missions[0].done, next.missionBonus], [100, true, 0]);
+  assert.equal(app.runnerMissions('sam').missions[0].done, true);
+});
+
+test('without a pickup: the longest stretch of the day counts, not reaching the target counts nothing', t => {
+  const { sam, play, give } = setup(t);
+  give(sam, [{ type: 'noPickup', target: 100 }]);
+  // The first pickup at 80 m: not made, whatever follows, and the run shows how far it got.
+  const short = play(300, { stats: { rose: 4, ground: 0, ceiling: 0, beforePickup: 80 } });
+  assert.deepEqual([short.missions.missions[0].progress, short.missions.missions[0].done], [80, false]);
+  const worse = play(300, { stats: { rose: 4, ground: 0, ceiling: 0, beforePickup: 30 } });
+  assert.equal(worse.missions.missions[0].progress, 80);
+  // Exactly the target, and a pickup right there, is enough.
+  const exact = play(100, { stats: { rose: 1, ground: 0, ceiling: 0, beforePickup: 100 } });
+  assert.deepEqual([exact.missions.missions[0].progress, exact.missions.missions[0].done], [100, true]);
+});
+
+test('without a pickup: a whole run without pickups makes it with the new app, too', t => {
+  const { sam, play, give } = setup(t);
+  give(sam, [{ type: 'noPickup', target: 100 }]);
+  const run = play(150, { stats: { ground: 0, ceiling: 0, beforePickup: 150 } });
+  assert.deepEqual([run.missions.missions[0].progress, run.missions.missions[0].done], [100, true]);
+});
+
+test('without a pickup: apps that do not send the metres before it keep the old measure', t => {
+  const { store, sam, play, give } = setup(t);
+  give(sam, [{ type: 'noPickup', target: 100 }, { type: 'distance', target: 5000 }]);
+  // Statistics without the new field, with pickups: the whole run is broken, as before.
+  const broken = play(300, { stats: { rose: 4, ground: 0, ceiling: 0 } });
+  assert.deepEqual([broken.missions.missions[0].progress, broken.missions.missions[0].done, broken.missionBonus], [0, false, 0]);
+  assert.equal(store.get('runnerMissions', sam).best.noPickup, undefined);
+  // No statistics at all: nothing changes.
+  assert.equal(play(300).missions.missions[0].progress, 0);
+  // Statistics without the new field and without pickups: made, as before.
+  const clean = play(150, { stats: { ground: 0, ceiling: 0 } });
+  assert.deepEqual([clean.missions.missions[0].progress, clean.missions.missions[0].done], [100, true]);
+  assert.equal(store.get('runnerMissions', sam).best.noPickup, 150);
+});
+
+test('without a pickup: claims no run can reach count for no mission, the run counts', t => {
+  const { sam, store, play, give } = setup(t);
+  give(sam, [{ type: 'noPickup', target: 100 }, { type: 'distance', target: 100 }, { type: 'collect', kind: 'rose', target: 3 }]);
+  // All of the 40 roses (over 13 rows) from the last 30 m on: they do not fit the way.
+  const run = play(300, { stats: { rose: 40, ground: 0, ceiling: 0, beforePickup: 270 } });
+  assert.deepEqual(run.missions.missions.map(m => [m.type, m.progress, m.done]), [['noPickup', 0, false], ['distance', 100, true], ['collect', 0, false]]);
+  assert.equal(run.gained, 300);
+  assert.deepEqual([store.get('runnerScores', sam).rounds, store.get('runnerMissions', sam).best.noPickup], [1, undefined]);
+  const base = { meters: 300, score: 320, metersSent: true }, stats = { rose: 4, ground: 0, ceiling: 0 };
+  assert.equal(checkRunStats({ ...stats, beforePickup: 200 }, base).beforePickup, 200);
+  // The whole way is possible: the last pickup row in the very last metres.
+  assert.equal(checkRunStats({ ...stats, beforePickup: 300 }, base).beforePickup, 300);
+  for (const beforePickup of [301, -1, 1.5, '120', null]) assert.equal(checkRunStats({ ...stats, beforePickup }, base), null, String(beforePickup));
+  // Without pickups the answer can only be the whole way.
+  const clean = { meters: 300, score: 300, metersSent: true };
+  assert.equal(checkRunStats({ ground: 0, ceiling: 0, beforePickup: 300 }, clean).beforePickup, 300);
+  assert.equal(checkRunStats({ ground: 0, ceiling: 0, beforePickup: 299 }, clean), null);
+  assert.equal('beforePickup' in checkRunStats(stats, base), false, 'absent stays absent');
+});
+
+test('without a pickup: the bests take the longest stretch, also of runs that collect later', () => {
+  const stats = { rose: 4, mask: 0, star: 0, ground: 0, ceiling: 0, passed: {} };
+  const best = { m: 300, s: 400, noPickup: 200 };
+  assert.equal(raiseBest(best, { meters: 500, score: 520, stats: { ...stats, beforePickup: 350 } }).noPickup, 350);
+  assert.equal(raiseBest(best, { meters: 500, score: 520, stats: { ...stats, beforePickup: 50 } }).noPickup, 200);
+  assert.equal(raiseBest({ m: 300, s: 400 }, { meters: 500, score: 520, stats: { ...stats, beforePickup: 0 } }).noPickup, undefined);
+  // Above the share of the best distance it raises the targets of the coming days.
+  const ctx = { stats: true, runs: 10, best: { m: 500, s: 500, noPickup: 400 } };
+  assert.deepEqual(missionOptions('noPickup', 'hard', ctx), [{ target: 180 }]);
+});
+
+test('without a pickup: a result sent again counts once and gets the first answer', t => {
+  const { app, clock, sam, give } = setup(t);
+  give(sam, [{ type: 'noPickup', target: 100 }]);
+  const { roundId } = app.runnerStart('sam');
+  clock.now = new Date(+clock.now + 600000);
+  const body = { roundId, score: 320, meters: 300, missionStats: { rose: 4, ground: 0, ceiling: 0, beforePickup: 120 } };
+  const first = app.runnerScore('sam', body), again = app.runnerScore('sam', body);
+  assert.equal(first.progress.missionBonus, 450);
+  assert.deepEqual(again.progress, first.progress);
+  assert.equal(app.runnerWardrobe('sam').stats.missionPoints, 450);
+});
+
 test('rewards: crate points once per mission, the Missionskiste for all three, not for the ensemble', t => {
   const { app, store, sam, play, give } = setup(t);
   give(sam, [{ type: 'distance', target: 100 }, { type: 'dailyDistance', target: 500 }, { type: 'collect', kind: 'star', target: 1 }]);

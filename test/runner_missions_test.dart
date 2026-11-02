@@ -97,6 +97,30 @@ void _expectPlausible(StageRunner game) {
   }
   if ((passed['border'] ?? 0) > 0) expect(meters, greaterThanOrEqualTo(70));
   if ((passed['sandbag'] ?? 0) > 0) expect(meters, greaterThanOrEqualTo(140));
+  final before = s['beforePickup']! as int;
+  expect(before, lessThanOrEqualTo(meters));
+  if (score == meters) expect(before, meters);
+  expect(
+    rose / 3 + mask / 2 + star,
+    lessThanOrEqualTo((meters - before) / 6 + 2),
+  );
+}
+
+/// One step towards the next pickup, to collect all that can be had.
+void _collectStep(StageRunner game) {
+  final ahead = game.pickups.where((p) => p.x > game.runnerWorldX - .02);
+  final next = ahead.isEmpty ? null : ahead.reduce((a, b) => a.x < b.x ? a : b);
+  game.holding = next != null && next.y < game.y;
+  game.update(1 / 60);
+}
+
+/// The metres at which a collecting player takes the first pickup of [seed].
+int _firstPickupMeters(int seed) {
+  final game = StageRunner(random: Random(seed))..invincible = true;
+  while (game.collected == 0) {
+    _collectStep(game);
+  }
+  return game.meters;
 }
 
 JsonMap _mission(
@@ -259,12 +283,7 @@ void main() {
     test('pickups by kind add up to the pickup points', () {
       final game = StageRunner(random: Random(5))..invincible = true;
       for (var i = 0; i < 60 * 60; i++) {
-        final ahead = game.pickups.where((p) => p.x > game.runnerWorldX - .02);
-        final next = ahead.isEmpty
-            ? null
-            : ahead.reduce((a, b) => a.x < b.x ? a : b);
-        game.holding = next != null && next.y < game.y;
-        game.update(1 / 60);
+        _collectStep(game);
       }
       expect(game.collected, greaterThan(20));
       expect(
@@ -311,6 +330,87 @@ void main() {
         expect(game.meters, greaterThan(50), reason: 'seed $seed');
         _expectPlausible(game);
       }
+    });
+
+    test('the metres before the first pickup stop there', () {
+      final game = StageRunner(random: Random(5))..invincible = true;
+      expect(game.metersBeforePickup, 0);
+      while (game.collected == 0) {
+        expect(game.metersBeforePickup, game.meters);
+        _collectStep(game);
+      }
+      final first = game.meters;
+      for (var i = 0; i < 60 * 30; i++) {
+        _collectStep(game);
+      }
+      expect(game.collected, greaterThan(1));
+      expect(game.meters, greaterThan(first));
+      expect(game.metersBeforePickup, first);
+      expect(game.missionStats['beforePickup'], first);
+    });
+
+    test('a run without a pickup has all its metres before one', () {
+      final game = StageRunner(random: Random(1))..invincible = true;
+      final mission = DailyMission.fromJson(
+        _mission('easy', 'noPickup', 'Lauf 5 m', 5),
+      );
+      for (var i = 0; i < 60 * 3 && game.collected == 0; i++) {
+        game.update(1 / 60);
+      }
+      expect(game.collected, 0);
+      expect(game.metersBeforePickup, game.meters);
+      expect(mission.live(game), game.meters);
+    });
+
+    test('collecting after the target of a noPickup mission keeps it made: '
+        'the app tells it and the numbers it sends say the same', () {
+      for (var seed = 1; seed <= 12; seed++) {
+        final target = _firstPickupMeters(seed);
+        final missions = DailyMissions.fromJson(
+          _missions(
+            missions: [
+              _mission(
+                'hard',
+                'noPickup',
+                'Lauf $target m, ohne etwas einzusammeln',
+                target,
+              ),
+            ],
+          ),
+        );
+        final mission = missions.missions.single;
+        final watch = MissionWatch(missions);
+        final game = StageRunner(random: Random(seed))..invincible = true;
+        final made = <String>[];
+        for (var i = 0; i < 60 * 40; i++) {
+          _collectStep(game);
+          if (watch.check(game) case final m?) made.add(m.slot);
+        }
+        expect(made, ['hard'], reason: 'seed $seed');
+        expect(game.collected, greaterThan(1), reason: 'seed $seed');
+        expect(game.meters, greaterThan(target), reason: 'seed $seed');
+        // As before the first pickup: it stays made to the end of the run.
+        expect(mission.live(game), target, reason: 'seed $seed');
+        expect(mission.reachedBy(game), isTrue, reason: 'seed $seed');
+        expect(game.missionStats['beforePickup'], target, reason: 'seed $seed');
+        _expectPlausible(game);
+      }
+    });
+
+    test('a noPickup mission short of its target is not made by the first '
+        'pickup or anything after it', () {
+      final target = _firstPickupMeters(5) + 1;
+      final missions = DailyMissions.fromJson(
+        _missions(missions: [_mission('easy', 'noPickup', 'Lauf', target)]),
+      );
+      final watch = MissionWatch(missions);
+      final game = StageRunner(random: Random(5))..invincible = true;
+      for (var i = 0; i < 60 * 30; i++) {
+        _collectStep(game);
+        expect(watch.check(game), isNull);
+      }
+      expect(game.meters, greaterThan(target));
+      expect(missions.missions.single.live(game), target - 1);
     });
 
     test('the watch tells a made mission once, while running', () {

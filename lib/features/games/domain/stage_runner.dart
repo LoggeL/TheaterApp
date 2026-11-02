@@ -183,17 +183,26 @@ class StageRunner {
   double groundDistance = 0, ceilingDistance = 0;
   static const ceilingZone = .05;
 
+  /// The metres when the first pickup was taken; null until then.
+  int? _firstPickupAt;
+
   int get groundMeters => (groundDistance * RunnerRules.metersPerUnit).floor();
   int get ceilingMeters =>
       (ceilingDistance * RunnerRules.metersPerUnit).floor();
   int collectedOf(PickupKind kind) => collectedBy[kind.index];
   int passedOf(ObstacleKind kind) => passedBy[kind.index];
 
+  /// Metres run before the first pickup: all of them so far without one, and
+  /// no more after it. What a `noPickup` mission counts, so that collecting
+  /// after its target takes nothing back.
+  int get metersBeforePickup => _firstPickupAt ?? meters;
+
   /// The run's statistics as the app sends them with the score.
   Map<String, Object> get missionStats => {
     for (final k in PickupKind.values) k.name: collectedBy[k.index],
     'ground': groundMeters,
     'ceiling': ceilingMeters,
+    'beforePickup': metersBeforePickup,
     'passed': {
       for (final k in ObstacleKind.values)
         if (passedBy[k.index] > 0) k.name: passedBy[k.index],
@@ -372,6 +381,7 @@ class StageRunner {
     for (final p in pickups) {
       if (!p.taken && (p.x - x).abs() < .06 && (p.y - y).abs() < .075) {
         p.taken = true;
+        _firstPickupAt ??= meters;
         pickupPoints += p.kind.points;
         collected++;
         collectedBy[p.kind.index]++;

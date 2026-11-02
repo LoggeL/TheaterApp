@@ -176,7 +176,7 @@ class DailyMission {
       final k? => game.passedOf(k),
       null => null,
     },
-    'noPickup' => game.collected == 0 ? game.meters : 0,
+    'noPickup' => game.metersBeforePickup,
     'dailyDistance' => progress + game.meters,
     'runs' => progress + (game.meters >= min ? 1 : 0),
     _ => null,

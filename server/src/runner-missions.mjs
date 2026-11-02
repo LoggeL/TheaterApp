@@ -19,6 +19,10 @@ import { berlinDay } from './event-series.mjs';
 //   debuts only with their points); implausible ones count for no mission, the run itself counts.
 // - Apps without statistics (older ones) only get the types the server can check from metres and
 //   points; the kind of client is decided when the day's missions are made.
+// - "Without a pickup" (`noPickup`) is the only condition a run can break after it was met, so it is
+//   measured up to the first pickup (`beforePickup` in the statistics): whatever is collected after
+//   the target does not take the mission back. Apps that do not send it (older ones) keep the old
+//   measure, the whole run if it has no pickup at all, else nothing.
 // - Rewards are crate points (`runnerCratePoints`; like the Tagesbonus: crates only, not the
 //   Ensemble-Strecke), once per mission; all three on one day also bring a "Missionskiste" (shine
 //   chance by crate kind `mission` in the catalog's `dupes.shinyChance`). Missions made before kept
@@ -63,8 +67,8 @@ export const missionRules = Object.freeze({
     ceiling: { weight: 1.5, slots: missionSlots, share: { easy: 0.25, medium: 0.38, hard: 0.55 }, min: 10, max: 3000, start: [10, 20, 35] },
     // Obstacles of a debut only for those whose runs at this slot reach its points; `min` is 1 for them.
     pass: { weight: 2, slots: missionSlots, share: { easy: 0.3, medium: 0.45, hard: 0.65 }, min: 2, debutMin: 1, max: 400, start: { crate: [4, 7, 10], flat: [3, 5, 8], lamp: [4, 7, 10], border: [3, 6, 9], sandbag: [2, 4, 6] } },
-    // Distance without one pickup: shares of the best such run or, if higher, of `ofDistance` times
-    // the best run (avoiding every pickup costs distance).
+    // Distance before the first pickup: shares of the best such stretch or, if higher, of
+    // `ofDistance` times the best run (avoiding every pickup costs distance).
     noPickup: { weight: 1, slots: missionSlots, share: { easy: 0.22, medium: 0.32, hard: 0.45 }, ofDistance: 0.6, min: 80, max: 4000, start: [100, 150, 220] },
     // Metres today in total: `ofBest` times the best run. Only easy.
     dailyDistance: { weight: 1.5, basic: true, slots: ['easy'], ofBest: 1, min: 500, max: 30000, start: [600] },
@@ -103,7 +107,9 @@ const within = (v, min, max) => Math.min(max, Math.max(min, nice(Math.min(max, M
 /**
  * The checked statistics of a run, or null if they are missing or implausible: sums within the
  * metres, pickups exactly the points beyond the metres, no more pickup rows and obstacles than
- * sections fit in the distance, debut obstacles only with their points.
+ * sections fit in the distance, debut obstacles only with their points. `beforePickup` (newer apps
+ * only, absent stays absent): within the metres, all of them in a run without pickups, and the
+ * pickups must fit the way left after it.
  */
 export function checkRunStats(raw, { meters, score, metersSent }) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !metersSent) return null;
@@ -119,16 +125,30 @@ export function checkRunStats(raw, { meters, score, metersSent }) {
   if (s.ground + s.ceiling > meters) return null;
   if (s.rose * missionPickups.rose + s.mask * missionPickups.mask + s.star * missionPickups.star !== score - meters) return null;
   // A section is at least 6.7 m long and holds at most one row (3 roses, 2 masks or a star).
-  const sections = meters / 6 + 2;
-  if (s.rose / 3 + s.mask / 2 + s.star > sections) return null;
+  const sections = meters / 6 + 2, rows = s.rose / 3 + s.mask / 2 + s.star;
+  if (rows > sections) return null;
   if (Object.values(s.passed).reduce((a, b) => a + b, 0) > sections) return null;
   for (const [points, kind] of runnerDebuts) if (s.passed[kind] && score < points) return null;
   // Borders join the course at 80 m, sandbags at 150 m (counted where they stand, a bit ahead).
   if ((s.passed.border && meters < 70) || (s.passed.sandbag && meters < 140)) return null;
+  if (raw.beforePickup !== undefined) {
+    const before = count(raw.beforePickup);
+    if (Number.isNaN(before) || before > meters || (score === meters && before !== meters)) return null;
+    // The same count as above, on the way from the first pickup on: too high a claim would turn any
+    // run into a `noPickup` one.
+    if (rows > (meters - before) / 6 + 2) return null;
+    s.beforePickup = before;
+  }
   return s;
 }
 
 const debutOf = kind => runnerDebuts.find(([, k]) => k === kind)?.[0] ?? 0;
+
+/**
+ * The metres of a run with statistics before its first pickup. Older apps do not say: then the whole
+ * run if it has no pickup at all, else nothing.
+ */
+const metersBeforePickup = ({ meters, score, stats }) => stats.beforePickup ?? (score === meters ? meters : 0);
 
 /**
  * Targets a type offers in [slot] for the person's bests in [ctx] (`best`: per run, only ever
@@ -201,7 +221,8 @@ export function raiseBest(best, run) {
   if (!st) return next;
   for (const k of ['rose', 'mask', 'star', 'ground', 'ceiling']) next[k] = max(best[k], st[k]);
   next.passed = Object.fromEntries(missionObstacles.map(kind => [kind, max(best.passed?.[kind] ?? 0, st.passed[kind] ?? 0)]));
-  if (run.score === run.meters) next.noPickup = max(best.noPickup, run.meters);
+  const clean = metersBeforePickup(run);
+  if (clean > 0) next.noPickup = max(best.noPickup, clean);
   return next;
 }
 
@@ -249,14 +270,15 @@ export function missionsToday(t, personId, at, stats) {
 }
 
 /** What a run brings a mission on its own; null if it cannot tell (no statistics). */
-function runValue(m, { meters, score, stats }) {
+function runValue(m, run) {
+  const { meters, score, stats } = run;
   switch (m.type) {
     case 'distance': return meters;
     case 'points': case 'debut': return score;
     case 'collect': return stats ? stats[m.kind] : null;
     case 'ground': case 'ceiling': return stats ? stats[m.type] : null;
     case 'pass': return stats ? stats.passed[m.kind] ?? 0 : null;
-    case 'noPickup': return stats ? (score === meters ? meters : 0) : null;
+    case 'noPickup': return stats ? metersBeforePickup(run) : null;
     default: return null;
   }
 }
