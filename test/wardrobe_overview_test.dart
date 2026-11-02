@@ -148,12 +148,13 @@ JsonMap _json({
   String worn = 'character.elena--anno',
   List<String> shiny = const [],
   JsonMap? dupeCounts,
+  int crates = 1,
 }) => {
   'progress': {
     'meters': 2900,
     'earned': 4,
     'opened': 3,
-    'crates': 1,
+    'crates': crates,
     'previousAt': 2000,
     'nextAt': 4100,
     'poolSize': 5,
@@ -529,8 +530,8 @@ void main() {
         findsOneWidget,
       );
 
-      // The crates in numbers.
-      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+      // The crates in numbers, with the statistics.
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-stats')));
       await _settle(tester);
       expect(find.byKey(const ValueKey('crate-balance')), findsOneWidget);
       expect(find.bySemanticsLabel('geöffnet: 3'), findsOneWidget);
@@ -542,11 +543,40 @@ void main() {
       tester,
     ) async {
       await open(tester, _json());
-      expect(find.byKey(const ValueKey('crate-balance')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('wardrobe-summary-crates')));
+      expect(find.byKey(const ValueKey('wardrobe-ready-crates')), findsNothing);
+      // A button of its own for screen readers, which gets there too.
+      expect(
+        tester.getSemantics(
+          find.byKey(const ValueKey('wardrobe-summary-crates')),
+        ),
+        isSemantics(
+          label: '1 Kiste wartet, zu den Kisten',
+          isButton: true,
+          hasTapAction: true,
+        ),
+      );
+      tester.semantics.tap(
+        find.semantics.byLabel('1 Kiste wartet, zu den Kisten'),
+      );
       await _settle(tester);
       expect(tester.takeException(), isNull);
-      expect(find.byKey(const ValueKey('crate-balance')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('wardrobe-ready-crates')),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('without a waiting crate the summary has no way to them', (
+      tester,
+    ) async {
+      await open(tester, _json(crates: 0));
+      expect(
+        find.byKey(const ValueKey('wardrobe-summary-crates')),
+        findsNothing,
+      );
+      expect(find.text('Keine Kiste wartet'), findsNothing);
+      expect(find.text('Unique 0/1'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -558,7 +588,8 @@ void main() {
       expect(find.text('Bühnenbilder · 1/1'), findsOneWidget);
       // The ensemble reward is shown, but does not count.
       expect(find.byKey(const ValueKey('wardrobe-bd.reward')), findsOneWidget);
-      expect(find.text('Bühnenbilder: 1 von 1'), findsOneWidget);
+      // The chip is the only count: no second header repeats it.
+      expect(find.text('Bühnenbilder: 1 von 1'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
 

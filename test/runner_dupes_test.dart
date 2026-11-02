@@ -548,13 +548,18 @@ void main() {
         WardrobeScreen(controller: controller, sound: _Sound()),
       );
       await _settle(tester);
-      expect(find.text('420 Gage'), findsOneWidget);
+      // The collection shows nothing of the gage; the crates do.
+      expect(find.byKey(const ValueKey('wardrobe-gage')), findsNothing);
       expect(
         find.bySemanticsLabel(RegExp('Elena, Hellblau, Glanz')),
         findsOneWidget,
       );
       await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
       await _settle(tester);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('wardrobe-gage'))).data,
+        '420 Gage',
+      );
       await tester.tap(
         find.byKey(const PageStorageKey('wardrobe-crate-details')),
       );
@@ -607,7 +612,32 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a trade is chosen, signed and confirmed', (tester) async {
+    testWidgets('too little gage for a chosen item: what is missing, no button', (
+      tester,
+    ) async {
+      final controller = await _signedIn(
+        (request) => _path(request).contains('/games/runner/')
+            ? Future.value(jsonResponse(_json()))
+            : null,
+      );
+      await _pump(
+        tester,
+        WardrobeScreen(controller: controller, sound: _Sound()),
+      );
+      await _settle(tester);
+      await tester.tap(find.byKey(const ValueKey('wardrobe-p1')));
+      await _settle(tester);
+      expect(find.byKey(const ValueKey('wardrobe-buy')), findsNothing);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('wardrobe-buy-missing')))
+            .data,
+        'Gezielt holen kostet 400 Gage – dir fehlen noch 280 Gage. Gage gibt es für Duplikate.',
+      );
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a trade is chosen and confirmed', (tester) async {
       final bodies = <JsonMap>[];
       final controller = await _signedIn((request) {
         final path = _path(request);
@@ -631,21 +661,21 @@ void main() {
         WardrobeScreen(controller: controller, sound: _Sound()),
       );
       await _settle(tester);
-      await tester.tap(find.byKey(const ValueKey('wardrobe-trade')));
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
       await _settle(tester);
-      expect(find.text('→ zufällig Pink'), findsOneWidget);
-      // Gold costs more than there is.
-      expect(
-        tester
-            .widget<ListTile>(find.byKey(const ValueKey('trade-gold')))
-            .enabled,
-        isFalse,
-      );
+      expect(find.text('Neues Pink-Teil'), findsOneWidget);
+      // Gold costs more than there is: what is missing, no button.
+      expect(find.byKey(const ValueKey('trade-gold')), findsNothing);
+      expect(find.byKey(const ValueKey('trade-gold-missing')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('trade-pink')));
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('trade-sign')));
       await _settle(tester);
       expect(find.text('Tauschvertrag unterschreiben?'), findsOneWidget);
+      expect(
+        find.text(
+          '50 Gage gegen ein zufälliges Pink-Teil, das dir noch fehlt. Danach bleiben 70 Gage.',
+        ),
+        findsOneWidget,
+      );
       await tester.tap(find.byKey(const ValueKey('deal-confirm')));
       await _settle(tester);
       expect(bodies, [
@@ -814,10 +844,11 @@ void main() {
       );
       await _settle(tester);
       expect(find.byKey(const ValueKey('ensemble-card')), findsNothing);
-      expect(find.byKey(const ValueKey('wardrobe-trade')), findsNothing);
       expect(find.byKey(const ValueKey('wardrobe-gage')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
       await _settle(tester);
+      expect(find.byKey(const ValueKey('wardrobe-gage-card')), findsNothing);
+      expect(find.byKey(const ValueKey('wardrobe-gage')), findsNothing);
       expect(
         find.byKey(const PageStorageKey('wardrobe-ensemble-section')),
         findsNothing,

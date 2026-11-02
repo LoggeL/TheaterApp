@@ -62,7 +62,7 @@ JsonMap _target(String id, String kind, String name) => {
 
 JsonMap _wardrobeJson({
   int gage = 130,
-  int? price = 100,
+  int? price = 50,
   bool targets = false,
 }) => {
   'progress': {
@@ -130,7 +130,7 @@ Future<void> _open(
           'item': _item('maren', 'character', 'Maren'),
           'reel': List.filled(56, 'maren'),
           'winnerIndex': 48,
-          'outcome': {'type': 'new', 'crate': 'gage', 'cost': 100},
+          'outcome': {'type': 'new', 'crate': 'gage', 'cost': 50},
           'wardrobe': {
             ...wardrobe,
             'gage': {'balance': 30, 'earned': 400},
@@ -153,6 +153,10 @@ Future<void> _open(
   );
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 100));
+  // Everything gage buys is in the crates' tab.
+  await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
 }
 
 Finder get _buy => find.byKey(const ValueKey('wardrobe-buy-crate'));
@@ -161,7 +165,7 @@ void main() {
   setUpAll(() => initializeDateFormatting('de'));
 
   test('the price comes from the catalog; older servers have none', () {
-    expect(Wardrobe.fromJson(_wardrobeJson()).catalog.dupes.crateGage, 100);
+    expect(Wardrobe.fromJson(_wardrobeJson()).catalog.dupes.crateGage, 50);
     expect(
       Wardrobe.fromJson(_wardrobeJson(price: 250)).catalog.dupes.crateGage,
       250,
@@ -177,14 +181,18 @@ void main() {
     final outcome = CrateOutcome.fromJson({
       'type': 'new',
       'crate': 'gage',
-      'cost': 100,
+      'cost': 50,
     });
-    expect(outcome.cost, 100);
+    expect(outcome.cost, 50);
   });
 
   testWidgets('the offer shows the price from the server', (tester) async {
     await _open(tester, _wardrobeJson(price: 250, gage: 300));
-    expect(find.text('Kiste kaufen · 250 Gage'), findsOneWidget);
+    expect(
+      find.descendant(of: _buy, matching: find.text('250 Gage')),
+      findsOneWidget,
+    );
+    expect(find.text('Noch zu teuer'), findsNothing);
     expect(
       find.byKey(const ValueKey('wardrobe-buy-crate-missing')),
       findsNothing,
@@ -192,15 +200,19 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('too little gage disables it and tells what is missing', (
+  testWidgets('too little gage shows what is missing, no disabled button', (
     tester,
   ) async {
     final opened = <JsonMap>[];
-    await _open(tester, _wardrobeJson(gage: 60), opened: opened);
-    final button = tester.widget<ButtonStyleButton>(_buy);
-    expect(button.onPressed, isNull);
-    expect(find.text('Dir fehlen noch 40 Gage.'), findsOneWidget);
-    await tester.tap(_buy, warnIfMissed: false);
+    await _open(tester, _wardrobeJson(gage: 10), opened: opened);
+    expect(_buy, findsNothing);
+    final missing = find.byKey(const ValueKey('wardrobe-buy-crate-missing'));
+    expect(
+      find.descendant(of: missing, matching: find.text('noch 40 Gage')),
+      findsOneWidget,
+    );
+    expect(find.text('Noch zu teuer'), findsOneWidget);
+    await tester.tap(missing, warnIfMissed: false);
     await tester.pump();
     expect(find.text('Kiste kaufen?'), findsNothing);
     expect(opened, isEmpty);
@@ -214,7 +226,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Kiste kaufen?'), findsOneWidget);
     expect(
-      find.text('Eine Kiste für 100 Gage. Danach bleiben 30 Gage.'),
+      find.text('Eine Kiste für 50 Gage. Danach bleiben 80 Gage.'),
       findsOneWidget,
     );
     expect(opened, isEmpty);
@@ -252,7 +264,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('crate-target-tech')));
     await tester.pumpAndSettle();
     expect(
-      find.text('Technik-Kiste für 100 Gage. Danach bleiben 30 Gage.'),
+      find.text('Technik-Kiste für 50 Gage. Danach bleiben 80 Gage.'),
       findsOneWidget,
     );
     await tester.tap(find.byKey(const ValueKey('deal-confirm')));

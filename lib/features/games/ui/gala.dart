@@ -133,6 +133,7 @@ class GalaVitrineCard extends StatelessWidget {
     required this.controller,
     this.art,
     this.onOpen,
+    this.showCrates = true,
   });
   final GalaState gala;
   final AppController controller;
@@ -140,6 +141,10 @@ class GalaVitrineCard extends StatelessWidget {
 
   /// Opens a Gala-Kiste; null while something else runs.
   final VoidCallback? onOpen;
+
+  /// Whether the waiting Gala-Kisten show here; the wardrobe opens them
+  /// with all other crates instead.
+  final bool showCrates;
 
   @override
   Widget build(BuildContext context) {
@@ -189,7 +194,7 @@ class GalaVitrineCard extends StatelessWidget {
                 ],
               ),
             ],
-            if (gala.crates > 0 && crate != null) ...[
+            if (showCrates && gala.crates > 0 && crate != null) ...[
               const SizedBox(height: 10),
               Row(
                 children: [

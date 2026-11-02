@@ -495,7 +495,7 @@ void main() {
           ),
           findsOneWidget,
         );
-        await tester.tap(find.byKey(const ValueKey('wardrobe-open')));
+        await tester.tap(find.byKey(const ValueKey('wardrobe-ready-own')));
         await tester.pumpAndSettle();
         expect(find.text('Welche Kiste?'), findsOneWidget);
         // The Zufallskiste shines more; a complete set says so; a locked one tells why.
@@ -593,7 +593,7 @@ void main() {
           find.byKey(const ValueKey('wardrobe-targets-hint')),
           findsNothing,
         );
-        await tester.tap(find.byKey(const ValueKey('wardrobe-open')));
+        await tester.tap(find.byKey(const ValueKey('wardrobe-ready-own')));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 100));
         expect(find.text('Welche Kiste?'), findsNothing);

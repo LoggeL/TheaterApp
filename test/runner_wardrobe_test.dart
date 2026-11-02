@@ -241,10 +241,12 @@ void main() {
     Future<List<JsonMap>> open(
       WidgetTester tester, {
       bool available = true,
+      bool complete = false,
       List<String> supported = features,
     }) async {
       final bodies = <JsonMap>[];
       final json = rewards(available: available);
+      if (complete) (json['progress'] as Map)['complete'] = true;
       final controller = await _signedIn(tester, (request) {
         final path = _path(request);
         if (path.endsWith('/wardrobe')) {
@@ -329,6 +331,50 @@ void main() {
       await open(tester, available: false);
       expect(find.byKey(const ValueKey('wardrobe-ready-crates')), findsNothing);
       expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a complete collection without duplicates: its own crates '
+        'stay shut and are not counted as waiting', (tester) async {
+      await open(
+        tester,
+        complete: true,
+        supported: const ['stageRunner', 'runnerUnlocks', 'runnerMissions'],
+      );
+      final ready = find.byKey(const ValueKey('wardrobe-ready-crates'));
+      expect(find.byKey(const ValueKey('wardrobe-ready-own')), findsNothing);
+      // The two mission crates, as many as the buttons open.
+      expect(
+        find.byKey(const ValueKey('wardrobe-ready-mission')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: ready, matching: find.text('2')),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(RegExp('^Kisten, 2 wartend')),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox());
+
+      // Only own crates: nothing waits, nothing leads there.
+      await open(
+        tester,
+        complete: true,
+        supported: const ['stageRunner', 'runnerUnlocks'],
+      );
+      expect(ready, findsNothing);
+      expect(
+        find.bySemanticsLabel(RegExp('^Kisten, 0 wartend')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('wardrobe-tab-collection')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('wardrobe-summary-crates')),
+        findsNothing,
+      );
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -1060,7 +1106,14 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.text('1 Kostümkiste bereit'), findsOneWidget);
+      expect(find.text('Nächste Kostümkiste'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('wardrobe-ready-own')),
+          matching: find.text('Kostümkiste öffnen'),
+        ),
+        findsOneWidget,
+      );
       await tester.tap(
         find.byKey(const PageStorageKey('wardrobe-crate-details')),
       );

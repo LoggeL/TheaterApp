@@ -346,14 +346,25 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('wardrobe-tab-crates')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.text('2 Termin-Kisten bereit'), findsOneWidget);
+      // One place to open them: the ready crates, each naming its event.
+      final ready = find.byKey(const ValueKey('wardrobe-ready-crates'));
+      expect(
+        find.descendant(
+          of: ready,
+          matching: find.byWidgetPredicate(
+            (w) =>
+                w.key is ValueKey<String> &&
+                (w.key! as ValueKey<String>).value.startsWith(
+                  'wardrobe-ready-event-',
+                ),
+          ),
+        ),
+        findsNWidgets(2),
+      );
       expect(find.text('Probe Akt 2 · Sa. 31. Oktober'), findsOneWidget);
       expect(find.text('Premiere · Sa. 7. November'), findsOneWidget);
       await tester.tap(
-        find.descendant(
-          of: find.byKey(const ValueKey('event-crate-auffuehrung')),
-          matching: find.text('Öffnen'),
-        ),
+        find.byKey(const ValueKey('wardrobe-ready-event-auffuehrung')),
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));

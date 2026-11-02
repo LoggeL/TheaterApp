@@ -568,7 +568,7 @@ void main() {
       return controller;
     }
 
-    testWidgets('the Vitrine shows masks and crates, which open as a gala', (
+    testWidgets('the Vitrine shows masks; its crates open as a gala', (
       tester,
     ) async {
       final opened = <JsonMap>[];
@@ -577,13 +577,23 @@ void main() {
         wardrobe: _wardrobeJson(gala: _galaJson(crates: 2, unseen: null)),
         opened: opened,
       );
+      // The crates open with all others; the Vitrine is folded.
+      expect(find.byKey(const ValueKey('runner-gala-vitrine')), findsNothing);
+      expect(find.text('Gala-Kiste öffnen (2)'), findsOneWidget);
+      final section = find.byKey(const PageStorageKey('wardrobe-gala-section'));
+      await tester.ensureVisible(section);
+      await tester.pump();
+      await tester.tap(section);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.byKey(const ValueKey('runner-gala-vitrine')), findsOneWidget);
       expect(find.text('Oktober 2026'), findsOneWidget);
-      expect(find.text('2 Gala-Kisten bereit'), findsOneWidget);
       expect(find.byKey(const ValueKey('gala-mask-gold')), findsOneWidget);
-      await tester.ensureVisible(find.byKey(const ValueKey('gala-open')));
+      expect(find.byKey(const ValueKey('gala-open')), findsNothing);
+      final ready = find.byKey(const ValueKey('wardrobe-ready-gala'));
+      await tester.ensureVisible(ready);
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('gala-open')));
+      await tester.tap(ready);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
       expect(opened.single, {'dupes': true, 'crate': 'gala'});

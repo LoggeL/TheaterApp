@@ -48,15 +48,15 @@ test('the feature is announced and the price stands in the wardrobe', t => {
   const { app } = setup(t);
   assert.ok(apiFeatures.includes('runnerGageCrates'));
   assert.ok(app.snapshot('sam').capabilities.features.includes('runnerGageCrates'));
-  assert.equal(app.runnerWardrobe('sam', { roles: true }).catalog.dupes.crateGage, 100);
+  assert.equal(app.runnerWardrobe('sam', { roles: true }).catalog.dupes.crateGage, 50);
   assert.equal(catalogOf({ crateGage: 250 }).dupes.crateGage, 250);
-  assert.equal(bundledCatalog().dupes.crateGage, 100);
+  assert.equal(bundledCatalog().dupes.crateGage, 50);
   for (const crateGage of [0, -5, 1.5, '100']) assert.throws(() => catalogOf({ crateGage }), /dupes\.crateGage/);
 });
 
 test('a crate bought opens at once; the balance sinks, the rest stays', t => {
   const { app, progress, patch, store } = setup(t);
-  patch({ gage: 130, gageEarned: 400, points: 0 });
+  patch({ gage: 80, gageEarned: 400, points: 0 });
   const before = progress(), r = app.runnerOpenCrate('sam', 'buy-1', flags);
   const p = progress();
   assert.equal(p.gage, 30);
@@ -67,17 +67,17 @@ test('a crate bought opens at once; the balance sinks, the rest stays', t => {
   assert.equal(r.outcome.type, 'new');
   assert.equal(r.outcome.crate, 'gage');
   assert.equal(r.outcome.target, 'random');
-  assert.equal(r.outcome.cost, 100);
+  assert.equal(r.outcome.cost, 50);
   assert.equal(r.wardrobe.gage.balance, 30);
   // No stock of any kind, no crate waiting after it.
   assert.equal(r.wardrobe.progress.crates, 0);
   assert.equal(store.all('runnerGalaPrizes').length, 0);
-  assert.match(store.db.prepare("SELECT subject FROM audit WHERE action='runner.crate'").get().subject, /-100$/);
+  assert.match(store.db.prepare("SELECT subject FROM audit WHERE action='runner.crate'").get().subject, /-50$/);
 });
 
 test('too little gage: 409 with its code and how much is missing; nothing is paid or drawn', t => {
   const { app, progress, patch } = setup(t);
-  patch({ gage: 99 });
+  patch({ gage: 49 });
   const before = progress();
   assert.throws(() => app.runnerOpenCrate('sam', 'poor', flags), e => {
     assert.equal(e.status, 409);
@@ -87,7 +87,7 @@ test('too little gage: 409 with its code and how much is missing; nothing is pai
   });
   assert.deepEqual(progress(), before);
   // A failed key is not remembered: with the money it goes through.
-  patch({ gage: 100 });
+  patch({ gage: 50 });
   assert.equal(app.runnerOpenCrate('sam', 'poor', flags).outcome.crate, 'gage');
   assert.equal(progress().gage, 0);
   // A record that never had gage.
@@ -97,7 +97,7 @@ test('too little gage: 409 with its code and how much is missing; nothing is pai
 
 test('a repeated key pays once and returns the same opening, also with the money spent', t => {
   const { app, progress, patch } = setup(t);
-  patch({ gage: 100 });
+  patch({ gage: 50 });
   const first = app.runnerOpenCrate('sam', 'same', flags), owned = progress().owned;
   assert.deepEqual(app.runnerOpenCrate('sam', 'same', flags), first);
   assert.equal(progress().gage, 0);
@@ -117,7 +117,7 @@ test('it can be aimed like a crate of the own runs, with the same shine chances'
   const random = app.runnerOpenCrate('sam', 'aim-2', { ...flags, target: 'random' });
   assert.equal(random.outcome.target, 'random');
   assert.equal(random.outcome.shiny, true);
-  assert.equal(progress().gage, 800);
+  assert.equal(progress().gage, 900);
 });
 
 test('a locked or unknown target costs nothing', t => {
@@ -139,21 +139,22 @@ test('older apps cannot buy: 400, nothing paid, their own crates untouched', t =
 test('a full collection pays first and adds the duplicate on top, as earned', t => {
   const { app, dice, progress, patch } = setup(t);
   const all = [...defaults, ...figures].map(x => x.id);
-  patch({ gage: 100, gageEarned: 7, owned: all, shiny: all });
+  patch({ gage: 50, gageEarned: 7, owned: all, shiny: all });
   dice.push(0, 0, 0.5);
   const r = app.runnerOpenCrate('sam', 'dup', flags);
   assert.equal(r.outcome.type, 'gage');
   assert.equal(r.outcome.duplicate, true);
   assert.equal(progress().gage, r.outcome.gage);
   assert.equal(progress().gageEarned, 7 + r.outcome.gage);
-  assert.ok(r.outcome.gage < 100);
+  assert.ok(r.outcome.gage < 50);
 });
 
 test('only the balance limits buying: no count, no day limit, no waiting', t => {
   const { app, progress, patch } = setup(t);
-  patch({ gage: 5000 });
+  patch({ gage: 5000, gageEarned: 0 });
   for (let i = 0; i < 50; i++) app.runnerOpenCrate('sam', `many-${i}`, flags);
-  assert.ok(progress().gage <= 5000 - 50 * 100 + 50 * 50, 'each crate paid');
+  // What the duplicates brought back is earned gage; the rest of the difference is the price.
+  assert.equal(progress().gage, 5000 - 50 * 50 + progress().gageEarned, 'each crate paid');
   patch({ gage: 0 });
   assert.throws(() => app.runnerOpenCrate('sam', 'broke', flags), { code: 'not_enough_gage' });
 });

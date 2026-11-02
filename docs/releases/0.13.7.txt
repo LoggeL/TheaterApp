@@ -1,0 +1,1 @@
+Neu: übersichtlichere Ansicht von Sammlung und Kisten, und Kisten sind jetzt günstiger. Dazu kleinere Verbesserungen.

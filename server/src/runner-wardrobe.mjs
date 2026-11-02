@@ -112,7 +112,7 @@ export const buyRequestPrefix = 'runner-buy:';
 // crates of the own metres, `ensemble`, …; a kind not listed has the chance of `costume`), and how
 // many duplicates of a rarity (its `gage` each) a trade and a purchase cost; `crateGage`: the price of
 // a crate bought with gage.
-export const dupeDefaults = Object.freeze({ shinyChance: Object.freeze({ costume: 0.03, ensemble: 0.03 }), tradeDupes: 5, buyDupes: 10, crateGage: 100 });
+export const dupeDefaults = Object.freeze({ shinyChance: Object.freeze({ costume: 0.03, ensemble: 0.03 }), tradeDupes: 5, buyDupes: 10, crateGage: 50 });
 /** The chance of a shine for one draw from a crate of [kind]. */
 export const shinyChanceOf = (c, kind) => c.dupes.shinyChance[kind] ?? c.dupes.shinyChance.costume;
 // The runner's poses in a character atlas (`RunnerSprite` in the app).

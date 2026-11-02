@@ -239,68 +239,173 @@ class TallyBar extends StatelessWidget {
   );
 }
 
+/// The text scale of the wardrobe's grids: 1 to 2.
+double wardrobeScale(BuildContext context) =>
+    (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0);
+
+/// The inner padding of the wardrobe's cards: 16 on phones, else 20.
+double wardrobeInset(BuildContext context) =>
+    MediaQuery.sizeOf(context).width < 600 ? 16 : 20;
+
+/// How [n] cells of at least [minCell] share [width]: as few rows as fit,
+/// the cells spread evenly over them (the front rows take the rest, so 7 on
+/// 3 rows are 3, 2, 2) and one cell width for every row.
+({List<int> rows, double cell}) balancedRows(
+  int n,
+  double width,
+  double minCell, {
+  double gap = 8,
+}) {
+  if (n <= 0) return (rows: const <int>[], cell: width);
+  final maxCols = ((width + gap) / (minCell + gap)).floor().clamp(1, n);
+  final count = (n / maxCols).ceil();
+  final perRow = (n / count).ceil();
+  return (
+    rows: [
+      for (var r = 0; r < count; r++) n ~/ count + (r < n % count ? 1 : 0),
+    ],
+    cell: (width - (perRow - 1) * gap) / perRow,
+  );
+}
+
+/// [children] in [balancedRows], left-aligned.
+class BalancedGrid extends StatelessWidget {
+  const BalancedGrid({
+    super.key,
+    required this.minCell,
+    required this.children,
+    this.gap = 8,
+    this.runGap = 10,
+  });
+  final double minCell, gap, runGap;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final layout = balancedRows(
+        children.length,
+        constraints.maxWidth,
+        minCell,
+        gap: gap,
+      );
+      var next = 0;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: runGap,
+        children: [
+          for (final n in layout.rows)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: gap,
+              children: [
+                for (var i = 0; i < n; i++)
+                  SizedBox(width: layout.cell, child: children[next++]),
+              ],
+            ),
+        ],
+      );
+    },
+  );
+}
+
 /// The top of the collection: "87 von 251" with a bar, each rarity's
-/// progress, the crates waiting, the shine, the unique figures and the gage.
+/// progress, the shine, the unique figures and the crates waiting. What
+/// costs or brings gage is in the crates' tab.
 class CollectionSummaryCard extends StatelessWidget {
   const CollectionSummaryCard({
     super.key,
     required this.overview,
     required this.waitingCrates,
     this.onCrates,
-    this.gage,
-    this.onTrade,
-    this.crateOffer,
-    this.crateMissing,
-    this.onBuyCrate,
   });
   final WardrobeOverview overview;
   final int waitingCrates;
+
+  /// To the crates; the way there shows only while [waitingCrates] wait.
   final VoidCallback? onCrates;
-
-  /// Shown with duplicates (`runnerDupes`) only.
-  final String? gage;
-  final VoidCallback? onTrade;
-
-  /// A crate for gage (`runnerGageCrates`): the offer, what the balance lacks
-  /// (then it stays disabled, like while [onBuyCrate] is null).
-  final String? crateOffer, crateMissing;
-  final VoidCallback? onBuyCrate;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final surface = theme.colorScheme.surface;
+    final scheme = theme.colorScheme;
+    final surface = scheme.surface;
     final all = overview.all;
     final percent = (all.fraction * 100).floor();
-    Widget pill({
-      required Key key,
-      required IconData icon,
-      required String label,
-      Color? color,
-      VoidCallback? onTap,
-      String? semantics,
-    }) => Semantics(
-      key: key,
-      button: onTap != null,
-      label: semantics,
-      excludeSemantics: semantics != null,
-      child: onTap == null
-          ? Chip(
-              avatar: Icon(icon, size: 18, color: color),
-              label: Text(label),
-              visualDensity: VisualDensity.compact,
-            )
-          : ActionChip(
-              avatar: Icon(icon, size: 18, color: color),
-              label: Text(label),
-              visualDensity: VisualDensity.compact,
-              onPressed: onTap,
-            ),
+    final scale = wardrobeScale(context);
+    final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
+    final quiet = theme.textTheme.bodySmall?.copyWith(
+      color: scheme.onSurfaceVariant,
     );
+    Widget note(Key key, IconData icon, Color color, String text) => Row(
+      key: key,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Flexible(child: Text(text, style: quiet)),
+      ],
+    );
+    final notes = [
+      if (overview.shiny > 0)
+        note(
+          const ValueKey('wardrobe-summary-shiny'),
+          Icons.auto_awesome,
+          const Color(0xFFE4AE39),
+          '${overview.shiny} in Glanz',
+        ),
+      if (overview.uniques case final u?)
+        Semantics(
+          key: const ValueKey('wardrobe-summary-unique'),
+          container: true,
+          label: 'Unique-Figuren: ${u.text} freigeschaltet',
+          excludeSemantics: true,
+          child: note(
+            const ValueKey('wardrobe-summary-unique-note'),
+            Icons.diamond_outlined,
+            const Color(0xFFB388FF),
+            'Unique ${u.owned}/${u.total}',
+          ),
+        ),
+    ];
+    final waiting = waitingCrates == 1
+        ? '1 Kiste wartet'
+        : '$waitingCrates Kisten warten';
+    final crates = waitingCrates <= 0
+        ? null
+        // The button's own node keeps its tap; only the text says more.
+        : TextButton(
+            key: const ValueKey('wardrobe-summary-crates'),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+            onPressed: onCrates,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.inventory_2_outlined,
+                  size: 18,
+                  color: StageTheme.accentText(
+                    StageTheme.orange,
+                    theme.brightness,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    waiting,
+                    semanticsLabel: '$waiting, zu den Kisten',
+                  ),
+                ),
+                const Icon(Icons.chevron_right, size: 18),
+              ],
+            ),
+          );
+    final wide = MediaQuery.sizeOf(context).width >= 600 && !largeText;
+    final inset = wardrobeInset(context);
     return Card(
       key: const ValueKey('wardrobe-summary'),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+        padding: EdgeInsets.fromLTRB(inset, inset - 2, inset, inset - 4),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -333,10 +438,21 @@ class CollectionSummaryCard extends StatelessWidget {
                           ],
                         ),
                       ),
+                      if (all.complete) ...[
+                        const Icon(
+                          Icons.check_circle,
+                          size: 18,
+                          color: StageTheme.green,
+                        ),
+                        const SizedBox(width: 4),
+                      ],
                       Text(
                         all.complete ? 'komplett' : '$percent %',
                         style: theme.textTheme.titleMedium?.copyWith(
-                          color: StageTheme.orange,
+                          color: StageTheme.accentText(
+                            StageTheme.orange,
+                            theme.brightness,
+                          ),
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -348,10 +464,10 @@ class CollectionSummaryCard extends StatelessWidget {
               ),
             ),
             if (overview.rarities.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
+              const SizedBox(height: 16),
+              // Even rows instead of one lone rarity on a line of its own.
+              BalancedGrid(
+                minCell: 64 * scale,
                 children: [
                   for (final r in overview.rarities)
                     Semantics(
@@ -360,154 +476,81 @@ class CollectionSummaryCard extends StatelessWidget {
                       label:
                           '${r.rarity.name}: ${r.tally.text}${r.locked ? ', noch gesperrt' : ''}',
                       excludeSemantics: true,
-                      child: SizedBox(
-                        width: 90,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                if (r.locked)
-                                  Icon(
-                                    Icons.lock_outline,
-                                    size: 12,
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  )
-                                else
-                                  CircleAvatar(
-                                    radius: 5,
-                                    backgroundColor: r.rarity.color,
-                                  ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    r.rarity.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.labelMedium,
-                                  ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              if (r.locked)
+                                Icon(
+                                  Icons.lock_outline,
+                                  size: 12,
+                                  color: scheme.onSurfaceVariant,
+                                )
+                              else
+                                CircleAvatar(
+                                  radius: 4,
+                                  backgroundColor: r.rarity.color,
                                 ),
-                              ],
-                            ),
-                            const SizedBox(height: 3),
-                            TallyBar(
-                              r.tally.fraction,
-                              color: StageTheme.legible(
-                                r.rarity.color,
-                                surface,
-                                minimum: 3,
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  r.rarity.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.labelMedium,
+                                ),
                               ),
-                              height: 4,
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          TallyBar(
+                            r.tally.fraction,
+                            color: StageTheme.legible(
+                              r.rarity.color,
+                              surface,
+                              minimum: 3,
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              r.tally.complete
-                                  ? '${r.tally.owned} ✓'
-                                  : '${r.tally.owned}/${r.tally.total}',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
+                            height: 4,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            r.tally.complete
+                                ? '${r.tally.owned} ✓'
+                                : '${r.tally.owned}/${r.tally.total}',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
                       ),
                     ),
                 ],
               ),
             ],
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                pill(
-                  key: const ValueKey('wardrobe-summary-crates'),
-                  icon: Icons.inventory_2_outlined,
-                  color: waitingCrates > 0 ? StageTheme.orange : null,
-                  label: waitingCrates == 0
-                      ? 'Keine Kiste wartet'
-                      : waitingCrates == 1
-                      ? '1 Kiste wartet'
-                      : '$waitingCrates Kisten warten',
-                  onTap: onCrates,
-                ),
-                if (overview.shiny > 0)
-                  pill(
-                    key: const ValueKey('wardrobe-summary-shiny'),
-                    icon: Icons.auto_awesome,
-                    color: const Color(0xFFE4AE39),
-                    label: '${overview.shiny} in Glanz',
-                  ),
-                if (overview.uniques case final u?)
-                  pill(
-                    key: const ValueKey('wardrobe-summary-unique'),
-                    icon: Icons.diamond_outlined,
-                    color: const Color(0xFFB388FF),
-                    label: 'Unique ${u.owned}/${u.total}',
-                    semantics: 'Unique-Figuren: ${u.text} freigeschaltet',
-                  ),
-                if (gage case final gage?)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.payments_outlined, size: 18),
-                      const SizedBox(width: 6),
-                      Text(
-                        gage,
-                        key: const ValueKey('wardrobe-gage'),
-                        style: theme.textTheme.labelLarge,
+            if (notes.isNotEmpty || crates != null) ...[
+              const SizedBox(height: 8),
+              if (wide)
+                Row(
+                  children: [
+                    Expanded(
+                      child: Wrap(
+                        spacing: 16,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: notes,
                       ),
-                    ],
-                  ),
-                if (gage != null)
-                  TextButton.icon(
-                    key: const ValueKey('wardrobe-trade'),
-                    onPressed: onTrade,
-                    icon: const Icon(Icons.handshake_outlined, size: 18),
-                    label: const Text('Tauschen'),
-                  ),
-              ],
-            ),
-            if (crateOffer case final offer?) ...[
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.tonalIcon(
-                  key: const ValueKey('wardrobe-buy-crate'),
-                  onPressed: crateMissing == null ? onBuyCrate : null,
-                  icon: const Icon(Icons.shopping_bag_outlined),
-                  label: Text(offer),
-                ),
-              ),
-              if (crateMissing case final missing?)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    missing,
-                    key: const ValueKey('wardrobe-buy-crate-missing'),
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ),
-            ],
-            if (overview.gift case final gift?) ...[
-              const SizedBox(height: 6),
-              Row(
-                key: const ValueKey('wardrobe-summary-gift'),
-                children: [
-                  const Icon(
-                    Icons.card_giftcard,
-                    size: 16,
-                    color: StageTheme.orange,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Geschenkt: ${giftName(gift)}. Weitere eigene Rollen kommen aus Kisten.',
-                      style: theme.textTheme.bodySmall,
                     ),
-                  ),
-                ],
-              ),
-            ],
+                    ?crates,
+                  ],
+                )
+              else
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [...notes, ?crates],
+                ),
+            ] else
+              const SizedBox(height: 4),
           ],
         ),
       ),
@@ -515,14 +558,11 @@ class CollectionSummaryCard extends StatelessWidget {
   }
 }
 
-/// "Elena als Lucy", for the present figure.
-String giftName(WardrobeItem item) =>
-    item.unique ? item.name : nameInRole(item.name, item.role);
-
 /// The plays (and the technicians) side by side: how many roles of each are
 /// collected, what is still missing by rarity, the way to the unique
-/// figure. A tap shows only that play's figures.
-class PlayProgressStrip extends StatelessWidget {
+/// figure. A tap shows only that play's figures. Where all tiles fit they
+/// share the width; else they scroll, and the chosen one scrolls into view.
+class PlayProgressStrip extends StatefulWidget {
   const PlayProgressStrip({
     super.key,
     required this.plays,
@@ -536,26 +576,68 @@ class PlayProgressStrip extends StatelessWidget {
   final ValueChanged<PlayTally>? onSelect;
 
   @override
+  State<PlayProgressStrip> createState() => _PlayProgressStripState();
+}
+
+class _PlayProgressStripState extends State<PlayProgressStrip> {
+  static const _gap = 10.0;
+  final _scroll = ScrollController();
+
+  @override
+  void didUpdateWidget(PlayProgressStrip old) {
+    super.didUpdateWidget(old);
+    if (widget.selected != old.selected && widget.selected != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _reveal());
+    }
+  }
+
+  /// Scrolls the chosen tile to the middle. Computed from its place: the
+  /// list builds lazily, so a tile far off has no context to ask.
+  void _reveal() {
+    if (!mounted || !_scroll.hasClients) return;
+    final i = widget.plays.indexWhere((p) => p.title == widget.selected);
+    if (i < 0) return;
+    final tile = 184 * wardrobeScale(context);
+    final position = _scroll.position;
+    final target = (i * (tile + _gap) - (position.viewportDimension - tile) / 2)
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    _scroll.animateTo(
+      target,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scale = (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(
-      1.0,
-      2.0,
-    );
+    final plays = widget.plays;
+    final scale = wardrobeScale(context);
     final complete = plays.where((p) => p.tally.complete).length;
+    Widget tile(PlayTally p) => _PlayTile(
+      p,
+      selected: p.title == widget.selected,
+      onTap: widget.onSelect == null ? null : () => widget.onSelect!(p),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 6),
-          child: Row(
+          // The count at the right; with large text below the title
+          // instead of pushing out of the line.
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
             children: [
-              Expanded(
-                child: Text(
-                  'Stücke & Technik',
-                  style: theme.textTheme.titleSmall,
-                ),
-              ),
+              Text('Stücke & Technik', style: theme.textTheme.titleSmall),
               Text(
                 '$complete von ${plays.length} komplett',
                 style: theme.textTheme.bodySmall,
@@ -565,19 +647,28 @@ class PlayProgressStrip extends StatelessWidget {
         ),
         SizedBox(
           height: 146 * scale,
-          child: ListView.separated(
-            key: const PageStorageKey('wardrobe-play-strip'),
-            scrollDirection: Axis.horizontal,
-            itemCount: plays.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 10),
-            itemBuilder: (context, i) => SizedBox(
-              width: 184 * scale,
-              child: _PlayTile(
-                plays[i],
-                selected: plays[i].title == selected,
-                onTap: onSelect == null ? null : () => onSelect!(plays[i]),
-              ),
-            ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final fits =
+                  plays.length * 168 * scale + (plays.length - 1) * _gap <=
+                  constraints.maxWidth;
+              if (fits) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  spacing: _gap,
+                  children: [for (final p in plays) Expanded(child: tile(p))],
+                );
+              }
+              return ListView.separated(
+                key: const PageStorageKey('wardrobe-play-strip'),
+                controller: _scroll,
+                scrollDirection: Axis.horizontal,
+                itemCount: plays.length,
+                separatorBuilder: (_, _) => const SizedBox(width: _gap),
+                itemBuilder: (context, i) =>
+                    SizedBox(width: 184 * scale, child: tile(plays[i])),
+              );
+            },
           ),
         ),
       ],
@@ -734,12 +825,11 @@ class _PlayTile extends StatelessWidget {
   }
 }
 
-/// The crates in numbers: what waits by kind, what was opened, the shine
-/// and the gage the duplicates brought.
+/// The crates in numbers: what was opened, the shine and the gage the
+/// duplicates brought.
 class CrateBalanceCard extends StatelessWidget {
   const CrateBalanceCard({
     super.key,
-    required this.waiting,
     required this.opened,
     required this.earned,
     required this.shiny,
@@ -747,15 +837,12 @@ class CrateBalanceCard extends StatelessWidget {
     this.duplicates,
   });
 
-  /// Waiting crates by kind ("Kostümkiste", count), only those with any.
-  final List<(String, String, int)> waiting;
   final int opened, earned, shiny;
   final int? gageEarned, duplicates;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final total = waiting.fold(0, (n, w) => n + w.$3);
     Widget figure(String key, String value, String label) => Semantics(
       key: ValueKey('crate-balance-$key'),
       container: true,
@@ -777,19 +864,11 @@ class CrateBalanceCard extends StatelessWidget {
         ],
       ),
     );
-    final figures = [
-      figure('opened', _number.format(opened), 'geöffnet'),
-      figure('earned', _number.format(earned), 'erspielt'),
-      figure('shiny', _number.format(shiny), 'in Glanz'),
-      if (duplicates != null)
-        figure('dupes', _number.format(duplicates), 'Duplikate'),
-      if (gageEarned != null)
-        figure('gage', _number.format(gageEarned), 'Gage verdient'),
-    ];
+    final inset = wardrobeInset(context);
     return Card(
       key: const ValueKey('crate-balance'),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        padding: EdgeInsets.all(inset),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -803,44 +882,27 @@ class CrateBalanceCard extends StatelessWidget {
                     style: theme.textTheme.titleMedium,
                   ),
                 ),
-                Text(
-                  total == 0
-                      ? 'nichts wartet'
-                      : total == 1
-                      ? '1 wartet'
-                      : '$total warten',
-                  style: theme.textTheme.bodySmall,
-                ),
               ],
             ),
-            if (waiting.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  for (final (singular, plural, n) in waiting)
-                    Chip(
-                      visualDensity: VisualDensity.compact,
-                      avatar: const Icon(
-                        Icons.inventory_2,
-                        size: 16,
-                        color: StageTheme.orange,
-                      ),
-                      label: Text('$n ${n == 1 ? singular : plural}'),
-                    ),
-                ],
-              ),
-            ],
             const SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [for (final f in figures) Expanded(child: f)],
+            BalancedGrid(
+              minCell: 88 * wardrobeScale(context),
+              children: [
+                figure('opened', _number.format(opened), 'geöffnet'),
+                figure('earned', _number.format(earned), 'erspielt'),
+                figure('shiny', _number.format(shiny), 'in Glanz'),
+                if (duplicates != null)
+                  figure('dupes', _number.format(duplicates), 'Duplikate'),
+                if (gageEarned != null)
+                  figure('gage', _number.format(gageEarned), 'Gage verdient'),
+              ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Text(
               'Kostümkisten aus deinen Läufen; Glanz und Gage aus allen Kisten.',
-              style: theme.textTheme.bodySmall,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
