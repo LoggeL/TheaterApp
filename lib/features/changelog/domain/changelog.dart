@@ -27,6 +27,14 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.13.8',
+    date: '4. November 2026',
+    items: [
+      'Auf der Creepshow-Bühne erkennst du die Hindernisse besser: Die Guillotine glänzt, der Hackblock ist blutrot und der Stoff darüber helllila.',
+      'Das Bücherregal hat viele bunte Buchrücken, der Sarkophag ist golden und ägyptisch gestaltet.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.13.7',
     date: '2. November 2026',
     items: [

@@ -490,7 +490,7 @@
   "server/src/wardrobe/images/obstacles-anno.webp": {"sha256": "cdb50d019b610b5a5f6622f9a72368f27ab223e2133e97fdcb4f35226de27059", "before": 77196, "method": "alpha 4", "ssim": 0.99998},
   "server/src/wardrobe/images/obstacles-black-swan.webp": {"sha256": "5c777b48643e65fc2939d4611cd14721e5916c5be326157a754d067292885f8d", "before": 77914, "method": "alpha 4", "ssim": 0.99998},
   "server/src/wardrobe/images/obstacles-christmas.webp": {"sha256": "bc86068b9b72536c7e13d2fbd702fbde8ea4437ec0e32f3142e6fa6878b5c02b", "before": 103888, "method": "alpha 4", "ssim": 0.99977},
-  "server/src/wardrobe/images/obstacles-creepshow.webp": {"sha256": "2d5be3742afb17d19f4aa2d4e3858604e6508f1366fdea1b37840b95588e2047", "before": 116416, "method": "alpha 4", "ssim": 1.0},
+  "server/src/wardrobe/images/obstacles-creepshow.webp": {"sha256": "f6254bd5bc21e360ced50851594441ee0ca12344d345e670fbf1e2bca4db3552", "before": 125476, "method": "alpha 4", "ssim": 0.99997},
   "server/src/wardrobe/images/obstacles-hell.webp": {"sha256": "0f656a03ea1f7a34d6e5b0df6e071e0e38d58f3131d9f21d70784bb70078528b", "before": 90842, "method": "alpha 4", "ssim": 0.99998},
   "server/src/wardrobe/images/obstacles-nexus.webp": {"sha256": "9316978c2a33c53d008edaed3af1522956c536b4f1b4b07ef638d7ad1b282915", "before": 72392, "method": "alpha 4", "ssim": 0.99997},
   "server/src/wardrobe/images/obstacles-romeo-julia.webp": {"sha256": "cab6452f94db5e848c4c1aceea90d19be77713070785be750b5dc2b4be82edda", "before": 91814, "method": "alpha 4", "ssim": 0.99998},

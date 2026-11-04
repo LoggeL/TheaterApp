@@ -1226,6 +1226,42 @@ void main() {
       expect(drawn.places[i].bottom, closeTo(floor * s, 1e-6));
     });
 
+    testWidgets('the coloured border stays above the guillotine blade', (
+      tester,
+    ) async {
+      final (own, _, set) = await arts(tester);
+      const lilac = Color(0xFFD9B8FF);
+      final dressed = own.dressed(
+        obstacles: set,
+        ownScenery: true,
+        border: lilac,
+      );
+      for (final center in [.4, .5, .6]) {
+        final parts = gapAt(center, .32);
+        final drawn = paint(dressed, set, parts);
+        final borders = drawn.rects
+            .where((r) => r.$2.toARGB32() == lilac.toARGB32())
+            .toList();
+        expect(borders, hasLength(1));
+        final border = borders.single.$1;
+        final blade = drawn
+            .places[drawn.cells.indexOf(RunnerSprite.guillotineBlade.rect)];
+        expect(border.top, parts.first.top * s);
+        expect(border.left, greaterThan(blade.left));
+        expect(border.right, lessThan(blade.right));
+        expect(border.bottom, lessThan(blade.bottom));
+        expect(border.bottom, lessThan(parts.last.top * s));
+      }
+      expect(
+        paint(
+          own,
+          set,
+          gapAt(.5, .32),
+        ).rects.any((r) => r.$2.toARGB32() == lilac.toARGB32()),
+        isFalse,
+      );
+    });
+
     test('the course marks its gaps and nothing else', () {
       final game = StageRunner(random: Random(7))..invincible = true;
       var gaps = 0;
@@ -3536,6 +3572,10 @@ class _DrawnCells implements Canvas {
 
   /// Where each of [cells] went.
   final places = <Rect>[];
+  final rects = <(Rect, Color)>[];
+
+  @override
+  void drawRect(Rect rect, Paint paint) => rects.add((rect, paint.color));
 
   @override
   void drawImageRect(ui.Image image, Rect src, Rect dst, Paint paint) {

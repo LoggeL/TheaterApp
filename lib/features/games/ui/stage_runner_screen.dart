@@ -1935,7 +1935,7 @@ class _StagePainter extends CustomPainter {
       case ObstacleKind.flat:
         _flat(canvas, a, rect);
       case ObstacleKind.border when a.ownScenery:
-        _guillotineTop(canvas, a, rect, (o.anchor - o.bottom) * s);
+        _guillotineTop(canvas, a, rect, (o.anchor - o.bottom) * s, s);
       case ObstacleKind.border:
         _velvetPiece(canvas, rect, s, a.border);
       case ObstacleKind.lamp:
@@ -2176,13 +2176,20 @@ class _StagePainter extends CustomPainter {
   /// fly loft and only as far as the back of the blade, so that the blade's
   /// slant shows; the uprights on past it over the [gap] below; and at the
   /// lower edge the blade, the same size at any height of the gap.
-  void _guillotineTop(Canvas canvas, RunnerArt a, Rect rect, double gap) {
+  void _guillotineTop(
+    Canvas canvas,
+    RunnerArt a,
+    Rect rect,
+    double gap,
+    double s,
+  ) {
     final width = rect.width * _guillotineWidth;
     final left = rect.center.dx - width / 2;
     final cell = RunnerSprite.guillotine;
     final blade = RunnerSprite.guillotineBlade;
     final height = width * blade.height / blade.width;
     final back = rect.bottom - height * .75;
+    const upright = RunnerSprite.guillotineUpright;
     if (back > rect.top) {
       _sprite(
         canvas,
@@ -2190,8 +2197,22 @@ class _StagePainter extends CustomPainter {
         cell,
         Rect.fromLTRB(left, rect.top, left + width, back),
       );
+      // The backdrop's border hangs above the blade, between the timber
+      // uprights. The blade is drawn last, over the fringe.
+      if (a.border != null) {
+        _velvetPiece(
+          canvas,
+          Rect.fromLTRB(
+            left + width * upright,
+            rect.top,
+            left + width * (1 - upright),
+            back,
+          ),
+          s,
+          a.border,
+        );
+      }
     }
-    const upright = RunnerSprite.guillotineUpright;
     for (final side in [0.0, 1 - upright]) {
       canvas.drawImageRect(
         a.imageOf(cell),
