@@ -1,0 +1,1 @@
+Termine können jetzt abgesagt werden. Ein abgesagter Termin bleibt im Spielplan sichtbar und ist deutlich als „Abgesagt“ markiert, auf Wunsch mit Grund. Wer zugesagt hat, wird benachrichtigt. Eine Absage lässt sich auch wieder zurücknehmen.

@@ -536,6 +536,7 @@ extension SyncController on AppController {
           return projected.copyWith(
             implicitYes:
                 projected.autoAccept &&
+                !projected.cancelled &&
                 !projected.fromSlotPool &&
                 projected.addressedToMe &&
                 !const {'yes', 'late', 'no'}.contains(projected.response) &&

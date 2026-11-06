@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
-import { eventNotificationBody } from './event-notification.mjs';
+import { eventNotificationBody, voidedByCancellation } from './event-notification.mjs';
 import { implicitYes, inAudience } from './theater.mjs';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -44,7 +44,8 @@ export function eventEmail(job, event, appOrigin) {
     : job.cancelled && job.seriesCount ? `${job.seriesCount} Termine der Serie entfallen, ab ${eventNotificationBody(event)}.`
       : job.series && job.change ? `${job.body}.` // "Gilt für n Termine ab <first changed occurrence>"
         : job.series && !job.cancelled ? `${job.body} ${job.extended ? 'Erster neuer Termin' : 'Erster Termin'}: ${eventNotificationBody(event)}`
-          : job.planned ? `${eventNotificationBody(event)}. Kannst du nicht? Bitte in der App absagen.` : eventNotificationBody(event);
+          : job.planned ? `${eventNotificationBody(event)}. Kannst du nicht? Bitte in der App absagen.`
+            : job.cancelled && job.reason ? `${eventNotificationBody(event)} · Grund: ${job.reason}` : eventNotificationBody(event);
   const footer = 'Termin-E-Mails kannst du in der App unter Darstellung & Erinnerungen ausschalten.';
   return { subject, text: `${subject}\n\n${body}\n\nTheater-App öffnen: ${link.href}\n\n${footer}`,
     html: `<!doctype html><html lang="de"><body><h1>${escapeHtml(subject)}</h1><p>${escapeHtml(body)}</p><p><a href="${escapeHtml(link.href)}">Theater-App öffnen</a></p><p>${escapeHtml(footer)}</p></body></html>` };
@@ -73,7 +74,7 @@ export async function deliverEmail(theater, email, appOrigin, now = new Date()) 
     if (at - Date.parse(job.createdAt) >= maxAgeMs) { s.put('emailJobs', job.id, { ...job, status: 'expired', finishedAt: now.toISOString() }); continue; }
     const event = job.cancelled ? job.event : s.get('events', job.data?.eventId);
     if (!job.test && (!event || Date.parse(event.endsAt ?? event.startsAt) <= at)) { s.put('emailJobs', job.id, { ...job, status: 'obsolete', finishedAt: now.toISOString() }); continue; }
-    if (!job.cancelled && job.eventVersion !== undefined && event?.version !== job.eventVersion) { s.put('emailJobs', job.id, { ...job, status: 'obsolete', finishedAt: now.toISOString() }); continue; }
+    if (voidedByCancellation(s, job) || (!job.cancelled && job.eventVersion !== undefined && event?.version !== job.eventVersion)) { s.put('emailJobs', job.id, { ...job, status: 'obsolete', finishedAt: now.toISOString() }); continue; }
     const accounts = s.accounts().filter(a => eligibleRecipient(s, a, job, event));
     const accepted = new Set(job.acceptedRecipientIds ?? []), permanent = new Set(job.failedRecipientIds ?? []);
     let retry = false, deferred = false;

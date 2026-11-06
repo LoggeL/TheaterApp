@@ -1,4 +1,4 @@
-import { customReminderMinutes, defaultReminders, eventNotificationBody } from './event-notification.mjs';
+import { customReminderMinutes, defaultReminders, eventNotificationBody, voidedByCancellation } from './event-notification.mjs';
 import { pushWanted } from './push-kinds.mjs';
 import { implicitYes, inAudience, plannedReminderLeadMs, plannedReminderMinLeadMs } from './theater.mjs';
 
@@ -25,7 +25,8 @@ export function scheduleReminders(theater, now = new Date()) {
   const s = theater.store, absences = s.all('absences');
   for (const event of s.all('events')) {
     const until = Date.parse(event.startsAt) - +now;
-    if (until <= 0 || until > customReminderMinutes.max * 60000) continue;
+    // A cancelled event (`event.cancel`) reminds nobody.
+    if (event.cancelledAt || until <= 0 || until > customReminderMinutes.max * 60000) continue;
     for (const a of s.accounts().filter(x => x.status === 'approved' && x.personId && inAudience(s.get('members', x.personId), event, s))) {
       const preferences = { ...defaultReminders, ...s.get('reminders', a.personId) };
       const kind = dueReminder(preferences, until);
@@ -82,6 +83,7 @@ export async function deliverPush(theater, messaging, appOrigin = process.env.AP
   if (!theater.pushEnabled || !messaging) return;
   const s = theater.store;
   for (const job of s.all('pushJobs').filter(j => j.status === 'pending' && Date.parse(j.nextAttemptAt) <= Date.now()).slice(0, 20)) {
+    if (voidedByCancellation(s, job)) { s.put('pushJobs', job.id, { ...job, status: 'obsolete', finishedAt: new Date().toISOString() }); continue; }
     const accounts = s.accounts().filter(a => a.status === 'approved' && a.personId && s.get('members', a.personId)?.active && (!job.recipientPersonIds || job.recipientPersonIds.includes(a.personId)) && (!job.adminsOnly || a.role === 'admin') && inAudience(s.get('members', a.personId), job, s) && pushWanted(s.get('reminders', a.personId), job) && (!job.change || (job.soon !== false && (answered(s, job, a.personId) || attendsImplicitly(s, job, a.personId)))) && (!job.remindOpen || (!answered(s, job, a.personId) && !attendsImplicitly(s, job, a.personId)))
       && eventPushEligible(s, job, a.personId) && (!job.remindPoll || !s.get('pollVotes', `${job.data?.pollId}:${a.personId}`)) && (!job.remindSlot || !s.get('slotBookings', `${job.data?.slotPoolId}:${a.personId}`)));
     const uids = new Set(accounts.map(a => a.uid));

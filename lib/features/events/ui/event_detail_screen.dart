@@ -15,6 +15,7 @@ import '../../rehearsal/ui/responses_screen.dart';
 import '../../rehearsal/ui/scene_planner_screen.dart';
 import '../../scripts/ui/script_reader_screen.dart';
 import '../../slots/ui/slot_event_notice.dart';
+import '../admin/event_cancel.dart';
 import '../admin/event_editor_screen.dart';
 import '../data/ics_export.dart';
 import '../domain/event_dates.dart';
@@ -181,9 +182,12 @@ class EventDetailContent extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             event.title,
-            style: embedded
-                ? Theme.of(context).textTheme.headlineMedium
-                : Theme.of(context).textTheme.headlineLarge,
+            style: cancelledTitle(
+              event,
+              embedded
+                  ? Theme.of(context).textTheme.headlineMedium
+                  : Theme.of(context).textTheme.headlineLarge,
+            ),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -191,6 +195,7 @@ class EventDetailContent extends StatelessWidget {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
+              if (event.cancelled) const CancelledPill(),
               EventKindPill(event.kind),
               if (marker != null) EventMarker(marker),
               if (event.inSeries)
@@ -227,7 +232,17 @@ class EventDetailContent extends StatelessWidget {
             ),
           ),
           SizedBox(height: embedded ? 16 : 24),
-          if (event.fromSlotPool)
+          if (event.cancelled)
+            _CancelledNotice(
+              event: event,
+              by: manager && event.cancelledBy != null
+                  ? controller.members
+                        .where((m) => m.id == event.cancelledBy)
+                        .firstOrNull
+                        ?.name
+                  : null,
+            )
+          else if (event.fromSlotPool)
             SlotEventNotice(controller: controller, event: event)
           else if (!event.addressedToMe)
             Card(
@@ -315,15 +330,18 @@ class EventDetailContent extends StatelessWidget {
               icon: const Icon(Icons.people_outline),
               label: const Text('Rückmeldungen ansehen'),
             ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () => openPage(
-                context,
-                AttendanceEditorScreen(controller: controller, event: event),
+            // Nobody attends a cancelled event.
+            if (!event.cancelled) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () => openPage(
+                  context,
+                  AttendanceEditorScreen(controller: controller, event: event),
+                ),
+                icon: const Icon(Icons.fact_check_outlined),
+                label: const Text('Anwesenheit erfassen'),
               ),
-              icon: const Icon(Icons.fact_check_outlined),
-              label: const Text('Anwesenheit erfassen'),
-            ),
+            ],
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: () => openPage(
@@ -333,6 +351,26 @@ class EventDetailContent extends StatelessWidget {
               icon: const Icon(Icons.link),
               label: const Text('Szenen planen'),
             ),
+            if (canCancelEvent(controller, event)) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                key: const ValueKey('event-cancel'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.error,
+                ),
+                onPressed: () => cancelEvent(context, controller, event),
+                icon: const Icon(Icons.event_busy_outlined),
+                label: const Text('Termin absagen'),
+              ),
+            ] else if (canUncancelEvent(controller, event)) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                key: const ValueKey('event-uncancel'),
+                onPressed: () => uncancelEvent(context, controller, event),
+                icon: const Icon(Icons.event_available_outlined),
+                label: const Text('Absage zurücknehmen'),
+              ),
+            ],
           ],
           // The route has the export in its app bar.
           if (embedded) ...[
@@ -349,6 +387,33 @@ class EventDetailContent extends StatelessWidget {
       );
     },
   );
+}
+
+/// Says that the event is called off, with the reason if one was given and,
+/// for those managing events, who called it off.
+class _CancelledNotice extends StatelessWidget {
+  const _CancelledNotice({required this.event, this.by});
+  final TheaterEvent event;
+  final String? by;
+  @override
+  Widget build(BuildContext context) {
+    final error = Theme.of(context).colorScheme.error;
+    return Card(
+      key: const ValueKey('event-cancelled-notice'),
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
+        leading: Icon(Icons.event_busy_outlined, color: error),
+        title: const Text('Dieser Termin ist abgesagt'),
+        subtitle: Text(
+          [
+            if (event.cancelReason.isNotEmpty) 'Grund: ${event.cancelReason}',
+            'Eine Rückmeldung ist nicht mehr nötig.',
+            if (by != null) 'Abgesagt von $by',
+          ].join('\n'),
+        ),
+      ),
+    );
+  }
 }
 
 class _DetailMeta extends StatelessWidget {

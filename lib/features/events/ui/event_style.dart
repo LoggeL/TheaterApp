@@ -94,6 +94,26 @@ class NotInvitedPill extends StatelessWidget {
   );
 }
 
+/// Marks an event that was called off ("Termin absagen"); it replaces the
+/// response badge, as nothing is answered for it any more.
+class CancelledPill extends StatelessWidget {
+  const CancelledPill({super.key});
+  @override
+  Widget build(BuildContext context) => StatePill(
+    'Abgesagt',
+    color: StageTheme.redTone.of(Theme.of(context).brightness),
+    icon: Icons.event_busy_outlined,
+  );
+}
+
+/// A cancelled event's title is struck through, everywhere it is listed.
+TextStyle? cancelledTitle(TheaterEvent event, TextStyle? style) =>
+    event.cancelled
+    ? (style ?? const TextStyle()).copyWith(
+        decoration: TextDecoration.lineThrough,
+      )
+    : style;
+
 /// The own response for colours and icons: 'auto' for the implicit yes of an
 /// auto-accepted event, else the response. Not a wire value: [hasResponse]
 /// and the response groups keep using [TheaterEvent.response].

@@ -2,6 +2,7 @@
 library;
 
 export '../../core/app_controller.dart' show EventsController;
+export 'admin/event_cancel.dart';
 export 'admin/event_editor_screen.dart';
 export 'admin/event_place_field.dart';
 export 'admin/events_admin_screen.dart';

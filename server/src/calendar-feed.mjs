@@ -135,16 +135,19 @@ export function calendarFeedLines(theater, personId, { appOrigin = null, stamp =
   for (const e of calendarFeedEvents(theater, personId)) {
     const production = e.productionId ? theater.store.get('productions', e.productionId) : null;
     const productionTitle = production?.title?.trim() ?? '';
-    const summary = productionTitle && !e.title.toLowerCase().includes(productionTitle.toLowerCase()) ? `${e.title} · ${productionTitle}` : e.title;
+    const title = productionTitle && !e.title.toLowerCase().includes(productionTitle.toLowerCase()) ? `${e.title} · ${productionTitle}` : e.title;
+    // A cancelled event (`event.cancel`) stays in the feed as STATUS:CANCELLED, also named so for calendars that ignore the status.
+    const summary = e.cancelledAt ? `Abgesagt: ${title}` : title;
     const link = appOrigin ? eventLink(appOrigin, e.id) : null;
-    const description = [e.description?.trim(), link ? `In der Theater-App öffnen: ${link}` : ''].filter(Boolean).join('\n\n');
+    const cancelNote = e.cancelledAt ? `Der Termin ist abgesagt.${e.cancelReason ? ` Grund: ${e.cancelReason}` : ''}` : '';
+    const description = [cancelNote, e.description?.trim(), link ? `In der Theater-App öffnen: ${link}` : ''].filter(Boolean).join('\n\n');
     lines.push('BEGIN:VEVENT', `UID:${icsText(icsUid(e.id))}`, `SEQUENCE:${icsSequence(e.version)}`, `DTSTAMP:${icsTime(e.updatedAt ?? stamp)}`,
       ...(e.updatedAt ? [`LAST-MODIFIED:${icsTime(e.updatedAt)}`] : []),
       `DTSTART:${icsTime(e.startsAt)}`, `DTEND:${icsTime(e.endsAt)}`, `SUMMARY:${icsText(summary)}`,
       ...(e.place?.trim() ? [`LOCATION:${icsText(e.place.trim())}`] : []),
       ...(description ? [`DESCRIPTION:${icsText(description)}`] : []),
       ...(link ? [`URL:${link}`] : []),
-      'STATUS:CONFIRMED', 'TRANSP:OPAQUE', 'END:VEVENT');
+      `STATUS:${e.cancelledAt ? 'CANCELLED' : 'CONFIRMED'}`, `TRANSP:${e.cancelledAt ? 'TRANSPARENT' : 'OPAQUE'}`, 'END:VEVENT');
   }
   lines.push('END:VCALENDAR');
   return lines;

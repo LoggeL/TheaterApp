@@ -64,11 +64,13 @@ String calendarFile(TheaterEvent event, {DateTime? now}) {
     'DTSTAMP:${_icsStamp(now ?? DateTime.now())}',
     'DTSTART:${_icsStamp(event.startsAt!)}',
     if (event.endsAt != null) 'DTEND:${_icsStamp(event.endsAt!)}',
-    'SUMMARY:${icsText(event.title)}',
+    'SUMMARY:${icsText(event.cancelled ? 'Abgesagt: ${event.title}' : event.title)}',
     if (event.place.trim().isNotEmpty)
       'LOCATION:${icsText(event.place.trim())}',
     if (event.description.isNotEmpty)
       'DESCRIPTION:${icsText(event.description)}',
+    // As in the calendar feed: a cancelled event stays, marked as such.
+    if (event.cancelled) ...['STATUS:CANCELLED', 'TRANSP:TRANSPARENT'],
     'END:VEVENT',
     'END:VCALENDAR',
   ];

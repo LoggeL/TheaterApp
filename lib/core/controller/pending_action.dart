@@ -57,6 +57,8 @@ class PendingAction {
     'checkin.save' => 'Anwesenheits-Check-in',
     'event.script' => 'Drehbuchzuordnung',
     'event.save' || 'event.delete' => 'Termin',
+    'event.cancel' => 'Terminabsage',
+    'event.uncancel' => 'Absage zurücknehmen',
     'slotPool.save' ||
     'slotPool.close' ||
     'slotPool.delete' ||

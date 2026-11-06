@@ -43,7 +43,8 @@ export function eventCratesSince(t) {
   const saved = t.store.get('settings', 'eventCratesSince');
   return saved ? Date.parse(saved.at) : Date.parse(t.store.put('settings', 'eventCratesSince', { at: t.clock().toISOString() }).at);
 }
-const counts = (t, e) => !e.slotPoolId && Date.parse(e.endsAt) > eventCratesSince(t);
+// A cancelled event (`event.cancel`) took place for nobody: no crate, no adoption, no reminder.
+const counts = (t, e) => !e.slotPoolId && !e.cancelledAt && Date.parse(e.endsAt) > eventCratesSince(t);
 
 /**
  * Settles the Termin-Kiste of [personId] after their attendance at [e] was set to [present]
@@ -131,7 +132,7 @@ export function settleAttendance(t, now = t.clock()) {
   const state = new Map(s.all(settleKind).map(x => [x.eventId, x]));
   for (const e of s.all('events')) {
     const end = Date.parse(e.endsAt);
-    if (e.slotPoolId || !(end > since) || at < end + rules.reminderAfterMs) continue;
+    if (e.slotPoolId || e.cancelledAt || !(end > since) || at < end + rules.reminderAfterMs) continue;
     const done = state.get(e.id) ?? { eventId: e.id };
     if (done.adoptedAt) continue;
     const adoptAt = end + rules.autoAdoptAfterMs;

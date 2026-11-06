@@ -30,6 +30,28 @@ extension ProjectionController on AppController {
                 )
               : item;
         }).toList();
+      // Mirrors the server: the event stays, only marked as cancelled.
+      case 'event.cancel' || 'event.uncancel':
+        final cancel = body['action'] == 'event.cancel';
+        view['events'] = jsonList(view['events']).map((item) {
+          final event = jsonMap(item);
+          if (event['id'] != body['id']) return item;
+          return {
+            for (final entry in event.entries)
+              if (!const {
+                'cancelledAt',
+                'cancelReason',
+                'cancelledBy',
+              }.contains(entry.key))
+                entry.key: entry.value,
+            if (cancel) ...{
+              'cancelledAt': action.createdAt.toUtc().toIso8601String(),
+              'cancelReason': textValue(body['reason']),
+              'cancelledBy': ?_user?.personId,
+            },
+            'version': intValue(event['version'], 1) + 1,
+          };
+        }).toList();
       case 'attendance':
         final attendance = jsonMap(view['attendanceByEvent']),
             reasons = jsonMap(view['declineReasons']);
@@ -95,6 +117,7 @@ extension ProjectionController on AppController {
                 ensemblesOf(jsonList(event['productionIds']).map((e) => '$e')),
               );
           if (event['locked'] == true ||
+              event['cancelledAt'] != null ||
               event['slotPoolId'] != null ||
               !invited ||
               end == null ||
@@ -247,7 +270,10 @@ extension ProjectionController on AppController {
   String? _versionedEventId(JsonMap payload) {
     final id = switch (payload['action']) {
       'event.script' => textValue(payload['eventId']),
-      'event.save' || 'event.delete' => textValue(payload['id']),
+      'event.save' ||
+      'event.delete' ||
+      'event.cancel' ||
+      'event.uncancel' => textValue(payload['id']),
       _ => '',
     };
     return id.isEmpty ? null : id;

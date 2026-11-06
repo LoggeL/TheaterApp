@@ -32,9 +32,10 @@ bool eventIsRunning(TheaterEvent event, DateTime now) {
       (event.endsAt ?? start).isAfter(now);
 }
 
-/// Short highlight label for events that deserve attention right now.
+/// Short highlight label for events that deserve attention right now; none
+/// for a cancelled event.
 String? eventMarker(TheaterEvent event, DateTime now, {bool isNext = false}) {
-  if (eventIsPast(event, now)) return null;
+  if (event.cancelled || eventIsPast(event, now)) return null;
   if (eventIsRunning(event, now)) return 'Läuft gerade';
   if (eventOnDay(event, now)) return 'Heute';
   return isNext ? 'Als Nächstes' : null;

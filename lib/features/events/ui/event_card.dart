@@ -110,11 +110,14 @@ class EventCard extends StatelessWidget {
                       ],
                       Text(
                         event.title,
-                        style: prominent
-                            ? theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w800,
-                              )
-                            : theme.textTheme.titleMedium,
+                        style: cancelledTitle(
+                          event,
+                          prominent
+                              ? theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                )
+                              : theme.textTheme.titleMedium,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Row(
@@ -139,7 +142,9 @@ class EventCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (!event.addressedToMe)
+                if (event.cancelled)
+                  const CancelledPill()
+                else if (!event.addressedToMe)
                   const NotInvitedPill()
                 else
                   RsvpStatusBadge(
@@ -157,7 +162,8 @@ class EventCard extends StatelessWidget {
         ),
       ),
     );
-    // Past events stay readable but step back behind what is still ahead.
-    return past ? Opacity(opacity: .62, child: card) : card;
+    // Past and cancelled events stay readable but step back behind what is
+    // still ahead.
+    return past || event.cancelled ? Opacity(opacity: .62, child: card) : card;
   }
 }

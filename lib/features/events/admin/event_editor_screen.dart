@@ -14,6 +14,7 @@ import '../../slots/ui/slot_pools_screen.dart';
 import '../domain/event_places.dart';
 import '../domain/event_series.dart';
 import '../domain/event_types.dart';
+import 'event_cancel.dart';
 import 'event_place_field.dart';
 
 /// Matches `changePushWindowDays` on the server.
@@ -519,6 +520,21 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
     );
   }
 
+  /// Calls the event off (or withdraws that) and leaves the editor; unsaved
+  /// edits of the form are not kept.
+  Future<void> _cancel({required bool undo}) async {
+    final event = widget.event!;
+    setState(() => _busy = true);
+    try {
+      final done = undo
+          ? await uncancelEvent(context, widget.controller, event)
+          : await cancelEvent(context, widget.controller, event);
+      if (done && mounted) Navigator.pop(context, EventEditorResult.saved);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _delete() async {
     final choice = await _confirmDelete();
     if (choice == null || !mounted) return;
@@ -662,6 +678,24 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
             ? 'Serie bearbeiten'
             : 'Termin bearbeiten',
         children: (context) => [
+          if (widget.event?.cancelled == true)
+            Padding(
+              key: const ValueKey('event-editor-cancelled'),
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Row(
+                children: [
+                  Icon(Icons.event_busy_outlined, size: 18, color: error),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Dieser Termin ist abgesagt. Änderungen werden nicht '
+                      'gepusht.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (_canEditSeries)
             _seriesScope(theme)
           else if (widget.event?.inSeries == true)
@@ -864,46 +898,48 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
               title: const Text('Alle gelten als zugesagt'),
               subtitle: Text(_autoAcceptHint),
             ),
-          SwitchListTile(
-            key: const ValueKey('event-push'),
-            value: _push && widget.controller.pushConfigured && _changeIsNear,
-            onChanged: widget.controller.pushConfigured && _changeIsNear
-                ? (v) => setState(() => _push = v)
-                : null,
-            title: Text(
-              widget.event == null || _extending
-                  ? 'Eingeladene per Push benachrichtigen'
-                  : 'Neue Zeit oder neuen Ort per Push melden',
+          // A cancelled event stays quiet (server).
+          if (widget.event?.cancelled != true)
+            SwitchListTile(
+              key: const ValueKey('event-push'),
+              value: _push && widget.controller.pushConfigured && _changeIsNear,
+              onChanged: widget.controller.pushConfigured && _changeIsNear
+                  ? (v) => setState(() => _push = v)
+                  : null,
+              title: Text(
+                widget.event == null || _extending
+                    ? 'Eingeladene per Push benachrichtigen'
+                    : 'Neue Zeit oder neuen Ort per Push melden',
+              ),
+              subtitle: Text(
+                !_changeIsNear
+                    ? '${_wholeSeries ? 'Die kommenden Termine liegen' : 'Der Termin liegt'} '
+                          'mehr als $changePushWindowDays Tage in der '
+                          'Zukunft. Änderungen werden erst ab $changePushWindowDays '
+                          'Tagen vorher gepusht.'
+                    : widget.controller.pushConfigured
+                    ? widget.event == null
+                          ? '${_series == null ? '' : 'Eine Benachrichtigung für die ganze Serie. '}'
+                                'Geht an: $audience'
+                          // Like a new series: one push for all new dates.
+                          : _extending
+                          ? 'Eine Benachrichtigung für die neuen Termine'
+                                '${_relevantTimeOrPlace ? ', eine weitere für die neue Zeit oder den neuen Ort' : ''}. '
+                                'Geht an: $audience'
+                          // Changes only reach people who accepted (server).
+                          : !_relevantChange
+                          ? 'Datum, Uhrzeit und Ort sind unverändert, daher geht '
+                                'kein Push raus. Änderungen an Titel oder '
+                                'Beschreibung werden nie gepusht.'
+                          : _autoAccept
+                          ? 'Geht an alle Eingeladenen, die nicht abgesagt '
+                                'haben ($audience). Ausgeschaltet geht kein Push '
+                                'raus.'
+                          : 'Geht an alle, die zugesagt haben ($audience). '
+                                'Ausgeschaltet geht kein Push raus.'
+                    : 'Push ist noch nicht eingerichtet.',
+              ),
             ),
-            subtitle: Text(
-              !_changeIsNear
-                  ? '${_wholeSeries ? 'Die kommenden Termine liegen' : 'Der Termin liegt'} '
-                        'mehr als $changePushWindowDays Tage in der '
-                        'Zukunft. Änderungen werden erst ab $changePushWindowDays '
-                        'Tagen vorher gepusht.'
-                  : widget.controller.pushConfigured
-                  ? widget.event == null
-                        ? '${_series == null ? '' : 'Eine Benachrichtigung für die ganze Serie. '}'
-                              'Geht an: $audience'
-                        // Like a new series: one push for all new dates.
-                        : _extending
-                        ? 'Eine Benachrichtigung für die neuen Termine'
-                              '${_relevantTimeOrPlace ? ', eine weitere für die neue Zeit oder den neuen Ort' : ''}. '
-                              'Geht an: $audience'
-                        // Changes only reach people who accepted (server).
-                        : !_relevantChange
-                        ? 'Datum, Uhrzeit und Ort sind unverändert, daher geht '
-                              'kein Push raus. Änderungen an Titel oder '
-                              'Beschreibung werden nie gepusht.'
-                        : _autoAccept
-                        ? 'Geht an alle Eingeladenen, die nicht abgesagt '
-                              'haben ($audience). Ausgeschaltet geht kein Push '
-                              'raus.'
-                        : 'Geht an alle, die zugesagt haben ($audience). '
-                              'Ausgeschaltet geht kein Push raus.'
-                  : 'Push ist noch nicht eingerichtet.',
-            ),
-          ),
           const SizedBox(height: 24),
           FilledButton(
             onPressed: _busy || !_valid ? null : _save,
@@ -923,6 +959,24 @@ class _EventEditorScreenState extends State<EventEditorScreen> {
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall,
               ),
+            ),
+          if (widget.event case final event?
+              when canCancelEvent(widget.controller, event) ||
+                  canUncancelEvent(widget.controller, event))
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: event.cancelled
+                  ? TextButton(
+                      key: const ValueKey('event-editor-uncancel'),
+                      onPressed: _busy ? null : () => _cancel(undo: true),
+                      child: const Text('Absage zurücknehmen'),
+                    )
+                  : TextButton(
+                      key: const ValueKey('event-editor-cancel'),
+                      style: TextButton.styleFrom(foregroundColor: error),
+                      onPressed: _busy ? null : () => _cancel(undo: false),
+                      child: const Text('Termin absagen'),
+                    ),
             ),
           if (widget.event != null)
             Padding(

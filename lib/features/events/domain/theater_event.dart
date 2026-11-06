@@ -34,6 +34,9 @@ class TheaterEvent {
     this.implicitCount = 0,
     this.createdBy,
     this.updatedBy,
+    this.cancelledAt,
+    this.cancelReason = '',
+    this.cancelledBy,
   });
   final String id,
       title,
@@ -101,8 +104,21 @@ class TheaterEvent {
   /// those who manage events (servers with `accountPermissions`).
   final int? createdBy, updatedBy;
   int? get lastEditedBy => updatedBy ?? createdBy;
+
+  /// When the event was called off ("Termin absagen", servers with
+  /// `eventCancel`); it stays visible, but answers, reminders and the
+  /// check-in are over. Null for events that take place.
+  final DateTime? cancelledAt;
+
+  /// The optional reason given with the cancellation.
+  final String cancelReason;
+
+  /// Person id of who called the event off.
+  final int? cancelledBy;
+  bool get cancelled => cancelledAt != null;
   bool get needsResponse =>
       response == 'open' &&
+      !cancelled &&
       !locked &&
       !fromSlotPool &&
       addressedToMe &&
@@ -110,8 +126,10 @@ class TheaterEvent {
 
   /// Whether the signed-in person plans to come: an own yes or late, or the
   /// implicit yes of an auto-accepted event.
-  bool get attending => const {'yes', 'late'}.contains(response) || implicitYes;
+  bool get attending =>
+      !cancelled && (const {'yes', 'late'}.contains(response) || implicitYes);
   bool acceptsResponsesAt(DateTime now) =>
+      !cancelled &&
       !locked &&
       !fromSlotPool &&
       !((endsAt ?? startsAt)?.isBefore(now) ?? false);
@@ -162,6 +180,11 @@ class TheaterEvent {
     implicitCount: intValue(json['implicitPeople']),
     createdBy: json['createdBy'] == null ? null : intValue(json['createdBy']),
     updatedBy: json['updatedBy'] == null ? null : intValue(json['updatedBy']),
+    cancelledAt: dateValue(json['cancelledAt'])?.toLocal(),
+    cancelReason: textValue(json['cancelReason']),
+    cancelledBy: json['cancelledBy'] == null
+        ? null
+        : intValue(json['cancelledBy']),
   );
   TheaterEvent copyWith({
     String? response,
@@ -205,6 +228,9 @@ class TheaterEvent {
     implicitCount: implicitCount,
     createdBy: createdBy,
     updatedBy: updatedBy,
+    cancelledAt: cancelledAt,
+    cancelReason: cancelReason,
+    cancelledBy: cancelledBy,
   );
   JsonMap toJson() => {
     'id': id,
@@ -240,5 +266,9 @@ class TheaterEvent {
     if (implicitCount != 0) 'implicitPeople': implicitCount,
     if (createdBy != null) 'createdBy': createdBy,
     if (updatedBy != null) 'updatedBy': updatedBy,
+    if (cancelledAt != null)
+      'cancelledAt': cancelledAt!.toUtc().toIso8601String(),
+    if (cancelReason.isNotEmpty) 'cancelReason': cancelReason,
+    if (cancelledBy != null) 'cancelledBy': cancelledBy,
   };
 }

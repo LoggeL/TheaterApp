@@ -127,6 +127,16 @@ class _QuickRsvpState extends State<QuickRsvp> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final event = widget.event;
+    // A cancelled event takes no answers; the row says so instead.
+    if (event.cancelled) {
+      return Text(
+        'Termin abgesagt – keine Rückmeldung nötig.',
+        key: const ValueKey('quick-rsvp-cancelled'),
+        style: widget.dense
+            ? Theme.of(context).textTheme.bodySmall
+            : const TextStyle(color: Color(0xFFDAE0D9), fontSize: 13),
+      );
+    }
     final canDecline = controller.canDecline(event);
     final options = [
       _RsvpOption(

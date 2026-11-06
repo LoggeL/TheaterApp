@@ -44,8 +44,10 @@ export const lateDeclineWindowMs = 24 * 60 * 60 * 1000;
 // arrives before the late-decline window) and no longer once the start is two hours away.
 export const plannedReminderLeadMs = 48 * 60 * 60 * 1000;
 export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
+// An optional reason when an event is called off (`event.cancel`); shown in the app and in the push.
+export const cancelReasonMaxLength = 300;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink', 'runnerMonthlyGala', 'runnerGageCrates']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink', 'runnerMonthlyGala', 'runnerGageCrates', 'eventCancel']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -110,11 +112,11 @@ export const inAudience = (member, item, store) => {
 /**
  * Auto-accept ("Alle gelten als zugesagt"): invited active people without an own yes, late or no
  * attend implicitly, unless an absence covers the event day. A withdrawn answer (`open`) counts
- * as none. `status` is the person's stored response status (null without one); `absences` may be
+ * as none. A cancelled event (`cancelledAt`) has no implicit attendees. `status` is the person's stored response status (null without one); `absences` may be
  * preloaded (all of them or the person's own). Mirrored by the app's `implicitYes` (sync.dart).
  */
 export const implicitYes = (store, event, member, status, absences = null) => {
-  if (event?.autoAccept !== true || event.slotPoolId || member == null || member.active === false || ['yes', 'late', 'no'].includes(status) || !inAudience(member, event, store)) return false;
+  if (event?.autoAccept !== true || event.slotPoolId || event.cancelledAt || member == null || member.active === false || ['yes', 'late', 'no'].includes(status) || !inAudience(member, event, store)) return false;
   const d = day(event.startsAt);
   return !(absences ?? store.all('absences')).some(x => x.personId === member.id && x.from <= d && x.to >= d);
 };
@@ -349,12 +351,18 @@ export class Theater {
   }
   /** Active members an event, poll or slot pool is addressed to. */
   audienceIds(item) { return this.store.all('members').filter(m => m.active !== false && inAudience(m, item, this.store)).map(m => m.id); }
+  /** Invitees who plan to attend event `e`: an own yes or late, or the implicit yes of an auto-accepted event. */
+  committedIds(e) {
+    const s = this.store;
+    const own = this.audienceIds(e).filter(p => ['yes', 'late'].includes(s.get('responses', `${e.id}:${p}`)?.status));
+    return [...new Set([...own, ...this.implicitIds(e)])];
+  }
   /**
    * People who attend an auto-accepted event implicitly (see `implicitYes`); empty for other events.
    * `statusOf` maps `eventId:personId` to the response status; both arguments may be preloaded.
    */
   implicitIds(e, statusOf = null, absences = null, members = null) {
-    if (e?.autoAccept !== true || e.slotPoolId) return [];
+    if (e?.autoAccept !== true || e.slotPoolId || e.cancelledAt) return [];
     const s = this.store, all = absences ?? s.all('absences');
     const status = personId => (statusOf ? statusOf.get(`${e.id}:${personId}`) : s.get('responses', `${e.id}:${personId}`)?.status) ?? null;
     return (members ?? s.all('members')).filter(m => implicitYes(s, e, m, status(m.id), all)).map(m => m.id);
@@ -430,7 +438,7 @@ export class Theater {
     const absences = this.store.all('absences').filter(x => x.from <= d && x.to >= d && invitedIds.includes(x.personId));
     const answered = new Set(responses.filter(r => ['yes', 'late', 'no'].includes(r.status)).map(r => r.personId)), absent = new Set(absences.map(x => x.personId));
     const implicitIds = this.implicitIds(e, new Map(responses.map(r => [`${r.eventId}:${r.personId}`, r.status])), absences), implicit = new Set(implicitIds);
-    return { responses, checkins: this.store.all('checkins').filter(r => r.eventId === eventId), absences, invitedIds, openIds: invitedIds.filter(x => !answered.has(x) && !implicit.has(x)), absentIds: invitedIds.filter(x => absent.has(x)), implicitIds, ...this.reminded(this.nudges(), 'event', eventId) };
+    return { responses, checkins: this.store.all('checkins').filter(r => r.eventId === eventId), absences, invitedIds, openIds: e.cancelledAt ? [] : invitedIds.filter(x => !answered.has(x) && !implicit.has(x)), absentIds: invitedIds.filter(x => absent.has(x)), implicitIds, ...this.reminded(this.nudges(), 'event', eventId) };
   }
   // Feedback tickets live in feedback-tickets.mjs; these keep the existing entry points.
   submitFeedback(uid, b) { return submitFeedback(this, uid, b); }
@@ -538,7 +546,7 @@ export class Theater {
   /** Recent response and attendance counts; members see their own, admins see all active people. */
   participation(uid) {
     const a = this.account(uid), at = +this.clock(), since = at - participationWindowDays * 86400000;
-    const events = this.store.all('events').filter(e => !voluntaryEventTypes.includes(e.type) && Date.parse(e.endsAt) < at && Date.parse(e.startsAt) >= since);
+    const events = this.store.all('events').filter(e => !e.cancelledAt && !voluntaryEventTypes.includes(e.type) && Date.parse(e.endsAt) < at && Date.parse(e.startsAt) >= since);
     const responses = new Map(this.store.all('responses').map(r => [`${r.eventId}:${r.personId}`, r.status]));
     // Attendance adopted from the own commitments (Termin-Kisten) is no recorded attendance here.
     const checkins = new Map(this.store.all('checkins').filter(c => c.source !== 'auto').map(c => [`${c.eventId}:${c.personId}`, c.present]));
@@ -598,6 +606,7 @@ export class Theater {
         const e = s.get('events', b.eventId);
         if (!e || !this.canSee(a, e)) fail(404, 'Termin nicht gefunden.');
         if (e.slotPoolId) fail(409, 'Diesen Termin bitte im Terminfinder umbuchen oder freigeben.', 'closed');
+        if (e.cancelledAt) fail(409, 'Der Termin ist abgesagt.', 'closed');
         if (e.locked || Date.parse(e.endsAt) < +this.clock()) fail(409, 'Die Rückmeldefrist ist vorbei.', 'closed');
         if (!['yes', 'late', 'no', 'open'].includes(b.status)) fail(400, 'Ungültige Rückmeldung.');
         if (['no', 'open'].includes(b.status) && Date.parse(e.startsAt) - declineCutoffMs <= +this.clock()) fail(409, 'Ab einer Stunde vor Beginn ist keine Absage mehr möglich.', 'closed');
@@ -619,7 +628,8 @@ export class Theater {
         // A decline that already exists stays the member's own (with its own reason).
         const declinedEventIds = [];
         for (const e of s.all('events')) {
-          if (e.slotPoolId || !inAudience(s.get('members', a.personId), e, s) || day(e.startsAt) < b.from || day(e.startsAt) > b.to) continue;
+          // Cancelled events are skipped; withdrawing the cancellation declines them (see storeEvent).
+          if (e.slotPoolId || e.cancelledAt || !inAudience(s.get('members', a.personId), e, s) || day(e.startsAt) < b.from || day(e.startsAt) > b.to) continue;
           const status = s.get('responses', `${e.id}:${a.personId}`)?.status;
           if (e.locked || Date.parse(e.startsAt) - declineCutoffMs <= +this.clock()) {
             // Too late to decline, but on an auto-accepted event the absence still ends the implicit yes.
@@ -864,7 +874,9 @@ export class Theater {
           // Older apps do not send the switch; the event keeps its stored value then.
           autoAccept: b.autoAccept === undefined ? old?.autoAccept === true : b.autoAccept, productionId: b.productionId || null, sceneIds: b.productionId ? sceneIds : [], roleIds, personIds, productionIds, ...(old?.seriesId ? { seriesId: old.seriesId } : {}), ...(old?.seriesRepeat ? { seriesRepeat: old.seriesRepeat } : {}),
           // Who planned the event (person ids), shown to everyone who manages events; older events have no creator.
-          createdBy: old ? old.createdBy ?? null : a.personId, updatedBy: a.personId, version: (old?.version ?? 0) + 1 };
+          createdBy: old ? old.createdBy ?? null : a.personId, updatedBy: a.personId, version: (old?.version ?? 0) + 1,
+          // Editing a cancelled event keeps it cancelled (see event.cancel).
+          ...(old?.cancelledAt ? { cancelledAt: old.cancelledAt, cancelReason: old.cancelReason ?? '', cancelledBy: old.cancelledBy ?? null } : {}) };
         if (b.repeat != null) {
           // A series is a set of independent events sharing a seriesId; each is
           // edited on its own later. Every occurrence gets the usual absence
@@ -907,7 +919,8 @@ export class Theater {
         }
         // Moving a near event far away still concerns those who expect it soon.
         const soon = !old || near(old.startsAt) || near(startsAt);
-        const kind = old ? { change: true, soon } : { newEvent: true }, relevant = !old || moved(old, e);
+        // A cancelled event stays quiet: its invitees already heard of the cancellation.
+        const kind = old ? { change: true, soon } : { newEvent: true }, relevant = !old || (!old.cancelledAt && moved(old, e));
         if (relevant && b.push === true) this.enqueuePush({ title: `${old ? 'Termin geändert' : 'Neuer Termin'}: ${e.title}`, body: eventNotificationBody(e), data: { eventId }, roleIds, personIds, productionIds, ...kind, announce: old ? 'changed' : 'new' });
         else if (relevant) this.enqueueEmail({ data: { eventId }, roleIds, personIds, productionIds, ...kind });
         if (relevant && b.push === true && this.pushEnabled && soon) this.markPlannedReminders([e], old ? 'changes' : 'eventAnnouncements');
@@ -919,8 +932,11 @@ export class Theater {
         if ((e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.', 'version_conflict');
         if (b.series !== undefined && b.series !== 'following') fail(400, 'Unbekannte Auswahl für die Terminserie.');
         if (b.series !== 'following' || !e.seriesId) {
-          this.enqueueEmail({ data: { eventId: e.id }, roleIds: e.roleIds, personIds: e.personIds, productionIds: e.productionIds, cancelled: true, event: cancelledEvent(e) });
-          this.pushCancelled(a, [e], `Termin abgesagt: ${e.title}`, eventNotificationBody(e));
+          // A cancelled event was already announced as cancelled; deleting it later stays quiet.
+          if (!e.cancelledAt) {
+            this.enqueueEmail({ data: { eventId: e.id }, roleIds: e.roleIds, personIds: e.personIds, productionIds: e.productionIds, cancelled: true, event: cancelledEvent(e) });
+            this.pushCancelled(a, [e], `Termin abgesagt: ${e.title}`, eventNotificationBody(e));
+          }
           this.removeEvent(e.id);
           return { ids: [e.id] };
         }
@@ -930,8 +946,44 @@ export class Theater {
         this.cancelSeriesEvents(a, doomed);
         return { ids: doomed.map(x => x.id) };
       }
+      case 'event.cancel': {
+        // Calls one upcoming event off without deleting it: it stays visible as cancelled, answers
+        // are closed and reminders stop. Who had committed hears of it by push (kind `changes`):
+        // an own yes or late, or the implicit yes of an auto-accepted event. Only this occurrence
+        // of a series; Terminfinder events are managed in their pool.
+        events(); const e = s.get('events', b.id); if (!e) fail(404, 'Termin nicht gefunden.');
+        if (e.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.', 'closed');
+        if ((e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.', 'version_conflict');
+        if (e.cancelledAt) fail(409, 'Der Termin ist bereits abgesagt.', 'closed');
+        if (Date.parse(e.endsAt) <= +this.clock()) fail(409, 'Vergangene Termine lassen sich nicht mehr absagen.', 'closed');
+        if (b.reason != null && typeof b.reason !== 'string') fail(400, 'Ungültiger Absagegrund.');
+        // One line: the reason also ends up in the push text.
+        const reason = (b.reason ?? '').replace(/\s+/g, ' ').trim();
+        if (reason.length > cancelReasonMaxLength) fail(400, `Der Absagegrund darf höchstens ${cancelReasonMaxLength} Zeichen haben.`);
+        const recipients = this.committedIds(e).filter(p => p !== a.personId);
+        const cancelledAt = new Date(+this.clock()).toISOString();
+        this.storeEvent({ ...e, cancelledAt, cancelReason: reason, cancelledBy: a.personId, updatedBy: a.personId, version: (e.version ?? 1) + 1 });
+        // The event stays, so the push opens it. Its email mirror is the cancellation email for the
+        // same people; both lapse when the cancellation is withdrawn before they go out.
+        if (recipients.length) this.enqueuePush({ title: `Termin abgesagt: ${e.title}`, body: `${eventNotificationBody(e)}${reason ? ` · Grund: ${reason}` : ''}`, data: { eventId: e.id }, recipientPersonIds: recipients, fixedText: true, pushKind: 'changes', cancelled: true, cancelledAt, event: cancelledEvent(e), ...(reason ? { reason } : {}) });
+        return { id: e.id, recipients: recipients.length, pushQueued: this.pushEnabled && recipients.length > 0, pushSkipped: !this.pushEnabled ? 'disabled' : recipients.length ? null : 'no_recipients' };
+      }
+      case 'event.uncancel': {
+        // Withdraws a cancellation without any notice: answers are open again, reminders resume.
+        events(); const e = s.get('events', b.id); if (!e) fail(404, 'Termin nicht gefunden.');
+        if (e.slotPoolId) fail(409, 'Dieser Termin wird vom Terminfinder verwaltet.', 'closed');
+        if ((e.version ?? 1) !== b.version) fail(409, 'Der Termin wurde zwischenzeitlich geändert.', 'version_conflict');
+        if (!e.cancelledAt) fail(409, 'Der Termin ist nicht abgesagt.', 'closed');
+        if (Date.parse(e.endsAt) <= +this.clock()) fail(409, 'Vergangene Termine bleiben abgesagt.', 'closed');
+        const { cancelledAt, cancelReason, cancelledBy, ...rest } = e;
+        const restored = this.storeEvent({ ...rest, updatedBy: a.personId, version: (e.version ?? 1) + 1 });
+        // Silent like switching auto-accept on: no "Du bist eingeplant" right away.
+        this.markPlannedReminders([restored]);
+        return { id: e.id };
+      }
       case 'checkin.save': {
         events(); const e = s.get('events', b.eventId); if (!e) fail(404, 'Termin nicht gefunden.');
+        if (e.cancelledAt) fail(409, 'Für abgesagte Termine wird keine Anwesenheit erfasst.', 'closed');
         for (const c of list(b.members)) {
           const memberId = Number(c.id), key = `${b.eventId}:${memberId}`, old = s.get('checkins', key);
           if (!s.get('members', memberId)?.active) fail(400, 'Person nicht verfügbar.');
@@ -1078,7 +1130,7 @@ export class Theater {
         // Nudges only the invited people who have not answered the event yet.
         events(); if (!this.pushEnabled) fail(409, 'Der Push-Versand ist noch nicht eingerichtet.', 'push_unavailable');
         const e = s.get('events', b.eventId); if (!e) fail(404, 'Termin nicht gefunden.');
-        if (e.locked || e.slotPoolId || Date.parse(e.endsAt ?? e.startsAt) < +this.clock()) fail(409, 'Für diesen Termin sind keine Rückmeldungen mehr möglich.', 'closed');
+        if (e.locked || e.slotPoolId || e.cancelledAt || Date.parse(e.endsAt ?? e.startsAt) < +this.clock()) fail(409, 'Für diesen Termin sind keine Rückmeldungen mehr möglich.', 'closed');
         // Nobody owes an answer here; the invitees are reminded automatically two days ahead.
         if (e.autoAccept === true) fail(409, 'Bei diesem Termin gelten alle Eingeladenen automatisch als zugesagt.', 'nothing_open');
         this.checkCooldown('event', e.id);
@@ -1319,13 +1371,14 @@ export class Theater {
    * `changes`), except who declined them and the person deleting. The event is gone: no deep link.
    */
   pushCancelled(a, events, title, body) {
-    const s = this.store, upcoming = events.filter(x => Date.parse(x.endsAt) > +this.clock());
+    // Cancelled events (`event.cancel`) were announced already.
+    const s = this.store, upcoming = events.filter(x => !x.cancelledAt && Date.parse(x.endsAt) > +this.clock());
     const recipients = [...new Set(upcoming.flatMap(x => this.audienceIds(x).filter(p => s.get('responses', `${x.id}:${p}`)?.status !== 'no')))].filter(p => p !== a.personId);
     if (recipients.length) this.enqueuePush({ title, body, data: {}, recipientPersonIds: recipients, pushKind: 'changes' });
   }
   /** Removes occurrences of a series with one cancellation email and one push, naming the next affected date. */
   cancelSeriesEvents(a, doomed) {
-    const upcoming = doomed.filter(x => Date.parse(x.endsAt) > +this.clock());
+    const upcoming = doomed.filter(x => !x.cancelledAt && Date.parse(x.endsAt) > +this.clock());
     if (upcoming.length) {
       const first = upcoming[0];
       this.enqueueEmail({ data: { eventId: first.id }, roleIds: first.roleIds, personIds: first.personIds, productionIds: first.productionIds, cancelled: true, event: cancelledEvent(first), ...(upcoming.length > 1 ? { seriesCount: upcoming.length } : {}) });

@@ -27,6 +27,14 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.14.0',
+    date: '6. November 2026',
+    items: [
+      'Fällt ein Termin aus, siehst du ihn weiterhin im Spielplan, deutlich als „Abgesagt“ markiert und auf Wunsch mit Grund. Hattest du zugesagt, bekommst du eine Benachrichtigung.',
+      'Für die Theaterleitung: Termine lassen sich absagen und die Absage wieder zurücknehmen.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.13.8',
     date: '4. November 2026',
     items: [

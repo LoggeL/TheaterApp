@@ -102,7 +102,8 @@ class TodayDigest {
   /// unanswered on a day of an own absence (which the server only declines
   /// while responses are still accepted). A confirmation keeps the event.
   static bool _attends(TheaterEvent event, List<Absence> absences) {
-    if (event.response == 'no') return false;
+    // A cancelled event takes place for nobody; it stays among the later ones.
+    if (event.response == 'no' || event.cancelled) return false;
     final start = event.startsAt;
     if (event.response != 'open' || start == null) return true;
     return !absences.any((a) => a.coversDay(start));

@@ -10,6 +10,7 @@ import '../../../shared/widgets/page_header.dart';
 import '../domain/event_dates.dart';
 import '../domain/event_format.dart';
 import '../ui/event_card.dart';
+import '../ui/event_style.dart';
 import '../ui/rehearsal_calendar.dart';
 import 'event_editor_screen.dart';
 
@@ -61,7 +62,7 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
       child: ListTile(
         title: Row(
           children: [
-            Flexible(child: Text(e.title)),
+            Flexible(child: Text(e.title, style: cancelledTitle(e, null))),
             if (e.inSeries)
               const Padding(
                 padding: EdgeInsets.only(left: 6),
@@ -74,7 +75,8 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
         ),
         subtitle: Text(
           '${eventDate(e)} · ${eventTime(e)}'
-          '${e.fromSlotPool ? ' · Terminfinder' : ''}',
+          '${e.fromSlotPool ? ' · Terminfinder' : ''}'
+          '${e.cancelled ? ' · Abgesagt' : ''}',
         ),
         // Slot pool events follow their bookings and are edited in the pool.
         trailing: IconButton(

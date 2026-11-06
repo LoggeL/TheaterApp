@@ -23,3 +23,14 @@ export function eventNotificationBody(event) {
   if (!Number.isFinite(+start)) return event.title;
   return `${berlinDateTime(start)}${event.place ? ` · ${event.place}` : ''}`;
 }
+
+/**
+ * Whether a job about one event is void because of its cancellation (`event.cancel`): every job
+ * of a cancelled event except its own cancellation notice, and that notice once the cancellation
+ * was withdrawn (or renewed). Series notices only name their first occurrence and stay.
+ */
+export function voidedByCancellation(s, job) {
+  const event = job.data?.eventId && !job.series ? s.get('events', job.data.eventId) : null;
+  if (!event) return false;
+  return job.cancelledAt ? event.cancelledAt !== job.cancelledAt : !!event.cancelledAt;
+}

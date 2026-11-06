@@ -546,6 +546,7 @@ class _AgendaTile extends StatelessWidget {
     final accent = past ? scheme.onSurfaceVariant : eventAccent(context, event);
     final pending =
         !past &&
+        !event.cancelled &&
         event.response == 'open' &&
         event.addressedToMe &&
         !event.autoAccept &&
@@ -578,7 +579,7 @@ class _AgendaTile extends StatelessWidget {
             child: Icon(eventKindIcon(event.kind), size: 20, color: accent),
           ),
         ),
-        title: Text(event.title),
+        title: Text(event.title, style: cancelledTitle(event, null)),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -589,7 +590,9 @@ class _AgendaTile extends StatelessWidget {
             ],
           ],
         ),
-        trailing: pending
+        trailing: event.cancelled && !past
+            ? const CancelledPill()
+            : pending
             ? RsvpStatusBadge(status: event.response, emphasizeOpen: true)
             : !past && !event.addressedToMe
             ? const NotInvitedPill()
@@ -597,6 +600,6 @@ class _AgendaTile extends StatelessWidget {
         onTap: onTap,
       ),
     );
-    return past ? Opacity(opacity: .62, child: tile) : tile;
+    return past || event.cancelled ? Opacity(opacity: .62, child: tile) : tile;
   }
 }
