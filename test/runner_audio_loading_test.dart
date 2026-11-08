@@ -92,7 +92,13 @@ class _Audio implements WebAudio {
   @override
   void close() => log.add('close');
   @override
-  Future<WebAudioClip> decode(Uint8List bytes, double volume) async {
+  void setVolume(WebAudioChannel channel, double gain) {}
+  @override
+  Future<WebAudioClip> decode(
+    Uint8List bytes,
+    double volume,
+    WebAudioChannel channel,
+  ) async {
     decoded.add(bytes.first);
     if (pending[bytes.first] case final completion?) return completion.future;
     return _Clip(this, bytes.first);

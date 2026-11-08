@@ -8,9 +8,21 @@ import 'stage_runner_sound.dart';
 /// One audio context of the browser for all sounds of the game.
 WebAudio openWebAudio() => _BrowserAudio(web.AudioContext());
 
+/// How long a change of a channel's volume takes: a short ramp instead of a
+/// jump, which would click while a slider moves.
+const _volumeRamp = .03;
+
 class _BrowserAudio implements WebAudio {
   _BrowserAudio(this._context);
   final web.AudioContext _context;
+
+  /// A gain per channel, between the sounds' own gains and the output: its
+  /// volume applies to what sounds now and what plays later, without
+  /// decoding again.
+  late final Map<WebAudioChannel, web.GainNode> _channels = {
+    for (final channel in WebAudioChannel.values)
+      channel: _context.createGain()..connect(_context.destination),
+  };
 
   @override
   void resume() {
@@ -21,14 +33,29 @@ class _BrowserAudio implements WebAudio {
   void suspend() => _context.suspend().toDart.ignore();
 
   @override
-  Future<WebAudioClip> decode(Uint8List bytes, double volume) async {
+  Future<WebAudioClip> decode(
+    Uint8List bytes,
+    double volume,
+    WebAudioChannel channel,
+  ) async {
     // The browser takes over (detaches) the buffer it decodes, so it gets
     // its own copy.
     final data = Uint8List.fromList(bytes).buffer.toJS;
     final buffer = await _context.decodeAudioData(data).toDart;
     final gain = _context.createGain()..gain.value = volume;
-    gain.connect(_context.destination);
+    gain.connect(_channels[channel]!);
     return _BrowserClip(_context, buffer, gain);
+  }
+
+  /// Ramps to [gain] from where the channel is now; a ramp to 0 ends in
+  /// silence exactly.
+  @override
+  void setVolume(WebAudioChannel channel, double gain) {
+    final param = _channels[channel]!.gain, now = _context.currentTime;
+    param
+      ..cancelScheduledValues(now)
+      ..setValueAtTime(param.value, now)
+      ..linearRampToValueAtTime(gain, now + _volumeRamp);
   }
 
   @override
@@ -39,6 +66,8 @@ class _BrowserClip implements WebAudioClip {
   _BrowserClip(this._context, this._buffer, this._gain);
   final web.AudioContext _context;
   final web.AudioBuffer _buffer;
+
+  /// The sound's own volume, into its channel.
   final web.GainNode _gain;
 
   /// A buffer source plays once and is cheap: a new one for every play. A

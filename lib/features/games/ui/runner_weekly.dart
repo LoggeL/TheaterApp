@@ -39,13 +39,14 @@ class WeeklyPlay {
   };
 }
 
-/// "Geister: Wenige / Alle" for every run of the Wochenprobe, ranked or
-/// training, kept on this device ([RunnerMenuPreferences.ghostMode]).
+/// "Geister: Aus / Wenige / Alle" for every run of the Wochenprobe, ranked
+/// or training, kept on this device ([RunnerMenuPreferences.ghostMode]).
 class GhostModeChoice extends StatelessWidget {
   const GhostModeChoice({super.key, required this.preferences});
   final RunnerMenuPreferences preferences;
 
   static String note(GhostMode mode) => switch (mode) {
+    GhostMode.off => 'Keine Geister: Du läufst die Strecke allein.',
     GhostMode.few => 'Platz 1, dein bester Lauf und wer direkt vor dir liegt.',
     GhostMode.all => 'Die besten Läufe aller, die diese Woche gewertet haben.',
   };
@@ -61,12 +62,14 @@ class GhostModeChoice extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Side by side where they fit, else the choice below its name
-            // (a small phone at a large font).
-            Wrap(
+            // (a small phone at a large font). Not a Wrap: in the game's
+            // settings dialog its intrinsic height asks the segmented
+            // button for a dry layout, which that cannot give (it reads its
+            // own constraints before layout and throws).
+            OverflowBar(
               spacing: 16,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              alignment: WrapAlignment.spaceBetween,
+              overflowSpacing: 6,
+              alignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('Geister', style: theme.textTheme.titleSmall),
                 SegmentedButton<GhostMode>(

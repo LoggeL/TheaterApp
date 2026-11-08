@@ -54,13 +54,35 @@ class _Drawn implements Canvas {
   void drawImageRect(ui.Image image, Rect src, Rect dst, Paint paint) =>
       calls.add(('image', image, src, paint.color.a));
 
+  /// The silhouettes of ghosts among the paths.
+  int ghostPaths = 0;
+
   @override
-  void drawPath(Path path, Paint paint) =>
-      calls.add(('path', null, null, paint.color.a));
+  void drawPath(Path path, Paint paint) {
+    calls.add(('path', null, null, paint.color.a));
+    final c = paint.color;
+    if (c.a > 0 && (c.toARGB32() & 0xFFFFFF) == 0xDCE6F0) ghostPaths++;
+  }
 
   @override
   void saveLayer(Rect? bounds, Paint paint) =>
       calls.add(('layer', null, bounds, paint.color.a));
+
+  /// Only the ghosts' crosses draw lines on this stage.
+  @override
+  void drawLine(Offset p1, Offset p2, Paint paint) {
+    if (paint.color.toARGB32() == 0x40DCE6F0) {
+      calls.add(('line', null, null, paint.color.a));
+    }
+  }
+
+  /// Texts left of the own figure: the ghosts' names.
+  @override
+  void drawParagraph(ui.Paragraph paragraph, Offset offset) {
+    if (offset.dx + paragraph.longestLine <= StageRunner.runnerX * 500) {
+      calls.add(('text', null, null, 1));
+    }
+  }
 
   @override
   int getSaveCount() => 1;
@@ -141,6 +163,26 @@ void main() {
       ghosts.mode = GhostMode.few;
       expect(_ranks(ghosts.shown), [1, 6, 7]);
       expect(ghosts.leader!.rank, 1);
+    });
+
+    test('"Aus" shows none: no ghost, no name, no figure to load', () {
+      expect(pickGhosts(all, GhostMode.off), isEmpty);
+      expect(GhostMode.values.map((m) => m.label), ['Aus', 'Wenige', 'Alle']);
+      final ghosts = RunnerGhosts(
+        [all[4], all[0], _ghost(7, me: true), all[2]],
+        mode: GhostMode.off,
+        ownRank: 7,
+      );
+      expect(ghosts.shown, isEmpty);
+      expect(ghosts.wanted, isEmpty);
+      // On again during the run: the named ones load first.
+      ghosts.mode = GhostMode.all;
+      expect(_ranks(ghosts.wanted), [1, 7, 3, 5]);
+      ghosts.mode = GhostMode.few;
+      expect(_ranks(ghosts.wanted), [1, 7]);
+      ghosts.mode = GhostMode.off;
+      expect(ghosts.shown, isEmpty);
+      expect(ghosts.wanted, isEmpty);
     });
 
     test('the server names the figure of each ghost', () {
@@ -262,15 +304,52 @@ void main() {
       again.dispose();
     });
 
-    test('the old training switch and unknown values leave "Wenige"', () async {
-      SharedPreferences.setMockInitialValues({
-        'stageRunner.trainingGhosts': false,
-        RunnerMenuPreferences.ghostModeKey: 'none',
-      });
+    test('"Aus" is kept across restarts', () async {
       final preferences = RunnerMenuPreferences();
       await preferences.loaded;
-      expect(preferences.ghostMode, GhostMode.few);
+      preferences.setGhostMode(GhostMode.off);
+      expect(preferences.ghostMode, GhostMode.off);
+      await pumpEventQueue();
       preferences.dispose();
+      final again = RunnerMenuPreferences();
+      await again.loaded;
+      expect(again.ghostMode, GhostMode.off);
+      again.dispose();
+    });
+
+    test('unknown values leave "Wenige"', () async {
+      for (final stored in <Object>['none', 'aus', 3]) {
+        SharedPreferences.setMockInitialValues({
+          RunnerMenuPreferences.legacyTrainingGhostsKey: false,
+          RunnerMenuPreferences.ghostModeKey: stored,
+        });
+        final preferences = RunnerMenuPreferences();
+        await preferences.loaded;
+        expect(preferences.ghostMode, GhostMode.few, reason: '$stored');
+        preferences.dispose();
+      }
+    });
+
+    test('the old training switch, turned off, keeps the ghosts off', () async {
+      Future<GhostMode> restored(Map<String, Object> values) async {
+        SharedPreferences.setMockInitialValues(values);
+        final preferences = RunnerMenuPreferences();
+        await preferences.loaded;
+        addTearDown(preferences.dispose);
+        return preferences.ghostMode;
+      }
+
+      const legacy = RunnerMenuPreferences.legacyTrainingGhostsKey;
+      expect(await restored({legacy: false}), GhostMode.off);
+      expect(await restored({legacy: true}), GhostMode.few);
+      // Chosen since: that choice.
+      expect(
+        await restored({
+          legacy: false,
+          RunnerMenuPreferences.ghostModeKey: 'all',
+        }),
+        GhostMode.all,
+      );
     });
 
     test('without storage the choice still holds for now', () async {
@@ -356,6 +435,67 @@ void main() {
         skins.dispose();
       },
     );
+
+    test('ghosts turned off before the art loads load no figures', () async {
+      final controller = TestServer().controller();
+      addTearDown(controller.dispose);
+      final art = RunnerArt.test(_picture(4, 4), _picture(4, 4));
+      final ghosts = [
+        for (var i = 1; i <= 3; i++)
+          _ghost(
+            i,
+            figure: GhostFigure(
+              id: 'c$i',
+              image: '/games/runner/skins/c$i.webp?v=1',
+            ),
+          ),
+      ];
+      // "Wenige" at the start, then "Aus" in the pause, all before the art.
+      final skins = GhostSkins(controller)
+        ..want(ghosts, null)
+        ..want(const [], null);
+      skins.artReady(art);
+      expect(GhostSkins.asked, 0, reason: 'nothing waits once they are off');
+      // On, off and on again: only the ones wanted last load, once each.
+      skins
+        ..want(ghosts, null)
+        ..want(const [], null)
+        ..want(ghosts.take(2), null)
+        ..artReady(art);
+      expect(GhostSkins.asked, 2);
+      await pumpEventQueue();
+      skins.dispose();
+    });
+
+    test('"Aus" draws no ghost, no cross and no name', () {
+      final art = RunnerArt.test(_picture(1124, 580), _picture(8, 8));
+      final game = StageRunner(seed: 7)
+        ..obstacles.clear()
+        ..pickups.clear();
+      // One that crashed early and one still running.
+      final crashed = _ghost(1, seconds: .5, y: .3);
+      final running = _ghost(2, y: .4);
+      final ghosts = RunnerGhosts([crashed, running]);
+      final painter = stagePainterFor(game, art, ghosts: ghosts);
+      int drawn() {
+        final canvas = _Drawn();
+        painter.paint(canvas, const Size(800, 500));
+        return canvas.ghostPaths +
+            canvas.calls.where((c) => c.$1 == 'line' || c.$1 == 'text').length;
+      }
+
+      while (game.time < 1) {
+        game
+          ..invincible = true
+          ..update(1 / 60);
+      }
+      // "Wenige": both, the cross of the first and the names.
+      expect(drawn(), greaterThan(3));
+      ghosts.mode = GhostMode.off;
+      expect(drawn(), 0);
+      ghosts.mode = GhostMode.few;
+      expect(drawn(), greaterThan(3));
+    });
 
     test('ghosts are drawn faint and behind the course', () {
       final atlas = _picture(1124, 580), skin = _picture(1124, 580);

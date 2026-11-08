@@ -86,6 +86,53 @@ abstract interface class RunnerMusic {
   void resumeMusic();
 }
 
+/// The volumes of the game's music and its effects ("Ton" in the game's
+/// settings): shares from 0 to 1 of the full volume, which is the game's
+/// own level ([RunnerSfx.volume], the music's), remembered on this device
+/// like the mute switch. They multiply with everything else, the music's
+/// fades too; 0 is silent and starts nothing. Mute ([RunnerSound.enabled])
+/// stays the quick switch beside them. Kept apart from [RunnerSound] like
+/// [RunnerMusic].
+abstract interface class RunnerVolumes {
+  ValueListenable<double> get musicVolume;
+  ValueListenable<double> get effectsVolume;
+
+  /// Changes the music's volume at once, also of the music playing.
+  void setMusicVolume(double share);
+
+  /// Changes the effects' volume from their next play on; 0 also ends
+  /// those still sounding.
+  void setEffectsVolume(double share);
+
+  /// Plays [sfx] at the effects' volume to be heard, called from the
+  /// gesture that changed it: gets the sounds ready ([RunnerSound.prepare])
+  /// where that needs a gesture (browsers), and while they are still being
+  /// decoded (before the first run) plays it once they are, the latest
+  /// preview only. Silent while muted or at 0 %.
+  void previewEffect(RunnerSfx sfx);
+}
+
+/// The gain for a volume [share] (0 to 1) of a slider: its square, as the
+/// ear hears loudness about logarithmically. Half way is then about half
+/// as loud (-12 dB), not hardly quieter (-6 dB). Exactly 0 and 1 at the
+/// ends.
+double runnerVolumeGain(double share) {
+  if (!(share > 0)) return 0;
+  if (share >= 1) return 1;
+  return share * share;
+}
+
+/// Where the volumes of [RunnerVolumes] are kept on this device, as
+/// doubles from 0 to 1.
+const runnerMusicVolumeKey = 'stageRunner.musicVolume',
+    runnerEffectsVolumeKey = 'stageRunner.effectsVolume';
+
+/// A remembered volume share as it may be used: finite and from 0 to 1;
+/// null for anything else.
+@visibleForTesting
+double? runnerVolumeShare(Object? stored) =>
+    stored is num && stored.isFinite ? stored.toDouble().clamp(0.0, 1.0) : null;
+
 /// The music rises from silence when a run starts and fades out when it
 /// ends.
 @visibleForTesting
@@ -105,20 +152,35 @@ void _silent(Object e) {
   if (kDebugMode) debugPrint('Bühnenlauf: Ton nicht verfügbar: $e');
 }
 
-/// The mute switch, remembered on this device.
-mixin _RememberedSwitch {
+/// The mute switch and the volumes ([RunnerVolumes]), remembered on this
+/// device.
+mixin _RememberedSettings {
   static const _key = 'stageRunner.sound';
+
   final _enabled = ValueNotifier(true);
+  final _musicShare = ValueNotifier(1.0), _effectsShare = ValueNotifier(1.0);
   bool _disposed = false, _switchChanged = false;
+  bool _musicChanged = false, _effectsChanged = false;
   late final Future<void> _settingsReady;
 
   ValueListenable<bool> get enabled => _enabled;
+  ValueListenable<double> get musicVolume => _musicShare;
+  ValueListenable<double> get effectsVolume => _effectsShare;
+
+  /// The gains the volumes stand for ([runnerVolumeGain]).
+  double get _musicGain => runnerVolumeGain(_musicShare.value);
+  double get _effectsGain => runnerVolumeGain(_effectsShare.value);
 
   Future<void> _restore() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final on = prefs.getBool(_key);
-      if (on != null && !_disposed && !_switchChanged) _enabled.value = on;
+      if (_disposed) return;
+      final on = prefs.get(_key);
+      if (on is bool && !_switchChanged) _enabled.value = on;
+      final music = runnerVolumeShare(prefs.get(runnerMusicVolumeKey));
+      if (music != null && !_musicChanged) _musicShare.value = music;
+      final effects = runnerVolumeShare(prefs.get(runnerEffectsVolumeKey));
+      if (effects != null && !_effectsChanged) _effectsShare.value = effects;
     } catch (_) {}
   }
 
@@ -131,13 +193,59 @@ mixin _RememberedSwitch {
           .then<void>((_) {}, onError: (Object _) {}),
     );
   }
+
+  /// Takes the volume [share] (of the music, else the effects); false when
+  /// nothing changed. A slider calls this many times a second: the latest
+  /// share is written after the one being written, never one per call.
+  bool _rememberVolume(double share, {required bool music}) {
+    if (_disposed || !share.isFinite) return false;
+    final value = share.clamp(0.0, 1.0);
+    final notifier = music ? _musicShare : _effectsShare;
+    if (music) {
+      _musicChanged = true;
+    } else {
+      _effectsChanged = true;
+    }
+    if (notifier.value == value) return false;
+    notifier.value = value;
+    _unsaved[music ? runnerMusicVolumeKey : runnerEffectsVolumeKey] = value;
+    if (!_saving) {
+      _saving = true;
+      unawaited(_saveVolumes());
+    }
+    return true;
+  }
+
+  final _unsaved = <String, double>{};
+  bool _saving = false;
+
+  Future<void> _saveVolumes() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      while (_unsaved.isNotEmpty) {
+        final key = _unsaved.keys.first;
+        await prefs.setDouble(key, _unsaved.remove(key)!);
+      }
+    } catch (_) {
+      // Only a convenience: the volume still holds for now.
+      _unsaved.clear();
+    } finally {
+      _saving = false;
+    }
+  }
+
+  void _disposeSettings() {
+    _enabled.dispose();
+    _musicShare.dispose();
+    _effectsShare.dispose();
+  }
 }
 
-/// Waits for this platform's saved mute setting. Stand-ins without saved
-/// settings are ready immediately.
+/// Waits for this platform's saved mute setting and volumes. Stand-ins
+/// without saved settings are ready immediately.
 Future<void> runnerSoundSettingsReady(RunnerSound sound) =>
-    sound is _RememberedSwitch
-    ? (sound as _RememberedSwitch)._settingsReady
+    sound is _RememberedSettings
+    ? (sound as _RememberedSettings)._settingsReady
     : Future<void>.value();
 
 /// [RunnerSound] with the `audioplayers` plugin, for the native platforms.
@@ -146,8 +254,8 @@ Future<void> runnerSoundSettingsReady(RunnerSound sound) =>
 /// Every effect has its own player, so a run never loads a sound (on iOS a
 /// new AVPlayerItem on the UI thread) while it is played.
 class PluginRunnerSound
-    with _RememberedSwitch
-    implements RunnerSound, RunnerMusic {
+    with _RememberedSettings
+    implements RunnerSound, RunnerMusic, RunnerVolumes {
   PluginRunnerSound({
     @visibleForTesting AudioPlayer Function()? newPlayer,
     @visibleForTesting Future<bool> Function()? othersPlaying,
@@ -249,6 +357,13 @@ class PluginRunnerSound
 
   final Map<RunnerSfx, AudioPlayer> _players = {};
   final Set<RunnerSfx> _loaded = {};
+
+  /// The volume each effect's player was given last.
+  final Map<RunnerSfx, double> _volumes = {};
+
+  /// Whether a change of [musicVolume] waits in the queue; it takes the
+  /// latest one when its turn comes.
+  bool _musicVolumeQueued = false;
 
   /// Length of the loaded effect, only where it is ended early.
   final Map<RunnerSfx, Duration> _lengths = {};
@@ -360,7 +475,9 @@ class PluginRunnerSound
     if (!_canSound) return;
     await player.setSource(AssetSource(sfx.asset));
     if (!_canSound) return;
-    await player.setVolume(sfx.volume);
+    final volume = _effectVolume(sfx);
+    await player.setVolume(volume);
+    _volumes[sfx] = volume;
     _loaded.add(sfx);
     if (_endsEarly) {
       final length = await player.getDuration();
@@ -368,12 +485,20 @@ class PluginRunnerSound
     }
   }
 
+  /// The volume of [sfx] at the chosen [effectsVolume].
+  double _effectVolume(RunnerSfx sfx) => sfx.volume * _effectsGain;
+
+  /// The music's volume at [level] of its fades and the chosen
+  /// [musicVolume].
+  double _musicOut(double level) => _musicVolume * level * _musicGain;
+
   @override
   void play(RunnerSfx sfx) {
-    if (!_enabled.value) return;
+    // At 0 % no player starts at all.
+    if (!_enabled.value || _effectsGain == 0) return;
     _run(() async {
       final player = await _player(sfx);
-      if (!_canSound) return;
+      if (!_canSound || _effectsGain == 0) return;
       final count = _plays[sfx] = (_plays[sfx] ?? 0) + 1;
       _ends.remove(sfx)?.cancel();
       if (!_loaded.contains(sfx)) {
@@ -382,6 +507,13 @@ class PluginRunnerSound
       } else if (player.state == PlayerState.playing) {
         // Still sounding: start it over, as before.
         await player.stop();
+      }
+      if (!_canSound || _effectsGain == 0) return;
+      // The volume changed since this player last played.
+      final volume = _effectVolume(sfx);
+      if (_volumes[sfx] != volume) {
+        await player.setVolume(volume);
+        _volumes[sfx] = volume;
       }
       if (!_canSound) return;
       await player.resume();
@@ -401,8 +533,8 @@ class PluginRunnerSound
   }
 
   Future<void> _resumeMusic() async {
-    // Stopped again before its turn came.
-    if (!_musicWanted || !_canSound || _hidden) return;
+    // Stopped again before its turn came; at 0 % it does not start.
+    if (!_musicWanted || !_canSound || _hidden || _musicGain == 0) return;
     // Another app's music goes on alone; the game's own never stops it.
     if (_musicPlayer?.state != PlayerState.playing &&
         await _othersPlayingNow()) {
@@ -410,9 +542,9 @@ class PluginRunnerSound
     }
     if (!_musicWanted || !_canSound || _hidden) return;
     final player = await _readyMusic();
-    if (!_musicWanted || !_canSound || _hidden) return;
-    await player.setVolume(_musicVolume * _musicLevel);
-    if (!_musicWanted || !_canSound || _hidden) return;
+    if (!_musicWanted || !_canSound || _hidden || _musicGain == 0) return;
+    await player.setVolume(_musicOut(_musicLevel));
+    if (!_musicWanted || !_canSound || _hidden || _musicGain == 0) return;
     await player.resume();
   }
 
@@ -482,7 +614,7 @@ class PluginRunnerSound
     _fade = Timer.periodic(over ~/ steps, (timer) {
       step++;
       final level = _musicLevel = from + (to - from) * step / steps;
-      _run(() async => _musicPlayer?.setVolume(_musicVolume * level));
+      _run(() async => _musicPlayer?.setVolume(_musicOut(level)));
       if (step < steps) return;
       timer.cancel();
       _fade = null;
@@ -514,6 +646,50 @@ class PluginRunnerSound
       _run(stop, needsSound: false);
     }
   }
+
+  @override
+  void setMusicVolume(double share) {
+    if (!_rememberVolume(share, music: true)) return;
+    // Only the music of a run plays; the next one starts at this volume.
+    if (!_musicWanted || !_enabled.value || _hidden || _musicVolumeQueued) {
+      return;
+    }
+    _musicVolumeQueued = true;
+    // Runs even when muted meanwhile (no needsSound), so the flag is always
+    // cleared: else every later change would wait for a task that never
+    // comes.
+    _run(() async {
+      _musicVolumeQueued = false;
+      if (!_canSound || !_musicWanted || _hidden) return;
+      final player = _musicPlayer;
+      final playing = player != null && player.state == PlayerState.playing;
+      if (_musicGain == 0) {
+        // Silent, and the player holds where it is.
+        if (playing) await player.pause();
+      } else if (playing) {
+        await player.setVolume(_musicOut(_musicLevel));
+      } else {
+        // Up from 0 %: it goes on.
+        await _resumeMusic();
+      }
+    }, needsSound: false);
+  }
+
+  @override
+  void setEffectsVolume(double share) {
+    if (!_rememberVolume(share, music: false) || _effectsGain > 0) return;
+    // At 0 % even the effects still sounding end.
+    _run(() async {
+      for (final p in _players.values) {
+        if (p.state == PlayerState.playing) await p.stop();
+      }
+    }, needsSound: false);
+  }
+
+  /// A play queues behind the loads, and loads its own effect if need be:
+  /// it sounds also before the first run.
+  @override
+  void previewEffect(RunnerSfx sfx) => play(sfx);
 
   @override
   void useTune(Uint8List? tune) {
@@ -558,9 +734,13 @@ class PluginRunnerSound
     for (final p in players) {
       unawaited(p.dispose().catchError((Object _) {}));
     }
-    _enabled.dispose();
+    _disposeSettings();
   }
 }
+
+/// The two sums of the game's sounds, each with a volume of its own
+/// ([RunnerVolumes]).
+enum WebAudioChannel { music, effects }
 
 /// The few calls of the Web Audio API that [WebRunnerSound] makes.
 abstract class WebAudio {
@@ -571,8 +751,18 @@ abstract class WebAudio {
   /// Holds everything that sounds where it is.
   void suspend();
 
-  /// Decodes a compressed sound, to be played at [volume].
-  Future<WebAudioClip> decode(Uint8List bytes, double volume);
+  /// Decodes a compressed sound, to be played at [volume] through
+  /// [channel].
+  Future<WebAudioClip> decode(
+    Uint8List bytes,
+    double volume,
+    WebAudioChannel channel,
+  );
+
+  /// Sets the volume (a gain) of everything through [channel]: what sounds
+  /// now and what plays later, without decoding anything again. 1 until
+  /// set.
+  void setVolume(WebAudioChannel channel, double gain);
   void close();
 }
 
@@ -600,20 +790,25 @@ abstract class WebAudioVoice {
 /// element, sets the element's source anew as a data URI whenever a player
 /// changes its sound, and seeks and restarts the element for every play.)
 class WebRunnerSound
-    with _RememberedSwitch
-    implements RunnerSound, RunnerMusic {
+    with _RememberedSettings
+    implements RunnerSound, RunnerMusic, RunnerVolumes {
   WebRunnerSound({
     @visibleForTesting WebAudio Function()? open,
     @visibleForTesting AssetBundle? bundle,
   }) : _open = open ?? platform.openWebAudio,
        _bundle = bundle ?? rootBundle {
-    _settingsReady = _restore();
+    // A context opened before the volumes were known gets them now.
+    _settingsReady = _restore().then((_) {
+      _musicVolumeChanged();
+      _effectsVolumeChanged();
+    });
   }
 
   final WebAudio Function() _open;
   final AssetBundle _bundle;
   final Map<String, Future<Uint8List?>> _bytes = {};
-  final Map<(Uint8List, double), Future<WebAudioClip?>> _decoding = {};
+  final Map<(Uint8List, double, WebAudioChannel), Future<WebAudioClip?>>
+  _decoding = {};
   WebAudio? _audio;
   Future<void>? _loading;
   final Map<RunnerSfx, WebAudioClip> _clips = {};
@@ -668,7 +863,7 @@ class WebRunnerSound
   void prepare() {
     if (!_enabled.value || _disposed) return;
     _safely(() {
-      final audio = _audio ??= _open();
+      final audio = _audio ??= _openAudio();
       // Still within the tap: Safari only starts audio in a user gesture.
       audio.resume();
       _loading ??= _settingsReady
@@ -680,12 +875,19 @@ class WebRunnerSound
     });
   }
 
+  /// The audio context, at the chosen volumes.
+  WebAudio _openAudio() => _open()
+    ..setVolume(WebAudioChannel.music, _musicGain)
+    ..setVolume(WebAudioChannel.effects, _effectsGain);
+
   /// Fetches and decodes all sounds side by side; one that fails stays
   /// silent.
   Future<void> _load(WebAudio audio) => Future.wait([
     for (final sfx in RunnerSfx.values)
       if (!_clips.containsKey(sfx))
-        _decode(audio, sfx.asset, sfx.volume).then((clip) {
+        _decode(audio, sfx.asset, sfx.volume, WebAudioChannel.effects).then((
+          clip,
+        ) {
           if (clip != null) _clips[sfx] = clip;
         }),
     _loadMusic(audio),
@@ -697,11 +899,12 @@ class WebRunnerSound
     if (_disposed || !_enabled.value) return;
     final asked = ++_tunes, tune = _tune;
     if (_musicReady && identical(_musicTune, tune)) return;
+    const channel = WebAudioChannel.music;
     var clip = tune == null
         ? null
-        : await _decodeBytes(audio, tune, _musicVolume);
+        : await _decodeBytes(audio, tune, _musicVolume, channel);
     if (asked != _tunes || _disposed || !_enabled.value) return;
-    clip ??= _ownTune ??= await _decode(audio, _music, _musicVolume);
+    clip ??= _ownTune ??= await _decode(audio, _music, _musicVolume, channel);
     if (asked != _tunes || _disposed) return;
     _musicReady = clip != null;
     _musicTune = tune;
@@ -721,11 +924,12 @@ class WebRunnerSound
     WebAudio audio,
     String asset,
     double volume,
+    WebAudioChannel channel,
   ) async {
     try {
       final bytes = await _fetch(asset);
       if (bytes == null || _disposed || !_enabled.value) return null;
-      final clip = await _decodeBytes(audio, bytes, volume);
+      final clip = await _decodeBytes(audio, bytes, volume, channel);
       // Decoded clips are retained, compressed copies no longer needed.
       if (clip != null) _bytes.remove(asset);
       return clip;
@@ -741,11 +945,12 @@ class WebRunnerSound
     WebAudio audio,
     Uint8List bytes,
     double volume,
+    WebAudioChannel channel,
   ) {
     if (_disposed || !_enabled.value) return Future.value();
-    final key = (bytes, volume);
+    final key = (bytes, volume, channel);
     return _decoding.putIfAbsent(key, () {
-      return _decodeNow(audio, bytes, volume).whenComplete(() {
+      return _decodeNow(audio, bytes, volume, channel).whenComplete(() {
         _decoding.remove(key);
       });
     });
@@ -755,9 +960,10 @@ class WebRunnerSound
     WebAudio audio,
     Uint8List bytes,
     double volume,
+    WebAudioChannel channel,
   ) async {
     try {
-      final clip = await audio.decode(bytes, volume);
+      final clip = await audio.decode(bytes, volume, channel);
       return _disposed ? null : clip;
     } catch (e) {
       // E.g. a browser without an AAC decoder.
@@ -768,7 +974,8 @@ class WebRunnerSound
 
   @override
   void play(RunnerSfx sfx) {
-    if (!_enabled.value || _disposed) return;
+    // At 0 % nothing starts at all.
+    if (!_enabled.value || _disposed || _effectsGain == 0) return;
     // Not decoded (yet): silence rather than loading during a run.
     final clip = _clips[sfx];
     if (clip == null) return;
@@ -782,7 +989,68 @@ class WebRunnerSound
   void _startMusic() {
     final clip = _musicClip;
     if (clip == null || _musicVoice != null || _disposed) return;
+    // At 0 % it does not start; turned up, it rises from silence.
+    if (_musicGain == 0) return;
     _safely(() => _musicVoice = clip.play(loop: true, fadeIn: musicFadeIn));
+  }
+
+  /// How quickly the music ends when turned down to 0 % (the channel is
+  /// silent before already).
+  static const _silenceFade = Duration(milliseconds: 60);
+
+  @override
+  void setMusicVolume(double share) {
+    if (_rememberVolume(share, music: true)) _musicVolumeChanged();
+  }
+
+  void _musicVolumeChanged() {
+    final audio = _audio;
+    if (audio == null || _disposed) return;
+    _safely(() => audio.setVolume(WebAudioChannel.music, _musicGain));
+    if (_musicGain == 0) {
+      final voice = _musicVoice;
+      _musicVoice = null;
+      if (voice != null) _safely(() => voice.stop(fadeOut: _silenceFade));
+    } else if (_musicWanted && _enabled.value) {
+      _startMusic();
+    }
+  }
+
+  @override
+  void setEffectsVolume(double share) {
+    if (_rememberVolume(share, music: false)) _effectsVolumeChanged();
+  }
+
+  /// Counts the previews, so one that waits for decoding plays only if it
+  /// is still the latest.
+  int _previews = 0;
+
+  @override
+  void previewEffect(RunnerSfx sfx) {
+    if (!_enabled.value || _disposed || _effectsGain == 0) return;
+    // Within the gesture: Safari only starts audio so.
+    prepare();
+    final asked = ++_previews;
+    if (_clips.containsKey(sfx)) return play(sfx);
+    // Still decoding (prepare only started it): heard once it is there.
+    // Without loading (it failed, or nothing to load) it stays silent.
+    _loading?.then((_) {
+      if (asked == _previews) play(sfx);
+    }, onError: (Object _) {});
+  }
+
+  void _effectsVolumeChanged() {
+    final audio = _audio;
+    if (audio == null || _disposed) return;
+    _safely(() {
+      audio.setVolume(WebAudioChannel.effects, _effectsGain);
+      if (_effectsGain > 0) return;
+      // At 0 % even the effects still sounding end.
+      for (final voice in _voices.values) {
+        voice.stop();
+      }
+      _voices.clear();
+    });
   }
 
   @override
@@ -874,6 +1142,6 @@ class WebRunnerSound
     _musicVoice = null;
     // Closing the context ends everything that still sounds.
     if (audio != null) _safely(audio.close);
-    _enabled.dispose();
+    _disposeSettings();
   }
 }

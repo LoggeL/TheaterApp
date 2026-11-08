@@ -39,10 +39,13 @@ class RunnerMenuPreferences extends ChangeNotifier {
   /// a chosen collection stays.
   static const legacyBoardKey = 'stageRunner.boardView';
 
-  /// The ghosts of the Wochenprobe: `few` or `all` ([GhostMode]). The
-  /// switch for training before it (`stageRunner.trainingGhosts`) is not
-  /// read: ghosts are never all off now, and "Wenige" is calm enough.
+  /// The ghosts of the Wochenprobe: `off`, `few` or `all` ([GhostMode]).
   static const ghostModeKey = 'stageRunner.ghostMode';
+
+  /// The switch before it (0.15.0), for training runs only. Turned off and
+  /// nothing chosen since, the ghosts stay off ([GhostMode.off]), now also
+  /// in ranked runs; else "Wenige".
+  static const legacyTrainingGhostsKey = 'stageRunner.trainingGhosts';
 
   /// The ids of the news entries shown on this device.
   static const newsSeenKey = 'stageRunner.newsSeen';
@@ -86,11 +89,13 @@ class RunnerMenuPreferences extends ChangeNotifier {
             _ => null,
           };
       if (!_changedDone && done != null) _doneMissionsOpen = done;
-      final ghosts = preferences.getString(ghostModeKey);
+      final ghosts = preferences.get(ghostModeKey);
       if (!_changedGhosts) {
         _ghostMode =
             GhostMode.values.where((m) => m.name == ghosts).firstOrNull ??
-            _ghostMode;
+            (ghosts == null && preferences.get(legacyTrainingGhostsKey) == false
+                ? GhostMode.off
+                : _ghostMode);
       }
       _newsSeen.addAll(preferences.getStringList(newsSeenKey) ?? const []);
       _newsKnown = true;

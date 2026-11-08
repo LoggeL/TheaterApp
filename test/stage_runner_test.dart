@@ -155,7 +155,21 @@ class _FakeWebAudio implements WebAudio {
   @override
   void suspend() => log.add('suspend');
   @override
-  Future<WebAudioClip> decode(Uint8List bytes, double volume) async {
+  void setVolume(WebAudioChannel channel, double gain) =>
+      volumes[channel] = gain;
+
+  /// The volume of each channel as last set.
+  final volumes = <WebAudioChannel, double>{};
+
+  /// The channel each clip plays through.
+  final channels = <String, WebAudioChannel>{};
+
+  @override
+  Future<WebAudioClip> decode(
+    Uint8List bytes,
+    double volume,
+    WebAudioChannel channel,
+  ) async {
     final name = assets.entries
         .singleWhere((e) => listEquals(e.value, bytes))
         .key
@@ -163,6 +177,7 @@ class _FakeWebAudio implements WebAudio {
         .last;
     if (broken.contains(name)) throw StateError('cannot decode $name');
     clips[name] = volume;
+    channels[name] = channel;
     return _FakeClip(this, name);
   }
 
@@ -2312,6 +2327,16 @@ void main() {
       expect(audio.clips, {
         for (final sfx in RunnerSfx.values) '${sfx.name}.mp3': sfx.volume,
         'music.mp3': .32,
+      });
+      // Each through the channel of its volume, at the full volume so far.
+      expect(audio.channels, {
+        for (final sfx in RunnerSfx.values)
+          '${sfx.name}.mp3': WebAudioChannel.effects,
+        'music.mp3': WebAudioChannel.music,
+      });
+      expect(audio.volumes, {
+        WebAudioChannel.music: 1.0,
+        WebAudioChannel.effects: 1.0,
       });
       // The tune starts once it is decoded.
       expect(audio.log, ['resume', 'play music.mp3#1 loop']);

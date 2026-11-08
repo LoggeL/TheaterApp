@@ -203,10 +203,14 @@ class RunnerGhost {
   }
 }
 
-/// Which ghosts a run of the Wochenprobe shows ("Geister: Wenige / Alle").
-/// There is no "none": the ghosts are what the week is about, but all of
-/// them at once distract, so "Wenige" is the default.
+/// Which ghosts a run of the Wochenprobe shows ("Geister: Aus / Wenige /
+/// Alle"), ranked or training alike. All of them at once distract, so
+/// "Wenige" is the default; whoever runs better alone turns them off.
 enum GhostMode {
+  /// None at all: no ghost, no mark of a crash and no name tag, and their
+  /// figures are not loaded.
+  off('Aus'),
+
   /// The week's best, the own best run and whoever is just ahead of it.
   few('Wenige'),
 
@@ -221,11 +225,13 @@ enum GhostMode {
 /// first. [GhostMode.few]: the week's first, the own best run and the one
 /// directly ahead of it in the ranking ([ownRank], else the own ghost's
 /// rank), each once; without an own place yet the first two.
+/// [GhostMode.off]: none.
 List<RunnerGhost> pickGhosts(
   List<RunnerGhost> ghosts,
   GhostMode mode, {
   int? ownRank,
 }) {
+  if (mode == GhostMode.off) return const [];
   if (mode == GhostMode.all) return List.unmodifiable(ghosts);
   final own = ghosts.where((g) => g.me).firstOrNull;
   final rank = own?.rank ?? ownRank;
@@ -265,8 +271,8 @@ double ghostTagAlpha(double time) =>
     (1 - (time - ghostNamesFor) / ghostNamesFade).clamp(0.0, 1.0);
 
 /// The ghosts of a run, best first: all of them, those [mode] shows and
-/// those whose names show at the start (the [GhostMode.few] ones, in
-/// either mode).
+/// those whose names show at the start (the [GhostMode.few] ones, as far
+/// as they are shown: with [GhostMode.off] there is no name either).
 class RunnerGhosts {
   RunnerGhosts(
     List<RunnerGhost> ghosts, {
@@ -295,10 +301,22 @@ class RunnerGhosts {
   /// What is drawn, best first.
   List<RunnerGhost> shown = const [];
 
-  /// The ghosts with a name tag.
+  /// The ghosts with a name tag, while they are [shown].
   late final Set<RunnerGhost> named;
 
   void _pick() => shown = pickGhosts(ghosts, _mode, ownRank: ownRank);
+
+  /// The ghosts whose figures to load, in this order: the named ones first,
+  /// as they show from the start, then the others shown. None while they
+  /// are off.
+  List<RunnerGhost> get wanted => shown.isEmpty
+      ? const []
+      : [
+          for (final g in shown)
+            if (named.contains(g)) g,
+          for (final g in shown)
+            if (!named.contains(g)) g,
+        ];
 
   /// The best of them, whose score the run chases.
   RunnerGhost? get leader => ghosts.firstOrNull;

@@ -46,11 +46,12 @@ class GhostSkins {
 
   /// Starts loading the figures of [ghosts], in this order, for the art
   /// [base]. Without art yet (the stage draws plain shapes) they wait for
-  /// [artReady].
+  /// [artReady], in place of what waited before: each call names all the
+  /// ghosts wanted now, so with the ghosts off nothing waits.
   void want(Iterable<RunnerGhost> ghosts, RunnerArt? base) {
     if (_disposed) return;
     if (base == null) {
-      (_waiting ??= []).addAll(ghosts);
+      _waiting = [...ghosts];
       return;
     }
     bool fits(ui.Image image) =>

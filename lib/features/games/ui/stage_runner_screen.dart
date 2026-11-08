@@ -29,6 +29,7 @@ import 'missions_card.dart';
 import 'next_drop.dart';
 import 'runner_menu.dart';
 import 'runner_news.dart';
+import 'runner_volume_settings.dart';
 import 'runner_weekly.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart';
@@ -323,11 +324,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   void _menuChanged() {
     if (!mounted) return;
     setState(() {});
-    // "Geister: Wenige / Alle", also changed during a run (its pause).
+    // "Geister: Aus / Wenige / Alle", also changed during a run (its
+    // pause): it applies at once, and only figures now shown load.
     final ghosts = _ghosts;
     if (ghosts != null && ghosts.mode != _menu.ghostMode) {
       ghosts.mode = _menu.ghostMode;
-      _ghostSkins?.want(ghosts.shown, _art);
+      _ghostSkins?.want(ghosts.wanted, _art);
       _frame.value++;
     }
   }
@@ -351,6 +353,20 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     String? saveError;
     var saveRequest = 0;
     final ghosts = _weeklyShown;
+    final volumes = _sound is RunnerVolumes ? _sound as RunnerVolumes : null;
+    // More than the scenery's motion: a section each.
+    final sections = ghosts || volumes != null;
+    // Turning a volume in the pause of a run lets the run's sound be heard
+    // while the dialog is open (the music at its new volume, the effects'
+    // preview; in browsers both wait in the one held audio context). It
+    // holds again once the dialog closes, until the tap that runs on.
+    var heard = false;
+    void hear() {
+      if (heard || _phase != _Phase.playing || !_paused) return;
+      heard = true;
+      if (_sound case final RunnerMusic music) music.resumeMusic();
+    }
+
     try {
       await showDialog<void>(
         context: context,
@@ -365,16 +381,26 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                   horizontal: 16,
                   vertical: 24,
                 ),
-                // With the Wochenprobe its ghosts are chosen here too, also
-                // in the pause of one of its runs.
-                title: Text(ghosts ? 'Spieleinstellungen' : 'Bewegung'),
+                // The volumes, and with the Wochenprobe its ghosts, are
+                // chosen here too, also in the pause of a run: they apply
+                // at once.
+                title: Text(sections ? 'Spieleinstellungen' : 'Bewegung'),
                 content: SizedBox(
                   width: 420,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (ghosts)
+                      if (volumes != null) ...[
+                        RunnerVolumeSettings(
+                          key: const ValueKey('runner-volumes'),
+                          sound: _sound,
+                          volumes: volumes,
+                          onAdjust: hear,
+                        ),
+                        const Divider(height: 32),
+                      ],
+                      if (sections)
                         Text(
                           'Bewegung',
                           style: Theme.of(context).textTheme.titleSmall,
@@ -452,6 +478,9 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       );
     } finally {
       _settingsOpen = false;
+    }
+    if (heard && mounted && _phase == _Phase.playing && _paused) {
+      if (_sound case final RunnerMusic music) music.pauseMusic();
     }
     // An interrupted run stays paused until the player taps the stage.
   }
@@ -722,9 +751,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _ghostSkins?.dispose();
     _ghostSkins = null;
     if (ghosts != null && ghosts.ghosts.isNotEmpty) {
-      // The named ones first: they show from the start.
+      // The named ones first: they show from the start. With the ghosts
+      // off nothing loads until they are turned on.
       _ghostSkins = GhostSkins(controller, onLoaded: () => _frame.value++)
-        ..want([...ghosts.named, ...ghosts.shown], _art);
+        ..want(ghosts.wanted, _art);
     }
     final perf = _perf = RunnerPerf(
       game,
@@ -3270,6 +3300,8 @@ class _StagePainter extends CustomPainter {
     double course,
   ) {
     final shown = ghosts.shown, t = g.time, mark = s * .012;
+    // Off ([GhostMode.off]): no ghost, no cross and no name.
+    if (shown.isEmpty) return;
     for (final ghost in shown) {
       if (!ghost.crashed || t < ghost.end) continue;
       final x = ghost.endX * s - course;

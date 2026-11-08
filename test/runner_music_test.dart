@@ -175,7 +175,17 @@ class _WebAudio implements WebAudio {
   @override
   void suspend() => log.add('suspend');
   @override
-  Future<WebAudioClip> decode(Uint8List bytes, double volume) async {
+  void setVolume(WebAudioChannel channel, double gain) =>
+      volumes[channel] = gain;
+
+  /// The volume of each channel as last set.
+  final volumes = <WebAudioChannel, double>{};
+  @override
+  Future<WebAudioClip> decode(
+    Uint8List bytes,
+    double volume,
+    WebAudioChannel channel,
+  ) async {
     if (broken.contains(bytes.length)) throw StateError('no decoder');
     return _Clip(this, bytes.length);
   }

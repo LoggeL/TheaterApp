@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -18,6 +19,12 @@ import 'package:theater_app/features/games/games.dart';
 import 'package:theater_app/features/games/ui/runner_menu.dart';
 import 'package:theater_app/features/games/ui/runner_news.dart';
 import 'package:theater_app/features/games/ui/runner_weekly.dart';
+import 'package:theater_app/features/games/ui/stage_runner_art.dart';
+import 'package:theater_app/features/games/ui/stage_runner_ghosts.dart';
+import 'package:theater_app/features/games/ui/stage_runner_look.dart'
+    show WardrobePictures;
+import 'package:theater_app/features/games/ui/stage_runner_screen.dart'
+    show stageLayout;
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
 
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
@@ -42,6 +49,61 @@ class _QuietSound implements RunnerSound {
 }
 
 const _seed = 3141592653;
+
+/// Counts what the stage draws of the ghosts: the ghosts themselves (as
+/// silhouettes or in their figures), the crosses where they crashed and
+/// the name tags (texts ending left of the own figure, at [runnerX]).
+class _GhostCanvas implements Canvas {
+  _GhostCanvas(this.runnerX);
+  final double runnerX;
+  int ghosts = 0, marks = 0, tags = 0;
+
+  @override
+  void drawPath(Path path, Paint paint) {
+    final c = paint.color;
+    if (c.a > 0 && (c.toARGB32() & 0xFFFFFF) == 0xDCE6F0) ghosts++;
+  }
+
+  @override
+  void drawImageRect(ui.Image image, Rect src, Rect dst, Paint paint) {
+    final c = paint.color;
+    if (c.a > 0 && c.a <= .26 && (c.toARGB32() & 0xFFFFFF) == 0) ghosts++;
+  }
+
+  @override
+  void drawLine(Offset p1, Offset p2, Paint paint) {
+    if (paint.color.toARGB32() == 0x40DCE6F0) marks++;
+  }
+
+  @override
+  void drawParagraph(ui.Paragraph paragraph, Offset offset) {
+    if (offset.dx + paragraph.longestLine <= runnerX) tags++;
+  }
+
+  @override
+  int getSaveCount() => 1;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+/// What the stage of the running game draws of the ghosts right now.
+({int ghosts, int marks, int tags}) _ghostsDrawn(WidgetTester tester) {
+  final stage = find.byKey(const ValueKey('runner-stage'));
+  final size = tester.getSize(stage);
+  final canvas = _GhostCanvas(StageRunner.runnerX * stageLayout(size).s);
+  tester.widget<CustomPaint>(stage).painter!.paint(canvas, size);
+  return (ghosts: canvas.ghosts, marks: canvas.marks, tags: canvas.tags);
+}
+
+ui.Image _picture(int width, int height) {
+  final recorder = ui.PictureRecorder();
+  Canvas(recorder).drawRect(
+    Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+    Paint()..color = const Color(0xFF808080),
+  );
+  return recorder.endRecording().toImageSync(width, height);
+}
 
 /// The test clock's week (`fixedNow` is Saturday, 12 September 2026).
 const _week = '2026-W37';
@@ -80,9 +142,12 @@ JsonMap _ghost(int rank, int person, String name, int score, double seconds) =>
 
 /// The Wochenprobe on a test server: its week, the calls and their bodies.
 class _Weekly {
-  _Weekly({this.used = 1, this.lastWeek});
+  _Weekly({this.used = 1, this.lastWeek, this.figures = false});
   int used;
   JsonMap? lastWeek;
+
+  /// Whether every ghost names a figure of its own to load.
+  final bool figures;
   bool offline = false, startOffline = false, scoresRejected = false;
 
   /// The ranked start counts on the server, but its answer never comes.
@@ -106,9 +171,21 @@ class _Weekly {
       _row(used > 1 ? 3 : 2, 8, 'Jonas', 80),
     ],
     'ghosts': [
-      _ghost(1, 7, 'Lena', 900, 40),
-      _ghost(3, 8, 'Jonas', 80, 3),
-      for (var i = 0; i < 12; i++) _ghost(4 + i, 20 + i, 'P$i', 50, 2 + i * .5),
+      for (final ghost in [
+        _ghost(1, 7, 'Lena', 900, 40),
+        _ghost(3, 8, 'Jonas', 80, 3),
+        for (var i = 0; i < 12; i++)
+          _ghost(4 + i, 20 + i, 'P$i', 50, 2 + i * .5),
+      ])
+        {
+          ...ghost,
+          if (figures)
+            'character': {
+              'id': 'character.p${ghost['personId']}',
+              'image':
+                  '/games/runner/skins/character-p${ghost['personId']}.webp?v=1',
+            },
+        },
     ],
     'lastWeek': lastWeek,
   };
@@ -384,10 +461,24 @@ void main() {
         find.text('Dein Wochenbestwert: 120 Punkte · Platz 2'),
         findsOneWidget,
       );
-      // "Geister: Wenige" until all are chosen, kept on this device; there is
-      // no choice without any.
+      // "Geister: Wenige" until another is chosen, kept on this device:
+      // "Aus / Wenige / Alle".
       expect(find.text(GhostModeChoice.note(GhostMode.few)), findsOneWidget);
-      expect(find.text('Aus'), findsNothing);
+      expect(
+        [
+          for (final m in GhostMode.values)
+            tester.widget<Text>(find.byKey(ValueKey('ghosts-${m.name}'))).data,
+        ],
+        ['Aus', 'Wenige', 'Alle'],
+      );
+      await _tapKey(tester, 'ghosts-off');
+      expect(find.text(GhostModeChoice.note(GhostMode.off)), findsOneWidget);
+      expect(
+        (await SharedPreferences.getInstance()).getString(
+          RunnerMenuPreferences.ghostModeKey,
+        ),
+        'off',
+      );
       await _tapKey(tester, 'ghosts-all');
       expect(find.text(GhostModeChoice.note(GhostMode.all)), findsOneWidget);
       expect(
@@ -758,6 +849,136 @@ void main() {
       await train(tester);
       await past(games.single, 150);
       expect(sound.played, isNot(contains(RunnerSfx.record)));
+    });
+
+    group('with the ghosts off', () {
+      setUp(() {
+        GhostSkins.reset();
+        WardrobePictures.clear();
+        // The game's pictures, so ghost figures would load at once.
+        RunnerArt.useForTest(RunnerArt.test(_picture(8, 8), _picture(8, 8)));
+      });
+      tearDown(() => RunnerArt.useForTest(null));
+
+      /// Runs on until [game] is [seconds] in, without crashing.
+      Future<void> until(
+        WidgetTester tester,
+        StageRunner game,
+        double seconds,
+      ) async {
+        game.invincible = true;
+        for (var i = 0; i < 400 && game.time < seconds; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        expect(game.time, greaterThanOrEqualTo(seconds));
+      }
+
+      bool loadedFigures(_Weekly weekly) =>
+          weekly.calls.any((c) => c.startsWith('GET skins/'));
+
+      testWidgets('a ranked run shows no ghost, no cross and no name, loads '
+          'no figure and still sends its own ghost', (tester) async {
+        SharedPreferences.setMockInitialValues({
+          RunnerMenuPreferences.newsSeenKey: [for (final n in runnerNews) n.id],
+          RunnerMenuPreferences.ghostModeKey: 'off',
+        });
+        final weekly = _Weekly(used: 1, figures: true);
+        final controller = await _controller(weekly);
+        final games = await pumpGame(tester, controller);
+        await _tapKey(tester, 'runner-weekly');
+        // The page shows the choice as it was left.
+        expect(find.text(GhostModeChoice.note(GhostMode.off)), findsOneWidget);
+        await _tapKey(tester, 'weekly-ranked');
+        await tester.tap(find.byKey(const ValueKey('weekly-confirm-start')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        final game = games.single;
+        expect(game.time, lessThan(ghostNamesFor));
+        // At the start the names would show, later the crosses.
+        expect(_ghostsDrawn(tester), (ghosts: 0, marks: 0, tags: 0));
+        await until(tester, game, 6);
+        expect(_ghostsDrawn(tester), (ghosts: 0, marks: 0, tags: 0));
+        expect(GhostSkins.asked, 0);
+        expect(loadedFigures(weekly), isFalse);
+
+        game.invincible = false;
+        await untilCurtain(tester);
+        expect(game.over, isTrue);
+        final sent = weekly.bodies['POST scores']!.single;
+        expect(sent['roundId'], 'w-2');
+        expect(sent['ghost'], isA<String>());
+        expect(loadedFigures(weekly), isFalse);
+      });
+
+      testWidgets('changed in the pause of a training run, the choice holds '
+          'at once, and is kept', (tester) async {
+        final weekly = _Weekly(used: 3, figures: true);
+        final controller = await _controller(weekly);
+        final games = await pumpGame(tester, controller);
+        await train(tester);
+        final game = games.single;
+        await until(tester, game, .5);
+
+        Future<void> choose(GhostMode mode) async {
+          final segment = find.byKey(ValueKey('ghosts-${mode.name}'));
+          await tester.ensureVisible(segment);
+          await tester.tap(segment);
+          await tester.pump();
+        }
+
+        // "Wenige" by default: here Lena, with her name.
+        await _tapKey(tester, 'runner-settings');
+        final time = game.time;
+        final few = _ghostsDrawn(tester);
+        expect(few.ghosts, greaterThan(0));
+        expect(few.tags, greaterThan(0));
+        expect(GhostSkins.asked, 1);
+        await choose(GhostMode.off);
+        expect(game.time, time, reason: 'the run waits');
+        expect(_ghostsDrawn(tester), (ghosts: 0, marks: 0, tags: 0));
+        expect(
+          (await SharedPreferences.getInstance()).getString(
+            RunnerMenuPreferences.ghostModeKey,
+          ),
+          'off',
+        );
+        // On again, they are back as they were; "Alle" loads their figures
+        // only now.
+        await choose(GhostMode.few);
+        expect(_ghostsDrawn(tester), few);
+        await choose(GhostMode.all);
+        expect(_ghostsDrawn(tester).ghosts, greaterThan(few.ghosts));
+        expect(GhostSkins.asked, greaterThan(1));
+        await choose(GhostMode.off);
+        await tester.tap(find.text('Fertig'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('runner-paused')));
+        await tester.pump();
+
+        // Later in the run the crashed ones would leave their crosses.
+        await until(tester, game, 6);
+        expect(_ghostsDrawn(tester), (ghosts: 0, marks: 0, tags: 0));
+        await _tapKey(tester, 'runner-settings');
+        await choose(GhostMode.all);
+        expect(_ghostsDrawn(tester).marks, greaterThan(0));
+        await choose(GhostMode.off);
+        expect(_ghostsDrawn(tester), (ghosts: 0, marks: 0, tags: 0));
+        await tester.tap(find.text('Fertig'));
+        await tester.pumpAndSettle();
+
+        // The next training starts without them.
+        game.invincible = false;
+        await tester.tap(find.byKey(const ValueKey('runner-paused')));
+        await untilCurtain(tester);
+        final again = find.byKey(const ValueKey('runner-train-again'));
+        await tester.ensureVisible(again);
+        await tester.tap(again);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(games, hasLength(2));
+        expect(games.last.time, lessThan(ghostNamesFor));
+        expect(_ghostsDrawn(tester), (ghosts: 0, marks: 0, tags: 0));
+      });
     });
 
     testWidgets('the menu stops pointing to last week’s reward once the '
