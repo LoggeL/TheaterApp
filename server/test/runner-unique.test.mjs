@@ -377,7 +377,7 @@ test('the bundled catalog: play-specific uniques and Kolping for the complete te
   const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', clock });
   app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
   const w = app.runnerWardrobe('admin', now);
-  assert.deepEqual(w.uniqueFigures.plays.map(x => [x.play, x.year]), [['Creepshow', 2026], ['Nexus', 2024], ['Creepshow und Nexus', undefined], ['Technik', undefined]]);
+  assert.deepEqual(w.uniqueFigures.plays.map(x => [x.play, x.year]), [['Creepshow', 2026], ['Nexus', 2024], ['Creepshow und Nexus', undefined], ['Technik', undefined], ['Anno 1146', 2025]]);
   const [creepshow, nexus, across] = w.uniqueFigures.plays;
   assert.deepEqual(across.plays.map(x => [x.play, x.year]), [['Creepshow', 2026], ['Nexus', 2024]]);
   // Kuschel needs exactly the role figures of Beatrice and of the AI together.
