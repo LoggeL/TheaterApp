@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { AppError } from './theater.mjs';
-import { releaseIsActive } from './runner-content-releases.mjs';
+import { releaseIsActive, releasePackReady } from './runner-content-releases.mjs';
 import { isUniqueEntry } from './runner-unique.mjs';
 
 // The admins' Skin-Viewer of the stage runner (`runnerAdminCatalog`): every entry of the wardrobe
@@ -11,9 +11,15 @@ import { isUniqueEntry } from './runner-unique.mjs';
 //   `departments`, `ensembleRarity`, `uniqueRarity`, `items`), but with every entry in `items`:
 //   active ones, those of a release that has not started (or whose pack is not ready), the unique
 //   figures and ensemble rewards (secrets for members until unlocked), and the `disabled` ones that
-//   members never get at all. Each item carries `admin`: `{ disabled, live, release, secret }`
+//   members never get at all. Each item carries `admin`: `{ disabled, live, release, waiting, secret }`
 //   (`live`: in the catalog members get right now; `release`: the scheduled release it belongs to;
 //   `secret`: `unique` or `reward` while it is hidden until unlocked), and `releases` lists them all.
+//   A release (on an item and in `releases`) also says whether its pack is `ready` (every item of
+//   its set enabled and with its picture, `releasePackReady`); an item's `waiting` is true once its
+//   release has started while the pack still holds it back. The entries of `releases` name what the
+//   pack still `missing` lacks: `{ id, name, reason }`, reason `disabled` (still disabled),
+//   `picture` (enabled without its picture), `unknown` (no such entry) or `invalid` (a default,
+//   reward or unique figure, which never belongs to a set).
 // - GET /admin/runner/skins/<file>: the pictures of that view. Its links point here, never to the
 //   members' route: `/games/runner/skins/<file>` keeps answering 404 for unreleased, disabled and
 //   secret pictures, for admins too, so nothing of this view can leak through it or its cache
@@ -108,12 +114,33 @@ function disabledOf(base) {
   return view;
 }
 
-/** The scheduled release of each item id: `{ id, name, startsAt, active, part }`, part `items`, `gated` or `free`. */
-function releasesById(t, at) {
+/**
+ * What keeps the pack of [release] back (see the header): nothing once it is ready. [names] are the
+ * names of every raw entry, disabled ones included.
+ */
+function missingOf(base, release, names) {
+  return release.itemIds.flatMap(id => {
+    const item = base.byId.get(id);
+    const reason = !item ? (names.has(id) ? 'disabled' : 'unknown')
+      : item.default || item.reward || item.unique ? 'invalid'
+      : ['character', 'backdrop'].includes(item.kind) && typeof item.image !== 'string' ? 'picture' : null;
+    return reason ? [{ id, name: names.get(id) ?? id, reason }] : [];
+  });
+}
+
+/** The scheduled releases: `{ id, name, startsAt, active, ready }` each, and their `missing` items. */
+function releasesOf(t, base, at, names) {
+  return (t.runnerReleases ?? []).map(r => {
+    const missing = missingOf(base, r, names);
+    return { release: r, shown: { id: r.id, name: r.name, startsAt: r.startsAt, active: releaseIsActive(r, at), ready: releasePackReady(base, r) }, missing };
+  });
+}
+
+/** The scheduled release of each item id: `{ id, name, startsAt, active, ready, part }`, part `items`, `gated` or `free`. */
+function releasesById(releases) {
   const byId = new Map();
-  for (const r of t.runnerReleases ?? []) {
-    const release = { id: r.id, name: r.name, startsAt: r.startsAt, active: releaseIsActive(r, at) };
-    for (const [part, ids] of [['items', r.itemIds], ['gated', r.gatedItemIds], ['free', r.freeItemIds]]) for (const id of list(ids)) if (!byId.has(id)) byId.set(id, { ...release, part });
+  for (const { release: r, shown } of releases) {
+    for (const [part, ids] of [['items', r.itemIds], ['gated', r.gatedItemIds], ['free', r.freeItemIds]]) for (const id of list(ids)) if (!byId.has(id)) byId.set(id, { ...shown, part });
   }
   return byId;
 }
@@ -122,12 +149,17 @@ function releasesById(t, at) {
 export function adminRunnerCatalog(t, uid) {
   t.account(uid, true);
   const base = t.runnerBaseCatalog, live = t.runnerCatalog, at = t.clock();
-  const releases = releasesById(t, at), disabled = disabledOf(base);
+  const disabled = disabledOf(base);
+  const names = new Map([...base.items, ...disabled.items].map(x => [x.id, x.name]));
+  const releases = releasesOf(t, base, at, names), byRelease = releasesById(releases);
   const milestones = new Map((base.ensemble?.milestones ?? []).filter(m => m.item).map(m => [m.item, m.km]));
   const state = (x, isDisabled) => {
-    const release = releases.get(x.id) ?? null;
+    const release = byRelease.get(x.id) ?? null;
+    // As `releasedCatalog` holds them back: the set and its gated items, a gated backdrop excepted.
+    const held = release && (release.part === 'items' || (release.part === 'gated' && x.kind !== 'backdrop'));
     return {
       disabled: isDisabled, live: !isDisabled && live.byId.has(x.id), release,
+      waiting: !!(held && release.active && !release.ready),
       secret: x.unique ? 'unique' : x.reward ? 'reward' : null,
       ...(milestones.has(x.id) ? { milestoneKm: milestones.get(x.id) } : {}),
     };
@@ -142,7 +174,7 @@ export function adminRunnerCatalog(t, uid) {
       ...base.items.map(x => ({ ...shown(x), admin: state(x, false) })),
       ...disabled.items.map(x => ({ ...x, admin: state(x, true) })),
     ],
-    releases: (t.runnerReleases ?? []).map(r => ({ id: r.id, name: r.name, startsAt: r.startsAt, active: releaseIsActive(r, at) })),
+    releases: releases.map(({ shown, missing }) => ({ ...shown, missing })),
     serverTime: at.toISOString(),
   };
 }

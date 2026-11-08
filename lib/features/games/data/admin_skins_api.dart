@@ -10,9 +10,45 @@ bool adminSkinsAvailable(AppController controller) =>
     wardrobeAvailable(controller) &&
     controller.supports('runnerAdminCatalog');
 
+/// An item that keeps the pack of a release back (`missing` on the server):
+/// [reason] `disabled` (still disabled), `picture` (enabled without its
+/// picture), `unknown` (no such entry) or `invalid` (a default, reward or
+/// unique figure, which never belongs to a set).
+class AdminSkinMissing {
+  const AdminSkinMissing({
+    required this.id,
+    required this.name,
+    required this.reason,
+  });
+  final String id, name, reason;
+
+  /// "Gerda (deaktiviert)", "Fritzi (ohne Bild)" …
+  String get text =>
+      '$name (${switch (reason) {
+        'disabled' => 'deaktiviert',
+        'picture' => 'ohne Bild',
+        'unknown' => 'nicht im Katalog',
+        _ => 'gehört in kein Set',
+      }})';
+
+  static AdminSkinMissing? fromJson(Object? value) {
+    if (value is! Map) return null;
+    final json = jsonMap(value);
+    final id = textValue(json['id']);
+    if (id.isEmpty) return null;
+    return AdminSkinMissing(
+      id: id,
+      name: textValue(json['name'], id),
+      reason: textValue(json['reason'], 'unknown'),
+    );
+  }
+}
+
 /// The scheduled release an item belongs to (`releases.json`): its [part]
 /// is `items` (the release's set), `gated` (hidden until it starts) or
-/// `free` (everybody's once it starts).
+/// `free` (everybody's once it starts). [ready]: every item of its set is
+/// enabled and has its pictures; else [missing] names those that are not
+/// (filled in from the catalog's list of releases).
 class AdminSkinRelease {
   const AdminSkinRelease({
     required this.id,
@@ -20,10 +56,27 @@ class AdminSkinRelease {
     required this.startsAt,
     required this.active,
     this.part = 'items',
+    this.ready = true,
+    this.missing = const [],
   });
   final String id, name, part;
   final DateTime? startsAt;
-  final bool active;
+  final bool active, ready;
+  final List<AdminSkinMissing> missing;
+
+  /// This release of an item with what [pack] (the entry of the catalog's
+  /// list) knows of its set.
+  AdminSkinRelease withPack(AdminSkinRelease? pack) => pack == null
+      ? this
+      : AdminSkinRelease(
+          id: id,
+          name: name,
+          startsAt: startsAt ?? pack.startsAt,
+          active: active,
+          part: part,
+          ready: pack.ready,
+          missing: pack.missing,
+        );
 
   static AdminSkinRelease? fromJson(Object? value) {
     if (value is! Map) return null;
@@ -36,6 +89,11 @@ class AdminSkinRelease {
       startsAt: DateTime.tryParse(textValue(json['startsAt']))?.toLocal(),
       active: json['active'] == true,
       part: textValue(json['part'], 'items'),
+      ready: json['ready'] != false,
+      missing: [
+        for (final m in jsonList(json['missing']))
+          ?AdminSkinMissing.fromJson(m),
+      ],
     );
   }
 }
@@ -43,12 +101,15 @@ class AdminSkinRelease {
 /// What a skin is right now, as the admins' view shows it.
 enum AdminSkinStatus {
   /// In the catalog members get.
-  active('Aktiv'),
+  active('Live'),
 
   /// `disabled` in the catalog: members never get it.
-  disabled('Disabled'),
+  disabled('Deaktiviert'),
 
-  /// In a release that has not started (or whose set is not complete).
+  /// Its release has started, but its set is not complete yet.
+  waiting('Wartet auf Bilder'),
+
+  /// In a release that has not started.
   scheduled('Geplant'),
 
   /// A secret until unlocked: a unique figure or an ensemble reward.
@@ -65,6 +126,7 @@ class AdminSkin {
     required this.item,
     this.disabled = false,
     this.live = true,
+    this.waiting = false,
     this.release,
     this.secret,
     this.milestoneKm,
@@ -78,6 +140,9 @@ class AdminSkin {
 
   /// `disabled` in the catalog; [live]: in the catalog members get now.
   final bool disabled, live;
+
+  /// Its release has started, but the pack still holds it back.
+  final bool waiting;
   final AdminSkinRelease? release;
 
   /// `unique` or `reward` while it is a secret until unlocked; null else.
@@ -86,10 +151,11 @@ class AdminSkin {
   /// The ensemble milestone of a reward, in km.
   final num? milestoneKm;
 
-  /// The status the viewer shows first: disabled before a pending release,
-  /// before a secret.
+  /// The status the viewer shows first: disabled before a waiting pack,
+  /// before a pending release, before a secret.
   AdminSkinStatus get status {
     if (disabled) return AdminSkinStatus.disabled;
+    if (waiting) return AdminSkinStatus.waiting;
     if (!live) return AdminSkinStatus.scheduled;
     if (secret != null) return AdminSkinStatus.gated;
     return AdminSkinStatus.active;
@@ -101,6 +167,7 @@ class AdminSkin {
     // A free item of a coming release is live already; only the gift waits.
     if (release != null && !release!.active && release!.part != 'free')
       AdminSkinStatus.scheduled,
+    if (waiting) AdminSkinStatus.waiting,
     if (secret != null || release?.part == 'gated') AdminSkinStatus.gated,
   };
 
@@ -111,11 +178,22 @@ class AdminSkin {
     if (item == null || item.id.isEmpty) return null;
     final admin = jsonMap(json['admin']);
     final secret = textValue(admin['secret']);
+    final disabled = admin['disabled'] == true;
+    final live = admin['live'] != false && !disabled;
+    final release = AdminSkinRelease.fromJson(admin['release']);
     return AdminSkin(
       item: item,
-      disabled: admin['disabled'] == true,
-      live: admin['live'] != false && admin['disabled'] != true,
-      release: AdminSkinRelease.fromJson(admin['release']),
+      disabled: disabled,
+      live: live,
+      // A server before `waiting`: a started release that is not live yet.
+      waiting: admin['waiting'] is bool
+          ? admin['waiting'] == true
+          : !disabled &&
+                !live &&
+                release != null &&
+                release.active &&
+                release.part != 'free',
+      release: release,
       secret: secret.isEmpty ? null : secret,
       milestoneKm: admin['milestoneKm'] is num
           ? admin['milestoneKm'] as num
@@ -165,8 +243,25 @@ class AdminSkinCatalog {
   final List<AdminSkinRelease> releases;
 
   factory AdminSkinCatalog.fromJson(JsonMap json) {
+    final releases = [
+      for (final r in jsonList(json['releases'])) ?AdminSkinRelease.fromJson(r),
+    ];
+    final packs = {for (final r in releases) r.id: r};
     final skins = [
-      for (final i in jsonList(json['items'])) ?AdminSkin.fromJson(i),
+      for (final i in jsonList(json['items']))
+        if (AdminSkin.fromJson(i) case final skin?)
+          skin.release == null
+              ? skin
+              : AdminSkin(
+                  item: skin.item,
+                  disabled: skin.disabled,
+                  live: skin.live,
+                  waiting: skin.waiting,
+                  release: skin.release!.withPack(packs[skin.release!.id]),
+                  secret: skin.secret,
+                  milestoneKm: skin.milestoneKm,
+                  unlock: skin.unlock,
+                ),
     ];
     return AdminSkinCatalog(
       // The items come apart (with their state); the catalog only lends
@@ -178,10 +273,7 @@ class AdminSkinCatalog {
         'uniques': const [],
       }),
       skins: skins,
-      releases: [
-        for (final r in jsonList(json['releases']))
-          ?AdminSkinRelease.fromJson(r),
-      ],
+      releases: releases,
     );
   }
 }
