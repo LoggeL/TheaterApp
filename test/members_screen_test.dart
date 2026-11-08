@@ -32,8 +32,9 @@ void main() {
       expect(find.text('Nicht aktiv (1)'), findsNothing);
       await tester.enterText(find.byType(TextField), 'ki');
       await tester.pumpAndSettle();
-      expect(find.text('Niemand gefunden'), findsNothing);
-      expect(find.text('Nicht aktiv (1)'), findsOneWidget);
+      expect(find.text('Niemand gefunden'), findsOneWidget);
+      expect(find.text('Nicht aktiv (1)'), findsNothing);
+      expect(find.text('Kim'), findsNothing);
 
       await tester.tap(find.byTooltip('Personen & Zugänge'));
       await tester.pumpAndSettle();

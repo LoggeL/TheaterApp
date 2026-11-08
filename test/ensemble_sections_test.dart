@@ -9,7 +9,7 @@ import 'app_controller_test.dart' show TestServer, signIn;
 void main() {
   for (final admin in [false, true]) {
     testWidgets(
-      '${admin ? 'people and access' : 'ensemble list'} separates inactive people',
+      '${admin ? 'people and access' : 'ensemble list'} handles inactive people',
       (tester) async {
         tester.view.physicalSize = const Size(800, 2000);
         tester.view.devicePixelRatio = 1;
@@ -32,16 +32,19 @@ void main() {
         );
         await tester.pumpAndSettle();
         final section = find.text('Nicht aktiv (1)');
-        expect(section, findsOneWidget);
+        expect(find.text('Kim'), findsNothing);
         if (admin) {
+          expect(section, findsOneWidget);
           // Collapsed in the admin list until opened.
-          expect(find.text('Kim'), findsNothing);
           await tester.tap(section);
           await tester.pumpAndSettle();
+          double top(Finder f) => tester.getTopLeft(f).dy;
+          expect(top(find.text('Sam')), lessThan(top(section)));
+          expect(top(find.text('Kim')), greaterThan(top(section)));
+        } else {
+          expect(section, findsNothing);
+          expect(find.text('Sam'), findsOneWidget);
         }
-        double top(Finder f) => tester.getTopLeft(f).dy;
-        expect(top(find.text('Sam')), lessThan(top(section)));
-        expect(top(find.text('Kim')), greaterThan(top(section)));
         expect(find.text('Inaktiv'), findsNothing);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());

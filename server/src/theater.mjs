@@ -101,6 +101,21 @@ export const productionEnsemble = production => [...new Set([
   ...list(production?.directorMemberIds).map(Number),
   ...list(production?.memberIds).map(Number),
 ])];
+// Historical assignments stay in the database and in the casting editor. The
+// member-facing production has no profile links or credits for inactive people.
+function ensembleProduction(p, inactive, admin) {
+  const ensemble = productionEnsemble(p);
+  if (admin || !ensemble.some(id => inactive.has(id))) return { ...p, ensemble };
+  const visible = id => !inactive.has(Number(id));
+  const casting = Object.fromEntries(Object.entries(p.casting ?? {}).filter(([, id]) => visible(id)));
+  return {
+    ...p, casting, ensemble: ensemble.filter(visible),
+    roles: list(p.roles).map(role => visible(p.casting?.[role.id]) ? role : { ...role, actor: '', personId: null }),
+    directorMemberIds: list(p.directorMemberIds).filter(visible),
+    memberIds: list(p.memberIds).filter(visible),
+    ...(p.memberFunctions ? { memberFunctions: Object.fromEntries(Object.entries(p.memberFunctions).filter(([id]) => visible(id))) } : {}),
+  };
+}
 // A member is addressed by a role, a production ensemble or by name; nothing chosen = everyone.
 // Ensembles are resolved through the store, so later casting changes apply.
 export const inAudience = (member, item, store) => {
@@ -284,8 +299,9 @@ export class Theater {
         (arrivalsByEvent[r.eventId] ??= {})[r.personId] = r.expectedArrivalAt;
       }
     }
+    const inactive = new Set(members.filter(m => m.active === false).map(m => m.id));
     const receipts = this.store.all('receipts').filter(r => r.personId === a.personId), formSubmissions = this.store.all('formSubmissions');
-    return { apiVersion: 1, user: this.profile(a), events: visibleEvents, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a, admin ? nudges : null), slotPools: this.slotPools(a, nudges), personRoles: this.store.all('personRoles'), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ({ ...p, ensemble: productionEnsemble(p) })), checkinsByEvent, autoCheckinsByEvent, memberAttendanceByEvent, implicitAttendanceByEvent, arrivalsByEvent, checkinVersions: events ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, read: receipts.some(r => r.messageId === m.id) || m.authorId === a.personId, addressedToMe: this.messageAddresses(member, m), ...formStatus(a, m, formSubmissions, this.clock()), ...(admin ? { ...this.messageReach(m), ...this.reminded(nudges, 'message', m.id) } : {}) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true, features: [...apiFeatures] }, serverTime: now() };
+    return { apiVersion: 1, user: this.profile(a), events: visibleEvents, attendanceByEvent: Object.fromEntries(own.map(r => [r.eventId, r.status])), declineReasons: Object.fromEntries(own.map(r => [r.eventId, r.reason])), expectedArrivals: Object.fromEntries(own.map(r => [r.eventId, r.expectedArrivalAt])), absences: this.store.all('absences').filter(x => x.personId === a.personId), polls: this.polls(a, admin ? nudges : null), slotPools: this.slotPools(a, nudges), personRoles: this.store.all('personRoles'), members: members.filter(m => !inactive.has(m.id)), productions: this.store.all('productions').sort(compareProductionsNewestFirst).map(p => ensembleProduction(p, inactive, admin)), checkinsByEvent, autoCheckinsByEvent, memberAttendanceByEvent, implicitAttendanceByEvent, arrivalsByEvent, checkinVersions: events ? Object.fromEntries(this.store.all('checkins').map(c => [`${c.eventId}:${c.personId}`, c.version])) : {}, reminders: { ...defaultReminders, ...this.store.get('reminders', a.personId) }, messages: this.store.all('messages').filter(m => this.canReadMessage(a, m)).map(m => ({ ...m, ...(inactive.has(m.authorId) ? { authorName: 'Ehemaliges Mitglied', authorId: null } : {}), read: receipts.some(r => r.messageId === m.id) || m.authorId === a.personId, addressedToMe: this.messageAddresses(member, m), ...formStatus(a, m, formSubmissions, this.clock()), ...(admin ? { ...this.messageReach(m), ...this.reminded(nudges, 'message', m.id) } : {}) })).sort((x, y) => y.createdAt.localeCompare(x.createdAt)), pendingAccounts: admin ? this.store.accounts().filter(x => x.status === 'pending') : [], capabilities: { pushConfigured: this.pushEnabled, emailConfigured: this.emailEnabled, firebaseAuth: true, checkins: true, admin: true, sampleData: this.store.get('settings', 'sampleData')?.enabled === true, features: [...apiFeatures] }, serverTime: now() };
   }
   /** Slot pools ("Terminfinder"): invited people book one time slot each. */
   slotPools(a, nudges = can(a, 'events') ? this.nudges() : null) {
@@ -293,8 +309,9 @@ export class Theater {
     return this.store.all('slotPools').filter(p => this.canSee(a, p, 'events')).map(p => {
       const own = bookings.find(b => b.poolId === p.id && b.personId === a.personId);
       return { ...this.editors(p, manager), addressedToMe: inAudience(member, p, this.store), ...(nudges ? this.reminded(nudges, 'slotPool', p.id) : {}), myBooking: own?.slotId ?? null, slots: p.slots.map(slot => {
-        const people = bookings.filter(b => b.poolId === p.id && b.slotId === slot.id).map(b => ({ personId: b.personId, name: this.store.get('members', b.personId)?.name ?? 'Ehemaliges Mitglied' })).sort((x, y) => x.name.localeCompare(y.name, 'de'));
-        return { ...slot, booked: people.length, people };
+        const reserved = bookings.filter(b => b.poolId === p.id && b.slotId === slot.id);
+        const people = reserved.filter(b => this.store.get('members', b.personId)?.active !== false).map(b => ({ personId: b.personId, name: this.store.get('members', b.personId)?.name ?? 'Ehemaliges Mitglied' })).sort((x, y) => x.name.localeCompare(y.name, 'de'));
+        return { ...slot, booked: reserved.length, people };
       }) };
     }).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
   }
@@ -328,7 +345,7 @@ export class Theater {
       // Admins see how many can vote and how many of them did; who voted stays hidden for anonymous polls.
       return { ...p, anonymous, closed: this.pollClosed(p), choice: own?.optionId ?? null, totalVotes: responses.length, addressedToMe: inAudience(member, p, this.store), ...(nudges ? { eligibleCount: eligible.size, eligibleVotes: responses.filter(v => eligible.has(v.personId)).length, ...this.reminded(nudges, 'poll', p.id) } : {}), options: p.options.map(o => {
         const selected = responses.filter(v => v.optionId === o.id);
-        return { id: o.id, label: o.label, votes: selected.length, ...(!anonymous ? { voters: selected.map(v => ({ personId: v.personId, name: this.store.get('members', v.personId)?.name ?? 'Ehemaliges Mitglied' })).sort((a, b) => a.name.localeCompare(b.name, 'de')) } : {}) };
+        return { id: o.id, label: o.label, votes: selected.length, ...(!anonymous ? { voters: selected.filter(v => this.store.get('members', v.personId)?.active !== false).map(v => ({ personId: v.personId, name: this.store.get('members', v.personId)?.name ?? 'Ehemaliges Mitglied' })).sort((a, b) => a.name.localeCompare(b.name, 'de')) } : {}) };
       }) };
     }).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
   }
@@ -426,7 +443,12 @@ export class Theater {
     this.account(uid);
     const p = this.store.get('productions', productionId), doc = this.store.get('scripts', productionId);
     if (!p || !doc) fail(404, 'Das Drehbuch ist nicht verfügbar.');
-    return { ...doc, roles: doc.roles.map(r => { const personId = p.casting?.[r.id]; const member = this.store.get('members', personId); return { ...r, personId: personId ?? null, actor: member?.name ?? r.actor ?? '' }; }), fetchedAt: now(), stale: false };
+    const roles = doc.roles.map(r => {
+      const personId = p.casting?.[r.id], member = this.store.get('members', personId);
+      if (member?.active === false) return { ...r, personId: null, actor: '' };
+      return { ...r, personId: personId ?? null, actor: member?.name ?? r.actor ?? '' };
+    });
+    return { ...doc, roles, fetchedAt: now(), stale: false };
   }
   adminData(uid) { this.account(uid, true); return { accounts: this.store.accounts(), members: this.store.all('members'), productions: this.store.all('productions').sort(compareProductionsNewestFirst) }; }
   eventDetails(uid, eventId) {
@@ -765,7 +787,7 @@ export class Theater {
         if (roleIds.length > 30 || roleIds.some(r => typeof r !== 'string' || !s.get('personRoles', r))) fail(400, 'Bitte gültige Rollen auswählen.');
         s.put('members', memberId, { ...old, id: memberId, name, roleIds, initials: initials(name), active: b.active !== false, version: (old?.version ?? 0) + 1 });
         // script() puts the name into the roles; the production's version tells stored scripts to fetch again.
-        if (old && old.name !== name) for (const p of s.all('productions')) if (Object.values(p.casting ?? {}).some(x => Number(x) === memberId)) s.put('productions', p.id, { ...p, version: (p.version ?? 1) + 1 });
+        if (old && (old.name !== name || (old.active !== false) !== (b.active !== false))) for (const p of s.all('productions')) if (Object.values(p.casting ?? {}).some(x => Number(x) === memberId)) s.put('productions', p.id, { ...p, version: (p.version ?? 1) + 1 });
         return { id: memberId };
       }
       case 'member.delete': {

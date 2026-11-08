@@ -27,6 +27,13 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.14.1',
+    date: '8. November 2026',
+    items: [
+      'Unter „Unser Ensemble“ und in der Personensuche siehst du nur aktive Mitglieder.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.14.0',
     date: '6. November 2026',
     items: [

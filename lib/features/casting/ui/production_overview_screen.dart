@@ -140,6 +140,13 @@ class _ProductionOverviewScreenState extends State<ProductionOverviewScreen> {
 
   Widget _content(BuildContext context, JsonMap record) {
     final cast = ProductionCast.fromRecord(record);
+    final activeIds = _controller.members
+        .where((m) => m.active)
+        .map((m) => m.id)
+        .toSet();
+    cast.casting.removeWhere((_, id) => !activeIds.contains(id));
+    cast.directors.removeWhere((id) => !activeIds.contains(id));
+    cast.team.removeWhere((id) => !activeIds.contains(id));
     final production = Production.fromJson(record);
     final me = _controller.user?.personId;
     final roles = rolesByImportance(

@@ -6,7 +6,6 @@ import '../../../shared/layout/content_width.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/member_avatar.dart';
-import '../../../shared/widgets/page_header.dart';
 import '../../accounts/ui/accounts_admin_screen.dart';
 import 'member_profile_screen.dart';
 
@@ -24,13 +23,13 @@ class _MembersScreenState extends State<MembersScreen> {
   Widget build(BuildContext context) {
     final members = widget.controller.members
         .where(
-          (m) => '${m.name} ${widget.controller.roleNames(m.roleIds)}'
-              .toLowerCase()
-              .contains(_query.toLowerCase()),
+          (m) =>
+              m.active &&
+              '${m.name} ${widget.controller.roleNames(m.roleIds)}'
+                  .toLowerCase()
+                  .contains(_query.toLowerCase()),
         )
         .toList();
-    final active = members.where((m) => m.active).toList(),
-        inactive = members.where((m) => !m.active).toList();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Unser Ensemble'),
@@ -70,19 +69,9 @@ class _MembersScreenState extends State<MembersScreen> {
                           ? 'Im Ensemble ist noch niemand eingetragen.'
                           : 'Zu „${_query.trim()}“ passt kein Name und keine Rolle.',
                     ),
-                  for (final (i, member) in active.indexed) ...[
+                  for (final (i, member) in members.indexed) ...[
                     if (i > 0) const Divider(indent: 82),
                     _member(member),
-                  ],
-                  if (inactive.isNotEmpty) ...[
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: SectionTitle('Nicht aktiv (${inactive.length})'),
-                    ),
-                    for (final (i, member) in inactive.indexed) ...[
-                      if (i > 0) const Divider(indent: 82),
-                      Opacity(opacity: .7, child: _member(member)),
-                    ],
                   ],
                 ],
               ),

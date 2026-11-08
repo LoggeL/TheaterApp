@@ -81,7 +81,7 @@ export class MediaService {
   async image(uid, id) {
     const a = this.theater.account(uid), m = this.store.get('media', id);
     if (!m || (m.hidden && a.role !== 'admin')) fail(404, 'Bild nicht gefunden.');
-    if (m.kind === 'profile' && m.ownerPersonId !== a.personId && !this.store.all('members').some(p => p.avatarId === id)) fail(404, 'Bild nicht gefunden.');
+    if (m.kind === 'profile' && m.ownerPersonId !== a.personId && !this.store.all('members').some(p => p.avatarId === id && (p.active !== false || a.role === 'admin'))) fail(404, 'Bild nicht gefunden.');
     // Photos of earlier website imports are never shown; people without an own picture keep the placeholder.
     if (m.kind === 'website') fail(404, 'Bild nicht gefunden.');
     if (m.galleryId) this.gallery(m.galleryId, uid);

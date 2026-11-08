@@ -52,7 +52,7 @@ class _MemberProfileScreenState extends State<MemberProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final member = widget.controller.members
-        .where((m) => m.id == widget.personId)
+        .where((m) => m.active && m.id == widget.personId)
         .firstOrNull;
     if (member == null) {
       return Scaffold(

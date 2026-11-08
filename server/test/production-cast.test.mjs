@@ -118,3 +118,25 @@ test('members read casting, direction and team of current and archived productio
   // Account e-mail addresses stay out of the production record.
   assert.doesNotMatch(JSON.stringify(production), /@/);
 });
+
+test('deactivation hides a profile and its assignments while preserving them for reactivation', t => {
+  const { theater, store, cast, action, kim } = setup(t);
+  cast([{ kind: 'role', roleId: 'LENA', personId: kim }, { kind: 'director', personId: kim }, { kind: 'member', personId: kim, function: 'Licht' }]);
+  const setActive = active => action({ action: 'member.save', id: kim, name: 'Kim Kulisse', version: store.get('members', kim).version, active });
+  const previousVersion = store.get('productions', 'winter').version;
+  setActive(false);
+  for (const uid of ['member', 'owner']) assert.ok(!theater.snapshot(uid).members.some(m => m.id === kim));
+  assert.equal(theater.adminData('owner').members.find(m => m.id === kim).active, false);
+  const view = theater.snapshot('member').productions.find(p => p.id === 'winter');
+  assert.deepEqual([view.memberIds, view.directorMemberIds, view.ensemble], [[], [], []]);
+  assert.deepEqual([view.casting, view.memberFunctions], [{}, {}]);
+  assert.equal(view.roles[0].actor, '');
+  assert.equal(theater.script('member', 'winter').roles[0].personId, null);
+  assert.equal(theater.script('member', 'winter').roles[0].actor, '');
+  assert.equal(view.version, previousVersion + 1);
+  assert.equal(theater.adminData('owner').productions.find(p => p.id === 'winter').casting.LENA, kim);
+  setActive(true);
+  assert.ok(theater.snapshot('member').members.some(m => m.id === kim));
+  assert.equal(theater.snapshot('member').productions.find(p => p.id === 'winter').casting.LENA, kim);
+  assert.equal(theater.script('member', 'winter').roles[0].actor, 'Kim Kulisse');
+});
