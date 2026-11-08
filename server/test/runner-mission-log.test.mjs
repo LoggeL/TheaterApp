@@ -149,7 +149,8 @@ test('the derivation names limits and the start value', () => {
   assert.equal(missionDerivation({ slot: 'hard', type: 'distance', target: 6000 }, ctx({ m: 20000 })).source, 'max');
   assert.equal(missionDerivation({ slot: 'easy', type: 'distance', target: 150 }, ctx({ m: 300 }, 2)).source, 'start');
   assert.deepEqual(missionDerivation({ slot: 'medium', type: 'collect', kind: 'mask', target: 9 }, ctx({ mask: 20 })), { best: 20, share: 0.45, raw: 9, value: 9, ratio: 0.45, source: 'share', few: false, countedRuns: 10, start: 4, bests: { m: null, s: null } });
-  assert.equal(missionDerivation({ slot: 'hard', type: 'debut', kind: 'drum', target: 250 }, ctx({ s: 400 })).source, 'band');
+  assert.equal(missionDerivation({ slot: 'hard', type: 'reach', kind: 'drum', target: 185 }, ctx({ m: 300 })).source, 'band');
+  assert.deepEqual(missionDerivation({ slot: 'hard', type: 'debut', kind: 'drum', target: 250 }, ctx({ s: 400 })), {});
   assert.deepEqual(missionDerivation({ slot: 'easy', type: 'unknown', target: 1 }, ctx({})), {});
 });
 

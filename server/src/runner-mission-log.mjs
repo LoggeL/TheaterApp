@@ -23,7 +23,7 @@ const guard = (name, fn) => { try { fn(); } catch (e) { console.error(`runner-mi
  * How the target of [m] came about from the bests in [ctx] (`missionOptions` in
  * runner-missions.mjs): `best` the person's relevant best per run, `share` the share of it, `value`
  * the measured figure (the minimum metres for `runs`), `source`: `start` (no best yet or the start
- * value as floor with few runs), `min`/`max` (a limit), `share`, `band` (debut).
+ * value as floor with few runs), `min`/`max` (a limit), `share`, `band` (`reach`, an obstacle's metres).
  */
 export function missionDerivation(m, ctx) {
   const r = ctx?.rules, d = r?.types?.[m.type];
@@ -40,14 +40,12 @@ export function missionDerivation(m, ctx) {
     case 'noPickup': basis = best.m > 0 ? Math.max(best.noPickup ?? 0, best.m * d.ofDistance) : undefined; break;
     case 'dailyDistance': basis = best.m; share = d.ofBest; start = d.start?.[0]; break;
     case 'runs': basis = best.m; break;
-    // Stored `debut` missions (made before 0.15): the obstacle's points against the points share.
-    case 'debut': basis = best.s; share = r.types.points?.share?.[m.slot]; break;
     // `reach` (runner-missions.mjs): the obstacle's metres against the distance share of the slot.
     case 'reach': basis = best.m; share = r.types.distance?.share?.[m.slot]; break;
     default: break;
   }
   const raw = basis > 0 && share > 0 ? basis * share : null;
-  const source = m.type === 'debut' || m.type === 'reach' ? 'band' : !(basis > 0) ? 'start' : few && start !== undefined && start >= raw ? 'start'
+  const source = m.type === 'reach' ? 'band' : !(basis > 0) ? 'start' : few && start !== undefined && start >= raw ? 'start'
     : raw !== null && min !== undefined && raw < min ? 'min' : raw !== null && max !== undefined && raw > max ? 'max' : 'share';
   return {
     best: num(basis), share: num(share), raw: raw === null ? null : Math.round(raw * 10) / 10, value: num(value),
