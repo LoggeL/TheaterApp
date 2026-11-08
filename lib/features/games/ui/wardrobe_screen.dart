@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -17,6 +19,7 @@ import 'figure_detail.dart';
 import 'gage_card.dart';
 import 'gala.dart';
 import 'missions_card.dart';
+import 'next_drop.dart';
 import 'pack_goals_card.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart' show obstacleName;
@@ -278,18 +281,21 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     }
   }
 
-  Future<void> _load() async {
+  /// Loads the wardrobe; false when none came.
+  Future<bool> _load() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final w = await loadWardrobe(controller);
-      if (!mounted) return;
+      if (!mounted) return false;
       _update(w);
       _celebrate(w);
+      return true;
     } catch (e) {
       if (mounted) setState(() => _error = userMessage(e));
+      return false;
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -808,7 +814,14 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Garderobe'),
+          title: _title(),
+          // Room for the countdown line under the title in large text.
+          toolbarHeight: _wardrobe?.nextDrop == null
+              ? null
+              : max(
+                  kToolbarHeight,
+                  MediaQuery.textScalerOf(context).scale(44) + 12,
+                ),
           bottom: TabBar(
             isScrollable: largeText,
             tabAlignment: largeText ? TabAlignment.start : TabAlignment.fill,
@@ -876,6 +889,25 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     return widget.initial == null
         ? page
         : _AfterEntrance(onEntered: _start, child: page);
+  }
+
+  /// "Garderobe", with the countdown to a content drop less than a day away
+  /// under it; at zero a fresh wardrobe brings the new costumes.
+  Widget _title() {
+    final drop = _wardrobe?.nextDrop;
+    if (drop == null) return const Text('Garderobe');
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Garderobe'),
+        NextDropLine(
+          drop: drop,
+          // Another load under way: asked again in a while.
+          onDue: () async => mounted && !_loading && await _load(),
+        ),
+      ],
+    );
   }
 
   Widget _costumes(BuildContext context) {

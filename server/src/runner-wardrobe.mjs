@@ -12,6 +12,7 @@ import { recordPackRun, packGoalsView, nextPackCrate, markPackCrateOpened } from
 import { giftOf, ownFiguresCutover, settleOwnFigures } from './runner-own-figures.mjs';
 import { galaCrates, galaTrophies, galaWardrobe, markGalaCrateOpened, markGalaSeen, nextGalaCrate } from './runner-gala.mjs';
 import { markWeeklyCrateOpened, nextWeeklyCrate, weeklyCrates, weeklyWardrobe } from './runner-weekly.mjs';
+import { nextDropFields } from './runner-next-drop.mjs';
 
 // "Garderobe" of the stage runner: every metre run counts towards costume crates; a crate holds one
 // item (a character, a backdrop, an obstacle set or an effect) that the person does not own yet.
@@ -849,6 +850,9 @@ function view(t, p, roles = false, unique = false) {
     // unique figures included for every app), so the app shows the same count everywhere; `free`: the
     // items a release gives everybody, which do not count.
     collection: { ...collectionOf(t, p), free: releasedFreeItems(t) },
+    // Added with the drop countdown: the next content drop within a day and the server's time
+    // (runner-next-drop.mjs); nothing otherwise.
+    ...nextDropFields(t),
   };
   return roles ? plain : olderAppView(c, plain, p, owned);
 }
@@ -909,7 +913,7 @@ const catalogFor = (t, roles, unique) => a => view(t, progressOf(t, a.personId),
 /**
  * Runs [fn] once per Idempotency-Key: a repeated key returns the stored result. The catalog of its
  * `wardrobe` (about 130 KB, the same for everybody) is not stored: [catalogNow] (the account) puts
- * the one of the moment back. Results stored with theirs come back as they are.
+ * the one of the moment back, with the drop countdown of the moment (`nextDropFields`). Results stored with theirs come back as they are.
  */
 function once(t, uid, prefix, requestId, action, fn, catalogNow) {
   if (typeof requestId !== 'string' || !requestId || requestId.length > 150) fail(400, 'Ein gültiger Änderungsschlüssel fehlt.');
@@ -919,10 +923,11 @@ function once(t, uid, prefix, requestId, action, fn, catalogNow) {
     const previous = t.store.db.prepare('SELECT result FROM requests WHERE uid=? AND request_id=?').get(uid, key);
     if (previous) {
       const stored = JSON.parse(previous.result);
-      return stored.wardrobe && !stored.wardrobe.catalog ? { ...stored, wardrobe: { ...stored.wardrobe, catalog: catalogNow(a) } } : stored;
+      return stored.wardrobe && !stored.wardrobe.catalog ? { ...stored, wardrobe: { ...stored.wardrobe, catalog: catalogNow(a), ...nextDropFields(t) } } : stored;
     }
     const { result, subject } = fn(a);
-    const { catalog: _, ...wardrobe } = result.wardrobe;
+    // The drop countdown is of the moment as well: a repeat gets the one of then.
+    const { catalog: _, nextDrop: _drop, now: _now, ...wardrobe } = result.wardrobe;
     t.store.db.prepare('INSERT INTO requests VALUES(?,?,?,?,?)').run(uid, key, action, JSON.stringify({ ...result, wardrobe }), t.clock().toISOString());
     t.store.audit(uid, action, subject);
     return result;
@@ -1131,13 +1136,51 @@ export function selectOutfit(t, uid, b) {
  * unlocked one of them (both the same 404 as an unknown file).
  */
 export function skinFile(t, uid, name) {
-  const a = t.account(uid);
-  const c = catalog(t), file = c.files.get(name), rewards = c.rewardFiles?.get(name), uniques = c.uniqueFiles?.get(name);
-  if (!file) fail(404, 'Nicht gefunden.');
-  if (rewards && !t.store.transaction(() => { const revealed = revealedRewards(t, credit); return rewards.some(id => revealed.has(id)); })) fail(404, 'Nicht gefunden.');
-  if (uniques) {
-    const mine = new Set(a.personId == null ? [] : list(t.store.get('runnerProgress', a.personId)?.uniques));
-    if (!uniques.some(id => mine.has(id))) fail(404, 'Nicht gefunden.');
-  }
+  const a = t.account(uid), file = catalog(t).files.get(name);
+  if (!file || !t.store.transaction(() => servedTo(t, a.personId)(name))) fail(404, 'Nicht gefunden.');
   return file;
+}
+
+/**
+ * Whether a picture of the catalog (its file [name]) is served to [personId] (see skinFile), as a
+ * function; the ensemble's revealed rewards are looked up once, on the first file that needs them.
+ */
+function servedTo(t, personId) {
+  const c = catalog(t);
+  let revealed = null, mine = null;
+  return name => {
+    if (!c.files.has(name)) return false;
+    const rewards = c.rewardFiles?.get(name), uniques = c.uniqueFiles?.get(name);
+    if (rewards && !rewards.some(id => (revealed ??= revealedRewards(t, credit)).has(id))) return false;
+    mine ??= new Set(personId == null ? [] : list(t.store.get('runnerProgress', personId)?.uniques));
+    return !uniques || uniques.some(id => mine.has(id));
+  };
+}
+
+/**
+ * The character [personId] ran a ghost of the Wochenprobe in (`runnerGhostFigures`): [wanted], the
+ * figure the app says it ran with, if it is a character the person owns; else (an unknown or
+ * unowned one, or none from older apps) the one they have selected. Never fails the run.
+ */
+export function runnerFigure(t, personId, wanted) {
+  const c = catalog(t), p = t.store.get('runnerProgress', personId);
+  if (!p) return c.defaults.character;
+  const owned = ownedIds(t, p), item = typeof wanted === 'string' ? c.byId.get(wanted) : undefined;
+  return item?.kind === 'character' && owned.has(item.id) ? item.id : selection(t, p, owned).character;
+}
+
+/**
+ * How [viewerId] sees the figures of the ghosts, as a function of an item id: `{ id, image }` with
+ * the figure's atlas when it is served to the viewer (else `image: null`, the app draws a silhouette),
+ * `default: true` for the game's own figure (the app's own atlas); null for an item no longer in the
+ * catalog.
+ */
+export function figureViews(t, viewerId) {
+  const c = catalog(t), served = servedTo(t, viewerId);
+  return id => {
+    const item = typeof id === 'string' ? c.byId.get(id) : undefined;
+    if (item?.kind !== 'character') return null;
+    const name = typeof item.image === 'string' ? item.image.match(/\/skins\/([^?]+)/)?.[1] : null;
+    return { id: item.id, image: name && served(name) ? item.image : null, ...(item.default ? { default: true } : {}) };
+  };
 }

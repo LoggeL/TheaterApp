@@ -17,6 +17,7 @@ class AppUser {
     this.roleIds = const [],
     this.profileVersion = 0,
     this.permissions = const [],
+    this.runnerEntry = false,
   });
   final String id, name, email, role;
   final bool mustChangePassword;
@@ -32,6 +33,10 @@ class AppUser {
   /// Rights on top of the role, e.g. `events` ("Termine verwalten"); the
   /// server lists all of them for admins. See core/account_permissions.dart.
   final List<String> permissions;
+
+  /// Whether the server offers the ensemble's game in the navigation: set
+  /// for those with more than ten runs. Everybody keeps the hidden taps.
+  final bool runnerEntry;
   bool get isApproved => status == 'approved' && identityReady;
   bool get isAdmin => role == 'admin';
 
@@ -69,6 +74,7 @@ class AppUser {
     directorProductionIds: jsonList(
       json['directorProductionIds'],
     ).map((e) => e.toString()).toList(),
+    runnerEntry: json['runnerEntry'] == true,
   );
   JsonMap toJson() => {
     'userId': id,
@@ -86,5 +92,6 @@ class AppUser {
     'permissions': permissions,
     'mustChangePassword': mustChangePassword,
     'directorProductionIds': directorProductionIds,
+    'runnerEntry': runnerEntry,
   };
 }

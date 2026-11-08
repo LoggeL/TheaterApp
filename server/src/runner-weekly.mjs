@@ -1,6 +1,6 @@
 import { AppError, runnerMaxMeters, stageRunner } from './theater.mjs';
 import { berlinParts, fromBerlin } from './event-series.mjs';
-import { creditGage, shinyChanceOf } from './runner-wardrobe.mjs';
+import { creditGage, figureViews, runnerFigure, shinyChanceOf } from './runner-wardrobe.mjs';
 
 // "Wochenprobe" of the stage runner (`runnerWeekly`): one course a week for everybody, three ranked
 // runs per person, unlimited training on the same course.
@@ -30,6 +30,13 @@ import { creditGage, shinyChanceOf } from './runner-wardrobe.mjs';
 //   server measured, like the score; a ghost that does not fit makes the run implausible (400). Only
 //   the run that raises the person's best keeps its ghost, so each person has at most one; closing
 //   the week drops them (only the current week's are ever shown).
+// - Ghost figures (`runnerGhostFigures`): a ghost keeps the character it was run in (`ghost.character`,
+//   an item id): the one the app says it ran with (`character` with the score) if the person owns
+//   it, else the one they have selected (`runnerFigure`); a ghost from before has none and shows the
+//   person's current selection. The weekly view gives it per ghost as `character: { id, image,
+//   default? }` (runner-wardrobe.mjs `figureViews`): `image` only when that picture is served to the
+//   one asking (an ensemble reward not revealed yet, a unique figure not unlocked: null, the app
+//   draws a silhouette). Older apps ignore it.
 // - Leaderboard and ghosts: active members with a ranked best above zero (as the other lists), by
 //   their current name. Weekly runs count for the progress like any other run (`recordRun`: crate
 //   points, Tagesbonus, Tagesmissionen, gage of duplicates), never for the all-time list
@@ -247,10 +254,11 @@ function view(t, personId, now) {
   for (const week of dueWeeks(t, now)) closeWeek(t, week, now);
   const week = berlinWeek(now), { seed } = weekOf(t, week), record = recordOf(t, week, personId), ranked = rankedWeek(t, week);
   const trophies = trophyCounts(t), trophiesOf = id => trophies.get(id) ?? noTrophies();
+  const figure = figureViews(t, personId);
   return {
     week, seed, ...weekBounds(week), attempts: attemptsOf(record), best: bestOf(record),
     leaderboard: ranked.map(x => ({ rank: x.rank, personId: x.personId, name: x.name, score: x.best, meters: x.meters, at: x.bestAt, me: x.personId === personId, trophies: trophiesOf(x.personId) })),
-    ghosts: ranked.filter(x => x.ghost).map(x => ({ personId: x.personId, name: x.name, rank: x.rank, score: x.best, meters: x.meters, hz: weeklyRules.hz, y: x.ghost.y, crashed: x.ghost.crashed, me: x.personId === personId })),
+    ghosts: ranked.filter(x => x.ghost).map(x => ({ personId: x.personId, name: x.name, rank: x.rank, score: x.best, meters: x.meters, hz: weeklyRules.hz, y: x.ghost.y, crashed: x.ghost.crashed, me: x.personId === personId, character: figure(x.ghost.character ?? runnerFigure(t, x.personId)) })),
     lastWeek: lastWeekOf(t, personId),
     // Added with `runnerWeeklyRewards`: the own weekly trophies of all weeks.
     trophies: trophiesOf(personId),
@@ -315,13 +323,14 @@ export function weeklyAnswer(t, personId, { week, ranked, improved }) {
 
 /**
  * Counts a finished run of the Wochenprobe (inside runnerScore's transaction) for the week it was
- * started in ([weekly] of the run). A ranked one may raise the best and keeps its [ghost] with it.
+ * started in ([weekly] of the run). A ranked one may raise the best and keeps its [ghost] with it,
+ * in the figure it was run in ([character] as the app says, see `runnerFigure`).
  */
-export function recordWeeklyRun(t, personId, weekly, { score, meters, ghost, at }) {
+export function recordWeeklyRun(t, personId, weekly, { score, meters, ghost, at, character }) {
   const record = recordOf(t, weekly.week, personId), improved = weekly.ranked && score > record.best;
   t.store.put(weekRunsKind, key(weekly.week, personId), {
     ...record, ...(weekly.ranked ? { ranked: record.ranked + 1 } : { training: record.training + 1 }),
-    ...(improved ? { best: score, meters, bestAt: at, ghost } : {}),
+    ...(improved ? { best: score, meters, bestAt: at, ghost: ghost && { ...ghost, character: runnerFigure(t, personId, character) } } : {}),
   });
   return { week: weekly.week, ranked: weekly.ranked, improved };
 }

@@ -160,7 +160,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('so oft du willst'), findsOneWidget);
-      expect(find.textContaining('die besten drei mit Namen'), findsOneWidget);
+      expect(find.textContaining('wer direkt vor dir liegt'), findsOneWidget);
       expect(find.textContaining('Wochenkiste fürs Mitmachen'), findsOneWidget);
       expect(find.text('Zur Wochenprobe'), findsOneWidget);
       // Seen as soon as it shows.

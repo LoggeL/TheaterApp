@@ -384,11 +384,21 @@ void main() {
         find.text('Dein Wochenbestwert: 120 Punkte · Platz 2'),
         findsOneWidget,
       );
-      // Training without ghosts, as chosen.
-      await _tapKey(tester, 'weekly-ghosts');
+      // "Geister: Wenige" until all are chosen, kept on this device; there is
+      // no choice without any.
+      expect(find.text(GhostModeChoice.note(GhostMode.few)), findsOneWidget);
+      expect(find.text('Aus'), findsNothing);
+      await _tapKey(tester, 'ghosts-all');
+      expect(find.text(GhostModeChoice.note(GhostMode.all)), findsOneWidget);
+      expect(
+        (await SharedPreferences.getInstance()).getString(
+          RunnerMenuPreferences.ghostModeKey,
+        ),
+        'all',
+      );
       await _tapKey(tester, 'weekly-training');
       final play = handed.single!;
-      expect((play.ranked, play.seed, play.ghosts), (false, _seed, false));
+      expect((play.ranked, play.seed), (false, _seed));
       // Training starts no attempt here.
       expect(weekly.calls, isNot(contains('POST rounds')));
     });

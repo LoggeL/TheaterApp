@@ -76,6 +76,9 @@ export const stageRunner = Object.freeze({ startSpeed: 0.55, acceleration: 0.01,
   // ahead), then the curtain takes 1 s and "Nochmal" a tap, so a player starts at most 3 runs in
   // 10 s. The start history keeps just this window.
   startBurst: 20, startWindowMs: 10000 });
+// Who has run more than `runnerEntryRounds` times (any run, the Wochenprobe's too) finds the game in
+// the navigation (`runnerEntry` in the profile); everybody else only through the hidden taps.
+export const runnerEntryRounds = 10;
 /** Metres a run can cover in `seconds`: the speed (stage heights per second) grows linearly up to its maximum. */
 export const runnerMaxMeters = seconds => {
   const { startSpeed: v0, acceleration: a, maxSpeed: v1, metersPerUnit } = stageRunner, t = Math.max(0, seconds), tc = (v1 - v0) / a;
@@ -254,7 +257,7 @@ export class Theater {
   }
   profile(a) {
     const m = a.personId == null ? null : this.store.get('members', a.personId);
-    return { userId: a.uid, displayName: m?.name ?? a.name, email: a.email, needsRegistrationName: a.status === 'pending' && a.nameProvided === false, avatarId: m?.avatarId ?? null, roleIds: list(m?.roleIds), profileVersion: m?.profileVersion ?? 0, role: a.role, permissions: a.role === 'admin' ? [...accountPermissions] : list(a.permissions).filter(p => accountPermissions.includes(p)), personId: a.personId, status: a.status, emailVerified: a.emailVerified, identityReady: a.identityReady, provider: a.provider, mustChangePassword: false, directorProductionIds: this.store.all('productions').filter(p => list(p.directorMemberIds).includes(a.personId)).map(p => p.id) };
+    return { userId: a.uid, displayName: m?.name ?? a.name, email: a.email, needsRegistrationName: a.status === 'pending' && a.nameProvided === false, avatarId: m?.avatarId ?? null, roleIds: list(m?.roleIds), profileVersion: m?.profileVersion ?? 0, role: a.role, permissions: a.role === 'admin' ? [...accountPermissions] : list(a.permissions).filter(p => accountPermissions.includes(p)), personId: a.personId, status: a.status, emailVerified: a.emailVerified, identityReady: a.identityReady, provider: a.provider, mustChangePassword: false, directorProductionIds: this.store.all('productions').filter(p => list(p.directorMemberIds).includes(a.personId)).map(p => p.id), runnerEntry: a.personId != null && (this.store.get('runnerScores', a.personId)?.rounds ?? 0) > runnerEntryRounds };
   }
   account(uid, admin = false) {
     const a = this.store.account(uid);
@@ -513,7 +516,8 @@ export class Theater {
       const counted = (best, bestAt) => this.store.put('runnerScores', a.personId, { personId: a.personId, best, bestAt, rounds: (old?.rounds ?? 0) + 1, lastPlayedAt: when });
       if (weekly) {
         counted(old?.best ?? 0, old?.bestAt ?? null);
-        const run = recordWeeklyRun(this, a.personId, weekly, { score: b.score, meters, ghost, at: when });
+        // `character`: the figure the ghost was run in (`runnerGhostFigures`), checked there.
+        const run = recordWeeklyRun(this, a.personId, weekly, { score: b.score, meters, ghost, at: when, character: b.character });
         finishRound(this, a.personId, b.roundId, b, { improved: false, progress, weekly: run });
         return { score: b.score, improved: false, leaderboard: this.runnerBoard(a), progress, weekly: weeklyAnswer(this, a.personId, run) };
       }

@@ -160,12 +160,21 @@ bool hasUnsavedChanges(NavigatorState navigator) => _dirtyGuards.any((guard) {
 ///
 /// [Navigator.popUntil] ignores [PopScope.canPop], so every jump to a
 /// section start goes through here instead.
-Future<bool> popToFirst(BuildContext context, NavigatorState navigator) async {
+Future<bool> popToFirst(BuildContext context, NavigatorState navigator) =>
+    popBackTo(context, navigator, (route) => route.isFirst);
+
+/// Goes back on [navigator] until [until] holds for the top route (or the
+/// first one is reached), asking first like [popToFirst].
+Future<bool> popBackTo(
+  BuildContext context,
+  NavigatorState navigator,
+  RoutePredicate until,
+) async {
   if (hasUnsavedChanges(navigator) && !await confirmDiscardChanges(context)) {
     return false;
   }
   if (!navigator.mounted) return false;
-  navigator.popUntil((route) => route.isFirst);
+  navigator.popUntil((route) => route.isFirst || until(route));
   return true;
 }
 

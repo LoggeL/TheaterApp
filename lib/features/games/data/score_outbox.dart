@@ -18,6 +18,7 @@ class RunScore {
     this.hitBy,
     this.missionStats,
     this.ghost,
+    this.character,
   });
 
   /// The round the server started for this run; null when it did not start.
@@ -26,8 +27,9 @@ class RunScore {
   final ObstacleKind? hitBy;
   final Map<String, Object>? missionStats;
 
-  /// A ranked run of the Wochenprobe: its ghost ([GhostRecorder.encode]).
-  final String? ghost;
+  /// A ranked run of the Wochenprobe: its ghost ([GhostRecorder.encode])
+  /// and the figure it was run in (an item id; the server checks it).
+  final String? ghost, character;
 }
 
 /// Sends the results of runs, also while the next run is already playing,
@@ -100,6 +102,7 @@ class RunnerScoreOutbox {
     hitBy: entry.run.hitBy,
     missionStats: entry.run.missionStats,
     ghost: entry.run.ghost,
+    character: entry.run.character,
   );
 
   /// Errors without an answer, timeouts and server faults may pass; a

@@ -58,7 +58,8 @@ const runnerNews = <RunnerNews>[
       'Drei Wertungsläufe, der beste zählt. Ein Versuch zählt, sobald der '
           'Lauf startet.',
       'Training auf der Wochenstrecke, so oft du willst.',
-      'Die Geister aller laufen mit, die besten drei mit Namen.',
+      'Geister laufen mit: Platz 1, dein bester Lauf und wer direkt vor '
+          'dir liegt – oder alle, wie du magst.',
       'Belohnung: eine Wochenkiste fürs Mitmachen, Pokal und Gage für die '
           'Plätze 1 bis 3.',
     ],

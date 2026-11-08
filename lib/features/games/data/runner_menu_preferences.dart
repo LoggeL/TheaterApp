@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../domain/runner_ghost.dart';
+
 /// Which ranking the Bühnenlauf menu shows.
 enum RunnerBoardView {
   /// The best run of the current month ("Monat", `runnerMonthlyLeaderboard`):
@@ -16,8 +18,8 @@ enum RunnerBoardView {
 
 /// Small choices of the Bühnenlauf menu, remembered on this device like the
 /// scenery motion (`RunnerMotionPreferences`): whether the day's finished
-/// missions are shown in full, which ranking is open, whether training
-/// in the Wochenprobe shows the ghosts, and which entries of "Neu im
+/// missions are shown in full, which ranking is open, which ghosts runs
+/// of the Wochenprobe show ([GhostMode]), and which entries of "Neu im
 /// Bühnenlauf" were shown (see `runner_news.dart`). Only a convenience:
 /// without storage the defaults apply and a failed save is ignored.
 class RunnerMenuPreferences extends ChangeNotifier {
@@ -37,7 +39,10 @@ class RunnerMenuPreferences extends ChangeNotifier {
   /// a chosen collection stays.
   static const legacyBoardKey = 'stageRunner.boardView';
 
-  static const trainingGhostsKey = 'stageRunner.trainingGhosts';
+  /// The ghosts of the Wochenprobe: `few` or `all` ([GhostMode]). The
+  /// switch for training before it (`stageRunner.trainingGhosts`) is not
+  /// read: ghosts are never all off now, and "Wenige" is calm enough.
+  static const ghostModeKey = 'stageRunner.ghostMode';
 
   /// The ids of the news entries shown on this device.
   static const newsSeenKey = 'stageRunner.newsSeen';
@@ -45,7 +50,8 @@ class RunnerMenuPreferences extends ChangeNotifier {
   final Future<SharedPreferences> Function() _loadPreferences;
   bool _doneMissionsOpen = false, _disposed = false;
   bool _changedDone = false, _changedBoard = false;
-  bool _trainingGhosts = true, _changedGhosts = false;
+  GhostMode _ghostMode = GhostMode.few;
+  bool _changedGhosts = false;
   RunnerBoardView _board = RunnerBoardView.month;
   final _newsSeen = <String>{};
   bool _newsKnown = false;
@@ -54,9 +60,9 @@ class RunnerMenuPreferences extends ChangeNotifier {
   bool get doneMissionsOpen => _doneMissionsOpen;
   RunnerBoardView get board => _board;
 
-  /// Whether training runs of the Wochenprobe show the ghosts (ranked runs
-  /// always do).
-  bool get trainingGhosts => _trainingGhosts;
+  /// Which ghosts the runs of the Wochenprobe show; [GhostMode.few] unless
+  /// chosen otherwise.
+  GhostMode get ghostMode => _ghostMode;
 
   /// The news entries already shown here.
   Set<String> get newsSeen => Set.unmodifiable(_newsSeen);
@@ -80,8 +86,12 @@ class RunnerMenuPreferences extends ChangeNotifier {
             _ => null,
           };
       if (!_changedDone && done != null) _doneMissionsOpen = done;
-      final ghosts = preferences.getBool(trainingGhostsKey);
-      if (!_changedGhosts && ghosts != null) _trainingGhosts = ghosts;
+      final ghosts = preferences.getString(ghostModeKey);
+      if (!_changedGhosts) {
+        _ghostMode =
+            GhostMode.values.where((m) => m.name == ghosts).firstOrNull ??
+            _ghostMode;
+      }
       _newsSeen.addAll(preferences.getStringList(newsSeenKey) ?? const []);
       _newsKnown = true;
       if (!_changedBoard) {
@@ -111,12 +121,12 @@ class RunnerMenuPreferences extends ChangeNotifier {
     _save((p) => p.setString(boardKey, board.name));
   }
 
-  void setTrainingGhosts(bool shown) {
-    if (_disposed || shown == _trainingGhosts) return;
+  void setGhostMode(GhostMode mode) {
+    if (_disposed || mode == _ghostMode) return;
     _changedGhosts = true;
-    _trainingGhosts = shown;
+    _ghostMode = mode;
     notifyListeners();
-    _save((p) => p.setBool(trainingGhostsKey, shown));
+    _save((p) => p.setString(ghostModeKey, mode.name));
   }
 
   /// Remembers the news entries [ids] as shown, with all seen before.

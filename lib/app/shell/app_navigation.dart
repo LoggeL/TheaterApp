@@ -9,6 +9,7 @@ import '../../features/slots/domain/slot_pool.dart';
 import '../../shared/feedback.dart';
 import '../../shared/layout/breakpoints.dart';
 import '../brand.dart';
+import 'app_section.dart';
 
 /// Keeps section selection available to routes opened above the app shell.
 /// [controller] lets pages opened with `openPage` show the section rail.
@@ -214,6 +215,16 @@ Widget _railTooltip(NavigationDestination destination, Widget icon) =>
         child: icon,
       );
 
+/// The rail's place of the game entry ([gameEntryShown]): after "Ich",
+/// before "Admin". The sections keep their [AppSection] index; only the
+/// rail counts the entry in between.
+int get _gameSlot => AppSection.me.index + 1;
+
+/// The section rail. With the game entry the rail has one destination more
+/// than there are sections: [selectedIndex] and [onSelected] still speak of
+/// sections, the entry itself opens the game ([onGame], by default
+/// [openStageRunner]). [gameOpen] marks the entry while the game or a page
+/// it opened is shown; without [onGame] a tap on it then does nothing.
 class AppNavigationRail extends StatelessWidget {
   const AppNavigationRail({
     super.key,
@@ -221,25 +232,52 @@ class AppNavigationRail extends StatelessWidget {
     required this.selectedIndex,
     required this.onSelected,
     this.showBrand = false,
+    this.onGame,
+    this.gameOpen = false,
   });
   final AppController controller;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
   final bool showBrand;
+  final VoidCallback? onGame;
+  final bool gameOpen;
 
   @override
   Widget build(BuildContext context) {
     final extended =
         MediaQuery.sizeOf(context).width >= Breakpoints.extendedRail;
-    final destinations = appNavigationDestinations(controller);
+    final sections = appNavigationDestinations(controller);
+    final game = gameEntryShown(controller);
+    final slot = _gameSlot;
+    final destinations = [
+      ...sections.take(slot),
+      if (game)
+        _destination(
+          gameEntryIcon,
+          gameEntrySelectedIcon,
+          label: gameEntryLabel,
+        ),
+      ...sections.skip(slot),
+    ];
+    final section = selectedIndex.clamp(0, sections.length - 1);
     return NavigationRail(
       minExtendedWidth: 220,
       extended: extended,
       labelType: extended
           ? NavigationRailLabelType.none
           : NavigationRailLabelType.all,
-      selectedIndex: selectedIndex.clamp(0, destinations.length - 1),
-      onDestinationSelected: onSelected,
+      selectedIndex: game && gameOpen
+          ? slot
+          : game && section >= slot
+          ? section + 1
+          : section,
+      onDestinationSelected: (index) {
+        if (!game || index < slot) return onSelected(index);
+        if (index > slot) return onSelected(index - 1);
+        if (onGame != null) return onGame!();
+        if (gameOpen) return;
+        openStageRunner(context, controller);
+      },
       leading: showBrand
           ? Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -289,7 +327,10 @@ class _RouteFrameScope extends InheritedWidget {
 
 /// Preserves the app's section navigation on a wide screen. Idempotent: only
 /// the outermost frame of a route shows the rail. A nested frame with
-/// [enabled] false (e.g. the reader's stage mode) hides it.
+/// [enabled] false (e.g. the reader's stage mode) hides it. [pageType] is
+/// the type of the route's screen: the game's page, and every page above it
+/// (the Garderobe, the Wochenprobe, a figure), marks the rail's game entry
+/// instead of the section it was opened from.
 class DesktopRouteFrame extends StatefulWidget {
   const DesktopRouteFrame({
     super.key,
@@ -297,11 +338,13 @@ class DesktopRouteFrame extends StatefulWidget {
     required this.selectedIndex,
     required this.child,
     this.enabled = true,
+    this.pageType,
   });
   final AppController controller;
   final int selectedIndex;
   final Widget child;
   final bool enabled;
+  final Type? pageType;
 
   @override
   State<DesktopRouteFrame> createState() => _DesktopRouteFrameState();
@@ -311,6 +354,45 @@ class _DesktopRouteFrameState extends State<DesktopRouteFrame> {
   /// Nested frames that currently ask to hide the rail.
   final _hiddenBy = <Object>{};
   _DesktopRouteFrameState? _outer;
+
+  /// The open routes of the game's page ([StageRunnerScreen]): a page above
+  /// one of them belongs to the game, and the rail's game entry leads back
+  /// to it there instead of starting the game anew.
+  static final _gameRoutes = <Route<dynamic>>{};
+
+  /// This frame's route while it is the game's page.
+  Route<dynamic>? _gameRoute;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _trackGame();
+  }
+
+  @override
+  void didUpdateWidget(DesktopRouteFrame oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _trackGame();
+  }
+
+  void _trackGame() {
+    final route = widget.pageType == StageRunnerScreen
+        ? ModalRoute.of(context)
+        : null;
+    if (identical(route, _gameRoute)) return;
+    if (_gameRoute case final old?) _gameRoutes.remove(old);
+    _gameRoute = route;
+    if (route != null) _gameRoutes.add(route);
+  }
+
+  /// Whether this frame's route is the game's page or above one: frames
+  /// rebuild when their route's place changes ([ModalRoute.of]), so one
+  /// below the game shows no mark once it is the top again.
+  bool _inGame(NavigatorState? navigator) =>
+      _gameRoute != null ||
+      _gameRoutes.any(
+        (route) => route.navigator == navigator && route.isActive,
+      );
 
   void _hide(Object frame, bool hide) {
     final changed = hide ? _hiddenBy.add(frame) : _hiddenBy.remove(frame);
@@ -325,6 +407,7 @@ class _DesktopRouteFrameState extends State<DesktopRouteFrame> {
   @override
   void dispose() {
     _outer?._hide(this, false);
+    if (_gameRoute case final route?) _gameRoutes.remove(route);
     super.dispose();
   }
 
@@ -343,6 +426,10 @@ class _DesktopRouteFrameState extends State<DesktopRouteFrame> {
         widget.controller.hasAccess &&
         MediaQuery.sizeOf(context).width >= Breakpoints.rail &&
         MediaQuery.textScalerOf(context).scale(14) <= 21;
+    // Depends on the route, so a change of its place rebuilds the mark.
+    ModalRoute.of(context);
+    final navigator = Navigator.maybeOf(context);
+    final inGame = rail && _inGame(navigator);
     // The page keeps its place in the tree when the rail comes or goes, so
     // its state survives resizing and the reader's stage mode.
     return Material(
@@ -356,10 +443,27 @@ class _DesktopRouteFrameState extends State<DesktopRouteFrame> {
               controller: widget.controller,
               selectedIndex: widget.selectedIndex,
               showBrand: true,
+              gameOpen: inGame,
               onSelected: (index) async {
                 // Unsaved input asks first; staying keeps the section.
                 if (await popToFirst(context, Navigator.of(context))) {
                   selection.value = index;
+                }
+              },
+              onGame: () async {
+                // The game's own page stays as it is.
+                if (_gameRoute != null) return;
+                final navigator = Navigator.of(context);
+                // A page the game opened: back to the game, its run kept.
+                if (_inGame(navigator)) {
+                  await popBackTo(context, navigator, _gameRoutes.contains);
+                  return;
+                }
+                // Like a section: back to the start first, then the game.
+                if (await popToFirst(context, navigator)) {
+                  if (navigator.mounted) {
+                    openStageRunner(navigator.context, widget.controller);
+                  }
                 }
               },
             ),

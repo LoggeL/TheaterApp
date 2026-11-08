@@ -219,6 +219,7 @@ Future<RoundResult> submitRound(
   ObstacleKind? hitBy,
   Map<String, Object>? missionStats,
   String? ghost,
+  String? character,
 }) async {
   final data = await controller.remote(
     '/games/runner/scores',
@@ -236,6 +237,9 @@ Future<RoundResult> submitRound(
       'course': StageRunner.courseVersion,
       // A ranked run of the Wochenprobe: its heights, for its ghost.
       'ghost': ?ghost,
+      // The figure of that ghost (`runnerGhostFigures`); older servers
+      // ignore it, and an unowned one counts as the selected figure.
+      'character': ?character,
     },
   );
   return RoundResult(

@@ -140,6 +140,7 @@ class _RoutePageState extends State<_RoutePage> {
     return DesktopRouteFrame(
       controller: controller,
       selectedIndex: selection.value,
+      pageType: widget.screen.runtimeType,
       child: page,
     );
   }

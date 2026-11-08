@@ -8,6 +8,7 @@ import '../../../core/app_controller.dart';
 import '../../../core/app_version.dart';
 import '../../../core/device_services.dart';
 import '../../../shared/feedback.dart';
+import '../../../shared/layout/breakpoints.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/brand_logo.dart';
 import '../../../shared/widgets/member_avatar.dart';
@@ -163,6 +164,23 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
         padding: const EdgeInsets.fromLTRB(22, 20, 22, 30),
         children: [
           const PageHeader('Mein Bereich.'),
+          // Phones have no room for the game in the navigation bar: those
+          // who play it often find it here. Wide screens show it in the rail.
+          if (gameEntryShown(controller) &&
+              MediaQuery.sizeOf(context).width < Breakpoints.rail) ...[
+            TileGroup(
+              tiles: [
+                GroupTile(
+                  key: const ValueKey('game-entry'),
+                  icon: gameEntryIcon,
+                  title: gameEntryLabel,
+                  subtitle: 'Weiterspielen',
+                  onTap: () => openStageRunner(context, controller),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
           _ProfileCard(controller: controller),
           const SizedBox(height: 28),
           ListenableBuilder(

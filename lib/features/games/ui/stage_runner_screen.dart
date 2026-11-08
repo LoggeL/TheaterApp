@@ -26,11 +26,13 @@ import '../domain/stage_runner.dart';
 import 'ensemble_card.dart' show EnsembleStrip;
 import 'gala.dart';
 import 'missions_card.dart';
+import 'next_drop.dart';
 import 'runner_menu.dart';
 import 'runner_news.dart';
 import 'runner_weekly.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart';
+import 'stage_runner_ghosts.dart';
 import 'stage_runner_look.dart';
 import 'stage_runner_music.dart';
 import 'stage_runner_perf.dart';
@@ -196,12 +198,14 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   /// The Wochenprobe (`runnerWeekly`): this week as last loaded, for the
   /// menu's entry; the mode of the current (or last) run, null for a normal
-  /// one; the ghost a ranked run records; the ghosts it shows; and what its
-  /// result changed.
+  /// one; the ghost a ranked run records and the figure it runs in; the
+  /// ghosts it shows with their figures; and what its result changed.
   WeeklyChallenge? _weekly;
   WeeklyPlay? _weeklyPlay;
   GhostRecorder? _recorder;
+  String? _runFigure;
   RunnerGhosts? _ghosts;
+  GhostSkins? _ghostSkins;
   WeeklyRunResult? _weeklyResult;
   bool get _weeklyShown => weeklyAvailable(controller);
 
@@ -257,7 +261,11 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _menu.addListener(_menuChanged);
     if (_art == null) {
       RunnerArt.load().then((art) {
-        if (mounted && art != null) setState(() => _art = art);
+        if (mounted && art != null) {
+          setState(() => _art = art);
+          // A run that started without art: its ghosts' figures now.
+          _ghostSkins?.artReady(art);
+        }
         _dress();
       });
     }
@@ -313,7 +321,15 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   }
 
   void _menuChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    // "Geister: Wenige / Alle", also changed during a run (its pause).
+    final ghosts = _ghosts;
+    if (ghosts != null && ghosts.mode != _menu.ghostMode) {
+      ghosts.mode = _menu.ghostMode;
+      _ghostSkins?.want(ghosts.shown, _art);
+      _frame.value++;
+    }
   }
 
   void _motionChanged() {
@@ -334,6 +350,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     }
     String? saveError;
     var saveRequest = 0;
+    final ghosts = _weeklyShown;
     try {
       await showDialog<void>(
         context: context,
@@ -348,13 +365,20 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                   horizontal: 16,
                   vertical: 24,
                 ),
-                title: const Text('Bewegung'),
+                // With the Wochenprobe its ghosts are chosen here too, also
+                // in the pause of one of its runs.
+                title: Text(ghosts ? 'Spieleinstellungen' : 'Bewegung'),
                 content: SizedBox(
                   width: 420,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (ghosts)
+                        Text(
+                          'Bewegung',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
                       SwitchListTile(
                         key: const ValueKey('runner-scenery-motion'),
                         contentPadding: EdgeInsets.zero,
@@ -398,6 +422,18 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.error,
                           ),
+                        ),
+                      ],
+                      if (ghosts) ...[
+                        const Divider(height: 32),
+                        GhostModeChoice(
+                          key: const ValueKey('runner-ghosts'),
+                          preferences: _menu,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Gilt für Wertungsläufe und Training der Wochenprobe.',
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
                     ],
@@ -446,6 +482,29 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     }
   }
 
+  /// A fresh wardrobe when the drop countdown reaches zero: the new
+  /// costumes join the catalog. Not during a run, where it would only wait:
+  /// the countdown asks again once the menu shows it. False when none came.
+  Future<bool> _reloadWardrobe() async {
+    if (!_dressable || _phase == _Phase.playing) return false;
+    try {
+      final w = await loadWardrobe(controller);
+      if (!mounted || _phase == _Phase.playing) return false;
+      final worn = _wardrobe;
+      setState(() {
+        _wardrobe = w;
+        if (_progress != null) _progress = w.progress;
+      });
+      if (worn == null || outfitOf(w) != outfitOf(worn)) {
+        await _dress();
+      }
+      return true;
+    } catch (e) {
+      if (kDebugMode) debugPrint('Bühnenlauf: Garderobe nicht neu geladen: $e');
+      return false;
+    }
+  }
+
   Future<void> _dress() async {
     unawaited(_tune());
     final base = RunnerArt.loaded, w = _wardrobe;
@@ -453,6 +512,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     final art = await dressArt(base, w, controller);
     if (mounted && identical(w, _wardrobe)) {
       setState(() => _art = art);
+      _ghostSkins?.artReady(art);
       _outfit = dressedOutfit(w);
       _perf?.skin();
     }
@@ -533,6 +593,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _menu.removeListener(_menuChanged);
     if (widget.menuPreferences == null) _menu.dispose();
     _painter?.dispose();
+    _ghostSkins?.dispose();
     _sound.stopMusic();
     if (widget.sound == null) _sound.dispose();
     _ticker.dispose();
@@ -646,9 +707,25 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _recorder = weekly?.ranked ?? false
         ? (GhostRecorder()..record(game))
         : null;
-    _ghosts = weekly != null && (weekly.ranked || weekly.ghosts)
-        ? RunnerGhosts(weekly.challenge.ghosts)
+    // The figure the ghost is run in, if the game is dressed in it; else the
+    // server takes the selected one.
+    _runFigure = _recorder != null && _outfit != null
+        ? _wardrobe?.worn(WardrobeKind.character)?.id
         : null;
+    final ghosts = _ghosts = weekly == null
+        ? null
+        : RunnerGhosts(
+            weekly.challenge.ghosts,
+            mode: _menu.ghostMode,
+            ownRank: weekly.challenge.own?.rank,
+          );
+    _ghostSkins?.dispose();
+    _ghostSkins = null;
+    if (ghosts != null && ghosts.ghosts.isNotEmpty) {
+      // The named ones first: they show from the start.
+      _ghostSkins = GhostSkins(controller, onLoaded: () => _frame.value++)
+        ..want([...ghosts.named, ...ghosts.shown], _art);
+    }
     final perf = _perf = RunnerPerf(
       game,
       curtainStart: _curtainStart,
@@ -779,6 +856,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       hitBy: _game.hitBy,
       missionStats: _game.missionStats,
       ghost: _recorder?.encode(crashed: _game.over),
+      character: _runFigure,
     );
     final weekly = _weeklyPlay;
     setState(() => _saving = true);
@@ -889,12 +967,15 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     );
   }
 
-  /// The menu before and after a run: the hero (or the last run's result)
-  /// first, then the own standing, the Ensemble-Strecke, the rankings and
-  /// the Tagesmissionen. Wide enough, the hero stays on the left and the
-  /// rest scrolls beside it.
+  /// The menu before and after a run: the countdown to a content drop less
+  /// than a day away, the hero (or the last run's result), then the own
+  /// standing, the Ensemble-Strecke, the rankings and the Tagesmissionen.
+  /// Wide enough, the hero stays on the left and the rest scrolls beside it.
   Widget _menuBody(BuildContext context) {
     final lead = _phase == _Phase.intro ? _hero(context) : _result(context);
+    // The drop countdown comes first: above the hero on phones, on top of
+    // the column beside it on wide screens.
+    final drop = _nextDropCard();
     final rest = [
       if (_weeklyShown) _weeklyCard(),
       ?_stand(context),
@@ -915,7 +996,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         if (constraints.maxWidth < _twoColumns) {
           return ListView(
             padding: pagePadding(context, maxWidth: 640, top: 16),
-            children: spaced([lead, ...rest]),
+            children: spaced([?drop, lead, ...rest]),
           );
         }
         final pad = pagePadding(context, maxWidth: 1040, top: 16);
@@ -937,7 +1018,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
               Expanded(
                 child: ListView(
                   padding: EdgeInsets.only(top: pad.top, bottom: pad.bottom),
-                  children: spaced(rest),
+                  children: spaced([?drop, ...rest]),
                 ),
               ),
             ],
@@ -1003,6 +1084,14 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       nextCrateFraction: next == null || p!.complete ? null : p.fraction,
       onWardrobe: _dressable ? _openWardrobe : null,
     );
+  }
+
+  /// The countdown to the next content drop, while one is less than a day
+  /// away (`nextDrop`).
+  Widget? _nextDropCard() {
+    final drop = _wardrobe?.nextDrop;
+    if (drop == null || !_dressable) return null;
+    return NextDropCard(drop: drop, onDue: _reloadWardrobe);
   }
 
   /// The way into the Wochenprobe.
@@ -1180,7 +1269,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       unawaited(_openWeekly());
       return;
     }
-    _play(WeeklyPlay(challenge: week, ghosts: last.ghosts));
+    _play(WeeklyPlay(challenge: week));
   }
 
   /// What a weekly run's result adds: which run it was, and for a ranked
@@ -1428,6 +1517,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       pixelRatio: ratio,
       sceneryMotion: () => _sceneryMotion,
       ghosts: () => _ghosts,
+      ghostSkins: () => _ghostSkins,
     );
   }
 
@@ -1818,14 +1908,14 @@ class RunnerGlyphs {
     );
   }
 
-  /// The name beside one of the best three ghosts, in its medal's colour.
+  /// The name beside a ghost: one of the best three in its medal's colour.
   TextPainter tag(String text, double size, int rank) {
     _bound();
     return _cache[('tag', text, size)] ??= _layout(
       text,
       TextStyle(
         fontFamily: _font,
-        color: _ghostTagColors[(rank - 1).clamp(0, 2)],
+        color: _ghostTagColors[rank >= 1 && rank <= 3 ? rank - 1 : 3],
         fontSize: size,
         fontWeight: FontWeight.w800,
       ),
@@ -1836,6 +1926,7 @@ class RunnerGlyphs {
     Color(0xE6F2C45A),
     Color(0xE6D5DCE2),
     Color(0xE6D9A06A),
+    Color(0xE6E6EDF2),
   ];
 
   /// A safety net: sizes that keep changing must not grow the cache forever.
@@ -1923,6 +2014,8 @@ CustomPainter stagePainterFor(
   RunnerTrail? trail,
   double pixelRatio = 1,
   bool sceneryMotion = true,
+  RunnerGhosts? ghosts,
+  GhostSkins? ghostSkins,
 }) {
   final f = fx ?? RunnerFx(), t = trail ?? RunnerTrail();
   return _StagePainter(
@@ -1933,6 +2026,8 @@ CustomPainter stagePainterFor(
     () => t,
     pixelRatio: pixelRatio,
     sceneryMotion: () => sceneryMotion,
+    ghosts: ghosts == null ? null : () => ghosts,
+    ghostSkins: ghostSkins == null ? null : () => ghostSkins,
   );
 }
 
@@ -1968,11 +2063,13 @@ class _StagePainter extends CustomPainter {
     this.pixelRatio = 1,
     required this.sceneryMotion,
     this.ghosts,
+    this.ghostSkins,
   }) : super(repaint: repaint);
   final StageRunner Function() game;
 
-  /// The ghosts of a Wochenprobe run; null otherwise.
+  /// The ghosts of a Wochenprobe run and their figures; null otherwise.
   final RunnerGhosts? Function()? ghosts;
+  final GhostSkins? Function()? ghostSkins;
   final RunnerFx Function() fx;
   final RunnerArt? Function() art;
 
@@ -2024,20 +2121,31 @@ class _StagePainter extends CustomPainter {
     _fill(const Color(0xFFFFF4C2)),
     _fill(const Color(0xFFBFA88A)),
   ];
-  // Ghosts: one plain figure for all, tinted; the best three clearer.
+  // Ghosts: all alike and faint ([ghostAlpha]), in their figures or, until
+  // those are loaded, as a plain silhouette. Their opacity changes every
+  // frame, so its steps are made once: a frame only picks a colour.
+  static const _ghostSteps = 24;
   static final _ghostFigure = _plainFigure();
-  static final _ghostTopPaints = [
-    _fill(const Color(0x8CE4AE39)),
-    _fill(const Color(0x80C9D1D8)),
-    _fill(const Color(0x80C98F55)),
+  static final _ghostSilhouettes = [
+    for (var i = 0; i <= _ghostSteps; i++)
+      Color.fromRGBO(220, 230, 240, ghostOpacity * i / _ghostSteps),
   ];
-  static final _ghostPaint = _fill(const Color(0x2EDCE6F0));
-  static final _ghostTopMarks = [
-    for (final p in _ghostTopPaints)
-      _stroke(p.color, 2)..strokeCap = StrokeCap.round,
+  static final _ghostOpacities = [
+    for (var i = 0; i <= _ghostSteps; i++)
+      Color.fromRGBO(0, 0, 0, ghostOpacity * i / _ghostSteps),
   ];
-  static final _ghostMark = _stroke(const Color(0x59DCE6F0), 1.5)
+  static final _ghostPaint = Paint();
+  static final _ghostSkinPaint = Paint()..filterQuality = FilterQuality.medium;
+  static final _ghostMark = _stroke(const Color(0x40DCE6F0), 1.5)
     ..strokeCap = StrokeCap.round;
+  static final _ghostTagLayer = Paint();
+  static final _tagOpacities = [
+    for (var i = 0; i <= _ghostSteps; i++)
+      Color.fromRGBO(0, 0, 0, i / _ghostSteps),
+  ];
+  // The name tags of a frame (at most the three of [RunnerGhosts.named]).
+  final _tagGhosts = List<RunnerGhost?>.filled(3, null);
+  final _tagTops = Float64List(3);
   final _glyphs = RunnerGlyphs();
   final _path = Path();
   final _decoration = _DecorationPictures();
@@ -2090,6 +2198,10 @@ class _StagePainter extends CustomPainter {
     _spotlights(canvas, s, w, floorY, sceneryScroll);
     _wings(canvas, s, w, sceneryScroll);
     _floor(canvas, s, w, floorY, sceneryScroll);
+    // Behind everything that matters for the run.
+    if (ghosts?.call() case final gh?) {
+      _ghostRuns(canvas, g, gh, ghostSkins?.call(), a, s, w, course);
+    }
 
     for (final o in g.obstacles) {
       final rect = Rect.fromLTRB(
@@ -2107,9 +2219,6 @@ class _StagePainter extends CustomPainter {
     }
 
     _pickups(canvas, g, a, s, w, course);
-    if (ghosts?.call() case final gh? when gh.visible) {
-      _ghostRuns(canvas, g, gh, s, w, course);
-    }
     trail().paint(canvas, s, a?.effect);
     if (a == null) {
       _plainRunner(canvas, g, s);
@@ -3145,62 +3254,140 @@ class _StagePainter extends CustomPainter {
       ..addRect(const Rect.fromLTRB(w * .08, h * .15, w * .32, h * .5));
   }
 
-  /// The week's other runs: every ghost at its height at this moment (all
-  /// runs are at the same place at the same time), the faint ones under
-  /// the best three with their names, and a small cross where one crashed.
+  /// The week's other runs: each ghost [RunnerGhosts.shown] at its height at
+  /// this moment (all runs are at the same place at the same time), faint
+  /// and fading further near the own figure ([ghostAlpha]); gone after its
+  /// crash but for a small cross where it happened. The names of
+  /// [RunnerGhosts.named] show for the first seconds ([ghostTagAlpha]).
   void _ghostRuns(
     Canvas canvas,
     StageRunner g,
     RunnerGhosts ghosts,
+    GhostSkins? skins,
+    RunnerArt? a,
     double s,
     double w,
     double course,
   ) {
-    final all = ghosts.ghosts, mark = s * .016;
-    for (final ghost in all) {
-      if (!ghost.crashed) continue;
+    final shown = ghosts.shown, t = g.time, mark = s * .012;
+    for (final ghost in shown) {
+      if (!ghost.crashed || t < ghost.end) continue;
       final x = ghost.endX * s - course;
       if (x < -mark || x > w + mark) continue;
       final y = ghost.endY * s;
-      final paint = ghost.top ? _ghostTopMarks[ghost.rank - 1] : _ghostMark;
       canvas
         ..drawLine(
           Offset(x - mark, y - mark),
           Offset(x + mark, y + mark),
-          paint,
+          _ghostMark,
         )
         ..drawLine(
           Offset(x - mark, y + mark),
           Offset(x + mark, y - mark),
-          paint,
+          _ghostMark,
         );
     }
-    final cx = StageRunner.runnerX * s, t = g.time;
-    final size = s * .03, gap = StageRunner.runnerWidth * s * .7;
+    final cx = StageRunner.runnerX * s;
     // The best last, on top.
-    for (var i = all.length - 1; i >= 0; i--) {
-      final ghost = all[i];
+    for (var i = shown.length - 1; i >= 0; i--) {
+      final ghost = shown[i];
       if (t > ghost.end) continue;
-      final y = ghost.yAt(t) * s;
-      canvas
-        ..save()
-        ..translate(cx, y)
-        ..scale(s)
-        ..drawPath(
-          _ghostFigure,
-          ghost.top ? _ghostTopPaints[ghost.rank - 1] : _ghostPaint,
-        )
-        ..restore();
-      if (!ghost.top) continue;
-      final tag = _glyphs.tag(ghost.tag, size, ghost.rank);
-      tag.paint(
-        canvas,
-        Offset(
-          cx - gap - tag.width,
-          y - StageRunner.runnerHeight * s * .34 - tag.height / 2,
-        ),
-      );
+      final y = ghost.yAt(t);
+      final step = (ghostAlpha(y, g.y) / ghostOpacity * _ghostSteps)
+          .round()
+          .clamp(0, _ghostSteps);
+      if (step == 0) continue;
+      final skin = a == null ? null : skins?.of(ghost, a);
+      if (skin == null) {
+        _ghostPaint.color = _ghostSilhouettes[step];
+        canvas
+          ..save()
+          ..translate(cx, y * s)
+          ..scale(s)
+          ..drawPath(_ghostFigure, _ghostPaint)
+          ..restore();
+      } else {
+        _ghostSkinPaint.color = _ghostOpacities[step];
+        _ghostSprite(canvas, g, ghost, skin, y, s);
+      }
     }
+    final tags = ghostTagAlpha(t);
+    if (tags > 0) _ghostTags(canvas, ghosts, t, s, tags);
+  }
+
+  /// A ghost in its figure: the runner's poses, without the wire and
+  /// without tilting, so it stays calm.
+  void _ghostSprite(
+    Canvas canvas,
+    StageRunner g,
+    RunnerGhost ghost,
+    ui.Image skin,
+    double y,
+    double s,
+  ) {
+    final t = g.time;
+    final sprite = ghost.onFloorAt(t)
+        ? RunnerSprite.stride(g.distance)
+        : ghost.vyAt(t) < -.05
+        ? RunnerSprite.fly
+        : RunnerSprite.dangle;
+    final scale = RunnerSprite.stagePerPixel * s;
+    final width = sprite.width * scale, height = sprite.height * scale;
+    final feet = sprite == RunnerSprite.fly
+        ? y + height / s / 2
+        : y + StageRunner.runnerHeight / 2 + .006;
+    final cx = StageRunner.runnerX * s, bottom = feet * s;
+    canvas.drawImageRect(
+      skin,
+      sprite.rect,
+      Rect.fromLTWH(cx - width / 2, bottom - height, width, height),
+      _ghostSkinPaint,
+    );
+  }
+
+  /// The names left of their ghosts, lowest first and each above the one
+  /// below where they would overlap (at the start everyone stands on the
+  /// floor); fading as a whole ([alpha]).
+  void _ghostTags(
+    Canvas canvas,
+    RunnerGhosts ghosts,
+    double t,
+    double s,
+    double alpha,
+  ) {
+    final size = s * .03, gap = StageRunner.runnerWidth * s * .7;
+    final cx = StageRunner.runnerX * s;
+    var n = 0;
+    for (final ghost in ghosts.shown) {
+      if (n == _tagGhosts.length) break;
+      if (t > ghost.end || !ghosts.named.contains(ghost)) continue;
+      // Sorted by height as they come, the lowest first.
+      final top =
+          (ghost.yAt(t) - StageRunner.runnerHeight * .34) * s - size * .7;
+      var i = n++;
+      for (; i > 0 && _tagTops[i - 1] < top; i--) {
+        _tagTops[i] = _tagTops[i - 1];
+        _tagGhosts[i] = _tagGhosts[i - 1];
+      }
+      _tagTops[i] = top;
+      _tagGhosts[i] = ghost;
+    }
+    if (n == 0) return;
+    final fading = alpha < 1;
+    if (fading) {
+      _ghostTagLayer.color = _tagOpacities[(alpha * _ghostSteps).round()];
+      canvas.saveLayer(Rect.fromLTRB(0, 0, cx, s), _ghostTagLayer);
+    }
+    var below = double.infinity;
+    for (var i = 0; i < n; i++) {
+      final ghost = _tagGhosts[i]!;
+      final tag = _glyphs.tag(ghost.tag, size, ghost.rank);
+      final top = min(_tagTops[i], below - tag.height);
+      tag.paint(canvas, Offset(cx - gap - tag.width, top));
+      below = top;
+      _tagGhosts[i] = null;
+    }
+    if (fading) canvas.restore();
   }
 
   void _plainRunner(Canvas canvas, StageRunner g, double s) {

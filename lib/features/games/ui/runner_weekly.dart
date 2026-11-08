@@ -14,6 +14,7 @@ import '../../../shared/widgets/page_header.dart';
 import '../data/runner_menu_preferences.dart';
 import '../data/wardrobe_api.dart' show weeklyRewardsAvailable;
 import '../data/weekly_api.dart';
+import '../domain/runner_ghost.dart';
 import 'runner_menu.dart';
 
 final _number = NumberFormat.decimalPattern('de');
@@ -21,14 +22,11 @@ final _number = NumberFormat.decimalPattern('de');
 /// What the Wochenprobe hands to the game: a ranked attempt that the
 /// server has already started (and counted), or a training run.
 class WeeklyPlay {
-  const WeeklyPlay({required this.challenge, this.start, this.ghosts = true});
+  const WeeklyPlay({required this.challenge, this.start});
   final WeeklyChallenge challenge;
 
   /// The ranked attempt; null for training.
   final WeeklyStart? start;
-
-  /// Whether a training run shows the ghosts; ranked runs always do.
-  final bool ghosts;
 
   bool get ranked => start != null;
   int get seed => start?.seed ?? challenge.seed;
@@ -39,6 +37,60 @@ class WeeklyPlay {
     final n when n > 0 => n,
     _ => challenge.used + 1,
   };
+}
+
+/// "Geister: Wenige / Alle" for every run of the Wochenprobe, ranked or
+/// training, kept on this device ([RunnerMenuPreferences.ghostMode]).
+class GhostModeChoice extends StatelessWidget {
+  const GhostModeChoice({super.key, required this.preferences});
+  final RunnerMenuPreferences preferences;
+
+  static String note(GhostMode mode) => switch (mode) {
+    GhostMode.few => 'Platz 1, dein bester Lauf und wer direkt vor dir liegt.',
+    GhostMode.all => 'Die besten Läufe aller, die diese Woche gewertet haben.',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListenableBuilder(
+      listenable: preferences,
+      builder: (context, _) {
+        final mode = preferences.ghostMode;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Side by side where they fit, else the choice below its name
+            // (a small phone at a large font).
+            Wrap(
+              spacing: 16,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              alignment: WrapAlignment.spaceBetween,
+              children: [
+                Text('Geister', style: theme.textTheme.titleSmall),
+                SegmentedButton<GhostMode>(
+                  showSelectedIcon: false,
+                  segments: [
+                    for (final m in GhostMode.values)
+                      ButtonSegment(
+                        value: m,
+                        label: Text(m.label, key: ValueKey('ghosts-${m.name}')),
+                      ),
+                  ],
+                  selected: {mode},
+                  onSelectionChanged: (chosen) =>
+                      preferences.setGhostMode(chosen.first),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(note(mode), style: theme.textTheme.bodySmall),
+          ],
+        );
+      },
+    );
+  }
 }
 
 /// Without a connection the ranked start cannot be counted, so it does not
@@ -257,10 +309,7 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
   void _train() {
     final week = _week;
     if (week == null || _starting) return;
-    Navigator.pop(
-      context,
-      WeeklyPlay(challenge: week, ghosts: _menu.trainingGhosts),
-    );
+    Navigator.pop(context, WeeklyPlay(challenge: week));
   }
 
   @override
@@ -509,15 +558,13 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
               icon: const Icon(Icons.fitness_center),
               label: const Text('Training'),
             ),
-            if (!offline)
-              SwitchListTile(
+            if (!offline) ...[
+              const SizedBox(height: 12),
+              GhostModeChoice(
                 key: const ValueKey('weekly-ghosts'),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Geister im Training'),
-                subtitle: const Text('Die besten Läufe der Woche laufen mit.'),
-                value: _menu.trainingGhosts,
-                onChanged: _menu.setTrainingGhosts,
+                preferences: _menu,
               ),
+            ],
           ],
         ),
       ),

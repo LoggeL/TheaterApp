@@ -317,6 +317,74 @@ class PackGoal {
   );
 }
 
+/// The monotonic clock of the drop countdown: the time since a fixed point,
+/// which a change of the device's wall clock (a network time sync, a manual
+/// change) does not move. Only tests put another one (that of their fake
+/// time) here.
+Duration Function() nextDropClock = _uptime;
+
+final _uptimeWatch = Stopwatch()..start();
+Duration _uptime() => _uptimeWatch.elapsed;
+
+/// The next scheduled content drop, once it is less than a day away
+/// (`nextDrop` of the wardrobe view); the server leaves it out otherwise and
+/// older servers never send it.
+///
+/// The countdown goes by the server's clock: [serverNow] is the server's time
+/// of the reply, [receivedAt] the moment it arrived on [nextDropClock], and
+/// the time since then is added to it. Neither a device clock that is off
+/// nor one that is set while it counts moves the drop.
+class NextDrop {
+  const NextDrop({
+    required this.id,
+    required this.name,
+    required this.startsAt,
+    required this.ready,
+    required this.serverNow,
+    required this.receivedAt,
+  });
+
+  final String id, name;
+  final DateTime startsAt, serverNow;
+
+  /// When the reply arrived, on [nextDropClock].
+  final Duration receivedAt;
+
+  /// Whether the drop is complete; a pack still waiting for its pictures
+  /// may start later than [startsAt].
+  final bool ready;
+
+  /// The time left at [at] on [nextDropClock]; negative once it is due.
+  Duration remainingAt(Duration at) =>
+      startsAt.difference(serverNow.add(at - receivedAt));
+
+  /// The time left now; negative once it is due.
+  Duration get remaining => remainingAt(nextDropClock());
+
+  /// Whether the reply came before the start: zero then means the drop is
+  /// due and a fresh wardrobe brings it. One that came after (a pack still
+  /// waiting for its pictures) has nothing new to fetch.
+  bool get countsDown => startsAt.isAfter(serverNow);
+
+  /// [json] is the `nextDrop` of a reply whose `now` is [now]; without a
+  /// server time the device's clock counts. Null for anything unreadable.
+  static NextDrop? fromJson(Object? json, {Object? now, Duration? receivedAt}) {
+    if (json is! Map) return null;
+    final map = jsonMap(json);
+    final id = textValue(map['id']);
+    final startsAt = DateTime.tryParse(textValue(map['startsAt']));
+    if (id.isEmpty || startsAt == null) return null;
+    return NextDrop(
+      id: id,
+      name: textValue(map['name']),
+      startsAt: startsAt.toLocal(),
+      ready: map['ready'] != false,
+      serverNow: DateTime.tryParse(textValue(now))?.toLocal() ?? DateTime.now(),
+      receivedAt: receivedAt ?? nextDropClock(),
+    );
+  }
+}
+
 /// What an item changes: exactly one of each kind is worn.
 enum WardrobeKind {
   character('Figuren', 'Figur'),
@@ -1625,8 +1693,13 @@ class Wardrobe {
     this.hiddenDefaults = const {},
     this.dupeCounts = const {},
     this.collection,
+    this.nextDrop,
   });
   final WardrobeCatalog catalog;
+
+  /// The next content drop less than a day away, for its countdown; null
+  /// otherwise and for older servers.
+  final NextDrop? nextDrop;
 
   /// The numbers of the Sammel-Rangliste; null for older servers, which
   /// leave [collected] and [collectible] to the app's own count.
@@ -1802,6 +1875,7 @@ class Wardrobe {
           ensemble?.rewardOf(i)?.reached == true,
     );
     return Wardrobe(
+      nextDrop: NextDrop.fromJson(json['nextDrop'], now: json['now']),
       collection: WardrobeCollection.fromJson(json['collection']),
       gift: _giftOf(json, catalog),
       hiddenDefaults: {

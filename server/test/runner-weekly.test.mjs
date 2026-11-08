@@ -276,7 +276,8 @@ test('ghosts are checked against the run and kept only with a new best', t => {
   assert.equal(checkGhost(Buffer.alloc(1, 128).toString('base64'), { meters: 0, elapsed: 1000 }).samples, 1);
 
   play('sam', { seconds: 60 });
-  const ghosts = app.runnerWeekly('kim').ghosts;
+  // `character` (the figure of the ghost) has its own tests in runner-ghost-figures.test.mjs.
+  const ghosts = app.runnerWeekly('kim').ghosts.map(({ character, ...x }) => x);
   assert.deepEqual(ghosts, [{ personId: sam, name: 'Sam Beispiel', rank: 1, score: 510, meters: 510, hz: 20, y: Buffer.alloc(1201, 128).toString('base64'), crashed: true, me: false }]);
   // A worse ranked run keeps the ghost of the best; training never makes one.
   play('sam', { seconds: 30, ghost: ghostOf(30, { value: 40 }) });
