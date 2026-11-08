@@ -2133,6 +2133,8 @@ class _StagePainter extends CustomPainter {
   static final _poolPaint = _fill(_beam.withValues(alpha: .07));
   static final _lensPaint = _fill(_beam);
   static final _ropePaint = _stroke(_rope, 1.5);
+  static final _flyLinePaint = _stroke(_rope, 5);
+  static final _flyLineEdge = _stroke(const Color(0xFF4A3F33), 8);
   static final _crowdPaint = _fill(_crowd);
   static final _housePaint = _fill(_house), _seatPaint = _fill(_velvetDark);
   static final _seatEdgePaint = _fill(_velvet);
@@ -3252,11 +3254,15 @@ class _StagePainter extends CustomPainter {
           rect.right,
           rect.bottom,
         );
-        canvas.drawLine(
-          Offset(frame.center.dx, 0),
-          Offset(frame.center.dx, frame.top),
-          _ropePaint,
-        );
+        // Two heavy fly lines at the frame's edges: the whole column up to
+        // the loft is solid, so it reads as one that cannot be jumped over.
+        final inset = rect.width * .16;
+        for (final x in [frame.left + inset, frame.right - inset]) {
+          final top = Offset(x, 0), bottom = Offset(x, frame.top);
+          canvas
+            ..drawLine(top, bottom, _flyLineEdge)
+            ..drawLine(top, bottom, _flyLinePaint);
+        }
         canvas.drawRect(frame, _canvasPaint);
         canvas.drawRect(frame.deflate(1), _canvasLine);
     }
