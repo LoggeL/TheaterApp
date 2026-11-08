@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
-import { eventNotificationBody, voidedByCancellation } from './event-notification.mjs';
+import { berlinDateTime, eventNotificationBody, voidedByCancellation } from './event-notification.mjs';
 import { implicitYes, inAudience } from './theater.mjs';
+import { theaterEmailHtml } from './email-template.mjs';
 
-const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const maxAgeMs = 23 * 3600000; // Resend retains idempotency keys for 24 hours.
 
 export class ResendEmail {
@@ -47,8 +47,32 @@ export function eventEmail(job, event, appOrigin) {
           : job.planned ? `${eventNotificationBody(event)}. Kannst du nicht? Bitte in der App absagen.`
             : job.cancelled && job.reason ? `${eventNotificationBody(event)} · Grund: ${job.reason}` : eventNotificationBody(event);
   const footer = 'Termin-E-Mails kannst du in der App unter Darstellung & Erinnerungen ausschalten.';
+  const kind = job.test ? 'E-Mail eingerichtet' : subject.slice(0, subject.indexOf(':'));
+  const series = job.series || job.seriesCount;
+  const message = job.test ? 'Deine Test-E-Mail ist da. So erreichen dich die Termin-E-Mails aus deiner Theater-App.'
+    : series ? body
+      : job.cancelled ? 'Dieser Termin entfällt.'
+        : job.planned ? 'Du bist eingeplant. Kannst du nicht? Bitte sag in der App ab.'
+          : job.remindOpen ? 'Deine Rückmeldung zu diesem Termin fehlt noch. Gib bitte in der App Bescheid, ob du dabei bist.'
+            : job.change ? 'Für diesen Termin gibt es eine Änderung. Hier findest du die aktuellen Angaben.'
+              : job.newEvent ? 'Ein neuer Termin für dich und dein Ensemble. Alle Einzelheiten findest du in der App.'
+                : 'Dein Termin steht an. Hier sind die Angaben für deine Planung.';
+  const details = job.test || series ? [] : [
+    ['Wann', berlinDateTime(event.startsAt)],
+    ['Wo', event.place],
+    ['Grund der Absage', job.cancelled ? job.reason : null],
+  ].filter(([, value]) => value);
   return { subject, text: `${subject}\n\n${body}\n\nTheater-App öffnen: ${link.href}\n\n${footer}`,
-    html: `<!doctype html><html lang="de"><body><h1>${escapeHtml(subject)}</h1><p>${escapeHtml(body)}</p><p><a href="${escapeHtml(link.href)}">Theater-App öffnen</a></p><p>${escapeHtml(footer)}</p></body></html>` };
+    html: theaterEmailHtml({
+      preview: `${subject}. ${body}`,
+      eyebrow: kind,
+      title: job.test ? 'Die Verbindung steht.' : event.title,
+      body: message,
+      details,
+      actionLabel: job.planned ? 'Termin ansehen oder absagen' : 'Theater-App öffnen',
+      actionUrl: link.href,
+      footer,
+    }) };
 }
 
 // Auto-accepted events: people without an own answer attend (see implicitYes).

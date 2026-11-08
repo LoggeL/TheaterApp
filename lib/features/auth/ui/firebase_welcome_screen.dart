@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../../../app/brand.dart';
 import '../../../app/platform/pwa_install_card.dart';
 import '../../../core/app_controller.dart';
 import '../../../core/identity.dart';
+import '../../../data/api_client.dart';
 import '../../../shared/feedback.dart';
-import '../../../shared/widgets/brand_logo.dart';
 import '../../../shared/widgets/privacy_links.dart';
+import 'auth_scaffold.dart';
 import 'bot_trap.dart';
 import 'sign_in_providers.dart';
 
@@ -25,7 +25,16 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
   // Times the form from its first showing, also across the mode switch.
   late final _trap = BotTrap(() => widget.controller.now);
   bool _register = false, _hidden = true, _busy = false;
+  bool _passkeysAvailable = false;
   String? _error;
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.passkeysAvailable().then((available) {
+      if (mounted) setState(() => _passkeysAvailable = available);
+    });
+  }
+
   @override
   void dispose() {
     _trap.dispose();
@@ -43,7 +52,9 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
     try {
       await operation();
     } catch (e) {
-      if (mounted) setState(() => _error = identityError(e));
+      if (mounted && !(e is ApiException && e.code == 'passkey_cancelled')) {
+        setState(() => _error = identityError(e));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -155,222 +166,222 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
     final others = providers
         .where((p) => !['password', 'google.com', 'apple.com'].contains(p))
         .toList();
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 470),
-            child: AutofillGroup(
-              child: Form(
-                key: _form,
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(28, 30, 28, 28),
-                  children: [
-                    const Row(
-                      children: [
-                        BrandLogo(size: 37),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            Brand.name,
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 38),
-                    Text(
-                      _register ? 'Konto erstellen' : 'Willkommen zurück',
-                      style: Theme.of(context).textTheme.headlineLarge,
-                    ),
-                    const SizedBox(height: 28),
-                    if (providers.contains('google.com'))
-                      _provider('google.com'),
-                    if (providers.contains('apple.com')) _provider('apple.com'),
-                    if (others.isNotEmpty)
-                      TextButton(
-                        onPressed: _busy
-                            ? null
-                            : () => showModalBottomSheet<void>(
-                                context: context,
-                                builder: (sheet) => SafeArea(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(24),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          'Weitere Anmeldearten',
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.titleLarge,
-                                        ),
-                                        const SizedBox(height: 20),
-                                        for (final p in others)
-                                          ListTile(
-                                            leading: Icon(providerIcon(p)),
-                                            title: Text(providerNames[p]!),
-                                            trailing: const Icon(
-                                              Icons.chevron_right,
-                                            ),
-                                            onTap: () {
-                                              Navigator.pop(sheet);
-                                              _run(
-                                                () => widget.controller
-                                                    .loginWithProvider(p),
-                                              );
-                                            },
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                        child: const Text('Weitere Anmeldearten'),
-                      ),
-                    if (providers.any((p) => p != 'password'))
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        child: Row(
-                          children: [
-                            Expanded(child: Divider()),
-                            Flexible(
-                              flex: 3,
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 12),
-                                child: Text(
-                                  'oder per E-Mail',
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                            Expanded(child: Divider()),
-                          ],
-                        ),
-                      ),
-                    if (_register) ...[
-                      TextFormField(
-                        controller: _name,
-                        maxLength: 120,
-                        autofillHints: const [AutofillHints.name],
-                        textCapitalization: TextCapitalization.words,
-                        textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(
-                          labelText: 'Name zur Zuordnung',
-                          hintText: 'Vor- und Nachname',
-                          helperText:
-                              'Nur zur Zuordnung deines Kontos zur richtigen Person im Ensemble.',
-                          helperMaxLines: 5,
-                          counterText: '',
-                        ),
-                        validator: (s) => s?.trim().isNotEmpty == true
-                            ? null
-                            : 'Bitte deinen Namen eingeben.',
-                      ),
-                      const SizedBox(height: 18),
-                    ],
-                    TextFormField(
-                      controller: _email,
-                      keyboardType: TextInputType.emailAddress,
-                      autofillHints: const [
-                        AutofillHints.username,
-                        AutofillHints.email,
-                      ],
-                      autocorrect: false,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(labelText: 'E-Mail'),
-                      validator: (s) => s != null && s.contains('@')
-                          ? null
-                          : 'Bitte eine gültige E-Mail-Adresse eingeben.',
-                    ),
-                    const SizedBox(height: 18),
-                    TextFormField(
-                      controller: _password,
-                      obscureText: _hidden,
-                      textInputAction: TextInputAction.done,
-                      autofillHints: [
-                        _register
-                            ? AutofillHints.newPassword
-                            : AutofillHints.password,
-                      ],
-                      decoration: InputDecoration(
-                        labelText: 'Passwort',
-                        helperText: _register ? 'Mindestens 12 Zeichen' : null,
-                        suffixIcon: IconButton(
-                          tooltip: _hidden
-                              ? 'Passwort anzeigen'
-                              : 'Passwort verbergen',
-                          onPressed: () => setState(() => _hidden = !_hidden),
-                          icon: Icon(
-                            _hidden
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined,
-                          ),
-                        ),
-                      ),
-                      onFieldSubmitted: (_) {
-                        if (!_busy) _submit();
-                      },
-                      validator: (s) => s == null || s.isEmpty
-                          ? 'Bitte dein Passwort eingeben.'
-                          : _register && s.length < 12
-                          ? 'Bitte mindestens 12 Zeichen verwenden.'
-                          : null,
-                    ),
-                    BotTrapField(_trap),
-                    if (!_register)
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: _busy ? null : _reset,
-                          child: const Text('Passwort vergessen?'),
-                        ),
-                      ),
-                    if (_error != null || widget.controller.error != null)
-                      _notice(_error ?? widget.controller.error!, error: true),
-                    const SizedBox(height: 18),
-                    FilledButton(
-                      onPressed: _busy ? null : _submit,
-                      child: _busy
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(_register ? 'Konto erstellen' : 'Anmelden'),
-                    ),
-                    if (_register)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 18),
-                        child: Text(
-                          'Die Theaterleitung gibt dein Konto anschließend frei.',
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    const SizedBox(height: 18),
-                    TextButton(
-                      onPressed: _busy
-                          ? null
-                          : () => setState(() {
-                              _register = !_register;
-                              _error = null;
-                              widget.controller.clearError();
-                            }),
-                      child: Text(
-                        _register
-                            ? 'Schon registriert? Anmelden'
-                            : 'Noch kein Konto? Registrieren',
-                      ),
-                    ),
-                    const PrivacyLinks(),
-                    const PwaInstallCard(),
-                  ],
+    return AuthScaffold(
+      child: AutofillGroup(
+        child: Form(
+          key: _form,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                _register ? 'Konto erstellen' : 'Willkommen zurück',
+                style: Theme.of(context).textTheme.headlineLarge,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _register
+                    ? 'Dein Zugang zum Kolpingtheater Ramsen.'
+                    : 'Melde dich an. Dein Ensemble wartet auf dich.',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-            ),
+              const SizedBox(height: 28),
+              if (!_register && _passkeysAvailable)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: FilledButton.tonalIcon(
+                    onPressed: _busy
+                        ? null
+                        : () => _run(widget.controller.loginWithPasskey),
+                    icon: const Icon(Icons.key_outlined),
+                    label: const Text('Mit Passkey anmelden'),
+                  ),
+                ),
+              if (providers.contains('google.com')) _provider('google.com'),
+              if (providers.contains('apple.com')) _provider('apple.com'),
+              if (others.isNotEmpty)
+                TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () => showModalBottomSheet<void>(
+                          context: context,
+                          builder: (sheet) => SafeArea(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Weitere Anmeldearten',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleLarge,
+                                  ),
+                                  const SizedBox(height: 20),
+                                  for (final p in others)
+                                    ListTile(
+                                      leading: Icon(providerIcon(p)),
+                                      title: Text(providerNames[p]!),
+                                      trailing: const Icon(Icons.chevron_right),
+                                      onTap: () {
+                                        Navigator.pop(sheet);
+                                        _run(
+                                          () => widget.controller
+                                              .loginWithProvider(p),
+                                        );
+                                      },
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                  child: const Text('Weitere Anmeldearten'),
+                ),
+              if (providers.any((p) => p != 'password') ||
+                  (!_register && _passkeysAvailable))
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Row(
+                    children: [
+                      Expanded(child: Divider()),
+                      Flexible(
+                        flex: 3,
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          child: Text(
+                            'oder per E-Mail',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                      Expanded(child: Divider()),
+                    ],
+                  ),
+                ),
+              if (_register) ...[
+                TextFormField(
+                  controller: _name,
+                  maxLength: 120,
+                  autofillHints: const [AutofillHints.name],
+                  textCapitalization: TextCapitalization.words,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                    labelText: 'Name zur Zuordnung',
+                    prefixIcon: Icon(Icons.person_outline),
+                    hintText: 'Vor- und Nachname',
+                    helperText:
+                        'Nur zur Zuordnung deines Kontos zur richtigen Person im Ensemble.',
+                    helperMaxLines: 5,
+                    counterText: '',
+                  ),
+                  validator: (s) => s?.trim().isNotEmpty == true
+                      ? null
+                      : 'Bitte deinen Namen eingeben.',
+                ),
+                const SizedBox(height: 18),
+              ],
+              TextFormField(
+                controller: _email,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [
+                  AutofillHints.username,
+                  AutofillHints.email,
+                ],
+                autocorrect: false,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: 'E-Mail',
+                  prefixIcon: Icon(Icons.mail_outline),
+                ),
+                validator: (s) => s != null && s.contains('@')
+                    ? null
+                    : 'Bitte eine gültige E-Mail-Adresse eingeben.',
+              ),
+              const SizedBox(height: 18),
+              TextFormField(
+                controller: _password,
+                obscureText: _hidden,
+                textInputAction: TextInputAction.done,
+                autofillHints: [
+                  _register
+                      ? AutofillHints.newPassword
+                      : AutofillHints.password,
+                ],
+                decoration: InputDecoration(
+                  labelText: 'Passwort',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  helperText: _register ? 'Mindestens 12 Zeichen' : null,
+                  suffixIcon: IconButton(
+                    tooltip: _hidden
+                        ? 'Passwort anzeigen'
+                        : 'Passwort verbergen',
+                    onPressed: () => setState(() => _hidden = !_hidden),
+                    icon: Icon(
+                      _hidden
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                  ),
+                ),
+                onFieldSubmitted: (_) {
+                  if (!_busy) _submit();
+                },
+                validator: (s) => s == null || s.isEmpty
+                    ? 'Bitte dein Passwort eingeben.'
+                    : _register && s.length < 12
+                    ? 'Bitte mindestens 12 Zeichen verwenden.'
+                    : null,
+              ),
+              BotTrapField(_trap),
+              if (!_register)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _busy ? null : _reset,
+                    child: const Text('Passwort vergessen?'),
+                  ),
+                ),
+              if (_error != null || widget.controller.error != null)
+                _notice(_error ?? widget.controller.error!, error: true),
+              const SizedBox(height: 18),
+              FilledButton(
+                onPressed: _busy ? null : _submit,
+                child: _busy
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(_register ? 'Konto erstellen' : 'Anmelden'),
+              ),
+              if (_register)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 18),
+                  child: Text(
+                    'Die Theaterleitung gibt dein Konto anschließend frei.',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              const SizedBox(height: 18),
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () => setState(() {
+                        _register = !_register;
+                        _error = null;
+                        widget.controller.clearError();
+                      }),
+                child: Text(
+                  _register
+                      ? 'Schon registriert? Anmelden'
+                      : 'Noch kein Konto? Registrieren',
+                ),
+              ),
+              const PrivacyLinks(),
+              const PwaInstallCard(),
+            ],
           ),
         ),
       ),
@@ -406,6 +417,7 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
   @override
   Widget build(BuildContext context) => AlertDialog(
     scrollable: true,
+    icon: const Icon(Icons.lock_reset_outlined, size: 32),
     title: const Text('Passwort zurücksetzen'),
     content: Form(
       key: _form,
@@ -425,7 +437,10 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
             autofillHints: const [AutofillHints.email],
             autocorrect: false,
             textInputAction: TextInputAction.send,
-            decoration: const InputDecoration(labelText: 'E-Mail'),
+            decoration: const InputDecoration(
+              labelText: 'E-Mail',
+              prefixIcon: Icon(Icons.mail_outline),
+            ),
             validator: (s) => s != null && s.contains('@')
                 ? null
                 : 'Bitte eine gültige E-Mail-Adresse eingeben.',

@@ -8,6 +8,7 @@ import '../../../core/identity.dart';
 import '../../../shared/widgets/privacy_links.dart';
 import '../../../shared/widgets/state_pill.dart';
 import '../domain/app_user.dart';
+import 'auth_scaffold.dart';
 
 class ApprovalPendingScreen extends StatefulWidget {
   const ApprovalPendingScreen({
@@ -286,113 +287,108 @@ class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
         'Dein Konto ist erstellt. Die Theaterleitung ordnet dich einer Person zu und gibt deinen Zugang frei.',
     };
     final blocked = step == _Step.blocked;
-    return Scaffold(
-      appBar: AppBar(title: const Text(Brand.name)),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: ListView(
-              padding: const EdgeInsets.all(28),
-              children: [
-                const SizedBox(height: 32),
-                CircleAvatar(
-                  radius: 42,
-                  backgroundColor: blocked
-                      ? scheme.errorContainer
-                      : scheme.tertiaryContainer,
-                  child: Icon(
-                    switch (step) {
-                      _Step.blocked => Icons.lock_outline,
-                      _Step.name => Icons.badge_outlined,
-                      _Step.verify => Icons.mark_email_unread_outlined,
-                      _Step.waiting => Icons.schedule,
-                    },
-                    color: blocked
-                        ? scheme.onErrorContainer
-                        : scheme.onTertiaryContainer,
-                    size: 42,
-                  ),
-                ),
-                const SizedBox(height: 28),
-                Text(
-                  title,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                const SizedBox(height: 16),
-                Text(message, textAlign: TextAlign.center),
-                const SizedBox(height: 28),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          user.needsRegistrationName ? 'Dein Konto' : user.name,
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        if (!user.needsRegistrationName &&
-                            user.status == 'pending') ...[
-                          const SizedBox(height: 4),
-                          const Text('Name zur Zuordnung'),
-                        ],
-                        const SizedBox(height: 6),
-                        Text(user.email),
-                        const SizedBox(height: 12),
-                        StatePill(
-                          user.emailVerified
-                              ? 'E-Mail bestätigt'
-                              : step == _Step.verify
-                              ? 'Bestätigung ausstehend'
-                              : 'Konto erstellt',
-                          icon: user.emailVerified
-                              ? Icons.check
-                              : Icons.schedule,
-                          color: user.emailVerified
-                              ? StageTheme.green
-                              : scheme.tertiary,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (widget.devices != null &&
-                    Brand.pushEnabled &&
-                    !c.isDemo &&
-                    user.status == 'pending') ...[
-                  const SizedBox(height: 12),
-                  _pushNotice(context),
-                ],
-                const SizedBox(height: 20),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Semantics(
-                      liveRegion: true,
-                      child: Text(
-                        _error!,
-                        style: TextStyle(color: scheme.error),
-                      ),
-                    ),
-                  ),
-                if (_info != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Semantics(liveRegion: true, child: Text(_info!)),
-                  ),
-                ..._actions(step, c),
-                const SizedBox(height: 14),
-                TextButton(
-                  onPressed: _busy ? null : () => _run(c.logout),
-                  child: const Text('Abmelden'),
-                ),
-                const PrivacyLinks(),
-              ],
+    return AuthScaffold(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: CircleAvatar(
+              radius: 30,
+              backgroundColor: blocked
+                  ? scheme.errorContainer
+                  : StageTheme.selectedTint(Theme.of(context).brightness),
+              child: Icon(
+                switch (step) {
+                  _Step.blocked => Icons.lock_outline,
+                  _Step.name => Icons.badge_outlined,
+                  _Step.verify => Icons.mark_email_unread_outlined,
+                  _Step.waiting => Icons.schedule,
+                },
+                color: blocked ? scheme.onErrorContainer : scheme.primary,
+                size: 28,
+              ),
             ),
           ),
-        ),
+          const SizedBox(height: 24),
+          Text(title, style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 28),
+          Card(
+            color: scheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(
+                color: scheme.outlineVariant.withValues(alpha: .5),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    user.needsRegistrationName ? 'Dein Konto' : user.name,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  if (!user.needsRegistrationName &&
+                      user.status == 'pending') ...[
+                    const SizedBox(height: 4),
+                    const Text('Name zur Zuordnung'),
+                  ],
+                  const SizedBox(height: 6),
+                  Text(user.email),
+                  const SizedBox(height: 12),
+                  StatePill(
+                    user.emailVerified
+                        ? 'E-Mail bestätigt'
+                        : step == _Step.verify
+                        ? 'Bestätigung ausstehend'
+                        : 'Konto erstellt',
+                    icon: user.emailVerified ? Icons.check : Icons.schedule,
+                    color: user.emailVerified
+                        ? StageTheme.green
+                        : scheme.tertiary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (widget.devices != null &&
+              Brand.pushEnabled &&
+              !c.isDemo &&
+              user.status == 'pending') ...[
+            const SizedBox(height: 12),
+            _pushNotice(context),
+          ],
+          const SizedBox(height: 20),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Semantics(
+                liveRegion: true,
+                child: Text(_error!, style: TextStyle(color: scheme.error)),
+              ),
+            ),
+          if (_info != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Semantics(liveRegion: true, child: Text(_info!)),
+            ),
+          ..._actions(step, c),
+          const SizedBox(height: 14),
+          TextButton(
+            onPressed: _busy ? null : () => _run(c.logout),
+            child: const Text('Abmelden'),
+          ),
+          const PrivacyLinks(),
+        ],
       ),
     );
   }

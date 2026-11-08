@@ -9,9 +9,11 @@ const providerNames = {
   'twitter.com': 'X',
   'yahoo.com': 'Yahoo',
   'password': 'E-Mail & Passwort',
+  'custom': 'Passkey',
 };
 
 IconData providerIcon(String provider) => switch (provider) {
+  'custom' => Icons.key_outlined,
   'google.com' => Icons.g_mobiledata,
   'apple.com' => Icons.apple,
   'microsoft.com' => Icons.window,

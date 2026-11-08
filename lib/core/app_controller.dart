@@ -11,10 +11,12 @@ import '../features/casting/domain/casting.dart';
 import 'models.dart';
 import 'identity.dart';
 import 'private_web_caches.dart';
+import 'passkeys.dart';
 
 part 'controller/bot_check.dart';
 part 'controller/projection.dart';
 part 'controller/session.dart';
+part 'controller/passkeys.dart';
 part 'controller/sync.dart';
 part '../features/absences/state/absences_controller.dart';
 part '../features/events/state/events_controller.dart';
@@ -32,6 +34,7 @@ class AppController extends ChangeNotifier {
     LocalStore? localStore,
     CredentialStore? credentialStore,
     IdentityService? identity,
+    PasskeyDevice? passkeyDevice,
     DateTime Function()? clock,
   }) : _api = apiClient ?? ApiClient(),
        _store =
@@ -41,6 +44,7 @@ class AppController extends ChangeNotifier {
            credentialStore ??
            (kIsWeb ? PreferencesCredentialStore() : SecureCredentialStore()),
        _identity = identity,
+       _passkeyDevice = passkeyDevice ?? PlatformPasskeyDevice(),
        _clock = clock ?? DateTime.now {
     // A cache-first start shows stored data before Firebase has restored
     // its sign-in; requests made meanwhile wait for it.
@@ -77,6 +81,7 @@ class AppController extends ChangeNotifier {
   final LocalStore _store;
   final CredentialStore _credentials;
   final IdentityService? _identity;
+  final PasskeyDevice _passkeyDevice;
   IdentityService? get identity => _identity;
   bool get usesFirebase => _identity != null;
   bool get hasAccess => _user?.isApproved == true;

@@ -89,6 +89,10 @@ def main():
     if email.get('enabled'):
         email_env = f"      RESEND_API_KEY_FILE: /run/secrets/resend-api-key\n      EMAIL_FROM: {json.dumps(email['from'])}\n      EMAIL_REPLY_TO: {json.dumps(email['replyTo'])}\n"
         email_volume = f"      - {remote}/secrets/resend-api-key:/run/secrets/resend-api-key:ro,Z\n"
+    passkeys = c.get('passkeys', {})
+    passkey_env = ''
+    if passkeys.get('enabled'):
+        passkey_env = f"      PASSKEY_RP_ID: {json.dumps(passkeys['rpId'])}\n      PASSKEY_WEB_ORIGINS: {json.dumps(','.join(passkeys['webOrigins']))}\n      PASSKEY_ANDROID_SHA256: {json.dumps(','.join(passkeys.get('androidSha256', [])))}\n      PASSKEY_APPLE_APP_ID: {json.dumps(passkeys.get('appleAppId', ''))}\n"
     compose = f'''services:
   theater:
     image: theater-app:{release}
@@ -109,7 +113,7 @@ def main():
       PLAY_REVIEW_CONFIG_FILE: /run/secrets/play-review.json
       # Cloudflare sets the real client address; the bot check limits attempts per address.
       CLIENT_IP_HEADER: cf-connecting-ip
-{email_env}    volumes:
+{email_env}{passkey_env}    volumes:
       - {remote}/data:/data:Z
       - {remote}/secrets/firebase-service-account.json:/run/secrets/firebase-service-account.json:ro,Z
       - {remote}/secrets/script-director-password:/run/secrets/script-director-password:ro,Z

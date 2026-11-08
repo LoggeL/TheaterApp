@@ -1,6 +1,7 @@
 // Configure existing Firebase Auth mail delivery. This does not create users or send mail.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { GoogleAuth } from 'google-auth-library';
+import { firebasePasswordResetTemplate } from '../src/email-template.mjs';
 
 async function main() {
 const project = process.env.FIREBASE_PROJECT_ID;
@@ -13,7 +14,7 @@ if (!key.startsWith('re_')) throw new Error('Ungültiger Resend-Schlüssel.');
 const client = await new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] }).getClient();
 const url = `https://identitytoolkit.googleapis.com/admin/v2/projects/${project}/config`;
 const { data: before } = await client.request({ url });
-const backupDir = new URL('../../artifacts/resend-2026-10-10/', import.meta.url);
+const backupDir = new URL(`../../artifacts/firebase-email/${new Date().toISOString().replaceAll(':', '-')}/`, import.meta.url);
 await mkdir(backupDir, { recursive: true });
 const backup = structuredClone(before.notification ?? {});
 if (backup.sendEmail?.smtp) delete backup.sendEmail.smtp.password;
@@ -22,8 +23,8 @@ const template = { senderDisplayName: 'Kolpingtheater Ramsen', senderLocalPart: 
 const fields = ['notification.sendEmail.method', 'notification.sendEmail.smtp', 'notification.defaultLocale'];
 const sendEmail = { method: 'CUSTOM_SMTP', smtp: { host: 'smtp.resend.com', port: 465, username: 'resend', password: key, senderEmail: sender, securityMode: 'SSL' } };
 for (const kind of ['verifyEmailTemplate', 'resetPasswordTemplate', 'changeEmailTemplate']) {
-  sendEmail[kind] = template;
-  for (const field of Object.keys(template)) fields.push(`notification.sendEmail.${kind}.${field}`);
+  sendEmail[kind] = { ...template, ...(kind === 'resetPasswordTemplate' ? firebasePasswordResetTemplate() : {}) };
+  for (const field of Object.keys(sendEmail[kind])) fields.push(`notification.sendEmail.${kind}.${field}`);
 }
 try {
   await client.request({ url, method: 'PATCH', params: { updateMask: fields.join(',') }, data: { notification: { defaultLocale: 'de', sendEmail } } });
@@ -34,6 +35,10 @@ try {
 }
 const { data: after } = await client.request({ url });
 if (after.notification?.sendEmail?.method !== 'CUSTOM_SMTP' || after.notification.sendEmail.smtp?.host !== 'smtp.resend.com') throw new Error('SMTP-Konfiguration wurde nicht übernommen.');
+const expectedReset = firebasePasswordResetTemplate();
+for (const [field, value] of Object.entries(expectedReset)) {
+  if (after.notification.sendEmail.resetPasswordTemplate?.[field] !== value) throw new Error('Passwort-E-Mail-Vorlage wurde nicht vollständig übernommen.');
+}
 const path = new URL('../../config/firebase-server-settings.json', import.meta.url);
 const settings = JSON.parse(await readFile(path, 'utf8'));
 settings.email = { method: 'CUSTOM_SMTP', smtpHost: 'smtp.resend.com', senderEmail: sender, locale: after.notification.defaultLocale };

@@ -4,6 +4,7 @@ import '../../../core/app_controller.dart';
 import '../../../core/identity.dart';
 import '../../../shared/feedback.dart';
 import 'sign_in_providers.dart';
+import 'passkeys_screen.dart';
 
 class AccountProvidersScreen extends StatefulWidget {
   const AccountProvidersScreen({super.key, required this.controller});
@@ -81,6 +82,27 @@ class _AccountProvidersScreenState extends State<AccountProvidersScreen> {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 20),
+          if (identity is PasskeyIdentity) ...[
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.key_outlined),
+                title: const Text('Passkeys'),
+                subtitle: const Text(
+                  'Mit Fingerabdruck, Gesicht oder Gerätesperre anmelden',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _busy
+                    ? null
+                    : () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              PasskeysScreen(controller: widget.controller),
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           for (final p in FirebaseConfiguration.providers.split(','))
             Card(
               child: ListTile(

@@ -17,5 +17,17 @@
     "senderEmail": "app-noreply@kolpingtheater-ramsen.de",
     "from": "Kolpingtheater Ramsen <app-noreply@kolpingtheater-ramsen.de>",
     "replyTo": "kolpingtheaterramsen@gmail.com"
+  },
+  "passkeys": {
+    "enabled": true,
+    "rpId": "app.kolpingtheater-ramsen.de",
+    "webOrigins": [
+      "https://app.kolpingtheater-ramsen.de"
+    ],
+    "androidSha256": [
+      "84:11:54:E8:B7:72:DC:8D:95:81:18:37:84:F4:75:B6:C4:82:9B:B3:AD:51:D9:4D:CE:BC:EE:DC:88:2D:1D:F3",
+      "77:44:E8:81:BE:45:EB:06:17:2A:BF:42:63:8A:4B:E1:86:29:60:9D:F0:E3:CA:B0:02:0E:E0:C8:5A:5F:AD:47"
+    ],
+    "appleAppId": ""
   }
 }

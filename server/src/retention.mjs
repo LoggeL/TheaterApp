@@ -27,6 +27,7 @@ export async function purgeExpired(theater, { now = new Date(), mediaDirectory =
   const s = theater.store, at = +now, before = days => new Date(at - days * dayMs).toISOString();
   const counts = { requests: 0, pushJobs: 0, emailJobs: 0, reminderSent: 0, reasons: 0, absences: 0, profileImages: 0, rejectedAccounts: 0, perfReports: 0, missionLog: 0, formSubmissions: 0 };
   s.transaction(() => {
+    s.db.prepare('DELETE FROM passkey_challenges WHERE expires_at <= ?').run(at);
     // Stored idempotency results can contain decline reasons.
     counts.requests = Number(s.db.prepare('DELETE FROM requests WHERE created_at < ?').run(before(retention.requestDays)).changes);
     counts.perfReports = Number(s.db.prepare('DELETE FROM perf_reports WHERE created_at < ?').run(before(retention.perfReportDays)).changes);

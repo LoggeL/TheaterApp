@@ -9,6 +9,11 @@ export class Store {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS entities(kind TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(kind,id));
       CREATE TABLE IF NOT EXISTS accounts(uid TEXT PRIMARY KEY, person_id INTEGER UNIQUE, status TEXT NOT NULL DEFAULT 'pending', role TEXT NOT NULL DEFAULT 'member', data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS passkey_users(uid TEXT PRIMARY KEY REFERENCES accounts(uid) ON DELETE CASCADE, handle TEXT NOT NULL UNIQUE);
+      CREATE TABLE IF NOT EXISTS passkeys(id TEXT PRIMARY KEY, uid TEXT NOT NULL REFERENCES accounts(uid) ON DELETE CASCADE, credential_id TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS passkeys_uid ON passkeys(uid);
+      CREATE TABLE IF NOT EXISTS passkey_challenges(id TEXT PRIMARY KEY, uid TEXT REFERENCES accounts(uid) ON DELETE CASCADE, kind TEXT NOT NULL, expires_at INTEGER NOT NULL, data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS passkey_challenges_expiry ON passkey_challenges(expires_at);
       CREATE TABLE IF NOT EXISTS requests(uid TEXT NOT NULL, request_id TEXT NOT NULL, hash TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(uid,request_id));
       CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, created_at TEXT NOT NULL);
       -- Anonymous performance telemetry (perf-telemetry.mjs): grouping columns plus the trimmed report.

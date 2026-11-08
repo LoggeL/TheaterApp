@@ -1,0 +1,12 @@
+Passkeys web bridge, pinned upstream release 2.4.0
+https://github.com/corbado/flutter-passkeys/releases/download/2.4.0/bundle.js
+SHA-256: dd06b08556f161f0518d701fd0a1bf9b3f5144e2e0d6e1f5c3cac81742c0be49
+
+Required by passkeys_web 2.11.0 before Flutter plugin registration.
+Served locally; no CDN, remote account or telemetry service.
+Unmodified upstream bundle, with Corbado and webauthn-json licenses beside it.
+Microsoft TypeScript helper license is embedded in the bundle.
+
+The bridge uses the basic WebAuthn registration and assertion APIs.
+Conditional creation and PRF are not used by the Theater-App.
+When updating, check the Flutter web plugin and bridge together.

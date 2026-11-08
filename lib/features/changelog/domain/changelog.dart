@@ -27,6 +27,14 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.16.0',
+    date: '8. November 2026',
+    items: [
+      'Du kannst dich jetzt mit einem Passkey anmelden, zum Beispiel per Fingerabdruck oder Gerätesperre. Hinterlege ihn nach der Anmeldung unter "Anmeldearten > Passkeys". Passwort und Google bleiben verfügbar.',
+      'Anmeldung, Registrierung und Freigabewartebildschirm sind neu gestaltet. Auch Termin-E-Mails sind übersichtlicher und besser lesbar.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.15.3',
     date: '8. November 2026',
     items: [

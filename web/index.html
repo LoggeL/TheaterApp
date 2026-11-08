@@ -56,6 +56,8 @@
   </div>
   <!-- data-cfasync: Cloudflare Rocket Loader must not defer the app's own scripts. -->
   <script data-cfasync="false" src="pwa.js"></script>
+  <!-- The passkeys Flutter web plugin requires this before its registration. -->
+  <script data-cfasync="false" src="vendor/passkeys-2.4.0.js" integrity="sha256-3QawhVbxYfBRjXAf0KG/mz9RROLg1uH1w8rIF0LAvkk="></script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader

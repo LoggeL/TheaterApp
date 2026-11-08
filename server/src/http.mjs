@@ -26,14 +26,14 @@ const hashedWebFile = /^\/(?:main\.[a-f0-9]{16}\.dart\.(?:js|mjs|wasm)|(?:flutte
 // /auth/session), sign-out, changing `/admin/*` calls and the account administration actions
 // (`account.*` via POST /actions). Errors marked `transient` (Google unreachable) become 503,
 // every other one 401.
-export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, passwordResetAuth = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null, appOrigin = null, calendarLimiter = new CalendarFeedLimiter(), perf = null }) {
+export function createHttpServer({ theater: defaultTheater, verifyToken, deleteIdentity = null, passwordResetAuth = null, passkeys = null, scriptService: defaultScriptService, focusBridge: defaultFocusBridge = null, media: defaultMedia = null, review = null, botCheck = null, clientIpHeader = '', allowedOrigins = [], authProviders = ['password', 'google.com'], webDir = null, appOrigin = null, calendarLimiter = new CalendarFeedLimiter(), perf = null }) {
   const origins = new Set(allowedOrigins);
   const telemetry = perf ?? new PerfTelemetry(defaultTheater.store);
   // Serialised before the head, so Server-Timing's `app` includes it.
   const json = (res, status, value) => { const body = JSON.stringify(value); res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(body); };
   const readBody = async (req, route) => {
     let body = {}, length = 0; const chunks = [];
-    for await (const chunk of req) { length += chunk.length; if (length > (route === '/media' ? 12 * 1024 * 1024 : route === '/telemetry/perf' ? perfTelemetry.maxBytes : 2 * 1024 * 1024)) throw new AppError(413, 'Die Anfrage ist zu groß.'); chunks.push(chunk); }
+    for await (const chunk of req) { length += chunk.length; if (length > (route.startsWith('/auth/passkeys') || route.startsWith('/passkeys') ? 64 * 1024 : route === '/media' ? 12 * 1024 * 1024 : route === '/telemetry/perf' ? perfTelemetry.maxBytes : 2 * 1024 * 1024)) throw new AppError(413, 'Die Anfrage ist zu groß.'); chunks.push(chunk); }
     if (length) { try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new AppError(400, 'Ungültiges JSON.'); } }
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AppError(400, 'Ungültige Anfrage.');
     return body;
@@ -77,6 +77,10 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
         res.end(req.method === 'HEAD' ? undefined : body); return;
       }
       if (req.method === 'OPTIONS') { if (origin && !origins.has(origin)) throw new AppError(403, 'Diese App-Adresse ist nicht freigegeben.'); res.writeHead(204); res.end(); return; }
+      if (passkeys && ['GET', 'HEAD'].includes(req.method)) {
+        if (path === '/.well-known/assetlinks.json') return json(res, 200, passkeys.assetLinks);
+        if (path === '/.well-known/apple-app-site-association') return json(res, 200, passkeys.appleAssociation);
+      }
       if (!path.startsWith('/api/mobile/v1')) {
         if (webDir && ['GET', 'HEAD'].includes(req.method)) {
           const root = resolve(webDir), requested = resolve(root, `.${path}`);
@@ -98,18 +102,31 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       }
       if (origin && !origins.has(origin)) throw new AppError(403, 'Diese App-Adresse ist nicht freigegeben.');
       const route = path.slice('/api/mobile/v1'.length);
-      if (route === '/config' && req.method === 'GET') return json(res, 200, { authProviders, pushConfigured: theater.pushEnabled, emailConfigured: theater.emailEnabled, scriptSourceConfigured: scriptService?.configured === true });
+      if (route === '/config' && req.method === 'GET') return json(res, 200, { authProviders, passkeys: passkeys?.configuration ?? { enabled: false }, pushConfigured: theater.pushEnabled, emailConfigured: theater.emailEnabled, scriptSourceConfigured: scriptService?.configured === true });
       // Public: asked before anyone signs in. The answers never leave the server.
       if (route === '/bot-check' && botCheck && req.method === 'GET') return json(res, 200, botCheck.question());
       if (route === '/bot-check' && botCheck && req.method === 'POST') { const { answer, botTrap } = await readBody(req, route); return json(res, 200, botCheck.attempt(clientAddress(req, clientIpHeader), answer, botTrap)); }
+      if (route.startsWith('/auth/passkeys/') && req.method === 'POST') {
+        if (!passkeys) throw new AppError(404, 'Passkeys sind auf diesem Server nicht eingerichtet.', 'passkey_unavailable');
+        const data = await readBody(req, route), ip = clientAddress(req, clientIpHeader);
+        if (route === '/auth/passkeys/options') return json(res, 200, await passkeys.authenticationOptions(ip));
+        if (route === '/auth/passkeys/verify') return json(res, 200, await passkeys.authenticate(data, ip));
+      }
       const token = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
       if (!token || token.length > 12000) throw new AppError(401, 'Bitte zuerst anmelden.');
       // Where a revoked or deleted login must not slip through a cached check. Account
       // administration via /actions is only known after reading the body and checked again there.
-      const fresh = req.method !== 'GET' && (route === '/auth/session' || route === '/auth/logout' || route.startsWith('/admin/'));
+      const fresh = req.method !== 'GET' && (route === '/auth/session' || route === '/auth/logout' || route.startsWith('/admin/') || route.startsWith('/passkeys'));
       const authenticate = async options => {
         const authStart = performance.now();
-        try { return await verifyToken(token, options); } catch (e) {
+        try {
+          const verified = await verifyToken(token, options);
+          if (verified?.firebase?.sign_in_provider === 'custom') {
+            if (!passkeys || (review && verified.uid === review.uid)) throw new AppError(401, 'Passkey-Anmeldung nicht verfügbar.');
+            passkeys.assertIdentity(verified);
+          }
+          return verified;
+        } catch (e) {
           if (isTransientAuthError(e)) {
             console.warn('Auth unavailable:', e.code ?? e.name);
             throw Object.assign(new AppError(503, 'Die Anmeldung kann gerade nicht geprüft werden. Bitte gleich erneut versuchen.', 'auth_unavailable'), { retryAfter: 5 });
@@ -146,6 +163,16 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       // Waiting accounts may already register a device; pushes start with the approval.
       if (route === '/devices' && ['POST', 'DELETE'].includes(req.method)) return json(res, 200, theater.device(identity.uid, body.token, body.platform, req.method === 'DELETE', body.notificationActions));
       theater.account(identity.uid);
+      if (route === '/passkeys' || route.startsWith('/passkeys/')) {
+        if (!passkeys || theater !== defaultTheater) throw new AppError(404, 'Passkeys sind für dieses Konto nicht eingerichtet.', 'passkey_unavailable');
+        // The body and Firebase lookups may yield; membership is checked again
+        // inside the service before any credential is added or removed.
+        if (route === '/passkeys' && req.method === 'GET') return json(res, 200, passkeys.list(identity.uid));
+        if (route === '/passkeys/options' && req.method === 'POST') return json(res, 200, await passkeys.registrationOptions(identity, body.name));
+        if (route === '/passkeys/verify' && req.method === 'POST') return json(res, 200, await passkeys.register(identity, body));
+        const key = route.match(/^\/passkeys\/([a-f0-9-]{36})$/);
+        if (key && req.method === 'DELETE') return json(res, 200, await passkeys.remove(identity, key[1]));
+      }
       if (route === '/profile' && req.method === 'PUT') {
         theater.action(identity.uid, { ...body, action: 'profile.save' }, req.headers['idempotency-key'] || randomUUID());
         return json(res, 200, { user: theater.profile(theater.account(identity.uid)) });

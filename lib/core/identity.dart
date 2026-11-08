@@ -24,6 +24,12 @@ abstract class IdentityService {
   Future<void> signOut();
 }
 
+/// Optional for identity implementations that support our custom-token bridge.
+abstract interface class PasskeyIdentity {
+  Future<void> signInWithCustomToken(String token, String expectedUid);
+  Future<void> reauthenticateForPasskeys({String? password, String? provider});
+}
+
 abstract final class FirebaseConfiguration {
   static const projectId = String.fromEnvironment('FIREBASE_PROJECT_ID');
   static const emulator = bool.fromEnvironment('USE_FIREBASE_EMULATORS');
@@ -67,7 +73,7 @@ abstract final class FirebaseConfiguration {
   }
 }
 
-class FirebaseIdentity implements IdentityService {
+class FirebaseIdentity implements IdentityService, PasskeyIdentity {
   bool _initialized = false, _googleInitialized = false;
   FirebaseAuth get _auth => FirebaseAuth.instance;
   @override
@@ -117,6 +123,64 @@ class FirebaseIdentity implements IdentityService {
   @override
   Future<void> signIn(String email, String password) async =>
       _auth.signInWithEmailAndPassword(email: email.trim(), password: password);
+
+  @override
+  Future<void> signInWithCustomToken(String token, String expectedUid) async {
+    final result = await _auth.signInWithCustomToken(token);
+    if (result.user?.uid != expectedUid) {
+      await _auth.signOut();
+      throw const ApiException(
+        'Die Passkey-Anmeldung passt nicht zum Konto.',
+        statusCode: 401,
+      );
+    }
+  }
+
+  @override
+  Future<void> reauthenticateForPasskeys({
+    String? password,
+    String? provider,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw const ApiException('Bitte erneut anmelden.', statusCode: 401);
+    }
+    if (password != null && user.email != null) {
+      await user.reauthenticateWithCredential(
+        EmailAuthProvider.credential(email: user.email!, password: password),
+      );
+    } else if (provider == 'google.com' && !kIsWeb) {
+      await user.reauthenticateWithCredential(await _googleCredential());
+    } else {
+      final AuthProvider authProvider = switch (provider) {
+        'google.com' =>
+          GoogleAuthProvider()
+            ..setCustomParameters({'prompt': 'select_account'}),
+        'apple.com' =>
+          AppleAuthProvider()
+            ..addScope('email')
+            ..addScope('name'),
+        'microsoft.com' => MicrosoftAuthProvider(),
+        'facebook.com' => FacebookAuthProvider(),
+        'github.com' => GithubAuthProvider(),
+        'twitter.com' => TwitterAuthProvider(),
+        'yahoo.com' => YahooAuthProvider(),
+        _ => throw const ApiException(
+          'Bitte eine verknüpfte Anmeldeart auswählen.',
+        ),
+      };
+      if (kIsWeb) {
+        await user.reauthenticateWithPopup(authProvider);
+      } else {
+        await user.reauthenticateWithProvider(authProvider);
+      }
+    }
+    if (_auth.currentUser?.uid != user.uid) {
+      throw const ApiException('Das Konto hat sich geändert.', statusCode: 401);
+    }
+    await user.getIdToken(true);
+  }
+
   @override
   Future<void> register(String name, String email, String password) async {
     final result = await _auth.createUserWithEmailAndPassword(

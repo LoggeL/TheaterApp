@@ -218,7 +218,11 @@ export class Theater {
       // A proof counts once: for the account it was first presented with.
       if (botCheck?.status === 'passed' && this.store.accounts().some(x => x.botCheckId === botCheck.id && x.uid !== identity.uid)) botCheck = { status: 'invalid' };
       const provider = identity.firebase?.sign_in_provider ?? 'password';
-      const identityReady = provider !== 'password' || identity.email_verified === true;
+      // A custom-token passkey login proves possession, not ownership of an
+      // unverified email address. The HTTP boundary also checks its live key.
+      const identityReady = provider === 'custom'
+        ? identity.email_verified === true && typeof identity.theater_passkey === 'string'
+        : provider !== 'password' || identity.email_verified === true;
       const identityName = text(identity.name, 120);
       let suppliedName;
       if (registrationName !== undefined) {

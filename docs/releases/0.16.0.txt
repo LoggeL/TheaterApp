@@ -1,0 +1,1 @@
+Melde dich mit einem Passkey an, zum Beispiel per Fingerabdruck oder Gerätesperre. Hinterlege ihn nach der Anmeldung unter "Anmeldearten > Passkeys". Passwort und Google bleiben verfügbar. Anmeldung, Registrierung und Freigabewartebildschirm sind neu gestaltet. Termin-E-Mails sind übersichtlicher und besser lesbar.

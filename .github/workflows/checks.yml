@@ -28,6 +28,9 @@ jobs:
         working-directory: server
       - run: npm test
         working-directory: server
+      - name: Check passkey exchange with Firebase Auth emulator
+        run: ./node_modules/.bin/firebase emulators:exec --only auth --project demo-theater-passkeys --config ../firebase.json 'node --test test/passkeys-firebase.test.mjs'
+        working-directory: server
       - run: npm audit --omit=dev
         working-directory: server
       - run: node tool/configure.mjs config/production.web.json

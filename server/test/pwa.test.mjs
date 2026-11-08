@@ -41,9 +41,10 @@ test('install manifest and brand icons have a stable identity and valid platform
 
 test('public build cache changes with asset contents and remains stable when finalized twice', async t => {
   const directory = await temporary(t);
-  for (const dir of ['assets/assets/auth', 'assets/assets/games/stage_runner', 'canvaskit']) await mkdir(join(directory, dir), {recursive: true});
+  for (const dir of ['assets/assets/auth', 'assets/assets/games/stage_runner', 'canvaskit', 'vendor']) await mkdir(join(directory, dir), {recursive: true});
   const fixtures = {
-    'index.html': '<meta name="theater-pwa-version" content="development">',
+    'index.html': '<meta name="theater-pwa-version" content="development"><script src="vendor/passkeys.js"></script>',
+    'vendor/passkeys.js': 'passkey bridge',
     'privacy.html': 'privacy', 'manifest.json': '{"icons":[]}',
     'main.1234.dart.js': 'main', 'pwa.1234.js': 'install',
     'assets/FontManifest.json': 'fonts', 'assets/font.ttf': 'font version one',
@@ -60,6 +61,7 @@ test('public build cache changes with asset contents and remains stable when fin
   assert.deepEqual(await writePwaWorker(root, entries), first);
   const worker = await readFile(join(directory, first.worker), 'utf8');
   assert(worker.includes('/assets/font.ttf'));
+  assert(worker.includes('/vendor/passkeys.js'), 'the plugin bridge must survive an offline start');
   // The first screen's picture is small and works offline.
   assert(worker.includes('/assets/assets/auth/no_bots.webp'));
   assert(worker.includes('/canvaskit/canvaskit.wasm'));
@@ -484,9 +486,10 @@ test('the page removes the per-account picture caches itself on logout', async (
 const run = promisify(execFile);
 async function webBuild(t, index) {
   const directory = await temporary(t);
-  for (const dir of ['icons', 'assets/fonts', 'assets/assets/games/stage_runner', 'canvaskit']) await mkdir(join(directory, dir), {recursive: true});
+  for (const dir of ['icons', 'assets/fonts', 'assets/assets/games/stage_runner', 'canvaskit', 'vendor']) await mkdir(join(directory, dir), {recursive: true});
   const fixtures = {
     'index.html': index ?? await readFile(source('index.html'), 'utf8'),
+    'vendor/passkeys-2.4.0.js': await readFile(source('vendor/passkeys-2.4.0.js'), 'utf8'),
     'pwa.js': await readFile(source('pwa.js'), 'utf8'),
     'main.dart.js': 'main __image_picker_web-file-input',
     'flutter_bootstrap.js': "_flutter.loader.load({config: {assetBase: './', canvasKitBaseUrl: 'canvaskit/'}, mainJsPath: 'main.dart.js'});",
@@ -506,10 +509,11 @@ test('the built page keeps its scripts away from Rocket Loader and shows a start
   const directory = await webBuild(t);
   const index = await readFile(join(directory, 'index.html'), 'utf8');
   const scripts = [...index.matchAll(/<script\b[^>]*>/g)].map(([tag]) => tag);
-  assert.equal(scripts.length, 2);
+  assert.equal(scripts.length, 3);
   assert(scripts.every(tag => tag.includes('data-cfasync="false"')), scripts.join('\n'));
   assert.match(scripts[0], /src="pwa\.[a-f0-9]{16}\.js"/);
-  assert.match(scripts[1], /src="flutter_bootstrap\.[a-f0-9]{16}\.js" async/);
+  assert.match(scripts[1], /src="vendor\/passkeys-2\.4\.0\.js"/);
+  assert.match(scripts[2], /src="flutter_bootstrap\.[a-f0-9]{16}\.js" async/);
   const splash = index.slice(index.indexOf('<div id="theater-splash"'), index.indexOf('</div>\n  </div>'));
   assert(splash.includes('<svg'));
   assert(!/\b(?:src|href)=/.test(splash));
@@ -522,7 +526,7 @@ test('the worker reloads exactly the files the server does not serve as immutabl
   const directory = await webBuild(t);
   const worker = await readFile(join(directory, 'theater-service-worker.js'), 'utf8');
   const build = JSON.parse(worker.match(/^const BUILD = (\{.*\});$/m)[1]);
-  assert.deepEqual(build.fresh.map(path => path.replace(/[a-f0-9]{16}/, '<hash>')).sort(), ['/index.html', '/manifest.<hash>.json', '/manifest.json', '/privacy.html']);
+  assert.deepEqual(build.fresh.map(path => path.replace(/[a-f0-9]{16}/, '<hash>')).sort(), ['/index.html', '/manifest.<hash>.json', '/manifest.json', '/privacy.html', '/vendor/passkeys-2.4.0.js']);
   const server = createHttpServer({theater: {}, verifyToken: async () => ({}), webDir: directory});
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));

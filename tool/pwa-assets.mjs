@@ -11,7 +11,10 @@ export async function writePwaWorker(root, entrypoints, assetPaths = {assetBase:
   const manifest = JSON.parse(await readFile(new URL('manifest.json', root), 'utf8'));
   // The Dart entrypoints belong to their renderer; the worker precaches the one the browser starts with.
   const {main, wasm, wasmRuntime, ...shell} = entrypoints;
+  let index = await readFile(new URL('index.html', root), 'utf8');
   const paths = new Set(['index.html', 'privacy.html', 'manifest.json', ...Object.values(shell), ...manifest.icons.map(icon => icon.src)]);
+  // Web plugins must also initialize when an installed app starts offline.
+  for (const [, src] of index.matchAll(/<script\b[^>]*\bsrc="(vendor\/[^"]+)"/g)) paths.add(src);
   const directory = assetPaths.assetBase + 'assets/';
   // The hidden game loads its pictures and sounds on demand; they need no offline copy.
   const onDemand = directory + 'assets/games/';
@@ -32,7 +35,6 @@ export async function writePwaWorker(root, entrypoints, assetPaths = {assetBase:
     for (const path of files) if (path && await access(new URL(path, root)).then(() => true, () => false)) present.push(path);
     if (present.some(path => path.endsWith('.wasm'))) renderers[name] = present;
   }
-  let index = await readFile(new URL('index.html', root), 'utf8');
   index = index.replace(/(name="theater-pwa-version" content=")[^"]+/, '$1development');
   const template = await readFile(new URL('../web/theater-service-worker.js', import.meta.url), 'utf8');
   const digest = createHash('sha256').update(template);
