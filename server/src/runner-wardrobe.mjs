@@ -96,8 +96,8 @@ export const runnerUnlocks = Object.freeze({
   reelLength: 56, reelWinner: 48,
   // Filler cards are drawn like a crate from all items, with rarity weight^fillerFlatten, so rare
   // colours pass by more often than they are won; now and then the rarest one stops right next to
-  // the marker.
-  fillerFlatten: 0.6, nearMissChance: 0.45,
+  // the marker: a random rarer item, one the person does not own yet if there is any.
+  fillerFlatten: 0.6, nearMissChance: 0.28,
 });
 export const wardrobeKinds = Object.freeze(['character', 'backdrop', 'obstacles', 'fx']);
 // How runs end, as the client's `ObstacleKind` names; anything else counts as `unknown`.
@@ -970,11 +970,11 @@ export function openCrate(t, uid, requestId, b = {}) {
     if (gage ? false : gala ? !galaCrate : pack ? !packCrate : event ? !eventCrate : mission ? missionCrates(p) <= 0 : ensemble ? ensembleCrates(p) <= 0 : cratesEarned(cratePoints(p)) - p.opened <= 0) fail(409, gala ? 'Gerade ist keine Gala-Kiste da.' : pack ? 'Gerade ist keine Set-Kiste da.' : event ? 'Gerade ist keine Termin-Kiste da.' : mission ? 'Gerade ist keine Missionskiste da.' : ensemble ? 'Gerade ist keine Ensemble-Kiste da.' : 'Gerade ist keine Kostümkiste da. Lauf weiter!', 'no_crate');
     if (!dupes) {
       // Older apps: only what is still missing; with nothing left the crates stay closed.
-      const { items: candidates, open } = pool(t, p);
+      const before = ownedIds(t, p), { items: candidates, open } = pool(t, p, before);
       if (!candidates.length) fail(409, 'Der Fundus ist komplett. Neue Kostüme kommen bald – die Kisten bleiben so lange zu.', 'wardrobe_complete');
       const item = drawItem(c, candidates, t.random, 1, open);
       const next = t.store.put('runnerProgress', a.personId, settleUnlocks(t, { ...p, opened: p.opened + 1, owned: [...list(p.owned), item.id] }));
-      const result = { item, ...reel(t, item, open), wardrobe: view(t, next, roles, unique) };
+      const result = { item, ...reel(t, item, open, before), wardrobe: view(t, next, roles, unique) };
       return { result: roles ? result : olderAppOpening(c, result), subject: item.id };
     }
     const owned = ownedIds(t, p), open = openFor(c, p, owned);
@@ -999,7 +999,7 @@ export function openCrate(t, uid, requestId, b = {}) {
     if (packCrate && !markPackCrateOpened(t, a.personId, packCrate.releaseId)) fail(409, 'Gerade ist keine Set-Kiste da.', 'no_crate');
     const saved = t.store.put('runnerProgress', a.personId, settleUnlocks(t, { ...next, ...counted }));
     const aim = crate === 'costume' || gage ? { target: target?.id ?? 'random' } : {};
-    const result = { item: draw.item, ...reel(t, draw.item, open, items), outcome: { ...outcome, duplicate: draw.duplicate, shiny, rarity: draw.tier.id, crate, ...aim, ...(gage ? { cost: price } : {}), ...(eventCrate ? { event: crateView(eventCrate) } : {}), ...(galaCrate ? { month: galaCrate.month } : {}), ...(packCrate ? { packId: packCrate.releaseId, name: packCrate.name } : {}) }, wardrobe: view(t, saved, roles, unique) };
+    const result = { item: draw.item, ...reel(t, draw.item, open, owned, items), outcome: { ...outcome, duplicate: draw.duplicate, shiny, rarity: draw.tier.id, crate, ...aim, ...(gage ? { cost: price } : {}), ...(eventCrate ? { event: crateView(eventCrate) } : {}), ...(galaCrate ? { month: galaCrate.month } : {}), ...(packCrate ? { packId: packCrate.releaseId, name: packCrate.name } : {}) }, wardrobe: view(t, saved, roles, unique) };
     return { result: roles ? result : olderAppOpening(c, result), subject: `${draw.item.id}${draw.duplicate ? ` ${outcome.type}` : ''}${shiny ? ' shiny' : ''}${target ? ` ${target.id}` : ''}${gage ? ` -${price}` : ''}` };
   }, catalogFor(t, roles, unique));
 }
@@ -1067,16 +1067,22 @@ export function galaSeen(t, uid, b) {
   });
 }
 
-/** Cards for the opening animation; only the one at `winnerIndex` was drawn, the rest is show. */
-function reel(t, item, open, pool = catalog(t).collectible) {
+/**
+ * Cards for the opening animation; only the one at `winnerIndex` was drawn, the rest is show.
+ * [owned]: what the person owned before this opening. Now and then (`nearMissChance`) a random item
+ * rarer than the won one stops right next to it, one not owned yet if any of them is missing.
+ */
+export function reel(t, item, open, owned, pool = catalog(t).collectible) {
   const { reelLength, reelWinner, fillerFlatten, nearMissChance } = runnerUnlocks, c = catalog(t);
   // Only what could be won (from this crate's pool): locked rarities are not teased.
   const all = pool.filter(x => x.drawnBy.some(r => open.has(r)));
   const cards = Array.from({ length: reelLength }, () => drawItem(c, all, t.random, fillerFlatten, open).id);
   cards[reelWinner] = item.id;
-  const rarest = all.filter(x => x.id !== item.id).sort((x, y) => c.rarity.get(y.rarity).rank - c.rarity.get(x.rarity).rank)[0];
-  if (rarest && c.rarity.get(rarest.rarity).rank > c.rarity.get(item.rarity).rank && t.random() < nearMissChance) {
-    cards[reelWinner + (t.random() < 0.5 ? -1 : 1)] = rarest.id;
+  const rank = x => c.rarity.get(x.rarity).rank;
+  const rarer = all.filter(x => x.id !== item.id && rank(x) > rank(item)), missing = rarer.filter(x => !owned.has(x.id));
+  if (rarer.length && t.random() < nearMissChance) {
+    const side = t.random() < 0.5 ? -1 : 1;
+    cards[reelWinner + side] = pickOne(missing.length ? missing : rarer, t.random).id;
   }
   return { reel: cards, winnerIndex: reelWinner };
 }
