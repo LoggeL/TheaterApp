@@ -165,12 +165,23 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   late CrateTarget? _target = _own ? widget.target : null;
 
   /// The crate with a look of its own: it opens its own way before the reel.
+  /// A Set-Kiste borrows the look of its play's crate (a set named like the
+  /// play, e.g. „Eine höllische Herausforderung“), if that has one.
   CrateTarget? get _look =>
       _target ??
       (widget.gala
           ? _wardrobe.gala.crate
           : widget.weekly
           ? _wardrobe.weekly.crate
+          : widget.packGoal != null
+          ? _wardrobe.crateTargets
+                .where(
+                  (t) =>
+                      t.kind == CrateTargetKind.play &&
+                      (t.play ?? t.name) == widget.packGoal!.name &&
+                      t.image != null,
+                )
+                .firstOrNull
           : null);
 
   // Keep the key after a failed reply: retrying must return this opening,
@@ -474,7 +485,9 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
             },
           ),
           Text(
-            '${_crateName(target)} geht auf …',
+            widget.packGoal != null
+                ? 'Die Set-Kiste geht auf …'
+                : '${_crateName(target)} geht auf …',
             style: const TextStyle(color: Colors.white70, fontSize: 16),
           ),
         ],

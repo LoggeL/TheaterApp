@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -386,6 +387,65 @@ void main() {
       expect(find.textContaining('Nächste Kiste'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'a set crate opens in the look of its play crate, if that has one',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      JsonMap hell({bool image = true}) => {
+        'id': 'play:eine-hoellische-herausforderung',
+        'kind': 'play',
+        'name': 'Eine höllische Herausforderung',
+        'play': 'Eine höllische Herausforderung',
+        'year': 2024,
+        'animation': 'inferno',
+        if (image) ...{
+          'image':
+              '/games/runner/skins/crate-play-eine-hoellische-herausforderung.webp?v=1',
+          'imageBox': [60, 160, 452, 492],
+        },
+      };
+      final controller = await _signedIn();
+      final sound = _Sound();
+      addTearDown(sound.dispose);
+      for (final image in [true, false]) {
+        final before = Wardrobe.fromJson({
+          ..._wardrobe(
+            goals: [_goal(reached: true, meters: 100000, crates: 1)],
+          ),
+          'crateTargets': [hell(image: image)],
+        });
+        await tester.pumpWidget(
+          MaterialApp(
+            home: CrateOpeningPage(
+              controller: controller,
+              wardrobe: before,
+              sound: sound,
+              packGoal: before.packGoals.single,
+              open: () => Completer<CrateOpening>().future,
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        // With the play's picture: its crate wobbles while the server draws;
+        // without one the plain crate as before.
+        expect(
+          find.byKey(
+            const ValueKey(
+              'crate-unboxing-play:eine-hoellische-herausforderung',
+            ),
+          ),
+          image ? findsOneWidget : findsNothing,
+        );
+        expect(find.text('Die Set-Kiste geht auf …'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      }
     },
   );
 

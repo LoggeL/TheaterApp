@@ -444,7 +444,7 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
 // catalog: every play with active role figures) or the Technik-Kiste (the technicians, a `crew`
 // rarity). Unique figures, ensemble rewards and the default outfit are in no pool.
 /** The animations an app knows for opening a crate; anything else plays `generic`. */
-export const crateAnimations = Object.freeze(['generic', 'burst', 'flightcase', 'maw', 'glitch', 'heavy', 'threads']);
+export const crateAnimations = Object.freeze(['generic', 'burst', 'flightcase', 'maw', 'glitch', 'heavy', 'threads', 'inferno']);
 /** A play's name as part of an id or file name: "Schicksalsfäden" → "schicksalsfaeden". */
 export const playSlug = name => name.toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
   .normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'stueck';
