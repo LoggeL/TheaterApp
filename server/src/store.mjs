@@ -16,6 +16,13 @@ export class Store {
       CREATE INDEX IF NOT EXISTS perf_reports_created ON perf_reports(created_at);
       -- Finds a report sent twice (perf-telemetry.mjs); not UNIQUE, older rows hold duplicates.
       CREATE INDEX IF NOT EXISTS perf_reports_session ON perf_reports(session_id);
+      -- History of the stage runner's Tagesmissionen for balancing (runner-mission-log.mjs): one row
+      -- per mission, person and Berlin day (rerolled = 1: the mission a reroll brought).
+      CREATE TABLE IF NOT EXISTS runner_mission_log(id INTEGER PRIMARY KEY, day TEXT NOT NULL, person_id INTEGER NOT NULL, slot TEXT NOT NULL, type TEXT NOT NULL, kind TEXT,
+        target REAL NOT NULL, reward INTEGER NOT NULL, best REAL, client_stats INTEGER NOT NULL, rerolled INTEGER NOT NULL, rerolled_from TEXT, rerolled_to TEXT,
+        done INTEGER NOT NULL, runs INTEGER NOT NULL, runs_to_done INTEGER, progress REAL NOT NULL, minutes_to_done REAL, crate INTEGER NOT NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(person_id, day, slot, rerolled));
+      CREATE INDEX IF NOT EXISTS runner_mission_log_day ON runner_mission_log(day);
     `);
   }
   get(kind, id) {

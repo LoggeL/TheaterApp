@@ -5,6 +5,7 @@ import { leadPushKinds, memberPushKinds } from './push-kinds.mjs';
 import { migrateSharedSpeakers, sharedSpeakersMigrationId, splitSharedSpeakers } from './shared-speakers.mjs';
 import { feedbackList, feedbackTicketsMigrationId, forgetFeedbackAccount, forgetFeedbackPerson, migrateFeedbackTickets, setFeedbackStatus, submitFeedback } from './feedback-tickets.mjs';
 import { checkRunStats, missions, rerollMission, runnerCourse } from './runner-missions.mjs';
+import { forgetMissionLog } from './runner-mission-log.mjs';
 import { findRound, finishRound, startRound } from './runner-rounds.mjs';
 import { autoCheckins, eventCrateNotice, forgetEventCrates, settleCheckinCrate } from './runner-event-crates.mjs';
 import { buyItem, bundledCatalog, collectionBoard, ensembleSeen, galaSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
@@ -1564,6 +1565,7 @@ export class Theater {
     forgetFormSubmissions(s, submission => submission.personId === personId);
     forgetFormGenerations(s, marker => marker.personId === personId);
     s.delete('runnerScores', personId); s.delete('runnerRounds', personId); s.delete('runnerProgress', personId); s.delete('runnerMissions', personId);
+    forgetMissionLog(s, personId);
     forgetMonthScores(s, personId);
     forgetGala(s, personId);
     forgetWeekly(s, personId);

@@ -178,6 +178,19 @@ docker exec $(docker ps -qf name=theater) node scripts/perf-report.mjs /data/the
 
 Grenzen: Tippen auf der Tastatur und Bilder ohne Animation oder Zeigereingabe gehen nur über `FrameTiming` ein. Firefox und Safari runden die Zeitmessung (`performance.now()`) auf etwa 1 ms. Im Web meldet die Engine immer 60 Hz, die Bildwiederholrate fehlt dort; `deviceMemory` und Verbindungstyp gibt es nur in Chromium. Die Web-Build- und Rasterzeiten aus `FrameTiming` misst die Engine auf dem Hauptthread.
 
+## Tagesmissionen-Verlauf (Balancing)
+
+Für das Balancing der Tagesmissionen im Bühnenlauf (`server/src/runner-missions.mjs`) schreibt der Server einen Verlauf mit: eine Zeile pro Mission, Person und Berliner Tag in der eigenen Tabelle `runner_mission_log` (`server/src/runner-mission-log.mjs`). Keine Anzeige in der App, keine Push-Nachricht, keine Änderung an Missionen, Zielen oder Belohnungen; ein Fehler beim Schreiben bricht keinen Lauf ab.
+
+- **Erfasst:** Tag, Person (`person_id`), Stufe, Typ und Art (`kind`), Ziel, Belohnung, ob die App Laufstatistik sendet, neu gewürfelt (`rerolled` = Mission aus einem Neuwürfeln mit `rerolled_from`, `rerolled_to` = weggewürfelt zu diesem Typ), geschafft, Läufe mit der offenen Mission, Läufe bis geschafft, Fortschritt, Minuten vom ersten Lauf des Tages bis geschafft, Missionskiste. Im JSON (`data`) die Herleitung des Ziels: maßgeblicher Bestwert pro Lauf, Anteil, Rohwert, Quelle (`share`, `start` bei fehlendem Bestwert bzw. weniger als 5 gezählten Läufen, `min`/`max` an einer Grenze, `band` beim Debüt), Verhältnis Ziel/Bestwert, außerdem erster Lauf des Tages, Zeitpunkt geschafft bzw. neu gewürfelt und Läufe des Tages.
+- **Wann:** beim Erzeugen der Tagesmissionen, nach jedem Lauf und beim Neuwürfeln. Ein Tag ist damit auch vollständig, wenn danach niemand mehr spielt (nicht geschafft = `done` 0). Missionen von vor dem Deploy haben keine Zeile.
+- **Löschung:** `server/src/retention.mjs` löscht Zeilen nach 180 Tagen; das dauerhafte Löschen einer Person löscht ihre Zeilen sofort.
+- **Auswertung:** nur lesend und nur als Summen (keine Namen, keine Personen-IDs), standardmäßig die letzten 14 abgeschlossenen Tage (`--today` nimmt den laufenden Tag dazu): je Typ × Stufe angeboten, Spieler, gespielt, Abschlussquote (von gespielten), weggewürfelt, Läufe bis geschafft (Median, p25–p75), Minuten bis geschafft, Fortschritt der offenen, Ziel/Bestwert, Anteil Startwerte; dazu je Stufe, je Art, je App mit/ohne Statistik, die häufigsten Neuwürfel-Wechsel und die Kistenquote je Tag. „zu leicht?“ markiert über 90 % geschafft bei höchstens einem Lauf, „zu schwer?“ unter 25 %; unter 10 gespielten Missionen oder 3 Spielern mit „kleine Stichprobe“.
+
+```sh
+docker exec $(docker ps -qf name=theater) node scripts/mission-report.mjs /data/theater.sqlite --days 14
+```
+
 ## Push aktivieren
 
 „Mein Bereich → Darstellung & Erinnerungen → Push auf diesem Gerät aktivieren“. Danach unter Probenleitung die Push-Diagnose öffnen und einen Test senden. `accepted_by_provider` bedeutet, dass FCM die Nachricht angenommen hat. Es bestätigt weder sichtbare Zustellung noch das Lesen einer Mitteilung. Ungültige Gerätetokens werden entfernt, Wiederholungen senden nicht erneut an bereits akzeptierte Geräte.
