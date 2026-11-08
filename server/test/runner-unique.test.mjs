@@ -356,15 +356,16 @@ test('the bundled catalog: play-specific uniques and Kolping for the complete te
     ['character.unique-ki-nexus', '{"play":"Nexus"}'],
     ['character.unique-captain-kuschel', '{"plays":["Creepshow","Nexus"]}'],
     ['character.unique-adolph-kolping', '{"allTechnicians":true}'],
+    ['character.unique-ritterpuppe', '{"play":"Anno 1146"}'],
     ['character.unique-willi', '{"play":"Eine höllische Herausforderung"}'],
   ]);
-  assert.deepEqual([...c.uniqueFiles.keys()].sort(), ['character-unique-adolph-kolping-portrait.webp', 'character-unique-adolph-kolping-thumb.webp', 'character-unique-adolph-kolping.webp', 'character-unique-beatrice-portrait.webp', 'character-unique-beatrice-thumb.webp', 'character-unique-beatrice.webp', 'character-unique-captain-kuschel-portrait.webp', 'character-unique-captain-kuschel-thumb.webp', 'character-unique-captain-kuschel.webp', 'character-unique-ki-nexus-portrait.webp', 'character-unique-ki-nexus-thumb.webp', 'character-unique-ki-nexus.webp', 'character-unique-willi-portrait.webp', 'character-unique-willi-thumb.webp', 'character-unique-willi.webp']);
+  assert.deepEqual([...c.uniqueFiles.keys()].sort(), ['character-unique-adolph-kolping-portrait.webp', 'character-unique-adolph-kolping-thumb.webp', 'character-unique-adolph-kolping.webp', 'character-unique-beatrice-portrait.webp', 'character-unique-beatrice-thumb.webp', 'character-unique-beatrice.webp', 'character-unique-captain-kuschel-portrait.webp', 'character-unique-captain-kuschel-thumb.webp', 'character-unique-captain-kuschel.webp', 'character-unique-ki-nexus-portrait.webp', 'character-unique-ki-nexus-thumb.webp', 'character-unique-ki-nexus.webp', 'character-unique-ritterpuppe-portrait.webp', 'character-unique-ritterpuppe-thumb.webp', 'character-unique-ritterpuppe.webp', 'character-unique-willi-portrait.webp', 'character-unique-willi-thumb.webp', 'character-unique-willi.webp']);
   const raw = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url), 'utf8')).items;
   const beatrice = c.byId.get('character.unique-beatrice');
   assert.deepEqual([beatrice.name, beatrice.play, beatrice.year, beatrice.unlock], ['Beatrice', 'Creepshow', 2026, { play: 'Creepshow' }]);
   // The others still wait for their pictures.
   assert.deepEqual(raw.filter(x => x.rarity === 'unique' && x.disabled).map(x => x.id),
-    ['character.unique-ritterpuppe', 'character.unique-kristall', 'character.unique-rabe']);
+    ['character.unique-kristall', 'character.unique-rabe']);
   // Willi requires the whole Hölle cast, including Hatice's documented role without an app account.
   const willi = c.byId.get('character.unique-willi'), hell = uniqueRequirement(c, willi)[0].ids;
   assert.equal(hell.length, 11);
