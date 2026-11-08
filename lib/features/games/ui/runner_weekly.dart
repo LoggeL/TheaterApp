@@ -12,6 +12,7 @@ import '../../../shared/layout/content_width.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../data/runner_menu_preferences.dart';
+import '../data/wardrobe_api.dart' show weeklyRewardsAvailable;
 import '../data/weekly_api.dart';
 import 'runner_menu.dart';
 
@@ -53,6 +54,11 @@ const weeklyNoAnswerText =
     'Start dort noch an, ist der Versuch trotzdem gezählt – die Versuche oben '
     'zeigen es, sobald die Verbindung wieder steht.';
 
+/// What a closed week brings (`runnerWeeklyRewards`), under the rules.
+const weeklyRewardsNote =
+    'Nach der Woche gibt es für jede Teilnahme mit Wertungslauf eine '
+    'Wochenkiste, für die Plätze 1 bis 3 dazu einen Pokal und Gage.';
+
 /// Opens the Wochenprobe; gives what to play, or null.
 Future<WeeklyPlay?> openRunnerWeekly(
   BuildContext context,
@@ -71,8 +77,8 @@ Future<WeeklyPlay?> openRunnerWeekly(
 );
 
 /// The Wochenprobe: this week's course with its countdown, the ranked
-/// attempts and training, the week's ranking and, once, last week's
-/// reward.
+/// attempts and training, the week's ranking with everyone's Pokale, the own
+/// Pokale and, once, last week's reward.
 class RunnerWeeklyScreen extends StatefulWidget {
   const RunnerWeeklyScreen({
     super.key,
@@ -115,6 +121,9 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
 
   AppController get controller => widget.controller;
   DateTime get _now => controller.now;
+
+  /// Whether the server gives the Wochenkiste and the Pokale.
+  bool get _rewards => weeklyRewardsAvailable(controller);
 
   @override
   void initState() {
@@ -306,6 +315,7 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
 
   Widget _rewardBanner(BuildContext context, WeeklyLastWeek reward) {
     final theme = Theme.of(context);
+    final trophy = reward.trophy;
     return Card(
       key: const ValueKey('weekly-reward'),
       color: StageTheme.orange.withValues(alpha: StageTheme.tintAlpha),
@@ -313,11 +323,23 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
         padding: const EdgeInsets.fromLTRB(16, 10, 4, 10),
         child: Row(
           children: [
-            const Icon(Icons.payments_outlined, color: StageTheme.orange),
+            trophy != null
+                ? Icon(Icons.emoji_events, color: trophy.color)
+                : reward.crates > 0
+                ? const Icon(
+                    Icons.inventory_2_outlined,
+                    color: StageTheme.orange,
+                  )
+                : const Icon(Icons.payments_outlined, color: StageTheme.orange),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                weeklyRewardText(reward.rank, reward.gage),
+                weeklyRewardText(
+                  reward.rank,
+                  reward.gage,
+                  trophy: trophy,
+                  crates: reward.crates,
+                ),
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w800,
                 ),
@@ -370,6 +392,36 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
               'der beste zählt; trainieren kannst du so oft du willst.',
               style: theme.textTheme.bodyMedium,
             ),
+            if (_rewards) ...[
+              const SizedBox(height: 6),
+              Text(
+                weeklyRewardsNote,
+                key: const ValueKey('weekly-rewards-note'),
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+            if (!week.trophies.isEmpty) ...[
+              const SizedBox(height: 8),
+              Row(
+                key: const ValueKey('weekly-trophies'),
+                children: [
+                  // The text beside says it all to a screen reader.
+                  ExcludeSemantics(
+                    child: WeeklyTrophyBadges(
+                      trophies: week.trophies,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Deine Pokale: ${week.trophies.text}',
+                      style: theme.textTheme.titleSmall,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 14),
             if (!offline)
               Row(
@@ -518,6 +570,9 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
                   name: e.name,
                   own: e.me,
                   trailing: _number.format(e.score),
+                  mask: e.trophies.isEmpty
+                      ? null
+                      : WeeklyTrophyBadges(trophies: e.trophies),
                 ),
             if (week.cached)
               Align(

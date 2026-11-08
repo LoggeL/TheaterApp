@@ -10,11 +10,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/models.dart';
+import 'package:theater_app/features/games/data/runner_menu_preferences.dart';
 import 'package:theater_app/features/games/data/weekly_api.dart';
 import 'package:theater_app/features/games/domain/runner_ghost.dart';
 import 'package:theater_app/features/games/domain/stage_runner.dart';
 import 'package:theater_app/features/games/games.dart';
 import 'package:theater_app/features/games/ui/runner_menu.dart';
+import 'package:theater_app/features/games/ui/runner_news.dart';
 import 'package:theater_app/features/games/ui/runner_weekly.dart';
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
 
@@ -539,6 +541,13 @@ void main() {
   });
 
   group('in the game', () {
+    // "Neu im Bühnenlauf" was read already; runner_news_test.dart has it.
+    setUp(
+      () => SharedPreferences.setMockInitialValues({
+        RunnerMenuPreferences.newsSeenKey: [for (final n in runnerNews) n.id],
+      }),
+    );
+
     Future<List<StageRunner>> pumpGame(
       WidgetTester tester,
       AppController controller, {

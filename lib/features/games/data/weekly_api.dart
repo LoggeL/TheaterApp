@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/painting.dart' show Color;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/app_controller.dart';
@@ -10,11 +11,70 @@ import 'leaderboard_api.dart';
 
 /// The Wochenprobe (`runnerWeekly`): one course for everyone per Berlin
 /// calendar week, three ranked attempts each and as much training as
-/// anyone likes on it, its own ranking with the runs as ghosts, and a little
-/// Gage for the places once the week is over. Its runs count for the
-/// crates, missions and Gage like any other, but not for the other lists.
+/// anyone likes on it, its own ranking with the runs as ghosts, and once the
+/// week is over a Wochenkiste for everyone who ran a ranked attempt, plus a
+/// Pokal and Gage for the places 1 to 3. Its runs count for the crates,
+/// missions and Gage like any other, but not for the other lists.
 bool weeklyAvailable(AppController controller) =>
     leaderboardAvailable(controller) && controller.supports('runnerWeekly');
+
+/// The Pokal of a place on the podium of a closed week.
+enum WeeklyTrophy {
+  gold('Gold-Pokal', 'Wochensieger', Color(0xFFE4AE39)),
+  silver('Silber-Pokal', 'Silber', Color(0xFFA9B1B8)),
+  bronze('Bronze-Pokal', 'Bronze', Color(0xFFB07A45));
+
+  const WeeklyTrophy(this.title, this.short, this.color);
+
+  /// "Silber-Pokal", as last week's banner names it.
+  final String title;
+
+  /// "Wochensieger", "Silber": how the counts name it ("2× Wochensieger").
+  final String short;
+  final Color color;
+
+  /// The trophy the server names; null for none or one this app does not
+  /// know.
+  static WeeklyTrophy? of(Object? name) =>
+      WeeklyTrophy.values.where((t) => t.name == name).firstOrNull;
+}
+
+/// How many Pokale of the Wochenprobe a member has won in all closed weeks
+/// (`{gold, silver, bronze}`); none from older servers.
+class WeeklyTrophies {
+  const WeeklyTrophies({this.gold = 0, this.silver = 0, this.bronze = 0});
+  static const none = WeeklyTrophies();
+  final int gold, silver, bronze;
+
+  int count(WeeklyTrophy trophy) => switch (trophy) {
+    WeeklyTrophy.gold => gold,
+    WeeklyTrophy.silver => silver,
+    WeeklyTrophy.bronze => bronze,
+  };
+
+  int get total => gold + silver + bronze;
+  bool get isEmpty => total == 0;
+
+  /// The kinds won, the best first, with their counts.
+  List<(WeeklyTrophy, int)> get won => [
+    for (final t in WeeklyTrophy.values)
+      if (count(t) > 0) (t, count(t)),
+  ];
+
+  /// "2× Wochensieger, 1× Silber"; empty without any.
+  String get text => [for (final (t, n) in won) '$n× ${t.short}'].join(', ');
+
+  static WeeklyTrophies of(Object? json) => json is Map
+      ? WeeklyTrophies(
+          gold: _count(json['gold']),
+          silver: _count(json['silver']),
+          bronze: _count(json['bronze']),
+        )
+      : none;
+
+  static int _count(Object? value) =>
+      value is num && value > 0 ? value.toInt() : 0;
+}
 
 /// One place in the week's ranking: the best ranked run of a member.
 class WeeklyEntry {
@@ -26,6 +86,7 @@ class WeeklyEntry {
     this.meters = 0,
     this.at,
     this.me = false,
+    this.trophies = WeeklyTrophies.none,
   });
   final int rank, personId, score, meters;
   final String name;
@@ -33,6 +94,9 @@ class WeeklyEntry {
   /// When the run was made; the earlier one wins a tie.
   final DateTime? at;
   final bool me;
+
+  /// The member's Pokale of earlier weeks, shown beside the name.
+  final WeeklyTrophies trophies;
 
   factory WeeklyEntry.fromJson(JsonMap json) => WeeklyEntry(
     rank: intValue(json['rank']),
@@ -42,25 +106,41 @@ class WeeklyEntry {
     meters: intValue(json['meters']),
     at: json['at'] is String ? DateTime.tryParse(json['at'] as String) : null,
     me: json['me'] == true,
+    trophies: WeeklyTrophies.of(json['trophies']),
   );
 }
 
-/// The own place of last week, until its banner was seen.
+/// The own place of last week, until its banner was seen: the Gage, the
+/// Pokal for the places 1 to 3 and the Wochenkisten it brought, as the
+/// server froze them when the week closed.
 class WeeklyLastWeek {
   const WeeklyLastWeek({
     required this.week,
     required this.rank,
     required this.score,
     required this.gage,
+    this.trophy,
+    this.crates = 0,
   });
   final String week;
   final int rank, score, gage;
+
+  /// Null below the podium and from older servers.
+  final WeeklyTrophy? trophy;
+
+  /// Wochenkisten won (one for taking part); 0 from older servers.
+  final int crates;
 
   factory WeeklyLastWeek.fromJson(JsonMap json) => WeeklyLastWeek(
     week: textValue(json['week']),
     rank: intValue(json['rank']),
     score: intValue(json['score']),
     gage: intValue(json['gage']),
+    trophy: WeeklyTrophy.of(json['trophy']),
+    crates: switch (json['crates']) {
+      final num n when n > 0 => n.toInt(),
+      _ => 0,
+    },
   );
 }
 
@@ -93,6 +173,7 @@ class WeeklyChallenge {
     this.leaderboard = const [],
     this.ghosts = const [],
     this.lastWeek,
+    this.trophies = WeeklyTrophies.none,
     this.cached = false,
   });
 
@@ -111,6 +192,9 @@ class WeeklyChallenge {
   final List<WeeklyEntry> leaderboard;
   final List<RunnerGhost> ghosts;
   final WeeklyLastWeek? lastWeek;
+
+  /// The own Pokale of all closed weeks.
+  final WeeklyTrophies trophies;
 
   /// Only the course, kept on this device from an earlier visit: enough
   /// for training without a connection, nothing else.
@@ -144,6 +228,7 @@ class WeeklyChallenge {
       lastWeek: json['lastWeek'] is Map
           ? WeeklyLastWeek.fromJson(jsonMap(json['lastWeek']))
           : null,
+      trophies: WeeklyTrophies.of(json['trophies']),
     );
   }
 
@@ -161,6 +246,7 @@ class WeeklyChallenge {
           best: best,
           leaderboard: leaderboard,
           ghosts: ghosts,
+          trophies: trophies,
           cached: cached,
         );
 

@@ -293,7 +293,7 @@ test('ghosts are checked against the run and kept only with a new best', t => {
   assert.equal(view.attempts.used, 1);
 });
 
-test('after the week the places get their gage exactly once, the banner shows until seen', t => {
+test('after the week the places get their rewards exactly once, the banner shows until seen', t => {
   const { app, store, sam, kim, lou, at, play, gage, action } = setup(t);
   const extra = action({ action: 'member.save', name: 'Ria Rang' }).id;
   app.session({ uid: 'ria', name: 'Ria', email: 'ria@example.invalid', email_verified: true });
@@ -310,12 +310,13 @@ test('after the week the places get their gage exactly once, the banner shows un
   assert.equal(store.get(weekAwardsKind, '2026-W45'), null);
   at(new Date(Date.parse('2026-11-08T23:00:00Z') + stageRunner.roundTtlMs).toISOString());
   const view = app.runnerWeekly('sam');
-  assert.deepEqual(view.lastWeek, { week: '2026-W45', rank: 2, score: Math.floor(runnerMaxMeters(80)), gage: weeklyRules.places[2] });
-  assert.deepEqual(gains(), [30, 20, 10, 5]);
+  assert.deepEqual(view.lastWeek, { week: '2026-W45', rank: 2, score: Math.floor(runnerMaxMeters(80)), gage: 50, trophy: 'silver', crates: 1 });
+  assert.deepEqual(gains(), [100, 50, 25, 0]);
   assert.equal(store.get('runnerProgress', store.account('admin').personId)?.gage ?? 0, 0);
   const awards = store.get(weekAwardsKind, '2026-W45');
-  assert.deepEqual(awards.placements.map(x => [x.rank, x.personId, x.gage]), [[1, kim, 30], [2, sam, 20], [3, lou, 10], [4, extra, 5]]);
+  assert.deepEqual(awards.placements.map(x => [x.rank, x.personId, x.gage, x.crates, x.trophy]), [[1, kim, 100, 1, 'gold'], [2, sam, 50, 1, 'silver'], [3, lou, 25, 1, 'bronze'], [4, extra, 0, 1, undefined]]);
   assert.equal(awards.players, 4);
+  assert.equal(awards.rules, weeklyRules.rules);
   // The week's ghosts are not needed any more; its best runs stay.
   assert.ok(store.all(weekRunsKind).every(x => x.ghost === null));
   assert.equal(store.get(weekRunsKind, `2026-W45:${kim}`).best, 900);
@@ -323,7 +324,8 @@ test('after the week the places get their gage exactly once, the banner shows un
   settleWeeks(app); app.runnerWeekly('kim'); app.runnerWeekly('lou');
   const restarted = new Theater(store, { clock: () => new Date('2026-11-10T08:00:00Z') });
   settleWeeks(restarted); restarted.runnerWeekly('sam');
-  assert.deepEqual(gains(), [30, 20, 10, 5]);
+  assert.deepEqual(gains(), [100, 50, 25, 0]);
+  assert.deepEqual(['kim', 'sam', 'lou', 'ria', 'admin'].map(uid => app.runnerWardrobe(uid).progress.weeklyCrates), [1, 1, 1, 1, 0]);
   // The banner: once per person, until seen; other people still see theirs.
   assert.equal(app.runnerWeekly('sam').lastWeek.rank, 2);
   const seen = app.runnerWeeklySeen('sam', { week: '2026-W45' });
@@ -331,7 +333,8 @@ test('after the week the places get their gage exactly once, the banner shows un
   assert.equal(seen.week, '2026-W46');
   assert.equal(app.runnerWeekly('sam').lastWeek, null);
   assert.equal(app.runnerWeeklySeen('sam', { week: '2026-W45' }).lastWeek, null);
-  assert.equal(app.runnerWeekly('kim').lastWeek.gage, 30);
+  assert.equal(app.runnerWeekly('kim').lastWeek.gage, 100);
+  assert.deepEqual(app.runnerWeekly('ria').lastWeek, { week: '2026-W45', rank: 4, score: Math.floor(runnerMaxMeters(20)), gage: 0, trophy: null, crates: 1 });
   assert.equal(app.runnerWeekly('admin').lastWeek, null);
   assert.throws(() => app.runnerWeeklySeen('sam', { week: '2026-11' }), { status: 400 });
   assert.throws(() => app.runnerWeeklySeen('sam', {}), { status: 400 });
@@ -362,7 +365,7 @@ test('inactive people are hidden from the week, deleted ones leave it', async t 
   action({ action: 'member.delete', id: sam, version: store.get('members', sam).version });
   assert.deepEqual(store.all(weekRunsKind).filter(x => x.personId === sam), []);
   assert.deepEqual(store.get(weekAwardsKind, '2026-W45').placements.map(x => [x.rank, x.personId]), [[2, lou]]);
-  assert.deepEqual(app.runnerWeekly('lou').lastWeek, { week: '2026-W45', rank: 2, score: Math.floor(runnerMaxMeters(70)), gage: 20 });
+  assert.deepEqual(app.runnerWeekly('lou').lastWeek, { week: '2026-W45', rank: 2, score: Math.floor(runnerMaxMeters(70)), gage: 50, trophy: 'silver', crates: 1 });
   assert.deepEqual(app.runnerWeekly('lou').leaderboard, []);
   assert.ok(store.all(weekRunsKind).some(x => x.personId === lou));
 });

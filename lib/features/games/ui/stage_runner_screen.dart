@@ -27,6 +27,7 @@ import 'ensemble_card.dart' show EnsembleStrip;
 import 'gala.dart';
 import 'missions_card.dart';
 import 'runner_menu.dart';
+import 'runner_news.dart';
 import 'runner_weekly.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart';
@@ -84,8 +85,13 @@ class StageRunnerScreen extends StatefulWidget {
     this.sound,
     this.motionPreferences,
     this.menuPreferences,
+    this.news = runnerNews,
   });
   final AppController controller;
+
+  /// The entries of "Neu im Bühnenlauf"; replaced in tests.
+  @visibleForTesting
+  final List<RunnerNews> news;
 
   /// Where the menu's small choices are kept; by default on this device.
   @visibleForTesting
@@ -199,6 +205,11 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   WeeklyRunResult? _weeklyResult;
   bool get _weeklyShown => weeklyAvailable(controller);
 
+  /// "Neu im Bühnenlauf", offered once as the menu opens; completes with
+  /// whether it led to another page (the gala's celebration then waits for
+  /// the next visit).
+  Future<bool>? _news;
+
   /// The stage's size in this run, and whether the run waits for a tap
   /// after the size changed (see [_resized]).
   Size? _stageSize;
@@ -256,6 +267,39 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _sound.enabled.addListener(_soundChanged);
     _motion.addListener(_motionChanged);
     if (_sound case final RunnerMusic music) music.warmUp();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _news = _offerNews();
+    });
+  }
+
+  /// Shows the newest entry of "Neu im Bühnenlauf" not seen on this device,
+  /// once the menu is free: not during a run, nor over another dialog or
+  /// page. It counts as seen as soon as it shows.
+  Future<bool> _offerNews() async {
+    await _menu.loaded;
+    if (!mounted ||
+        !_menu.newsKnown ||
+        _phase != _Phase.intro ||
+        _settingsOpen ||
+        ModalRoute.of(context)?.isCurrent == false) {
+      return false;
+    }
+    final pending = pendingRunnerNews(
+      widget.news,
+      _menu.newsSeen,
+      (news) => news.offered?.call(controller) ?? true,
+    );
+    if (pending == null) return false;
+    _menu.markNewsSeen(pending.seen);
+    final action = await showRunnerNews(context, pending.news);
+    if (!mounted || _phase != _Phase.intro) return false;
+    switch (action) {
+      case RunnerNewsAction.weekly:
+        unawaited(_openWeekly());
+        return true;
+      case null:
+        return false;
+    }
   }
 
   @override
@@ -384,6 +428,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       if (!mounted || _wardrobe != null) return;
       setState(() => _wardrobe = w);
       await _dress();
+      // Not over the news; after it, unless that led elsewhere.
+      if (await (_news ?? Future.value(false))) return;
       if (mounted && _phase == _Phase.intro) {
         await celebrateGala(
           context,

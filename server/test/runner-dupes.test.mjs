@@ -221,7 +221,7 @@ test('the bundled catalog pays gage in every rarity and keeps gold out of the sh
   assert.deepEqual(c.rarities.map(r => [r.id, r.gage]), [['hellblau', 10], ['legacy', 15], ['blau', 20], ['technik', 30], ['pink', 40], ['rot', 80], ['gold', 200]]);
   assert.deepEqual(c.rarities.filter(r => !r.buyable).map(r => r.id), ['gold']);
   // Missionskisten (Tagesmissionen) and the Zufallskiste shine a bit more often than an aimed crate.
-  assert.deepEqual(c.dupes, { shinyChance: { costume: 0.05, targeted: 0.03, ensemble: 0.03, event: 0.03, mission: 0.05, gala: 0.15 }, tradeDupes: 5, buyDupes: 10, crateGage: 50 });
+  assert.deepEqual(c.dupes, { shinyChance: { costume: 0.05, targeted: 0.03, ensemble: 0.03, event: 0.03, mission: 0.05, gala: 0.15, weekly: 0.03 }, tradeDupes: 5, buyDupes: 10, crateGage: 50 });
 });
 
 test('the HTTP API opens with duplicates, trades and buys once per key', async t => {

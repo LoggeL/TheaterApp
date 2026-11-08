@@ -5,6 +5,7 @@ import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../domain/stage_runner.dart';
 import 'missions_api.dart';
+import 'weekly_api.dart' show WeeklyTrophies, weeklyAvailable;
 
 /// Whether the "Garderobe" (costume crates for the metres run) is offered:
 /// the server must announce it. The demo has no server and no wardrobe: the
@@ -65,6 +66,14 @@ bool crateTargetsAvailable(AppController controller) =>
 /// Gala-Kisten (they open with duplicates) and the masks of the winners.
 bool monthlyGalaAvailable(AppController controller) =>
     dupesAvailable(controller) && controller.supports('runnerMonthlyGala');
+
+/// The rewards of the Wochenprobe (`runnerWeeklyRewards`): a Wochenkiste
+/// for every ranked week (they open with duplicates) and the Pokale of the
+/// places 1 to 3.
+bool weeklyRewardsAvailable(AppController controller) =>
+    dupesAvailable(controller) &&
+    weeklyAvailable(controller) &&
+    controller.supports('runnerWeeklyRewards');
 
 /// Crates bought with gage and opened at once (`runnerGageCrates`).
 bool gageCratesAvailable(AppController controller) =>
@@ -153,6 +162,30 @@ class GalaState {
       },
     );
   }
+}
+
+/// What the wardrobe tells of the Wochenprobe, all of it the person's own:
+/// the Wochenkisten waiting, the Pokale of all closed weeks and how the
+/// crate looks. Empty for older servers.
+class WeeklyRewardsState {
+  const WeeklyRewardsState({
+    this.crates = 0,
+    this.trophies = WeeklyTrophies.none,
+    this.crate,
+  });
+  final int crates;
+  final WeeklyTrophies trophies;
+
+  /// The Wochenkiste's look; no target of the own crates, only its pictures.
+  final CrateTarget? crate;
+
+  factory WeeklyRewardsState.fromJson(JsonMap json) => WeeklyRewardsState(
+    crates: max(0, intValue(json['crates'])),
+    trophies: WeeklyTrophies.of(json['trophies']),
+    crate: json['crate'] is Map
+        ? CrateTarget.fromJson(jsonMap(json['crate']))
+        : null,
+  );
 }
 
 /// A place on the podium of the Monatsgala. Equal scores share a rank.
@@ -924,6 +957,7 @@ class RunnerProgress {
     this.eventCrates = 0,
     this.packCrates = 0,
     this.galaCrates = 0,
+    this.weeklyCrates = 0,
     this.points,
     this.gainedPoints,
   }) : runMeters = runMeters ?? meters;
@@ -947,6 +981,10 @@ class RunnerProgress {
 
   /// Gala-Kisten waiting (`runnerMonthlyGala`).
   final int galaCrates;
+
+  /// Wochenkisten waiting (`runnerWeeklyRewards`): a field of its own, so
+  /// apps from before never count a crate they cannot open.
+  final int weeklyCrates;
 
   /// Crate metres from Tagesmissionen in total (part of [meters]) and
   /// Missionskisten waiting (`runnerMissions`).
@@ -988,7 +1026,8 @@ class RunnerProgress {
       missionCrates +
       eventCrates +
       packCrates +
-      galaCrates;
+      galaCrates +
+      weeklyCrates;
 
   /// Whether a crate of the own metres can be opened now.
   bool get canOpen => crates > 0 && (dupes || !complete);
@@ -1035,6 +1074,7 @@ class RunnerProgress {
     eventCrates: intValue(json['eventCrates']),
     packCrates: intValue(json['packCrates']),
     galaCrates: intValue(json['galaCrates']),
+    weeklyCrates: max(0, intValue(json['weeklyCrates'])),
     points: json['unit'] == 'points' && json['points'] is Map
         ? CratePoints.fromJson(jsonMap(json['points']))
         : null,
@@ -1079,7 +1119,7 @@ class GainedPoints {
 }
 
 /// What a crate of the own runs can be opened as (`runnerCrateTargets`).
-enum CrateTargetKind { random, tech, play, gala }
+enum CrateTargetKind { random, tech, play, gala, weekly }
 
 /// A crate of the own runs as the Zufallskiste, the Technik-Kiste or aimed at
 /// one play: its pool's progress ([owned] of [total], [locked] of them not to
@@ -1580,6 +1620,7 @@ class Wardrobe {
     this.uniqueFigures,
     this.crateTargets = const [],
     this.gala = const GalaState(),
+    this.weekly = const WeeklyRewardsState(),
     this.gift,
     this.hiddenDefaults = const {},
     this.dupeCounts = const {},
@@ -1630,6 +1671,9 @@ class Wardrobe {
 
   /// The own part of the Monatsgala; empty for older servers.
   final GalaState gala;
+
+  /// The own rewards of the Wochenprobe; empty for older servers.
+  final WeeklyRewardsState weekly;
 
   /// Only released packs, including completed goals and their waiting crates.
   final List<PackGoal> packGoals;
@@ -1799,6 +1843,14 @@ class Wardrobe {
       gala: json['gala'] is Map
           ? GalaState.fromJson(jsonMap(json['gala']))
           : const GalaState(),
+      weekly: json['weekly'] is Map
+          ? WeeklyRewardsState.fromJson(jsonMap(json['weekly']))
+          : WeeklyRewardsState(
+              crates: max(
+                0,
+                intValue(jsonMap(json['progress'])['weeklyCrates']),
+              ),
+            ),
       packGoals: [
         for (final goal in jsonList(json['packGoals']))
           if (goal is Map) PackGoal.fromJson(jsonMap(goal)),
@@ -2007,7 +2059,8 @@ String crateKey([Random? random]) {
 /// Opens a crate of the own metres, or an Ensemble-Kiste with [ensemble].
 /// With [dupes] (`runnerDupes`) the server may answer with a duplicate.
 /// [event] opens a Termin-Kiste: the one of [eventId], else the earliest.
-/// [gala] opens the earliest Gala-Kiste (`runnerMonthlyGala`).
+/// [gala] opens the earliest Gala-Kiste (`runnerMonthlyGala`), [weekly] the
+/// earliest Wochenkiste (`runnerWeeklyRewards`).
 /// [gage] buys a crate and opens it at once (`runnerGageCrates`), also aimed.
 /// [target] aims a crate of the own runs (`runnerCrateTargets`); without it
 /// (or `random`) it is the Zufallskiste, as for older apps.
@@ -2019,6 +2072,7 @@ Future<CrateOpening> openCrate(
   bool mission = false,
   bool event = false,
   bool gala = false,
+  bool weekly = false,
   bool gage = false,
   String? eventId,
   String? target,
@@ -2033,6 +2087,7 @@ Future<CrateOpening> openCrate(
       if (mission) 'crate': 'mission',
       if (event) 'crate': 'event',
       if (gala) 'crate': 'gala',
+      if (weekly) 'crate': 'weekly',
       if (gage) 'crate': 'gage',
       if (packId != null) 'crate': 'pack',
       'packId': ?packId,
@@ -2042,6 +2097,7 @@ Future<CrateOpening> openCrate(
           !mission &&
           !event &&
           !gala &&
+          !weekly &&
           packId == null)
         'target': target,
       ..._wardrobeFlags(controller),

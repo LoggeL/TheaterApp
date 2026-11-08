@@ -83,7 +83,7 @@ test('runs add their points; the reply tells how far the next crate is', t => {
   const first = play({ score: 1400, meters: 700 });
   assert.deepEqual(first.progress, {
     meters: 2800, earned: 0, opened: 0, crates: 0, previousAt: 0, nextAt: 3000, poolSize: 3, complete: false, ensembleCrates: 0, dupes: true, runMeters: 700, bonusMeters: 0, bonusOpen: false, missionMeters: 0, missionCrates: 0, eventCrates: 0,
-    packCrates: 0, packGoals: [], galaCrates: 0,
+    packCrates: 0, packGoals: [], galaCrates: 0, weeklyCrates: 0,
     unit: 'points', points: { total: 2800, base: 0, runs: 1400, bonus: 1400, missions: 0 },
     gained: 700, bonus: 700, missionBonus: 0, newCrates: 0, gainedPoints: { run: 1400, bonus: 1400, missions: 0 },
   });

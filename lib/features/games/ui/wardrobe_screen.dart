@@ -239,6 +239,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   bool get _missions => missionsAvailable(controller);
   bool get _eventCrates => eventCratesAvailable(controller);
   bool get _gala => monthlyGalaAvailable(controller);
+  bool get _weekly => weeklyRewardsAvailable(controller);
   bool get _gageCrates => gageCratesAvailable(controller);
   bool get _packs => packGoalsAvailable(controller);
   bool get _unique => uniqueFiguresAvailable(controller);
@@ -254,6 +255,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         (_ensemble && w.ensemble != null ? w.progress.ensembleCrates : 0) +
         (_eventCrates ? w.eventCrates.length : 0) +
         (_gala ? w.gala.crates : 0) +
+        (_weekly ? w.weekly.crates : 0) +
         (_packs ? w.packCrates : 0);
   }
 
@@ -315,6 +317,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     bool ensemble = false,
     bool mission = false,
     bool gala = false,
+    bool weekly = false,
     bool gage = false,
     EventCrate? event,
     PackGoal? packGoal,
@@ -331,6 +334,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       ensemble: ensemble,
       mission: mission,
       gala: gala,
+      weekly: weekly,
       gage: gage,
       event: event != null,
       eventCrate: event,
@@ -1198,6 +1202,16 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
           icon: Icons.theater_comedy_outlined,
           count: w.gala.crates,
           open: () => _open(gala: true),
+        ),
+      if (_weekly && w.weekly.crates > 0)
+        (
+          id: 'weekly',
+          label: Text(
+            'Wochenkiste öffnen${w.weekly.crates > 1 ? ' (${w.weekly.crates})' : ''}',
+          ),
+          icon: Icons.emoji_events_outlined,
+          count: w.weekly.crates,
+          open: () => _open(weekly: true),
         ),
       if (_packs)
         for (final goal in w.packGoals)
@@ -2192,6 +2206,7 @@ bool crateWaiting(Wardrobe? w) =>
         w.progress.missionCrates > 0 ||
         w.eventCrates.isNotEmpty ||
         w.gala.crates > 0 ||
+        w.weekly.crates > 0 ||
         w.packCrates > 0);
 
 /// A small "Garderobe" button with the number of waiting crates.

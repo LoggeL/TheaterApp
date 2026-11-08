@@ -11,6 +11,7 @@ import { releasedFreeItems } from './runner-content-releases.mjs';
 import { recordPackRun, packGoalsView, nextPackCrate, markPackCrateOpened } from './runner-pack-goals.mjs';
 import { giftOf, ownFiguresCutover, settleOwnFigures } from './runner-own-figures.mjs';
 import { galaCrates, galaTrophies, galaWardrobe, markGalaCrateOpened, markGalaSeen, nextGalaCrate } from './runner-gala.mjs';
+import { markWeeklyCrateOpened, nextWeeklyCrate, weeklyCrates, weeklyWardrobe } from './runner-weekly.mjs';
 
 // "Garderobe" of the stage runner: every metre run counts towards costume crates; a crate holds one
 // item (a character, a backdrop, an obstacle set or an effect) that the person does not own yet.
@@ -61,7 +62,8 @@ import { galaCrates, galaTrophies, galaWardrobe, markGalaCrateOpened, markGalaSe
 //   score and the Ensemble-Strecke keep the real metres. No cooldown, no diminishing returns.
 // - The shared "Ensemble-Strecke" of all players lives in runner-ensemble.mjs, the private
 //   "Termin-Kiste" for an own commitment to an event (`runnerEventCrates`) in runner-event-crates.mjs,
-//   the private "Gala-Kiste" of the Monatsgala (`runnerMonthlyGala`) in runner-gala.mjs.
+//   the private "Gala-Kiste" of the Monatsgala (`runnerMonthlyGala`) in runner-gala.mjs, the private
+//   "Wochenkiste" of the Wochenprobe (`runnerWeeklyRewards`) in runner-weekly.mjs.
 // - Unique figures (`runnerUniqueFigures`, `rarity: "unique"`): one non-human character per play,
 //   unlocked by owning all of the play's active role figures, a secret until then; see
 //   runner-unique.mjs. Apps ask for them with `unique`; apps from before never see them.
@@ -426,10 +428,10 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
   const rewardFiles = new Map([...users].filter(([, xs]) => xs.every(x => x.reward)).map(([name, xs]) => [name, xs.map(x => x.id)]));
   // Files only unique figures use: served only to those who unlocked one of them.
   const uniqueFiles = new Map([...users].filter(([, xs]) => xs.every(x => x.unique)).map(([name, xs]) => [name, xs.map(x => x.id)]));
-  const { crateTargets, targetItems, galaCrate } = crateTargetsOf(collectible, rarity, data?.crates, picture, bad);
+  const { crateTargets, targetItems, galaCrate, weeklyCrate } = crateTargetsOf(collectible, rarity, data?.crates, picture, bad);
   // The masks of the Monatsgala, by name like the crates; without its picture the app draws an icon.
   const galaMasks = Object.fromEntries(galaTrophies.flatMap(id => { const image = picture(`trophy-mask-${id}.webp`); return image ? [[id, image]] : []; }));
-  const result = { rarities, departments, items, collectible, uniques, uniqueRarity, byId, files, rewardFiles, uniqueFiles, rarity, dupes, ensemble, roleFigures, baseOf, rolesOf, crateTargets, targetItems, galaCrate, galaMasks, defaults: Object.fromEntries(wardrobeKinds.map(k => [k, items.find(x => x.kind === k && x.default).id])) };
+  const result = { rarities, departments, items, collectible, uniques, uniqueRarity, byId, files, rewardFiles, uniqueFiles, rarity, dupes, ensemble, roleFigures, baseOf, rolesOf, crateTargets, targetItems, galaCrate, weeklyCrate, galaMasks, defaults: Object.fromEntries(wardrobeKinds.map(k => [k, items.find(x => x.kind === k && x.default).id])) };
   // The raw entries and their folder, only for the admins' full view (runner-admin-catalog.mjs), which
   // also lists the `disabled` ones; never part of what members get (not enumerable, not spread).
   Object.defineProperty(result, 'source', { value: { data, imageDir }, enumerable: false });
@@ -455,7 +457,8 @@ export const playSlug = name => name.toLowerCase().replace(/ä/g, 'ae').replace(
  * `box` (`[x0, y0, x1, y1]`, pixels of the closed picture) is where the crate stands on its canvas,
  * which leaves room above for the open lid: the choice shows just that part (`imageBox`). The
  * Gala-Kiste (`galaCrate`) is no target of the own crates: its look (`crates.gala`) and pictures
- * (`crate-gala*.webp`) come the same way, and it can always be opened, with or without them.
+ * (`crate-gala*.webp`) come the same way, and it can always be opened, with or without them. So
+ * does the Wochenkiste (`weeklyCrate`, `crates.weekly`, `crate-weekly*.webp`).
  */
 function crateTargetsOf(collectible, rarity, data, picture, bad) {
   if (data !== undefined && (!data || typeof data !== 'object' || Array.isArray(data))) bad('crates');
@@ -486,14 +489,17 @@ function crateTargetsOf(collectible, rarity, data, picture, bad) {
       return { id: `play:${slug}`, kind: 'play', name: p.play, play: p.play, ...(p.year !== undefined ? { year: p.year } : {}), file: `play-${slug}`, items: p.items };
     }),
   ];
-  for (const key of Object.keys(looks)) if (key !== 'gala' && !entries.some(e => e.id === key)) bad(`crates.${key}: no such crate`);
+  for (const key of Object.keys(looks)) if (key !== 'gala' && key !== 'weekly' && !entries.some(e => e.id === key)) bad(`crates.${key}: no such crate`);
   const targetItems = new Map(entries.map(e => [e.id, e.items]));
   const look = ({ file, items, ...e }) => {
     const [image, openImage, fxImage] = ['', '-open', '-fx'].map(part => picture(`crate-${file}${part}.webp`));
     const box = image && looks[e.id]?.box;
     return { ...e, animation: looks[e.id]?.animation ?? 'generic', ...(image ? { image } : {}), ...(box ? { imageBox: [...box] } : {}), ...(openImage ? { openImage } : {}), ...(fxImage ? { fxImage } : {}) };
   };
-  return { crateTargets: entries.map(look), targetItems, galaCrate: look({ id: 'gala', kind: 'gala', name: 'Gala-Kiste', file: 'gala' }) };
+  return {
+    crateTargets: entries.map(look), targetItems, galaCrate: look({ id: 'gala', kind: 'gala', name: 'Gala-Kiste', file: 'gala' }),
+    weeklyCrate: look({ id: 'weekly', kind: 'weekly', name: 'Wochenkiste', file: 'weekly' }),
+  };
 }
 
 /**
@@ -695,6 +701,9 @@ export function progressView(t, p) {
     eventCrates: waitingEventCrates(t, p.personId).length,
     // Added with `runnerMonthlyGala`: Gala-Kisten waiting.
     galaCrates: galaCrates(t, p.personId),
+    // Added with `runnerWeeklyRewards`: Wochenkisten waiting. A field of its own that apps from
+    // before neither read nor add to their count, so they never show a crate they cannot open.
+    weeklyCrates: weeklyCrates(t, p.personId),
     packCrates: packGoalsView(t, p.personId).reduce((sum, goal) => sum + goal.crates, 0),
     // Added with `runnerCratePoints`: the crate points and where they come from (`base`: moved over
     // from the metres before; `runs`: the points of every run since; `bonus`: Tagesbonus; `missions`).
@@ -824,6 +833,8 @@ function view(t, p, roles = false, unique = false) {
     // Added with `runnerMonthlyGala`: only what is the person's own, as this view is also stored
     // with every opening (`requests`); the podium has its own route.
     gala: galaWardrobe(t, p),
+    // Added with `runnerWeeklyRewards`: the own Wochenkisten, weekly trophies and the crate's look.
+    weekly: weeklyWardrobe(t, p),
     packGoals: packGoalsView(t, p.personId),
     ...(c.roleFigures ? { roleFigures: true } : {}),
     // Added with `runnerUniqueFigures`: per play the progress towards its unique figure.
@@ -933,7 +944,8 @@ function duplicate(p, draw, shiny) {
  * `{ dupes: true }` (apps with `runnerDupes`) draws with duplicates and shine; `crate: 'ensemble'`
  * opens an Ensemble-Kiste instead of a crate of the own metres, `crate: 'event'` a Termin-Kiste (the
  * one of `eventId`, else the earliest waiting; see runner-event-crates.mjs), `crate: 'gala'` the
- * earliest Gala-Kiste waiting (runner-gala.mjs), `crate: 'gage'` buys a crate for `dupes.crateGage`
+ * earliest Gala-Kiste waiting (runner-gala.mjs), `crate: 'weekly'` the earliest Wochenkiste waiting
+ * (runner-weekly.mjs), `crate: 'gage'` buys a crate for `dupes.crateGage`
  * and opens it (`runnerGageCrates`, only with `dupes`; 409 `not_enough_gage` if the balance falls
  * short). Each kind shines with its own chance (`shinyChanceOf`). `roles: true`: the app knows role figures; for older apps a won
  * role figure shows as a role of the person's figure (runner-role-figures.mjs).
@@ -944,18 +956,19 @@ function duplicate(p, draw, shiny) {
  * A complete pool still opens and brings a duplicate (shine or gage), like a complete rarity.
  */
 export function openCrate(t, uid, requestId, b = {}) {
-  const dupes = b?.dupes === true, ensemble = b?.crate === 'ensemble', mission = b?.crate === 'mission', event = b?.crate === 'event', pack = b?.crate === 'pack', gala = b?.crate === 'gala', gage = b?.crate === 'gage', roles = b?.roles === true, unique = b?.unique === true;
+  const dupes = b?.dupes === true, ensemble = b?.crate === 'ensemble', mission = b?.crate === 'mission', event = b?.crate === 'event', pack = b?.crate === 'pack', gala = b?.crate === 'gala', weekly = b?.crate === 'weekly', gage = b?.crate === 'gage', roles = b?.roles === true, unique = b?.unique === true;
   const targetId = b?.target ?? null;
   if (pack && (!dupes || !roles)) fail(400, 'Set-Kisten gibt es nur in der neuen App.');
   if (pack && (typeof b.packId !== 'string' || !b.packId)) fail(400, 'Diese Set-Kiste gibt es nicht.', 'unknown_pack');
   if (gage && !dupes) fail(400, 'Kisten für Gage gibt es nur in der neuen App.');
   if (gala && !dupes) fail(400, 'Gala-Kisten gibt es nur in der neuen App.');
+  if (weekly && !dupes) fail(400, 'Wochenkisten gibt es nur in der neuen App.');
   if (event && !dupes) fail(400, 'Termin-Kisten gibt es nur in der neuen App.');
   if (mission && !dupes) fail(400, 'Missionskisten gibt es nur in der neuen App.');
   if (ensemble && !dupes) fail(400, 'Ensemble-Kisten gibt es nur in der neuen App.');
   if (targetId !== null) {
     if (typeof targetId !== 'string') fail(400, 'Diese Kiste gibt es nicht.', 'unknown_target');
-    if (event || mission || ensemble || pack || gala) fail(400, 'Nur Kostümkisten lassen sich gezielt wählen.', 'unknown_target');
+    if (event || mission || ensemble || pack || gala || weekly) fail(400, 'Nur Kostümkisten lassen sich gezielt wählen.', 'unknown_target');
     if (!dupes && targetId !== 'random') fail(400, 'Gezielte Kisten gibt es nur in der neuen App.');
   }
   return once(t, uid, crateRequestPrefix, requestId, 'runner.crate', a => {
@@ -965,9 +978,11 @@ export function openCrate(t, uid, requestId, b = {}) {
     const eventCrate = event ? nextEventCrate(t, a.personId, b.eventId ?? null) : null;
     const packCrate = pack ? nextPackCrate(t, a.personId, b.packId) : null;
     const galaCrate = gala ? nextGalaCrate(t, a.personId) : null;
+    const weeklyCrate = weekly ? nextWeeklyCrate(t, a.personId) : null;
     const price = gage ? c.dupes.crateGage : 0, short = price - (p.gage ?? 0);
     if (gage && short > 0) fail(409, `Für diese Kiste fehlen dir noch ${short} Gage.`, 'not_enough_gage');
-    if (gage ? false : gala ? !galaCrate : pack ? !packCrate : event ? !eventCrate : mission ? missionCrates(p) <= 0 : ensemble ? ensembleCrates(p) <= 0 : cratesEarned(cratePoints(p)) - p.opened <= 0) fail(409, gala ? 'Gerade ist keine Gala-Kiste da.' : pack ? 'Gerade ist keine Set-Kiste da.' : event ? 'Gerade ist keine Termin-Kiste da.' : mission ? 'Gerade ist keine Missionskiste da.' : ensemble ? 'Gerade ist keine Ensemble-Kiste da.' : 'Gerade ist keine Kostümkiste da. Lauf weiter!', 'no_crate');
+    if (weekly && !weeklyCrate) fail(409, 'Gerade ist keine Wochenkiste da.', 'no_crate');
+    if (gage || weekly ? false : gala ? !galaCrate : pack ? !packCrate : event ? !eventCrate : mission ? missionCrates(p) <= 0 : ensemble ? ensembleCrates(p) <= 0 : cratesEarned(cratePoints(p)) - p.opened <= 0) fail(409, gala ? 'Gerade ist keine Gala-Kiste da.' : pack ? 'Gerade ist keine Set-Kiste da.' : event ? 'Gerade ist keine Termin-Kiste da.' : mission ? 'Gerade ist keine Missionskiste da.' : ensemble ? 'Gerade ist keine Ensemble-Kiste da.' : 'Gerade ist keine Kostümkiste da. Lauf weiter!', 'no_crate');
     if (!dupes) {
       // Older apps: only what is still missing; with nothing left the crates stay closed.
       const before = ownedIds(t, p), { items: candidates, open } = pool(t, p, before);
@@ -986,20 +1001,21 @@ export function openCrate(t, uid, requestId, b = {}) {
     }
     const draw = drawWithDupes(c, owned, t.random, open, items);
     if (!draw) fail(409, 'Im Fundus ist noch nichts.', 'wardrobe_complete');
-    const crate = gage ? 'gage' : gala ? 'gala' : pack ? 'pack' : event ? 'event' : mission ? 'mission' : ensemble ? 'ensemble' : 'costume';
+    const crate = gage ? 'gage' : weekly ? 'weekly' : gala ? 'gala' : pack ? 'pack' : event ? 'event' : mission ? 'mission' : ensemble ? 'ensemble' : 'costume';
     // The Zufallskiste keeps the shine chance of the own crates (`costume`); an aimed one has `targeted`.
     const shiny = t.random() < shinyChanceOf(c, target || pack ? 'targeted' : gage ? 'costume' : crate);
     // A crate bought is paid first: a duplicate's gage comes on top of what is left.
     const paid = gage ? { ...p, gage: (p.gage ?? 0) - price } : p;
     const { next, outcome } = draw.duplicate ? duplicate(paid, draw, shiny)
       : { next: { ...paid, owned: [...list(paid.owned), draw.item.id], ...(shiny ? { shiny: [...list(paid.shiny), draw.item.id] } : {}) }, outcome: { type: 'new' } };
-    const counted = event || pack || gala || gage ? {} : mission ? { missionOpened: (p.missionOpened ?? 0) + 1 } : ensemble ? { ensembleOpened: (p.ensembleOpened ?? 0) + 1 } : { opened: p.opened + 1 };
+    const counted = event || pack || gala || weekly || gage ? {} : mission ? { missionOpened: (p.missionOpened ?? 0) + 1 } : ensemble ? { ensembleOpened: (p.ensembleOpened ?? 0) + 1 } : { opened: p.opened + 1 };
     if (eventCrate) markEventCrateOpened(t, eventCrate, draw.item.id);
     if (galaCrate) markGalaCrateOpened(t, galaCrate);
+    if (weeklyCrate) markWeeklyCrateOpened(t, weeklyCrate);
     if (packCrate && !markPackCrateOpened(t, a.personId, packCrate.releaseId)) fail(409, 'Gerade ist keine Set-Kiste da.', 'no_crate');
     const saved = t.store.put('runnerProgress', a.personId, settleUnlocks(t, { ...next, ...counted }));
     const aim = crate === 'costume' || gage ? { target: target?.id ?? 'random' } : {};
-    const result = { item: draw.item, ...reel(t, draw.item, open, owned, items), outcome: { ...outcome, duplicate: draw.duplicate, shiny, rarity: draw.tier.id, crate, ...aim, ...(gage ? { cost: price } : {}), ...(eventCrate ? { event: crateView(eventCrate) } : {}), ...(galaCrate ? { month: galaCrate.month } : {}), ...(packCrate ? { packId: packCrate.releaseId, name: packCrate.name } : {}) }, wardrobe: view(t, saved, roles, unique) };
+    const result = { item: draw.item, ...reel(t, draw.item, open, owned, items), outcome: { ...outcome, duplicate: draw.duplicate, shiny, rarity: draw.tier.id, crate, ...aim, ...(gage ? { cost: price } : {}), ...(eventCrate ? { event: crateView(eventCrate) } : {}), ...(galaCrate ? { month: galaCrate.month } : {}), ...(weeklyCrate ? { week: weeklyCrate.week } : {}), ...(packCrate ? { packId: packCrate.releaseId, name: packCrate.name } : {}) }, wardrobe: view(t, saved, roles, unique) };
     return { result: roles ? result : olderAppOpening(c, result), subject: `${draw.item.id}${draw.duplicate ? ` ${outcome.type}` : ''}${shiny ? ' shiny' : ''}${target ? ` ${target.id}` : ''}${gage ? ` -${price}` : ''}` };
   }, catalogFor(t, roles, unique));
 }

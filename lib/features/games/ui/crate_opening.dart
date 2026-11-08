@@ -30,6 +30,7 @@ Future<Wardrobe?> showCrateOpening(
   bool mission = false,
   bool event = false,
   bool gala = false,
+  bool weekly = false,
   bool gage = false,
   EventCrate? eventCrate,
   PackGoal? packGoal,
@@ -48,6 +49,7 @@ Future<Wardrobe?> showCrateOpening(
       mission: mission,
       event: event,
       gala: gala,
+      weekly: weekly,
       gage: gage,
       eventCrate: eventCrate,
       packGoal: packGoal,
@@ -79,6 +81,7 @@ class CrateOpeningPage extends StatefulWidget {
     this.mission = false,
     this.event = false,
     this.gala = false,
+    this.weekly = false,
     this.gage = false,
     this.eventCrate,
     this.packGoal,
@@ -110,6 +113,9 @@ class CrateOpeningPage extends StatefulWidget {
 
   /// A Gala-Kiste of the Monatsgala, the earliest waiting.
   final bool gala;
+
+  /// A Wochenkiste of the Wochenprobe, the earliest waiting.
+  final bool weekly;
 
   /// A crate bought with gage: each one is paid and confirmed on its own, so
   /// it offers no "Nächste Kiste".
@@ -160,7 +166,12 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
 
   /// The crate with a look of its own: it opens its own way before the reel.
   CrateTarget? get _look =>
-      _target ?? (widget.gala ? _wardrobe.gala.crate : null);
+      _target ??
+      (widget.gala
+          ? _wardrobe.gala.crate
+          : widget.weekly
+          ? _wardrobe.weekly.crate
+          : null);
 
   // Keep the key after a failed reply: retrying must return this opening,
   // even if the server already consumed its crate before the connection failed.
@@ -174,6 +185,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
       !widget.mission &&
       !widget.event &&
       !widget.gala &&
+      !widget.weekly &&
       widget.packGoal == null;
   bool _changed = false, _wearing = false;
   String? _error;
@@ -221,6 +233,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                 mission: widget.mission,
                 event: widget.event,
                 gala: widget.gala,
+                weekly: widget.weekly,
                 gage: widget.gage,
                 eventId: _eventCrate?.eventId,
                 target: _target?.id,
@@ -423,6 +436,8 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
               ? 'Die Set-Kiste geht auf …'
               : widget.gala
               ? 'Die Gala-Kiste geht auf …'
+              : widget.weekly
+              ? 'Die Wochenkiste geht auf …'
               : widget.event
               ? 'Die Termin-Kiste geht auf …'
               : widget.mission
@@ -523,6 +538,8 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                       ? 'Set-Kiste · ${result.outcome.packName ?? widget.packGoal!.name}'
                       : widget.gala
                       ? 'Gala-Kiste'
+                      : widget.weekly
+                      ? 'Wochenkiste'
                       : widget.event
                       ? eventCrateTitle(result.outcome.event ?? _eventCrate)
                       : widget.mission
@@ -594,6 +611,8 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         ? _wardrobe.packGoal(widget.packGoal!.releaseId)?.crates ?? 0
         : widget.gala
         ? _wardrobe.gala.crates
+        : widget.weekly
+        ? _wardrobe.weekly.crates
         : widget.event
         ? _wardrobe.eventCrates.length
         : widget.mission
@@ -608,6 +627,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
             widget.mission ||
             widget.event ||
             widget.gala ||
+            widget.weekly ||
             p.dupes ||
             !p.complete);
     final line = outcome.type == 'new' && outcome.shiny

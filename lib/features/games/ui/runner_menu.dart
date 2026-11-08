@@ -6,6 +6,7 @@ import '../../../shared/widgets/page_header.dart';
 import '../data/leaderboard_api.dart';
 import '../data/runner_menu_preferences.dart';
 import '../data/wardrobe_api.dart' show GalaTrophy;
+import '../data/weekly_api.dart' show WeeklyTrophies, WeeklyTrophy;
 import 'gala.dart';
 
 final _number = NumberFormat.decimalPattern('de');
@@ -484,10 +485,57 @@ String weeklyCountdown(DateTime endsAt, DateTime now) {
 String weeklyAttemptsText(int used, int max) =>
     used >= max ? 'Alle $max Versuche genutzt' : 'Versuch ${used + 1} von $max';
 
-/// "Letzte Woche: Platz 2 · +40 Gage", shown once after a week.
-String weeklyRewardText(int rank, int gage) => gage > 0
-    ? 'Letzte Woche: Platz $rank · +${_number.format(gage)} Gage'
-    : 'Letzte Woche: Platz $rank';
+/// "1 Wochenkiste", "2 Wochenkisten".
+String weeklyCratesText(int crates) =>
+    crates == 1 ? '1 Wochenkiste' : '$crates Wochenkisten';
+
+/// "Letzte Woche: Platz 2 · Silber-Pokal · +50 Gage · 1 Wochenkiste", shown
+/// once after a week; older servers name only the place and the Gage.
+String weeklyRewardText(
+  int rank,
+  int gage, {
+  WeeklyTrophy? trophy,
+  int crates = 0,
+}) => [
+  'Letzte Woche: Platz $rank',
+  ?trophy?.title,
+  if (gage > 0) '+${_number.format(gage)} Gage',
+  if (crates > 0) weeklyCratesText(crates),
+].join(' · ');
+
+/// The Pokale of the Wochenprobe beside a name: a small cup in the colour of
+/// each kind won with its count ("3×"), the best first. Nothing without any.
+class WeeklyTrophyBadges extends StatelessWidget {
+  const WeeklyTrophyBadges({super.key, required this.trophies, this.size = 15});
+  final WeeklyTrophies trophies;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    if (trophies.isEmpty) return const SizedBox.shrink();
+    final style = Theme.of(
+      context,
+    ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800);
+    return Tooltip(
+      message: trophies.text,
+      excludeFromSemantics: true,
+      child: Semantics(
+        label: 'Pokale: ${trophies.text}',
+        excludeSemantics: true,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (i, (trophy, n)) in trophies.won.indexed) ...[
+              if (i > 0) const SizedBox(width: 4),
+              Icon(Icons.emoji_events, size: size, color: trophy.color),
+              Text('$n×', style: style),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 /// The way into the Wochenprobe on the menu: the week's attempts, how long
 /// its course stays and the own place.
@@ -993,18 +1041,37 @@ class RunnerRankRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        name,
-                        style: style,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                // The mark beside the name may take at most 60 % of the row
+                // and shrinks to fit there (several Pokale at a large font
+                // on a small phone), so the name always keeps some room.
+                LayoutBuilder(
+                  builder: (context, constraints) => Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          name,
+                          style: style,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                    if (mask != null) ...[const SizedBox(width: 6), mask!],
-                  ],
+                      if (mask != null) ...[
+                        const SizedBox(width: 6),
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: constraints.hasBoundedWidth
+                                ? constraints.maxWidth * 0.6
+                                : double.infinity,
+                          ),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: AlignmentDirectional.centerStart,
+                            child: mask,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
                 if (fraction != null)
                   Padding(

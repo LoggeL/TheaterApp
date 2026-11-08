@@ -16,10 +16,10 @@ enum RunnerBoardView {
 
 /// Small choices of the Bühnenlauf menu, remembered on this device like the
 /// scenery motion (`RunnerMotionPreferences`): whether the day's finished
-/// missions are shown in full, which ranking is open, and whether training
-/// in the Wochenprobe shows the ghosts. Only a
-/// convenience: without storage the defaults apply and a failed save is
-/// ignored.
+/// missions are shown in full, which ranking is open, whether training
+/// in the Wochenprobe shows the ghosts, and which entries of "Neu im
+/// Bühnenlauf" were shown (see `runner_news.dart`). Only a convenience:
+/// without storage the defaults apply and a failed save is ignored.
 class RunnerMenuPreferences extends ChangeNotifier {
   RunnerMenuPreferences({
     @visibleForTesting Future<SharedPreferences> Function()? loadPreferences,
@@ -39,11 +39,16 @@ class RunnerMenuPreferences extends ChangeNotifier {
 
   static const trainingGhostsKey = 'stageRunner.trainingGhosts';
 
+  /// The ids of the news entries shown on this device.
+  static const newsSeenKey = 'stageRunner.newsSeen';
+
   final Future<SharedPreferences> Function() _loadPreferences;
   bool _doneMissionsOpen = false, _disposed = false;
   bool _changedDone = false, _changedBoard = false;
   bool _trainingGhosts = true, _changedGhosts = false;
   RunnerBoardView _board = RunnerBoardView.month;
+  final _newsSeen = <String>{};
+  bool _newsKnown = false;
 
   /// Whether finished missions show as rows (else one short line).
   bool get doneMissionsOpen => _doneMissionsOpen;
@@ -52,6 +57,13 @@ class RunnerMenuPreferences extends ChangeNotifier {
   /// Whether training runs of the Wochenprobe show the ghosts (ranked runs
   /// always do).
   bool get trainingGhosts => _trainingGhosts;
+
+  /// The news entries already shown here.
+  Set<String> get newsSeen => Set.unmodifiable(_newsSeen);
+
+  /// Whether [newsSeen] is known: storage answered. Without it no news is
+  /// offered, so it cannot come again at every start.
+  bool get newsKnown => _newsKnown;
 
   /// Completes even when storage is unavailable.
   late final Future<void> loaded;
@@ -70,6 +82,8 @@ class RunnerMenuPreferences extends ChangeNotifier {
       if (!_changedDone && done != null) _doneMissionsOpen = done;
       final ghosts = preferences.getBool(trainingGhostsKey);
       if (!_changedGhosts && ghosts != null) _trainingGhosts = ghosts;
+      _newsSeen.addAll(preferences.getStringList(newsSeenKey) ?? const []);
+      _newsKnown = true;
       if (!_changedBoard) {
         _board =
             RunnerBoardView.values.where((v) => v.name == board).firstOrNull ??
@@ -103,6 +117,19 @@ class RunnerMenuPreferences extends ChangeNotifier {
     _trainingGhosts = shown;
     notifyListeners();
     _save((p) => p.setBool(trainingGhostsKey, shown));
+  }
+
+  /// Remembers the news entries [ids] as shown, with all seen before.
+  void markNewsSeen(Iterable<String> ids) {
+    if (_disposed || _newsSeen.containsAll(ids)) return;
+    _newsSeen.addAll(ids);
+    notifyListeners();
+    final all = _newsSeen.toList();
+    _save((p) async {
+      // Another screen may have marked others meanwhile.
+      final stored = p.getStringList(newsSeenKey) ?? const [];
+      return p.setStringList(newsSeenKey, {...stored, ...all}.toList());
+    });
   }
 
   Future<void> _save(Future<bool> Function(SharedPreferences) write) async {
