@@ -2,6 +2,8 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import 'course_random.dart';
+
 /// Shared limits of "Bühnenlauf"; the server checks scores against the same
 /// numbers (`stageRunner` in server/src/theater.mjs).
 abstract final class RunnerRules {
@@ -15,7 +17,8 @@ abstract final class RunnerRules {
   static double speedAt(double seconds) =>
       min(maxSpeed, startSpeed + acceleration * seconds);
 
-  /// Metres a run can cover in [seconds].
+  /// Metres a run covers in [seconds]: every run moves at the same pace, so
+  /// this is also where each one is after [seconds].
   static double maxMeters(double seconds) {
     final t = max(0.0, seconds), top = (maxSpeed - startSpeed) / acceleration;
     final units = t <= top
@@ -24,6 +27,18 @@ abstract final class RunnerRules {
               acceleration * top * top / 2 +
               maxSpeed * (t - top);
     return units * metersPerUnit;
+  }
+
+  /// When a run has covered [meters]: the inverse of [maxMeters].
+  static double secondsAt(double meters) {
+    final units = meters / metersPerUnit;
+    if (!(units > 0)) return 0;
+    const top = (maxSpeed - startSpeed) / acceleration;
+    const reach = startSpeed * top + acceleration * top * top / 2;
+    if (units >= reach) return top + (units - reach) / maxSpeed;
+    return (sqrt(startSpeed * startSpeed + 2 * acceleration * units) -
+            startSpeed) /
+        acceleration;
   }
 }
 
@@ -117,12 +132,28 @@ class Pickup {
 /// always reachable at the current speed, but speed and density keep growing
 /// until the gaps get too tight to react – then the curtain falls.
 ///
+/// The course is a pure function of [seed]: every roll comes from its own
+/// [CourseRandom], and a section is placed only from where it stands (the
+/// time the runner gets there follows from the distance, see
+/// [RunnerRules.secondsAt]), never from the frames so far, the picture's
+/// width or the pickups taken. So the Wochenprobe gives everyone the same
+/// course; a normal run gets a fresh seed.
+///
 /// Pure game state without Flutter widgets, advanced by [update]; objects are
 /// recycled instead of allocated per section.
 class StageRunner {
-  StageRunner({Random? random}) : _random = random ?? Random();
+  /// A run on the course of [seed]; without one on a random course (rolled
+  /// from [random] when given, which keeps tests reproducible).
+  StageRunner({Random? random, int? seed})
+    : seed =
+          (seed ?? (random ?? Random()).nextInt(CourseRandom.seeds)) &
+          (CourseRandom.seeds - 1) {
+    _random = CourseRandom(this.seed);
+  }
 
-  final Random _random;
+  /// The course's seed, a uint32.
+  final int seed;
+  late final CourseRandom _random;
 
   /// Visible course width in stage heights; the runner stays at [runnerX].
   static const viewWidth = 1.6, runnerX = .4;
@@ -138,14 +169,27 @@ class StageRunner {
   /// Vertical acceleration and speed limits (stage heights per second).
   static const lift = 5.2, gravity = 4.6, maxRise = 1.6, maxFall = 1.8;
 
-  /// Obstacles that join the course once the score reaches their points; the
-  /// earlier ones stay. Each one's first appearance comes right after.
+  /// Obstacles that join the course from these metres on; the earlier ones
+  /// stay. The first one is the first section the runner gets to with at
+  /// least these metres, so it stands where it stands on every run of a
+  /// seed. Apps up to 0.14 counted points instead (250, 500, 750 and 1000):
+  /// the metres are where a typical run met them then, halfway between a
+  /// careful run and one that takes every pickup (about 1.35 and 1.55
+  /// points per metre), less the half section the runner goes on to the
+  /// first one standing past them (see the calibration in
+  /// test/runner_course_test.dart). The server mirrors them (`runnerDebuts`
+  /// in server/src/runner-missions.mjs).
   static const debuts = [
-    (250, ObstacleKind.drum),
-    (500, ObstacleKind.pile),
-    (750, ObstacleKind.truss),
-    (1000, ObstacleKind.drop),
+    (185, ObstacleKind.drum),
+    (370, ObstacleKind.pile),
+    (555, ObstacleKind.truss),
+    (740, ObstacleKind.drop),
   ];
+
+  /// Sent with every score, so the server knows the obstacles of this
+  /// course join by metres ([debuts]); apps up to 0.14 send none
+  /// (`runnerCourse` in server/src/runner-missions.mjs).
+  static const courseVersion = 2;
 
   /// A drum rolls towards the runner at this speed (stage heights per
   /// second), never faster or slower, never stopping.
@@ -222,7 +266,7 @@ class StageRunner {
   /// Whether that obstacle was part of a gap ([Obstacle.gap]).
   bool hitGap = false;
 
-  /// How many of the [debuts] the score has reached.
+  /// How many of the [debuts] the course has reached.
   int unlocked = 0;
 
   /// The newest obstacle kind and where its first one stands. The stage
@@ -269,16 +313,6 @@ class StageRunner {
     }
   }
 
-  /// Seconds the runner needs for [units] more stage heights at the growing
-  /// speed.
-  double _secondsFor(double units) {
-    const a = RunnerRules.acceleration, top = RunnerRules.maxSpeed;
-    final v = speed, rising = (top - v) / a;
-    final reach = v * rising + a * rising * rising / 2;
-    if (units >= reach) return rising + (units - reach) / top;
-    return (sqrt(v * v + 2 * a * units) - v) / a;
-  }
-
   /// Pickup points placed so far, for the per-metre limit.
   int placedPickupPoints = 0;
 
@@ -312,14 +346,20 @@ class StageRunner {
   static double unitsAt(double seconds) =>
       RunnerRules.maxMeters(seconds) / RunnerRules.metersPerUnit;
 
+  /// When the runner's centre gets to world x [x]: the same in every run.
+  static double timeAtX(double x) =>
+      RunnerRules.secondsAt((x - runnerX) * RunnerRules.metersPerUnit);
+
   void update(double dt) {
     dt = dt.clamp(0, .05).toDouble();
     if (over) {
       sinceOver += dt;
       return;
     }
+    // Exactly as far as [unitsAt] says, however the frames fall: where the
+    // runner is at a time is the same in every run (and for every ghost).
+    final step = unitsAt(time + dt) - unitsAt(time);
     time += dt;
-    final step = speed * dt;
     distance += step;
     vy = (vy + (holding ? -lift : gravity) * dt)
         .clamp(-maxRise, maxFall)
@@ -444,17 +484,13 @@ class StageRunner {
   void _section() {
     final x = _pastDrum(_nextX), m = x * RunnerRules.metersPerUnit;
     _drum = null;
-    // The speed when the runner gets here, not the current one. It is
-    // estimated as on the narrowest picture, from [lead] ahead: a wider one
-    // lays the course out earlier, but must not lay out another one.
-    const lead = viewWidth + .4 - runnerX;
-    final ahead = max(0.0, x - runnerWorldX);
-    final then = ahead > lead ? time + _secondsFor(ahead - lead) : time;
-    final arrival =
-        then + min(ahead, lead) / max(RunnerRules.speedAt(then), .01);
-    final v = RunnerRules.speedAt(arrival);
+    // The speed when the runner gets here, not the current one: it follows
+    // from where the section stands, so it is the same in every run.
+    final v = RunnerRules.speedAt(timeAtX(x));
     final spacing = max(.6, v * reactionTime(m));
-    while (unlocked < debuts.length && score >= debuts[unlocked].$1) {
+    // The runner's metres on getting here.
+    final arriving = (x - runnerX) * RunnerRules.metersPerUnit;
+    while (unlocked < debuts.length && arriving >= debuts[unlocked].$1) {
       unlocked++;
     }
     final ObstacleKind kind;
@@ -521,8 +557,7 @@ class StageRunner {
         width = drumWidth;
         // It gets to x just when the runner does, so the space before it is
         // as long as usual; until then it is further on, rolling.
-        final meets =
-            time + _secondsFor(max(0.0, x - hitHalfWidth - runnerWorldX));
+        final meets = timeAtX(x - hitHalfWidth);
         final left = x + rollSpeed * (meets - time);
         _obstacle(kind, left, width, floor - width, floor)
           ..falling = true
@@ -563,20 +598,20 @@ class StageRunner {
 
   /// Where the section that would start at [x] starts instead, so that the
   /// drum before it (if any) does not roll over it in the picture: by the
-  /// time it shows on the right, even of a [rollView] wide picture, the drum
-  /// has rolled past it. Only ever further on; early in a run, when the
-  /// runner is slow, by a few hundredths.
+  /// time it shows on the right of a [rollView] wide picture, the drum has
+  /// rolled past it. Only ever further on; early in a run, when the runner
+  /// is slow, by a few hundredths. The same on every screen, so the course
+  /// is; only still wider pictures may show a drum close to its neighbour
+  /// at their far right.
   double _pastDrum(double x) {
     final drum = _drum;
     if (drum == null) return x;
-    final view = max(rollView, _view);
     bool clear(double x) {
-      // When the drum's right edge has rolled past x, and how far the runner
-      // has come by then (counted from now, either way).
+      // When the drum's right edge has rolled past x, and where the
+      // picture's left edge is by then.
       final at =
           drum.meets - (x - rollClearance - drumWidth - drum.x) / rollSpeed;
-      final then = distance + unitsAt(at) - unitsAt(time);
-      return then + view <= x - rollClearance;
+      return unitsAt(at) + rollView <= x - rollClearance;
     }
 
     while (!clear(x)) {

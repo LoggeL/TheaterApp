@@ -4,7 +4,7 @@ import { Store } from '../src/store.mjs';
 import { Theater, apiFeatures } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
 import { loadCatalog } from '../src/runner-wardrobe.mjs';
-import { bestsOf, checkRunStats, chooseMission, dayMissions, missionOptions, missionRules, missionSlots, missionText, nice, raiseBest, seeded } from '../src/runner-missions.mjs';
+import { bestsOf, checkRunStats, chooseMission, dayMissions, legacyRunnerDebuts, missionOptions, missionRules, missionSlots, missionText, nice, raiseBest, runnerDebuts, seeded } from '../src/runner-missions.mjs';
 
 // Tagesmissionen: three a day per person, measured on the own best runs.
 const rarities = [{ id: 'hell', name: 'Hellblau', color: '#5E98D9', weight: 60, gage: 10 }];
@@ -104,7 +104,7 @@ test('targets: start values for new players, shares of the own bests for experie
   assert.deepEqual(missionOptions('collect', 'easy', none).map(o => [o.kind, o.target]), [['rose', 5], ['mask', 2], ['star', 1]]);
   // Without enough runs no obstacle of a debut and no debut mission.
   assert.ok(missionOptions('pass', 'hard', none).every(o => ['crate', 'flat', 'lamp', 'border', 'sandbag'].includes(o.kind)));
-  assert.deepEqual(missionOptions('debut', 'medium', none), []);
+  assert.deepEqual(missionOptions('reach', 'medium', none), []);
 
   // Runs of 80 … 320 m, best 320 m and 448 points: 30 %, 42 % and 57 % of the best distance.
   const window = windowOf(200), ctx = ctxOf(window);
@@ -114,15 +114,21 @@ test('targets: start values for new players, shares of the own bests for experie
   assert.deepEqual(missionOptions('runs', 'medium', ctx), [{ target: 3, min: 110 }]);
   // Even figures: 1 below 30, then 5, 10, 25, 50, 100.
   assert.deepEqual([7.4, 47, 183, 812, 1424, 4321].map(nice), [7, 45, 180, 800, 1400, 4300]);
-  // Obstacles of a debut only where a run at the slot reaches them: the Kabeltrommel (250) at
-  // 58 % of 448 points, not at 30 %; the Kistenstapel (500) never.
-  assert.ok(!missionOptions('pass', 'easy', ctx).some(o => o.kind === 'drum'));
-  const passKinds = missionOptions('pass', 'hard', ctx).map(o => o.kind);
+  // Obstacles of a debut only where a run at the slot reaches them: the Kabeltrommel (185 m) not
+  // at 57 % of 320 m (182 m), but at 57 % of 400 m, not at 30 %; the Kistenstapel (370 m) never.
+  const further = ctxOf(windowOf(250));
+  assert.ok(!missionOptions('pass', 'hard', ctx).some(o => o.kind === 'drum'));
+  assert.ok(!missionOptions('pass', 'easy', further).some(o => o.kind === 'drum'));
+  const passKinds = missionOptions('pass', 'hard', further).map(o => o.kind);
   assert.ok(passKinds.includes('drum'));
   assert.ok(!passKinds.includes('pile') && !passKinds.includes('truss'));
-  // The debut near the slot's points target (0.95 to 1.25 times it).
-  assert.deepEqual(missionOptions('debut', 'medium', ctxOf(window, 1000)), [{ kind: 'pile', target: 500 }]);
-  assert.deepEqual(missionOptions('debut', 'hard', ctx), [{ kind: 'drum', target: 250 }]);
+  // The debut near the slot's distance target (0.95 to 1.25 times it): 42 % of 800 m and 57 % of
+  // 320 m; none near 42 % of 320 m. Points no longer matter.
+  assert.deepEqual(missionOptions('reach', 'medium', ctxOf(windowOf(500), 99999)), [{ kind: 'pile', target: 370 }]);
+  assert.deepEqual(missionOptions('reach', 'hard', ctx), [{ kind: 'drum', target: 185 }]);
+  assert.deepEqual(missionOptions('reach', 'medium', ctxOf(window, 1000)), []);
+  // A type no longer made (`debut`, by points) offers nothing.
+  assert.deepEqual(missionOptions('debut', 'hard', ctx), []);
   // A kind of play the player hardly does is not offered rather than made too hard: one star at
   // best, a little ceiling.
   assert.ok(!missionOptions('collect', 'hard', ctx).some(o => o.kind === 'star'));
@@ -184,6 +190,9 @@ test('texts name the target in German', () => {
   assert.equal(missionText({ type: 'pass', kind: 'truss', target: 8 }).text, 'Unterquere 8 Traversen in einem Lauf');
   assert.equal(missionText({ type: 'pass', kind: 'drum', target: 3 }).text, 'Komm an 3 Kabeltrommeln vorbei in einem Lauf');
   assert.equal(missionText({ type: 'dailyDistance', target: 1500 }).text, 'Lauf heute insgesamt 1.500 m');
+  assert.equal(missionText({ type: 'reach', kind: 'truss', target: 555 }).text, 'Erreiche die Traverse: 555 m in einem Lauf');
+  assert.deepEqual(missionText({ type: 'reach', kind: 'drum', target: 185 }), { text: 'Erreiche die Kabeltrommel: 185 m in einem Lauf', unit: 'm' });
+  // Made before the debuts went by metres.
   assert.equal(missionText({ type: 'debut', kind: 'truss', target: 750 }).text, 'Erreiche die Traverse: 750 Punkte in einem Lauf');
   assert.equal(missionText({ type: 'runs', target: 3, min: 200 }).text, 'Schaff heute 3 Läufe mit je mindestens 200 m');
 });
@@ -197,13 +206,45 @@ test('the run statistics are checked for plausibility', () => {
     [{ ...ok, rose: 5 }, run], // pickups do not add up to the points beyond the metres
     [{ ...ok, rose: -1 }, run], [{ ...ok, mask: 1.5 }, run], [{ ...ok, passed: { dragon: 1 } }, run], [{ ...ok, passed: [] }, run],
     [{ ...ok, passed: { crate: 60 } }, run], // more obstacles than sections fit
-    [{ ...ok, passed: { truss: 1 } }, run], // a truss below 750 points
+    [{ ...ok, passed: { truss: 1 } }, run], // a truss below 555 m (and below 750 points)
+    [{ ...ok, passed: { pile: 1 } }, { ...run, course: 2 }], // a pile below 370 m in an app whose obstacles join by metres
     [{ rose: 36, mask: 0, star: 0, ground: 0, ceiling: 0 }, { meters: 50, score: 230, metersSent: true }], // more rows than sections
     [{ ground: 0, ceiling: 0, passed: { border: 1 } }, { meters: 60, score: 60, metersSent: true }], // borders only from 80 m
     [ok, { ...run, metersSent: false }], // without the exact metres nothing can be checked
     ['viel', run], [null, run],
   ];
   for (const [stats, r] of bad) assert.equal(checkRunStats(stats, r), null, JSON.stringify(stats));
+});
+
+test('debut obstacles count by metres; runs of older apps also by their points', () => {
+  const stats = passed => ({ rose: 0, mask: 0, star: 0, ground: 0, ceiling: 0, passed });
+  // 300 m with 520 points: the Kistenstapel joined older apps at 500 points, newer ones at 370 m.
+  const old = { meters: 300, score: 520, metersSent: true }, pile = stats({ pile: 1 });
+  pile.rose = 44;
+  assert.deepEqual(checkRunStats(pile, old)?.passed, { pile: 1 });
+  assert.equal(checkRunStats(pile, { ...old, course: 2 }), null);
+  // 365 m: the first pile stands at 370 m and is passed a few metres ahead of the runner.
+  assert.deepEqual(checkRunStats(stats({ pile: 1 }), { meters: 365, score: 365, metersSent: true, course: 2 })?.passed, { pile: 1 });
+  assert.equal(checkRunStats(stats({ pile: 1 }), { meters: 350, score: 350, metersSent: true, course: 2 }), null);
+  // Neither rule: 200 m with 400 points.
+  const neither = stats({ pile: 1 }); neither.rose = 40;
+  assert.equal(checkRunStats(neither, { meters: 200, score: 400, metersSent: true }), null);
+  // Metres reached, points not: fine for both kinds of app (the new rule of an older app is not
+  // known, it may be an app with metres that sends no `course`).
+  assert.deepEqual(checkRunStats(stats({ drop: 1, truss: 2 }), { meters: 750, score: 750, metersSent: true })?.passed, { drop: 1, truss: 2 });
+});
+
+test('the debut metres meet a typical run where the points of before did', () => {
+  // Where runs first got to each obstacle under the points of apps up to 0.14, as the app's course
+  // test simulates it (test/runner_course_test.dart, which also checks that the app has these
+  // metres): a careful player who ignores the pickups and one who takes every pickup. A typical run
+  // is halfway; the first obstacle stands a few metres past its debut (the section the runner gets to).
+  const careful = [202.9, 399.4, 598.7, 797.7], greedy = [174.7, 344.4, 520.1, 698.9];
+  for (const [i, [meters, kind]] of runnerDebuts.entries()) {
+    assert.equal(kind, legacyRunnerDebuts[i][1]);
+    const typical = (careful[i] + greedy[i]) / 2;
+    assert.ok(meters <= typical && meters >= typical * 0.97, `${kind}: ${meters} m against ${Math.round(typical)} m`);
+  }
 });
 
 test('implausible statistics count for no mission, the run counts as before', t => {

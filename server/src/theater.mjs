@@ -4,7 +4,7 @@ import { compareProductionsNewestFirst } from './production-order.mjs';
 import { leadPushKinds, memberPushKinds } from './push-kinds.mjs';
 import { migrateSharedSpeakers, sharedSpeakersMigrationId, splitSharedSpeakers } from './shared-speakers.mjs';
 import { feedbackList, feedbackTicketsMigrationId, forgetFeedbackAccount, forgetFeedbackPerson, migrateFeedbackTickets, setFeedbackStatus, submitFeedback } from './feedback-tickets.mjs';
-import { checkRunStats, missions, rerollMission } from './runner-missions.mjs';
+import { checkRunStats, missions, rerollMission, runnerCourse } from './runner-missions.mjs';
 import { findRound, finishRound, startRound } from './runner-rounds.mjs';
 import { autoCheckins, eventCrateNotice, forgetEventCrates, settleCheckinCrate } from './runner-event-crates.mjs';
 import { buyItem, bundledCatalog, collectionBoard, ensembleSeen, galaSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
@@ -13,6 +13,7 @@ import { packGoalsView } from './runner-pack-goals.mjs';
 import { adminRunnerCatalog, adminRunnerSkin } from './runner-admin-catalog.mjs';
 import { forgetMonthScores, periodBoard, rankedBoard, recordMonthRun } from './runner-monthly.mjs';
 import { forgetGala, galaView } from './runner-gala.mjs';
+import { checkGhost, forgetWeekly, recordWeeklyRun, startWeeklyRound, weeklyAnswer, weeklySeen, weeklyView } from './runner-weekly.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { archiveForm, attachForm, checkFormSubmissionOpen, forgetFormGenerations, forgetFormSubmissions, formStatus, saveForm, submitForm, withdrawForm } from './forms.mjs';
 
@@ -47,7 +48,7 @@ export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // An optional reason when an event is called off (`event.cancel`); shown in the app and in the push.
 export const cancelReasonMaxLength = 300;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink', 'runnerMonthlyGala', 'runnerGageCrates', 'eventCancel']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink', 'runnerMonthlyGala', 'runnerGageCrates', 'eventCancel', 'runnerWeekly']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -469,39 +470,56 @@ export class Theater {
   /**
    * Starts a run of the stage runner for the caller. No cooldown: only a spam guard of `startBurst`
    * starts per `startWindowMs`; the start history keeps no more than that window. Earlier runs stay
-   * open (see runner-rounds.mjs), so a quick "Nochmal" does not lose the last result.
+   * open (see runner-rounds.mjs), so a quick "Nochmal" does not lose the last result. `weekly`
+   * (`{ week, ranked }`) starts a run of the Wochenprobe (runner-weekly.mjs); without it as before.
    */
-  runnerStart(uid) {
+  runnerStart(uid, b = {}) {
     return this.store.transaction(() => {
-      const a = this.account(uid);
+      const a = this.account(uid), at = this.clock();
       // Observe readiness before this round starts, so delayed artwork never credits an older run.
       packGoalsView(this, a.personId);
-      const { roundId, startedAt } = startRound(this, a.personId, this.clock(), stageRunner);
+      if (b?.weekly !== undefined && b?.weekly !== null) return startWeeklyRound(this, a.personId, b.weekly, at, extra => startRound(this, a.personId, at, stageRunner, extra));
+      const { roundId, startedAt } = startRound(this, a.personId, at, stageRunner);
       return { roundId, startedAt };
     });
   }
   /**
    * Ends one of the caller's open runs with its score and keeps the person's best score. The same
-   * result sent again gets the first answer and counts no second time.
+   * result sent again gets the first answer and counts no second time. A run of the Wochenprobe
+   * (`weekly`, from its start) counts for its week with `ghost` and for the progress, never for the
+   * all-time or the month's list.
    */
   runnerScore(uid, b) {
     return this.store.transaction(() => {
       const a = this.account(uid), at = +this.clock();
       if (!Number.isInteger(b.score) || b.score < 0) fail(400, 'Ungültiger Punktestand.', 'implausible');
       const { repeat, elapsed, round } = findRound(this, a.personId, b.roundId, b, at, stageRunner);
-      if (repeat) return { score: b.score, improved: repeat.improved, leaderboard: this.runnerBoard(a), progress: repeat.progress };
+      if (repeat) return { score: b.score, improved: repeat.improved, leaderboard: this.runnerBoard(a), progress: repeat.progress, ...(repeat.weekly ? { weekly: weeklyAnswer(this, a.personId, repeat.weekly) } : {}) };
       if (b.score > runnerMaxScore(elapsed)) fail(400, 'So viele Punkte sind in dieser Zeit nicht möglich.', 'implausible');
+      const weekly = round.weekly ?? null;
+      if (weekly && !Number.isInteger(b.meters)) fail(400, 'Die Meter des Laufs fehlen.', 'implausible');
       const meters = runMeters(b, elapsed, runnerMaxMeters, stageRunner), points = runPoints(b, meters);
+      const ghost = weekly?.ranked ? checkGhost(b.ghost, { meters, elapsed }) : null;
       // Before the round is counted: a first progress record credits only the earlier runs.
       // Tagesmissionen: the run's statistics only count if they are plausible; the run counts anyway.
       const statsSent = b.missionStats !== undefined && b.missionStats !== null;
-      const stats = checkRunStats(b.missionStats, { meters, score: b.score, metersSent: Number.isInteger(b.meters) });
+      // Apps whose obstacles join by metres say so (`course`); the Wochenprobe has only those.
+      const stats = checkRunStats(b.missionStats, { meters, score: b.score, metersSent: Number.isInteger(b.meters), course: weekly ? runnerCourse : b.course });
       const progress = recordRun(this, a.personId, meters, b.hitBy, new Date(at), { score: b.score, points, stats, statsSent, startedAt: new Date(round.startedAt) });
-      const old = this.store.get('runnerScores', a.personId), improved = b.score > (old?.best ?? 0);
-      const when = new Date(at).toISOString();
+      const old = this.store.get('runnerScores', a.personId), when = new Date(at).toISOString();
+      // Every run counts as one (`rounds`, beside the deaths of `recordRun`); only a normal one can
+      // be the all-time best.
+      const counted = (best, bestAt) => this.store.put('runnerScores', a.personId, { personId: a.personId, best, bestAt, rounds: (old?.rounds ?? 0) + 1, lastPlayedAt: when });
+      if (weekly) {
+        counted(old?.best ?? 0, old?.bestAt ?? null);
+        const run = recordWeeklyRun(this, a.personId, weekly, { score: b.score, meters, ghost, at: when });
+        finishRound(this, a.personId, b.roundId, b, { improved: false, progress, weekly: run });
+        return { score: b.score, improved: false, leaderboard: this.runnerBoard(a), progress, weekly: weeklyAnswer(this, a.personId, run) };
+      }
+      const improved = b.score > (old?.best ?? 0);
       // The Monatsrangliste (runner-monthly.mjs) keeps the best of the Berlin month beside it.
       recordMonthRun(this, a.personId, b.score, when, old);
-      this.store.put('runnerScores', a.personId, { personId: a.personId, best: improved ? b.score : old?.best ?? 0, bestAt: improved ? when : old?.bestAt ?? null, rounds: (old?.rounds ?? 0) + 1, lastPlayedAt: when });
+      counted(improved ? b.score : old?.best ?? 0, improved ? when : old?.bestAt ?? null);
       // Each run counts once; a repeat of this result gets this answer (see runner-rounds.mjs).
       finishRound(this, a.personId, b.roundId, b, { improved, progress });
       return { score: b.score, improved, leaderboard: this.runnerBoard(a), progress };
@@ -527,6 +545,9 @@ export class Theater {
   // The Monatsgala lives in runner-gala.mjs.
   runnerGala(uid) { return galaView(this, uid); }
   runnerGalaSeen(uid, b) { return galaSeen(this, uid, b); }
+  // The Wochenprobe lives in runner-weekly.mjs.
+  runnerWeekly(uid) { return weeklyView(this, uid); }
+  runnerWeeklySeen(uid, b) { return weeklySeen(this, uid, b); }
   // Tagesmissionen live in runner-missions.mjs.
   runnerMissions(uid) { return missions(this, uid); }
   runnerMissionReroll(uid, requestId, b) { return rerollMission(this, uid, requestId, b); }
@@ -1545,6 +1566,7 @@ export class Theater {
     s.delete('runnerScores', personId); s.delete('runnerRounds', personId); s.delete('runnerProgress', personId); s.delete('runnerMissions', personId);
     forgetMonthScores(s, personId);
     forgetGala(s, personId);
+    forgetWeekly(s, personId);
     // Keep anonymous shared progress, remove the deleted member's personal set-goal records.
     for (const x of s.all('runnerPackContributions').filter(x => x.personId === personId)) s.delete('runnerPackContributions', `${x.releaseId}:${personId}`);
     forgetEventCrates(s, personId);

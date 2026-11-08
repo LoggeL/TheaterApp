@@ -17,6 +17,7 @@ class RunScore {
     required this.meters,
     this.hitBy,
     this.missionStats,
+    this.ghost,
   });
 
   /// The round the server started for this run; null when it did not start.
@@ -24,6 +25,9 @@ class RunScore {
   final int score, meters;
   final ObstacleKind? hitBy;
   final Map<String, Object>? missionStats;
+
+  /// A ranked run of the Wochenprobe: its ghost ([GhostRecorder.encode]).
+  final String? ghost;
 }
 
 /// Sends the results of runs, also while the next run is already playing,
@@ -66,9 +70,8 @@ class RunnerScoreOutbox {
 
   /// Sends the waiting results again, one after the other; stops at the
   /// first one that still finds no connection.
-  Future<void> retry() => _retrying ??= _retryAll().whenComplete(
-    () => _retrying = null,
-  );
+  Future<void> retry() =>
+      _retrying ??= _retryAll().whenComplete(() => _retrying = null);
 
   Future<void> _retryAll() async {
     while (_waiting.isNotEmpty) {
@@ -96,6 +99,7 @@ class RunnerScoreOutbox {
     meters: entry.run.meters,
     hitBy: entry.run.hitBy,
     missionStats: entry.run.missionStats,
+    ghost: entry.run.ghost,
   );
 
   /// Errors without an answer, timeouts and server faults may pass; a

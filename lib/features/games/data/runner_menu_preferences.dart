@@ -16,7 +16,8 @@ enum RunnerBoardView {
 
 /// Small choices of the Bühnenlauf menu, remembered on this device like the
 /// scenery motion (`RunnerMotionPreferences`): whether the day's finished
-/// missions are shown in full, and which ranking is open. Only a
+/// missions are shown in full, which ranking is open, and whether training
+/// in the Wochenprobe shows the ghosts. Only a
 /// convenience: without storage the defaults apply and a failed save is
 /// ignored.
 class RunnerMenuPreferences extends ChangeNotifier {
@@ -36,14 +37,21 @@ class RunnerMenuPreferences extends ChangeNotifier {
   /// a chosen collection stays.
   static const legacyBoardKey = 'stageRunner.boardView';
 
+  static const trainingGhostsKey = 'stageRunner.trainingGhosts';
+
   final Future<SharedPreferences> Function() _loadPreferences;
   bool _doneMissionsOpen = false, _disposed = false;
   bool _changedDone = false, _changedBoard = false;
+  bool _trainingGhosts = true, _changedGhosts = false;
   RunnerBoardView _board = RunnerBoardView.month;
 
   /// Whether finished missions show as rows (else one short line).
   bool get doneMissionsOpen => _doneMissionsOpen;
   RunnerBoardView get board => _board;
+
+  /// Whether training runs of the Wochenprobe show the ghosts (ranked runs
+  /// always do).
+  bool get trainingGhosts => _trainingGhosts;
 
   /// Completes even when storage is unavailable.
   late final Future<void> loaded;
@@ -60,6 +68,8 @@ class RunnerMenuPreferences extends ChangeNotifier {
             _ => null,
           };
       if (!_changedDone && done != null) _doneMissionsOpen = done;
+      final ghosts = preferences.getBool(trainingGhostsKey);
+      if (!_changedGhosts && ghosts != null) _trainingGhosts = ghosts;
       if (!_changedBoard) {
         _board =
             RunnerBoardView.values.where((v) => v.name == board).firstOrNull ??
@@ -85,6 +95,14 @@ class RunnerMenuPreferences extends ChangeNotifier {
     _board = board;
     notifyListeners();
     _save((p) => p.setString(boardKey, board.name));
+  }
+
+  void setTrainingGhosts(bool shown) {
+    if (_disposed || shown == _trainingGhosts) return;
+    _changedGhosts = true;
+    _trainingGhosts = shown;
+    notifyListeners();
+    _save((p) => p.setBool(trainingGhostsKey, shown));
   }
 
   Future<void> _save(Future<bool> Function(SharedPreferences) write) async {

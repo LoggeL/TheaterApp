@@ -16,7 +16,8 @@ import { berlinDay } from './event-series.mjs';
 // - Which missions: deterministic from person and day (and yesterday's types, which are avoided),
 //   never two of a type on one day. One mission per day may be rerolled for free.
 // - A run's statistics are checked for plausibility (sums, pickup points, obstacles per metre,
-//   debuts only with their points); implausible ones count for no mission, the run itself counts.
+//   debuts only with their metres, or for older apps their points); implausible ones count for no
+//   mission, the run itself counts.
 // - Apps without statistics (older ones) only get the types the server can check from metres and
 //   points; the kind of client is decided when the day's missions are made.
 // - "Without a pickup" (`noPickup`) is the only condition a run can break after it was met, so it is
@@ -36,8 +37,18 @@ export const rewardPoints = m => m.unit === 'points' ? m.reward : Math.round(m.r
 const list = value => Array.isArray(value) ? value : [];
 export const missionRequestPrefix = 'runner-mission:';
 export const missionSlots = Object.freeze(['easy', 'medium', 'hard']);
-// The points at which an obstacle joins the course (`StageRunner.debuts` in the app).
-export const runnerDebuts = Object.freeze([[250, 'drum'], [500, 'pile'], [750, 'truss'], [1000, 'drop']]);
+// The metres at which an obstacle joins the course (`StageRunner.debuts` in the app, course rule
+// `runnerCourse`): where it stands, so the course is the same for every run of a seed. Calibrated
+// so that a typical run meets each one about where the points of before (`legacyRunnerDebuts`) did:
+// halfway between a careful run and one that takes every pickup. The app's course test simulates
+// it (test/runner_course_test.dart) and checks that these are the app's values.
+export const runnerDebuts = Object.freeze([[185, 'drum'], [370, 'pile'], [555, 'truss'], [740, 'drop']]);
+// The points at which an obstacle joined the course in apps up to 0.14 (no `course` sent).
+export const legacyRunnerDebuts = Object.freeze([[250, 'drum'], [500, 'pile'], [750, 'truss'], [1000, 'drop']]);
+// The course rule of apps whose obstacles join by metres (`course: 2` with the score).
+export const runnerCourse = 2;
+// A debut obstacle counts as passed where it stands, a bit ahead of the runner (as the borders).
+const debutSlack = 10;
 export const missionPickups = Object.freeze({ rose: 5, mask: 10, star: 25 });
 export const missionObstacles = Object.freeze(['crate', 'flat', 'lamp', 'border', 'sandbag', 'drum', 'pile', 'truss', 'drop']);
 
@@ -65,16 +76,17 @@ export const missionRules = Object.freeze({
     collect: { weight: 2, slots: missionSlots, share: { easy: 0.3, medium: 0.45, hard: 0.6 }, kinds: { rose: { min: 3, start: [5, 9, 14] }, mask: { min: 2, start: [2, 4, 6] }, star: { min: 1, start: [1, 2, 3] } }, max: 400 },
     ground: { weight: 1.5, slots: missionSlots, share: { easy: 0.25, medium: 0.38, hard: 0.55 }, min: 20, max: 4000, start: [20, 35, 55] },
     ceiling: { weight: 1.5, slots: missionSlots, share: { easy: 0.25, medium: 0.38, hard: 0.55 }, min: 10, max: 3000, start: [10, 20, 35] },
-    // Obstacles of a debut only for those whose runs at this slot reach its points; `min` is 1 for them.
+    // Obstacles of a debut only for those whose runs at this slot reach its metres; `min` is 1 for them.
     pass: { weight: 2, slots: missionSlots, share: { easy: 0.3, medium: 0.45, hard: 0.65 }, min: 2, debutMin: 1, max: 400, start: { crate: [4, 7, 10], flat: [3, 5, 8], lamp: [4, 7, 10], border: [3, 6, 9], sandbag: [2, 4, 6] } },
     // Distance before the first pickup: shares of the best such stretch or, if higher, of
     // `ofDistance` times the best run (avoiding every pickup costs distance).
     noPickup: { weight: 1, slots: missionSlots, share: { easy: 0.22, medium: 0.32, hard: 0.45 }, ofDistance: 0.6, min: 80, max: 4000, start: [100, 150, 220] },
     // Metres today in total: `ofBest` times the best run. Only easy.
     dailyDistance: { weight: 1.5, basic: true, slots: ['easy'], ofBest: 1, min: 500, max: 30000, start: [600] },
-    // Reach an obstacle's points in a run, if they lie near this slot's points target: within
-    // `band` times it (the highest such obstacle).
-    debut: { weight: 1.5, basic: true, slots: ['medium', 'hard'], band: [0.95, 1.25] },
+    // Reach an obstacle's metres in a run, if they lie near this slot's distance target: within
+    // `band` times it (the highest such obstacle). A type of its own: apps up to 0.14 count the
+    // missions of type `debut` (made before, by points) live with the score, and this one not at all.
+    reach: { weight: 1.5, basic: true, slots: ['medium', 'hard'], band: [0.95, 1.25] },
     // Own idea: a series, `count` runs today of at least `share` of the best run.
     runs: { weight: 1, basic: true, slots: ['easy', 'medium'], count: 3, share: { easy: 0.22, medium: 0.33 }, min: 60, max: 4000, start: [100, 150] },
   },
@@ -104,14 +116,18 @@ export function nice(v) {
 }
 const within = (v, min, max) => Math.min(max, Math.max(min, nice(Math.min(max, Math.max(min, v)))));
 
+const debutOf = kind => runnerDebuts.find(([, k]) => k === kind)?.[0] ?? 0;
+const legacyDebutOf = kind => legacyRunnerDebuts.find(([, k]) => k === kind)?.[0] ?? 0;
+
 /**
  * The checked statistics of a run, or null if they are missing or implausible: sums within the
  * metres, pickups exactly the points beyond the metres, no more pickup rows and obstacles than
- * sections fit in the distance, debut obstacles only with their points. `beforePickup` (newer apps
+ * sections fit in the distance, debut obstacles only with their metres (older apps: or their points,
+ * [course] is not `runnerCourse`). `beforePickup` (newer apps
  * only, absent stays absent): within the metres, all of them in a run without pickups, and the
  * pickups must fit the way left after it.
  */
-export function checkRunStats(raw, { meters, score, metersSent }) {
+export function checkRunStats(raw, { meters, score, metersSent, course }) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !metersSent) return null;
   const count = v => v === undefined ? 0 : Number.isInteger(v) && v >= 0 ? v : NaN;
   const s = { rose: count(raw.rose), mask: count(raw.mask), star: count(raw.star), ground: count(raw.ground), ceiling: count(raw.ceiling), passed: {} };
@@ -128,7 +144,10 @@ export function checkRunStats(raw, { meters, score, metersSent }) {
   const sections = meters / 6 + 2, rows = s.rose / 3 + s.mask / 2 + s.star;
   if (rows > sections) return null;
   if (Object.values(s.passed).reduce((a, b) => a + b, 0) > sections) return null;
-  for (const [points, kind] of runnerDebuts) if (s.passed[kind] && score < points) return null;
+  // Debut obstacles by metres (`course: 2`); older apps sent their points, so for them either rule
+  // will do (they cannot tell which one their app had).
+  const reached = kind => meters + debutSlack >= debutOf(kind) || (course !== runnerCourse && score >= legacyDebutOf(kind));
+  for (const [, kind] of runnerDebuts) if (s.passed[kind] && !reached(kind)) return null;
   // Borders join the course at 80 m, sandbags at 150 m (counted where they stand, a bit ahead).
   if ((s.passed.border && meters < 70) || (s.passed.sandbag && meters < 140)) return null;
   if (raw.beforePickup !== undefined) {
@@ -142,7 +161,6 @@ export function checkRunStats(raw, { meters, score, metersSent }) {
   return s;
 }
 
-const debutOf = kind => runnerDebuts.find(([, k]) => k === kind)?.[0] ?? 0;
 
 /**
  * The metres of a run with statistics before its first pickup. Older apps do not say: then the whole
@@ -157,6 +175,7 @@ const metersBeforePickup = ({ meters, score, stats }) => stats.beforePickup ?? (
  */
 export function missionOptions(type, slot, ctx) {
   const r = ctx.rules ?? missionRules, d = r.types[type], i = missionSlots.indexOf(slot), best = ctx.best ?? {};
+  if (!d) return [];
   const few = (ctx.runs ?? 0) < r.minRuns;
   // share × best within the limits; with few runs at least the start value. [strict]: a kind of play
   // the person hardly does (below the minimum) is not offered rather than made too hard.
@@ -166,7 +185,7 @@ export function missionOptions(type, slot, ctx) {
     return [within(Math.max(value * share, few && start !== undefined ? start : 0), min, max)];
   };
   const share = d.share?.[slot];
-  const points = slotShare => best.s * r.types.points.share[slotShare];
+  const reach = slotShare => best.m * r.types.distance.share[slotShare];
   switch (type) {
     case 'distance': case 'points':
       return target(best[type === 'distance' ? 'm' : 's'], share, d.start[i], d.min, d.max).map(t => ({ target: t }));
@@ -176,8 +195,8 @@ export function missionOptions(type, slot, ctx) {
       return Object.entries(d.kinds).flatMap(([kind, k]) => target(best[kind], share, k.start[i], k.min, d.max, true).map(t => ({ kind, target: t })));
     case 'pass': {
       if (!best.passed) return Object.entries(d.start).map(([kind, start]) => ({ kind, target: within(start[i], d.min, d.max) }));
-      // An obstacle of a debut only if a run at this slot's share of the best points gets there.
-      return missionObstacles.filter(kind => !debutOf(kind) || points(slot) >= debutOf(kind))
+      // An obstacle of a debut only if a run at this slot's share of the best distance gets there.
+      return missionObstacles.filter(kind => !debutOf(kind) || reach(slot) >= debutOf(kind))
         .flatMap(kind => target(best.passed[kind] ?? 0, share, undefined, debutOf(kind) ? d.debutMin : d.min, d.max, true).map(t => ({ kind, target: t })));
     }
     case 'noPickup': {
@@ -186,10 +205,10 @@ export function missionOptions(type, slot, ctx) {
     }
     case 'dailyDistance': return target(best.m, d.ofBest, d.start[0], d.min, d.max).map(t => ({ target: t }));
     case 'runs': return target(best.m, share, d.start[i], d.min, d.max).map(min => ({ target: d.count, min }));
-    case 'debut': {
-      if (!(best.s > 0) || few || !d.slots.includes(slot)) return [];
-      const [low, high] = d.band.map(f => points(slot) * f);
-      const hit = runnerDebuts.findLast(([p]) => p > low && p <= high);
+    case 'reach': {
+      if (!(best.m > 0) || few || !d.slots.includes(slot)) return [];
+      const [low, high] = d.band.map(f => reach(slot) * f);
+      const hit = runnerDebuts.findLast(([m]) => m > low && m <= high);
       return hit ? [{ kind: hit[1], target: hit[0] }] : [];
     }
     default: return [];
@@ -275,6 +294,7 @@ function runValue(m, run) {
   switch (m.type) {
     case 'distance': return meters;
     case 'points': case 'debut': return score;
+    case 'reach': return meters;
     case 'collect': return stats ? stats[m.kind] : null;
     case 'ground': case 'ceiling': return stats ? stats[m.type] : null;
     case 'pass': return stats ? stats.passed[m.kind] ?? 0 : null;
@@ -346,6 +366,8 @@ export function missionText(m) {
     case 'noPickup': return { text: `Lauf ${n} m, ohne etwas einzusammeln`, unit: 'm' };
     case 'dailyDistance': return { text: `Lauf heute insgesamt ${n} m`, unit: 'm' };
     case 'runs': return { text: `Schaff heute ${n} Läufe mit je mindestens ${number.format(m.min)} m`, unit: 'Läufe' };
+    case 'reach': return { text: `Erreiche ${debutNames[m.kind]}: ${n} m in einem Lauf`, unit: 'm' };
+    // Made before the debuts went by metres.
     case 'debut': return { text: `Erreiche ${debutNames[m.kind]}: ${n} Punkte in einem Lauf`, unit: 'Punkte' };
     default: return { text: 'Mission', unit: '' };
   }

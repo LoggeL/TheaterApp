@@ -427,6 +427,10 @@ Duration _berlinOffset(DateTime utc) {
   return Duration(hours: summer ? 2 : 1);
 }
 
+/// The wall clock in Berlin at [time].
+DateTime berlinWallClock(DateTime time) =>
+    time.toUtc().add(_berlinOffset(time));
+
 /// The headline of a month list: "Oktober 2026 · noch 3 Tage", today
 /// included, counted in German time; "· letzter Tag" on the last one.
 /// [month] is `YYYY-MM`; once [endsAt] has passed only the month shows.
@@ -447,6 +451,129 @@ String? monthHeadline(String? month, DateTime? endsAt, DateTime now) {
   if (left > 1) return '$name · noch $left Tage';
   if (left == 1) return '$name · letzter Tag';
   return name;
+}
+
+/// "Woche 46 · 9.–15. November": the ISO week of the Wochenprobe and its
+/// days in Berlin; [startsAt] and [endsAt] are Monday 00:00 there.
+String weeklyHeadline(String week, DateTime startsAt, DateTime endsAt) {
+  final number = RegExp(r'W(\d{1,2})$').firstMatch(week)?[1];
+  final first = berlinWallClock(startsAt);
+  final last = berlinWallClock(endsAt).subtract(const Duration(days: 1));
+  final days = first.month == last.month
+      ? '${first.day}.–${last.day}. ${_monthNames[last.month - 1]}'
+      : '${first.day}. ${_monthNames[first.month - 1]} – '
+            '${last.day}. ${_monthNames[last.month - 1]}';
+  return number == null ? days : 'Woche ${int.parse(number)} · $days';
+}
+
+/// "Neue Strecke in 2 Tagen 5 Std.": how long this week's course stays.
+String weeklyCountdown(DateTime endsAt, DateTime now) {
+  final left = endsAt.difference(now);
+  if (left <= Duration.zero) return 'Die neue Strecke ist da';
+  final days = left.inDays, hours = left.inHours % 24;
+  final minutes = left.inMinutes % 60;
+  if (days > 0) {
+    return 'Neue Strecke in $days ${days == 1 ? 'Tag' : 'Tagen'}'
+        '${hours > 0 ? ' $hours Std.' : ''}';
+  }
+  if (hours > 0) return 'Neue Strecke in $hours Std. $minutes Min.';
+  return 'Neue Strecke in ${minutes < 1 ? 1 : minutes} Min.';
+}
+
+/// "Versuch 2 von 3": the next ranked attempt, or that none is left.
+String weeklyAttemptsText(int used, int max) =>
+    used >= max ? 'Alle $max Versuche genutzt' : 'Versuch ${used + 1} von $max';
+
+/// "Letzte Woche: Platz 2 · +40 Gage", shown once after a week.
+String weeklyRewardText(int rank, int gage) => gage > 0
+    ? 'Letzte Woche: Platz $rank · +${_number.format(gage)} Gage'
+    : 'Letzte Woche: Platz $rank';
+
+/// The way into the Wochenprobe on the menu: the week's attempts, how long
+/// its course stays and the own place.
+class RunnerWeeklyCard extends StatelessWidget {
+  const RunnerWeeklyCard({
+    super.key,
+    required this.onOpen,
+    this.week,
+    this.startsAt,
+    this.endsAt,
+    this.used = 0,
+    this.max = 3,
+    this.rank,
+    this.reward = false,
+    this.now,
+  });
+  final VoidCallback onOpen;
+
+  /// Null until the week is known.
+  final String? week;
+  final DateTime? startsAt, endsAt;
+  final int used, max;
+  final int? rank;
+
+  /// Whether last week's reward waits to be seen.
+  final bool reward;
+  final DateTime? now;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final ends = endsAt;
+    final lines = week == null || ends == null
+        ? 'Eine Strecke für alle, drei Wertungsläufe pro Woche'
+        : '${weeklyAttemptsText(used, max)} · '
+              '${weeklyCountdown(ends, now ?? DateTime.now())}';
+    return Card(
+      key: const ValueKey('runner-weekly'),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onOpen,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 12, 14),
+          child: Row(
+            children: [
+              const Icon(Icons.event_repeat, color: StageTheme.orange),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Wochenprobe', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 2),
+                    Text(lines, style: theme.textTheme.bodySmall),
+                    if (reward)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Deine Belohnung von letzter Woche wartet',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: StageTheme.orange,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (rank != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Text(
+                    'Platz $rank',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              Icon(Icons.chevron_right, color: theme.hintColor),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// The rankings: the best run of this month ("Monat", the main view where
@@ -725,7 +852,7 @@ class _RunnerRankingCardState extends State<RunnerRankingCard> {
       ..._rows<LeaderboardEntry>(
         entries,
         mine,
-        (e) => _RankRow(
+        (e) => RunnerRankRow(
           rank: e.rank,
           name: e.name,
           own: mine(e),
@@ -772,7 +899,7 @@ class _RunnerRankingCardState extends State<RunnerRankingCard> {
       ..._rows<CollectionEntry>(
         board.entries,
         (e) => e.me,
-        (e) => _RankRow(
+        (e) => RunnerRankRow(
           rank: e.rank,
           name: e.name,
           own: e.me,
@@ -796,8 +923,9 @@ class _RunnerRankingCardState extends State<RunnerRankingCard> {
 }
 
 /// One place of a ranking; the own one tinted and bold.
-class _RankRow extends StatelessWidget {
-  const _RankRow({
+class RunnerRankRow extends StatelessWidget {
+  const RunnerRankRow({
+    super.key,
     required this.rank,
     required this.name,
     required this.own,

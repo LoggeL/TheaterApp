@@ -135,6 +135,7 @@ void main() {
         'meters': a.meters,
         'hitBy': a.hitBy!.name,
         'missionStats': a.missionStats,
+        'course': StageRunner.courseVersion,
       },
     ]);
     await tester.pumpWidget(const SizedBox());
@@ -177,11 +178,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
 
     final [a, b] = games;
-    expect([for (final s in scores) (s['roundId'], s['score'])], [
-      ('r-1', a.score),
-      ('r-2', b.score),
-      ('r-1', a.score),
-    ]);
+    expect(
+      [for (final s in scores) (s['roundId'], s['score'])],
+      [('r-1', a.score), ('r-2', b.score), ('r-1', a.score)],
+    );
     // A resend says the same about the run as the first try, also what the
     // missions need, fixed when the curtain fell.
     expect(scores[2]['missionStats'], scores[0]['missionStats']);

@@ -462,15 +462,19 @@ void main() {
   });
 
   group('new obstacles', () {
-    test('each joins once the score reaches its points, and shows at once', () {
+    test('each joins once the run reaches its metres, and shows at once', () {
       for (var seed = 0; seed < 4; seed++) {
         final game = StageRunner(random: Random(seed))..invincible = true;
-        final firstSeen = <ObstacleKind, int>{};
+        // The metres when the runner (its centre, as the debut's metres
+        // count) first gets to one of a kind.
+        final firstMet = <ObstacleKind, int>{};
         final debuts = <ObstacleKind>[];
         while (game.time < 200) {
           _greedyStep(game);
           for (final o in game.obstacles) {
-            firstSeen.putIfAbsent(o.kind, () => game.score);
+            if (o.left <= game.runnerWorldX) {
+              firstMet.putIfAbsent(o.kind, () => game.meters);
+            }
           }
           final debut = game.debut;
           if (debut != null && !debuts.contains(debut.kind)) {
@@ -482,12 +486,14 @@ void main() {
             );
           }
         }
-        expect(game.score, greaterThan(1000), reason: 'seed $seed');
+        expect(game.meters, greaterThan(800), reason: 'seed $seed');
         expect(debuts, [for (final (_, kind) in StageRunner.debuts) kind]);
-        for (final (points, kind) in StageRunner.debuts) {
+        for (final (meters, kind) in StageRunner.debuts) {
+          // Right from its metres on (the server counts passing one only
+          // from there), and the next section at the latest.
           expect(
-            firstSeen[kind],
-            greaterThanOrEqualTo(points),
+            firstMet[kind],
+            inInclusiveRange(meters, meters + 30),
             reason: '$kind, seed $seed',
           );
         }
@@ -578,6 +584,7 @@ void main() {
       check, {
       double seconds = 150,
       int seeds = 3,
+      List<double> views = views,
     }) {
       for (final view in views) {
         for (var seed = 0; seed < seeds; seed++) {
@@ -646,7 +653,15 @@ void main() {
       // Drawings reach a little beyond their hitboxes.
       const reach = StageRunner.rollClearance / 2;
       var close = 0;
-      watch((game, o, before, view, why) {
+      // The course is the same on every screen (the Wochenprobe), so it
+      // keeps the room for pictures up to [StageRunner.rollView]; still
+      // wider ones may show a drum close to its neighbour at the far right.
+      final wide = [
+        for (final v in views)
+          if (v <= StageRunner.rollView) v,
+      ];
+      expect(wide, contains(3.5));
+      watch(views: wide, (game, o, before, view, why) {
         if (!inPicture(game, o.left - reach, o.right + reach, view)) return;
         for (final other in game.obstacles) {
           if (identical(other, o)) continue;
@@ -1592,6 +1607,8 @@ void main() {
         'hitBy': game.hitBy!.name,
         // For the Tagesmissionen; servers without them ignore it.
         'missionStats': game.missionStats,
+        // Obstacles join by metres; older servers ignore it.
+        'course': 2,
       });
       expect(find.text('Der Vorhang fällt!'), findsOneWidget);
       expect(find.text('Neuer persönlicher Bestwert!'), findsOneWidget);

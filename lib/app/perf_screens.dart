@@ -36,6 +36,7 @@ import '../features/galleries/ui/gallery_editor_screen.dart' show GalleryEditor;
 import '../features/galleries/ui/gallery_list_screen.dart'
     show GalleryListScreen;
 import '../features/galleries/ui/gallery_screen.dart' show GalleryScreen;
+import '../features/games/ui/runner_weekly.dart' show RunnerWeeklyScreen;
 import '../features/games/ui/stage_runner_screen.dart' show StageRunnerScreen;
 import '../features/games/ui/wardrobe_screen.dart' show WardrobeScreen;
 import '../features/messages/ui/message_composer_screen.dart'
@@ -117,6 +118,7 @@ const Map<Type, String> perfScreenNames = {
   ProfileScreen: 'ProfileScreen',
   ResponsesAdminScreen: 'ResponsesAdminScreen',
   RolesAdminScreen: 'RolesAdminScreen',
+  RunnerWeeklyScreen: 'RunnerWeeklyScreen',
   ScenePlannerScreen: 'ScenePlannerScreen',
   ScriptReaderScreen: 'ScriptReaderScreen',
   ScriptRolesScreen: 'ScriptRolesScreen',

@@ -20,11 +20,14 @@ import '../data/runner_menu_preferences.dart';
 import '../data/runner_motion_preferences.dart';
 import '../data/score_outbox.dart';
 import '../data/wardrobe_api.dart';
+import '../data/weekly_api.dart';
+import '../domain/runner_ghost.dart';
 import '../domain/stage_runner.dart';
 import 'ensemble_card.dart' show EnsembleStrip;
 import 'gala.dart';
 import 'missions_card.dart';
 import 'runner_menu.dart';
+import 'runner_weekly.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_fx.dart';
 import 'stage_runner_look.dart';
@@ -185,6 +188,17 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   /// Whether the last run's result waits in the outbox for a connection.
   bool _queued = false;
 
+  /// The Wochenprobe (`runnerWeekly`): this week as last loaded, for the
+  /// menu's entry; the mode of the current (or last) run, null for a normal
+  /// one; the ghost a ranked run records; the ghosts it shows; and what its
+  /// result changed.
+  WeeklyChallenge? _weekly;
+  WeeklyPlay? _weeklyPlay;
+  GhostRecorder? _recorder;
+  RunnerGhosts? _ghosts;
+  WeeklyRunResult? _weeklyResult;
+  bool get _weeklyShown => weeklyAvailable(controller);
+
   /// The stage's size in this run, and whether the run waits for a tap
   /// after the size changed (see [_resized]).
   Size? _stageSize;
@@ -208,7 +222,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     super.initState();
     _ticker = createTicker(_tick);
     _lifecycle = AppLifecycleListener(
+      // Control Center, a call or another app in front: the run waits for a
+      // tap, as after a new size, instead of flying on unsteered (a ranked
+      // attempt of the Wochenprobe has no second try).
+      onInactive: _pauseRun,
       onHide: () {
+        if (_pauseRun()) return;
         if (_sound case final RunnerMusic music) music.pauseMusic();
       },
       onShow: () {
@@ -223,6 +242,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       unawaited(runnerScoreOutbox(controller).retry());
     }
     if (_collectionShown) _loadCollection();
+    if (_weeklyShown) unawaited(_loadWeekly());
     _menu.addListener(_menuChanged);
     if (_art == null) {
       RunnerArt.load().then((art) {
@@ -533,17 +553,68 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     }
   }
 
-  void _play() {
-    if (!_motion.ready) return;
+  /// This week's Wochenprobe for the menu, quietly: without it the entry
+  /// still leads there.
+  Future<void> _loadWeekly() async {
+    try {
+      final week = await loadWeekly(controller);
+      if (mounted) setState(() => _weekly = week);
+    } catch (e) {
+      if (kDebugMode) debugPrint('Bühnenlauf: Wochenprobe fehlt: $e');
+    }
+  }
+
+  Future<void> _openWeekly() async {
+    final play = await openRunnerWeekly(
+      context,
+      controller,
+      initial: _weekly,
+      preferences: _menu,
+      // The page shows last week's reward (once): the entry stops pointing
+      // to it, also when the page is left for a run.
+      onLoaded: (week) {
+        if (mounted) setState(() => _weekly = week.withoutLastWeek());
+      },
+    );
+    if (!mounted) return;
+    if (play != null) {
+      _play(play);
+    } else if (_phase != _Phase.playing) {
+      // A reward seen there leaves the entry.
+      unawaited(_loadWeekly());
+    }
+  }
+
+  /// Starts a run: a normal one on a fresh course, or one of the
+  /// Wochenprobe ([weekly]) on this week's course. A ranked attempt was
+  /// started on the server already and plays even before the motion
+  /// setting is known, as it counts.
+  void _play([WeeklyPlay? weekly]) {
+    if (!_motion.ready && weekly?.ranked != true) return;
     final run = ++_run;
-    final game = _game = StageRunner(random: widget.random);
+    final game = _game = weekly == null
+        ? StageRunner(random: widget.random)
+        : StageRunner(seed: weekly.seed);
+    _weeklyPlay = weekly;
+    _weeklyResult = null;
+    _recorder = weekly?.ranked ?? false
+        ? (GhostRecorder()..record(game))
+        : null;
+    _ghosts = weekly != null && (weekly.ranked || weekly.ghosts)
+        ? RunnerGhosts(weekly.challenge.ghosts)
+        : null;
     final perf = _perf = RunnerPerf(
       game,
       curtainStart: _curtainStart,
       sound: () => _sound.enabled.value,
     );
     final fx = _fx = RunnerFx(
-      best: _board?.own?.score,
+      // Training counts for no list: no record to break.
+      best: weekly == null
+          ? _board?.own?.score
+          : weekly.ranked
+          ? weekly.challenge.best?.score
+          : null,
       onSound: (sfx) {
         perf.played();
         _sound.play(sfx);
@@ -573,17 +644,27 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _stageSize = null;
     _paused = false;
     // The server times the run; a failed start only means it is not ranked.
-    _start = _ranked
-        ? startRound(controller).then<String?>(
-            (id) => id,
-            onError: (Object e) {
-              if (mounted && run == _run) {
-                setState(() => _saveError = userMessage(e));
-              }
-              return null;
-            },
-          )
-        : null;
+    // A ranked weekly run was started before (and counted).
+    final Future<String>? starting = weekly?.start != null
+        ? Future.value(weekly!.start!.roundId)
+        : !_ranked
+        ? null
+        : weekly != null
+        ? startWeeklyRound(
+            controller,
+            week: weekly.challenge.week,
+            ranked: false,
+          ).then((s) => s.roundId)
+        : startRound(controller);
+    _start = starting?.then<String?>(
+      (id) => id,
+      onError: (Object e) {
+        if (mounted && run == _run) {
+          setState(() => _saveError = userMessage(e));
+        }
+        return null;
+      },
+    );
     setState(() => _phase = _Phase.playing);
     _lastFrame = Duration.zero;
     _ticker
@@ -605,6 +686,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _game
       ..holding = _pointers > 0 || keys.any(_holdKeys.contains)
       ..update(dt);
+    _recorder?.record(_game);
     _fx.update(dt, _game);
     _trail.update(dt, _game, _art?.effect);
     _perf?.observe();
@@ -650,7 +732,9 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       meters: _game.meters,
       hitBy: _game.hitBy,
       missionStats: _game.missionStats,
+      ghost: _recorder?.encode(crashed: _game.over),
     );
+    final weekly = _weeklyPlay;
     setState(() => _saving = true);
     try {
       final result = await outbox.send(score);
@@ -660,8 +744,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         if (_phase == _Phase.playing) _board = result.leaderboard;
         return;
       }
+      // A weekly run counts for its own ranking only.
+      final improved = weekly == null
+          ? result.improved
+          : weekly.ranked && (result.weekly?.improved ?? false);
       // The fanfare, unless it already played when the record fell.
-      if (result.improved && !_fx.recordBroken) {
+      if (improved && !_fx.recordBroken) {
         _sound.play(RunnerSfx.record);
       } else if ((result.progress?.newCrates ?? 0) > 0) {
         _sound.play(RunnerSfx.reveal);
@@ -670,14 +758,20 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         _sound.play(RunnerSfx.jackpot);
       }
       setState(() {
-        _improved = result.improved;
+        _improved = improved;
+        _weeklyResult = result.weekly;
         _progress = result.progress;
         if (result.progress?.missions case final m?) _missions = m;
         _board = result.leaderboard;
         _boardError = null;
       });
-      // The run may have moved the own place in this month's list.
-      if (monthlyBoardAvailable(controller)) unawaited(_loadMonthly());
+      // The run may have moved the own place in this month's list, or in
+      // this week's.
+      if (weekly != null) {
+        unawaited(_loadWeekly());
+      } else if (monthlyBoardAvailable(controller)) {
+        unawaited(_loadMonthly());
+      }
     } catch (e) {
       if (kDebugMode) debugPrint('Bühnenlauf: Ergebnis nicht gesendet: $e');
       if (mounted && run == _run) {
@@ -756,6 +850,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   Widget _menuBody(BuildContext context) {
     final lead = _phase == _Phase.intro ? _hero(context) : _result(context);
     final rest = [
+      if (_weeklyShown) _weeklyCard(),
       ?_stand(context),
       ?_ensembleStrip(),
       _ranking(context),
@@ -861,6 +956,22 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       nextCrate: next,
       nextCrateFraction: next == null || p!.complete ? null : p.fraction,
       onWardrobe: _dressable ? _openWardrobe : null,
+    );
+  }
+
+  /// The way into the Wochenprobe.
+  Widget _weeklyCard() {
+    final w = _weekly;
+    return RunnerWeeklyCard(
+      onOpen: _openWeekly,
+      week: w?.week,
+      startsAt: w?.startsAt,
+      endsAt: w?.endsAt,
+      used: w?.used ?? 0,
+      max: w?.max ?? 3,
+      rank: w?.own?.rank,
+      reward: w?.lastWeek != null,
+      now: controller.now,
     );
   }
 
@@ -1011,10 +1122,81 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     );
   }
 
+  /// Another training run on this week's course, with the newest ghosts;
+  /// once the week is over the Wochenprobe shows the next one.
+  void _trainAgain() {
+    final last = _weeklyPlay;
+    if (last == null) return;
+    final week = _weekly?.week == last.challenge.week
+        ? _weekly!
+        : last.challenge;
+    if (!week.currentAt(controller.now)) {
+      unawaited(_openWeekly());
+      return;
+    }
+    _play(WeeklyPlay(challenge: week, ghosts: last.ghosts));
+  }
+
+  /// What a weekly run's result adds: which run it was, and for a ranked
+  /// one the week's best and place.
+  List<Widget> _weeklyLines(BuildContext context, WeeklyPlay play) {
+    final theme = Theme.of(context);
+    final r = _weeklyResult;
+    final max = r?.max ?? play.challenge.max;
+    final used = r?.used ?? play.attempt;
+    final best = r?.best;
+    return [
+      if (play.ranked && best != null) ...[
+        const SizedBox(height: 8),
+        Text(
+          r?.rank == null
+              ? 'Dein Wochenbestwert: ${best.score} Punkte'
+              : 'Dein Wochenbestwert: ${best.score} Punkte · Platz ${r!.rank}',
+          key: const ValueKey('runner-weekly-result'),
+          textAlign: TextAlign.center,
+          style: theme.textTheme.titleSmall,
+        ),
+      ],
+      if (play.ranked && used > 0 && !_saving) ...[
+        const SizedBox(height: 4),
+        Text(
+          used >= max
+              ? 'Alle Versuche dieser Woche genutzt'
+              : max - used == 1
+              ? 'Noch 1 Versuch diese Woche'
+              : 'Noch ${max - used} Versuche diese Woche',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall,
+        ),
+      ],
+      if (!play.ranked) ...[
+        const SizedBox(height: 8),
+        Text(
+          'Training zählt nicht für die Wochenwertung.',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall,
+        ),
+      ],
+    ];
+  }
+
   Widget _result(BuildContext context) {
     final theme = Theme.of(context);
+    final weekly = _weeklyPlay;
     final status = !_ranked
         ? null
+        : weekly != null
+        ? _saving
+              ? weekly.ranked
+                    ? 'Der Wertungslauf wird eingetragen …'
+                    : null
+              : _queued
+              ? 'Gerade keine Verbindung: Der Lauf wird nachgetragen, sobald der Server erreichbar ist.'
+              : _saveError != null
+              ? '${weekly.ranked ? 'Nicht gewertet' : 'Nicht eingetragen'}: $_saveError'
+              : _improved
+              ? 'Neuer Wochenbestwert!'
+              : null
         : _saving
         ? 'Punkte werden eingetragen …'
         : _queued
@@ -1044,6 +1226,16 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                 color: StageTheme.orange,
               ),
             const SizedBox(height: 12),
+            if (weekly != null) ...[
+              Text(
+                weekly.ranked
+                    ? 'Wertungslauf · Versuch ${weekly.attempt} von ${weekly.challenge.max}'
+                    : 'Training · Wochenprobe',
+                key: const ValueKey('runner-weekly-mode'),
+                style: theme.textTheme.labelMedium,
+              ),
+              const SizedBox(height: 2),
+            ],
             Text(
               'Der Vorhang fällt!',
               style: theme.textTheme.labelLarge?.copyWith(
@@ -1067,6 +1259,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall,
             ),
+            if (weekly != null) ..._weeklyLines(context, weekly),
             if (status != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -1096,12 +1289,35 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
               runSpacing: 12,
               alignment: WrapAlignment.center,
               children: [
-                FilledButton.icon(
-                  autofocus: true,
-                  onPressed: _play,
-                  icon: const Icon(Icons.replay),
-                  label: const Text('Nochmal'),
-                ),
+                if (weekly == null)
+                  FilledButton.icon(
+                    autofocus: true,
+                    onPressed: _play,
+                    icon: const Icon(Icons.replay),
+                    label: const Text('Nochmal'),
+                  )
+                else ...[
+                  if (!weekly.ranked)
+                    FilledButton.icon(
+                      key: const ValueKey('runner-train-again'),
+                      autofocus: true,
+                      onPressed: _trainAgain,
+                      icon: const Icon(Icons.replay),
+                      label: const Text('Nochmal trainieren'),
+                    ),
+                  (weekly.ranked ? FilledButton.icon : OutlinedButton.icon)(
+                    key: const ValueKey('runner-to-weekly'),
+                    autofocus: weekly.ranked,
+                    onPressed: _openWeekly,
+                    icon: const Icon(Icons.event_repeat),
+                    label: const Text('Zur Wochenprobe'),
+                  ),
+                  OutlinedButton(
+                    key: const ValueKey('runner-free-run'),
+                    onPressed: _motion.ready ? _play : null,
+                    child: const Text('Freier Lauf'),
+                  ),
+                ],
                 if (_dressable)
                   WardrobeButton(
                     crates:
@@ -1165,7 +1381,31 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       () => _trail,
       pixelRatio: ratio,
       sceneryMotion: () => _sceneryMotion,
+      ghosts: () => _ghosts,
     );
+  }
+
+  /// The weekly line under the numbers: which run this is and how far the
+  /// best of the week is ahead (or behind).
+  String _weeklyHud(WeeklyPlay play, int score) {
+    final mode = play.ranked
+        ? 'Wertungslauf · Versuch ${play.attempt}/${play.challenge.max}'
+        : 'Training';
+    final top = play.challenge.leaderboard.firstOrNull;
+    if (top == null) return mode;
+    final gap = top.score - score;
+    if (top.me) {
+      return gap > 0
+          ? '$mode · Bestwert: noch $gap'
+          : gap == 0
+          ? '$mode · gleichauf mit deinem Bestwert'
+          : '$mode · ${-gap} über deinem Bestwert';
+    }
+    return gap > 0
+        ? '$mode · ${top.name}: noch $gap'
+        : gap == 0
+        ? '$mode · gleichauf mit ${top.name}'
+        : '$mode · ${-gap} vor ${top.name}';
   }
 
   /// The stage fills the whole area below the app bar, in every
@@ -1182,6 +1422,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       color: const Color(0xFFFFF1D6),
       shadows: shadow,
     );
+    final scaler = MediaQuery.textScalerOf(context);
+    final weekly = _weeklyPlay;
     return Listener(
       behavior: HitTestBehavior.opaque,
       onPointerDown: (_) {
@@ -1215,11 +1457,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
           // on wide screens).
           Positioned.fill(
             child: CustomSingleChildLayout(
-              delegate: _HudLayout(
-                pad,
-                ratio,
-                MediaQuery.textScalerOf(context).scale(36),
-              ),
+              delegate: _HudLayout(pad, ratio, scaler.scale(36)),
               child: RepaintBoundary(
                 key: const ValueKey('runner-hud'),
                 child: Stack(
@@ -1263,6 +1501,34 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
               ),
             ),
           ),
+          // The Wochenprobe's line right below the numbers, a layer of its
+          // own like them.
+          if (weekly != null)
+            Positioned.fill(
+              child: CustomSingleChildLayout(
+                delegate: _HudLayout(
+                  pad,
+                  ratio,
+                  scaler.scale(20),
+                  below: scaler.scale(36),
+                ),
+                child: RepaintBoundary(
+                  key: const ValueKey('runner-weekly-hud'),
+                  child: ValueListenableBuilder(
+                    valueListenable: _hud,
+                    builder: (context, hud, _) => Text(
+                      _weeklyHud(weekly, hud.$1),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: const Color(0xE6FFF1D6),
+                        shadows: shadow,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             left: pad.left + 20,
             right: pad.right + 20,
@@ -1332,6 +1598,17 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     if (_sound case final RunnerMusic music) music.pauseMusic();
   }
 
+  /// Pauses a run in play until the next tap ([_resume]), with its music;
+  /// whether it did.
+  bool _pauseRun() {
+    if (_phase != _Phase.playing || _game.over || _paused) return false;
+    setState(() => _paused = true);
+    _pointers = 0;
+    _ticker.stop();
+    if (_sound case final RunnerMusic music) music.pauseMusic();
+    return true;
+  }
+
   /// Runs on after a pause, from the first fresh frame.
   void _resume() {
     if (!_paused || _settingsOpen) return;
@@ -1346,9 +1623,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 /// for them (tall pictures), else over its top edge, inside the safe area;
 /// always [height] high, so they are their own relayout boundary.
 class _HudLayout extends SingleChildLayoutDelegate {
-  _HudLayout(this.pad, this.pixelRatio, this.height);
+  _HudLayout(this.pad, this.pixelRatio, this.height, {this.below = 0});
   final EdgeInsets pad;
   final double pixelRatio, height;
+
+  /// How far below the numbers a further line goes.
+  final double below;
 
   @override
   BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
@@ -1359,12 +1639,15 @@ class _HudLayout extends SingleChildLayoutDelegate {
   @override
   Offset getPositionForChild(Size size, Size childSize) => Offset(
     pad.left + 20,
-    max(pad.top + 4, stageLayout(size, pixelRatio).top - 52),
+    max(pad.top + 4, stageLayout(size, pixelRatio).top - 52) + below,
   );
 
   @override
   bool shouldRelayout(_HudLayout old) =>
-      old.pad != pad || old.pixelRatio != pixelRatio || old.height != height;
+      old.pad != pad ||
+      old.pixelRatio != pixelRatio ||
+      old.height != height ||
+      old.below != below;
 }
 
 String _pickupLabel(PickupKind kind) => switch (kind) {
@@ -1488,6 +1771,26 @@ class RunnerGlyphs {
       ),
     );
   }
+
+  /// The name beside one of the best three ghosts, in its medal's colour.
+  TextPainter tag(String text, double size, int rank) {
+    _bound();
+    return _cache[('tag', text, size)] ??= _layout(
+      text,
+      TextStyle(
+        fontFamily: _font,
+        color: _ghostTagColors[(rank - 1).clamp(0, 2)],
+        fontSize: size,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+  }
+
+  static const _ghostTagColors = [
+    Color(0xE6F2C45A),
+    Color(0xE6D5DCE2),
+    Color(0xE6D9A06A),
+  ];
 
   /// A safety net: sizes that keep changing must not grow the cache forever.
   void _bound() {
@@ -1618,8 +1921,12 @@ class _StagePainter extends CustomPainter {
     this.trail, {
     this.pixelRatio = 1,
     required this.sceneryMotion,
+    this.ghosts,
   }) : super(repaint: repaint);
   final StageRunner Function() game;
+
+  /// The ghosts of a Wochenprobe run; null otherwise.
+  final RunnerGhosts? Function()? ghosts;
   final RunnerFx Function() fx;
   final RunnerArt? Function() art;
 
@@ -1671,6 +1978,20 @@ class _StagePainter extends CustomPainter {
     _fill(const Color(0xFFFFF4C2)),
     _fill(const Color(0xFFBFA88A)),
   ];
+  // Ghosts: one plain figure for all, tinted; the best three clearer.
+  static final _ghostFigure = _plainFigure();
+  static final _ghostTopPaints = [
+    _fill(const Color(0x8CE4AE39)),
+    _fill(const Color(0x80C9D1D8)),
+    _fill(const Color(0x80C98F55)),
+  ];
+  static final _ghostPaint = _fill(const Color(0x2EDCE6F0));
+  static final _ghostTopMarks = [
+    for (final p in _ghostTopPaints)
+      _stroke(p.color, 2)..strokeCap = StrokeCap.round,
+  ];
+  static final _ghostMark = _stroke(const Color(0x59DCE6F0), 1.5)
+    ..strokeCap = StrokeCap.round;
   final _glyphs = RunnerGlyphs();
   final _path = Path();
   final _decoration = _DecorationPictures();
@@ -1740,6 +2061,9 @@ class _StagePainter extends CustomPainter {
     }
 
     _pickups(canvas, g, a, s, w, course);
+    if (ghosts?.call() case final gh? when gh.visible) {
+      _ghostRuns(canvas, g, gh, s, w, course);
+    }
     trail().paint(canvas, s, a?.effect);
     if (a == null) {
       _plainRunner(canvas, g, s);
@@ -2750,6 +3074,86 @@ class _StagePainter extends CustomPainter {
         );
         canvas.drawRect(frame, _canvasPaint);
         canvas.drawRect(frame.deflate(1), _canvasLine);
+    }
+  }
+
+  /// A plain figure around its centre, in stage heights: head, body and
+  /// legs, as [_plainRunner] draws them.
+  static Path _plainFigure() {
+    const h = StageRunner.runnerHeight, w = StageRunner.runnerWidth;
+    return Path()
+      ..addOval(
+        Rect.fromCircle(center: const Offset(0, -h * .34), radius: h * .14),
+      )
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(
+            center: const Offset(0, -h * .02),
+            width: w * .8,
+            height: h * .42,
+          ),
+          const Radius.circular(w * .3),
+        ),
+      )
+      ..addRect(const Rect.fromLTRB(-w * .32, h * .15, -w * .08, h * .5))
+      ..addRect(const Rect.fromLTRB(w * .08, h * .15, w * .32, h * .5));
+  }
+
+  /// The week's other runs: every ghost at its height at this moment (all
+  /// runs are at the same place at the same time), the faint ones under
+  /// the best three with their names, and a small cross where one crashed.
+  void _ghostRuns(
+    Canvas canvas,
+    StageRunner g,
+    RunnerGhosts ghosts,
+    double s,
+    double w,
+    double course,
+  ) {
+    final all = ghosts.ghosts, mark = s * .016;
+    for (final ghost in all) {
+      if (!ghost.crashed) continue;
+      final x = ghost.endX * s - course;
+      if (x < -mark || x > w + mark) continue;
+      final y = ghost.endY * s;
+      final paint = ghost.top ? _ghostTopMarks[ghost.rank - 1] : _ghostMark;
+      canvas
+        ..drawLine(
+          Offset(x - mark, y - mark),
+          Offset(x + mark, y + mark),
+          paint,
+        )
+        ..drawLine(
+          Offset(x - mark, y + mark),
+          Offset(x + mark, y - mark),
+          paint,
+        );
+    }
+    final cx = StageRunner.runnerX * s, t = g.time;
+    final size = s * .03, gap = StageRunner.runnerWidth * s * .7;
+    // The best last, on top.
+    for (var i = all.length - 1; i >= 0; i--) {
+      final ghost = all[i];
+      if (t > ghost.end) continue;
+      final y = ghost.yAt(t) * s;
+      canvas
+        ..save()
+        ..translate(cx, y)
+        ..scale(s)
+        ..drawPath(
+          _ghostFigure,
+          ghost.top ? _ghostTopPaints[ghost.rank - 1] : _ghostPaint,
+        )
+        ..restore();
+      if (!ghost.top) continue;
+      final tag = _glyphs.tag(ghost.tag, size, ghost.rank);
+      tag.paint(
+        canvas,
+        Offset(
+          cx - gap - tag.width,
+          y - StageRunner.runnerHeight * s * .34 - tag.height / 2,
+        ),
+      );
     }
   }
 

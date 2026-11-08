@@ -110,11 +110,12 @@ class DailyMission {
   final String slot;
 
   /// `distance`, `points`, `collect`, `ground`, `ceiling`, `pass`,
-  /// `noPickup`, `dailyDistance`, `debut` or `runs`; unknown ones (from a
-  /// newer server) are shown but not checked live.
+  /// `noPickup`, `dailyDistance`, `debut` (by points, made before the
+  /// obstacles joined by metres), `reach` (an obstacle's metres) or `runs`;
+  /// unknown ones (from a newer server) are shown but not checked live.
   final String type;
 
-  /// A pickup or obstacle kind, for `collect`, `pass` and `debut`.
+  /// A pickup or obstacle kind, for `collect`, `pass`, `debut` and `reach`.
   final String? kind;
   final String text, unit;
   final int target, progress, reward;
@@ -164,7 +165,7 @@ class DailyMission {
   /// What [game] (a run going on) has of it so far, on top of [progress] for
   /// a day mission; null if the app cannot tell.
   int? live(StageRunner game) => switch (type) {
-    'distance' => game.meters,
+    'distance' || 'reach' => game.meters,
     'points' || 'debut' => game.score,
     'collect' => switch (pickup) {
       final k? => game.collectedOf(k),

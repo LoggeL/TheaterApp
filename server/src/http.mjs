@@ -196,7 +196,7 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (ownTicket?.[2] === '/read' && req.method === 'PUT') return json(res, 200, markFeedbackRead(theater, identity.uid, ownTicket[1]));
       if (route === '/games/runner/leaderboard' && req.method === 'GET') return json(res, 200, theater.runnerLeaderboard(identity.uid, { period: requestUrl.searchParams.get('period'), month: requestUrl.searchParams.get('month') }));
       if (route === '/games/runner/collection' && req.method === 'GET') return json(res, 200, theater.runnerCollection(identity.uid));
-      if (route === '/games/runner/rounds' && req.method === 'POST') return json(res, 200, theater.runnerStart(identity.uid));
+      if (route === '/games/runner/rounds' && req.method === 'POST') return json(res, 200, theater.runnerStart(identity.uid, body));
       if (route === '/games/runner/scores' && req.method === 'POST') return json(res, 200, theater.runnerScore(identity.uid, body));
       if (route === '/games/runner/wardrobe' && req.method === 'GET') return json(res, 200, theater.runnerWardrobe(identity.uid, { roles: requestUrl.searchParams.get('roles') === '1', unique: requestUrl.searchParams.get('unique') === '1' }));
       if (route === '/games/runner/crates' && req.method === 'POST') return json(res, 200, theater.runnerOpenCrate(identity.uid, req.headers['idempotency-key'], body));
@@ -208,6 +208,9 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (route === '/games/runner/unique/seen' && req.method === 'PUT') return json(res, 200, theater.runnerUniqueSeen(identity.uid, body));
       if (route === '/games/runner/gala' && req.method === 'GET') return json(res, 200, theater.runnerGala(identity.uid));
       if (route === '/games/runner/gala/seen' && req.method === 'PUT') return json(res, 200, theater.runnerGalaSeen(identity.uid, body));
+      // The Wochenprobe (runner-weekly.mjs).
+      if (route === '/games/runner/weekly' && req.method === 'GET') return json(res, 200, theater.runnerWeekly(identity.uid));
+      if (route === '/games/runner/weekly/seen' && req.method === 'PUT') return json(res, 200, theater.runnerWeeklySeen(identity.uid, body));
       if (route === '/games/runner/outfit' && req.method === 'PUT') return json(res, 200, theater.runnerOutfit(identity.uid, body));
       const skin = route.match(/^\/games\/runner\/skins\/([^/]+)$/);
       if (skin && req.method === 'GET') {

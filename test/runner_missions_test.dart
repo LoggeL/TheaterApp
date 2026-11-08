@@ -362,6 +362,22 @@ void main() {
       expect(mission.live(game), game.meters);
     });
 
+    test('a reach mission counts the metres, a debut mission the points', () {
+      final game = StageRunner(random: Random(3))..invincible = true;
+      for (var i = 0; i < 60 * 20; i++) {
+        _collectStep(game);
+      }
+      expect(game.score, greaterThan(game.meters));
+      final reach = DailyMission.fromJson(
+        _mission('hard', 'reach', 'Erreiche die Trommel: 185 m', 185),
+      );
+      final debut = DailyMission.fromJson(
+        _mission('hard', 'debut', 'Erreiche die Trommel', 250),
+      );
+      expect(reach.live(game), game.meters);
+      expect(debut.live(game), game.score);
+    });
+
     test('collecting after the target of a noPickup mission keeps it made: '
         'the app tells it and the numbers it sends say the same', () {
       for (var seed = 1; seed <= 12; seed++) {

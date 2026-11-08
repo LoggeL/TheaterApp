@@ -11,6 +11,8 @@ import { AppError } from './theater.mjs';
 // - A finished run keeps its result for a while: the same result sent again (a retry whose answer
 //   got lost) gets that answer back and counts no second time; a different result is rejected.
 // - Older records (`{ roundId, startedAt, starts }`, one open run) are read as one open run.
+// - A run of the Wochenprobe (runner-weekly.mjs) carries `weekly: { week, ranked, attempt }` from its
+//   start on, so its result cannot change the mode or the week.
 export const runnerRounds = Object.freeze({ open: 20, finished: 10 });
 
 const fail = (status, message, code) => { throw new AppError(status, message, code); };
@@ -25,13 +27,14 @@ const save = (t, personId, r) => t.store.put('runnerRounds', personId, { personI
 
 /**
  * Opens a run at [at] (inside runnerStart's transaction); `startBurst` starts per `startWindowMs` at
- * most. Open runs beyond `roundTtlMs` are dropped, the others end their measured time here.
+ * most. Open runs beyond `roundTtlMs` are dropped, the others end their measured time here. [extra]
+ * is kept with the run (the Wochenprobe's `weekly`).
  */
-export function startRound(t, personId, at, { startBurst, startWindowMs, roundTtlMs }) {
+export function startRound(t, personId, at, { startBurst, startWindowMs, roundTtlMs }, extra = {}) {
   const r = load(t, personId), now = +at, since = now - startWindowMs;
   const starts = r.starts.filter(x => Date.parse(x) > since).slice(-startBurst);
   if (starts.length >= startBurst) fail(429, 'Das waren gerade sehr viele Starts auf einmal. Bitte einen Moment warten.', 'rate_limited');
-  const startedAt = at.toISOString(), round = { roundId: randomUUID(), startedAt };
+  const startedAt = at.toISOString(), round = { roundId: randomUUID(), startedAt, ...extra };
   const open = r.open.filter(x => now - Date.parse(x.startedAt) <= roundTtlMs).map(x => x.until ? x : { ...x, until: startedAt });
   save(t, personId, { starts: [...starts, startedAt], open: [...open, round].slice(-runnerRounds.open), finished: r.finished });
   return round;

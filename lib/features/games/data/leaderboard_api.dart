@@ -3,6 +3,7 @@ import '../../../core/models.dart';
 import '../../../data/api_client.dart' show ApiException;
 import '../domain/stage_runner.dart';
 import 'wardrobe_api.dart';
+import 'weekly_api.dart' show WeeklyRunResult;
 
 /// Whether rounds count for the shared leaderboard: the server must offer it,
 /// and the demo has no server.
@@ -76,9 +77,13 @@ class RoundResult {
     required this.improved,
     required this.leaderboard,
     this.progress,
+    this.weekly,
   });
   final bool improved;
   final Leaderboard leaderboard;
+
+  /// For a run of the Wochenprobe: its best, place and attempts.
+  final WeeklyRunResult? weekly;
 
   /// The metres towards the next costume crate; only from servers with
   /// `runnerUnlocks`.
@@ -213,6 +218,7 @@ Future<RoundResult> submitRound(
   required int meters,
   ObstacleKind? hitBy,
   Map<String, Object>? missionStats,
+  String? ghost,
 }) async {
   final data = await controller.remote(
     '/games/runner/scores',
@@ -225,6 +231,11 @@ Future<RoundResult> submitRound(
       if (hitBy != null) 'hitBy': hitBy.name,
       // For the Tagesmissionen (`runnerMissions`); older servers ignore it.
       'missionStats': ?missionStats,
+      // The obstacles of this course join by metres; older servers ignore
+      // it.
+      'course': StageRunner.courseVersion,
+      // A ranked run of the Wochenprobe: its heights, for its ghost.
+      'ghost': ?ghost,
     },
   );
   return RoundResult(
@@ -232,6 +243,9 @@ Future<RoundResult> submitRound(
     leaderboard: Leaderboard.fromJson(jsonMap(data['leaderboard'])),
     progress: data['progress'] is Map
         ? RunnerProgress.fromJson(jsonMap(data['progress']))
+        : null,
+    weekly: data['weekly'] is Map
+        ? WeeklyRunResult.fromJson(jsonMap(data['weekly']))
         : null,
   );
 }
