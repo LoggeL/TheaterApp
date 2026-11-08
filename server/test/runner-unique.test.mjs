@@ -387,7 +387,7 @@ test('the bundled catalog: play-specific uniques and Kolping for the complete te
   const all = w.uniqueFigures.plays[3];
   assert.equal(all.allTechnicians, true);
   assert.equal(all.total, c.collectible.filter(x => x.kind === 'character' && x.rarities.some(id => c.rarities.some(r => r.id === id && r.crew))).length);
-  assert.equal(all.total, 8);
+  assert.equal(all.total, 9);
   assert.deepEqual(leaks(w, ['Kuschel', 'KI Nexus', 'unique-', 'Beatrice', 'Adolph Kolping']), []);
 });
 

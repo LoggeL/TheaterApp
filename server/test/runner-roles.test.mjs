@@ -30,7 +30,9 @@ test('every actor figure of the bundled catalog has role, play and year; technic
   const complete = x => typeof x.role === 'string' && x.role.trim() && typeof x.play === 'string' && x.play.trim() && Number.isInteger(x.year);
   assert.deepEqual(cast.filter(x => !complete(x)).map(x => x.id), [], 'actor figures without a complete role');
   assert.deepEqual(crew.filter(x => !x.role?.trim() || x.play !== undefined || x.year !== undefined).map(x => x.id), [], 'technicians: a function, no play or year');
-  assert.equal(crew.length, 8, 'one figure per technician');
+  // One figure per technician; Jonas plays and is a technician as well (his own `character.jonas--technik`).
+  assert.equal(crew.length, 9, 'nine technicians');
+  assert.equal(new Set(crew.map(x => x.personId)).size, crew.length, 'one figure per technician');
   // A person without a single active figure (new members without a picture yet: Lucia and the
   // technicians Daniel, Elea, Emilia and Julian) is not in the catalog at all, not even disabled;
   // waiting roles of people who already have an active figure stay (Romeo und Julia; in Nexus the KI
@@ -49,11 +51,14 @@ test('every actor figure of the bundled catalog has role, play and year; technic
   assert.deepEqual(raw.filter(x => x.personId === 24).map(x => x.rarity), ['legacy', 'legacy', 'legacy', 'legacy']);
   assert.deepEqual([at('character.maren').role, at('character.maren').play], ['Bühnentechnik', undefined]);
   assert.deepEqual([at('character.jonas').role, at('character.jonas').departments], ['Vetter Viktor', ['licht']]);
+  // Jonas is a technician as well: his crew figure has the function, no play, and is one of his figures.
+  assert.deepEqual(['role', 'play', 'year', 'rarity', 'departments', 'personId'].map(k => at('character.jonas--technik')[k]), ['Lichttechnik und Pyrotechnik', undefined, undefined, 'technik', ['licht'], 3]);
+  assert.equal(c.baseOf.get('character.jonas--technik'), 'character.jonas');
   assert.deepEqual(['role', 'play', 'year', 'name'].map(k => at('character.raphael--schicksal')[k]), ['Hades', 'Schicksalsfäden', 2025, 'Raphael']);
   // Figures with a picture take part; the others wait for it (Romeo und Julia, earlier plays).
   // Nexus (2024) came in with 24 figures: 10 light blue, 2 blue, 3 pink, 6 legacy, 2 red, 1 gold.
   const count = id => c.collectible.filter(x => x.kind === 'character' && x.rarity === id).length;
-  assert.deepEqual(['hellblau', 'legacy', 'blau', 'technik', 'pink', 'rot', 'gold'].map(count), [33, 16, 18, 8, 17, 13, 8]);
+  assert.deepEqual(['hellblau', 'legacy', 'blau', 'technik', 'pink', 'rot', 'gold'].map(count), [33, 16, 18, 9, 17, 13, 8]);
   assert.ok(raw.filter(x => x.id.endsWith('--romeo-julia')).every(x => x.disabled === true));
   const nexus = raw.filter(x => x.id.endsWith('--nexus'));
   // Logge's role "KI" is gone: the AI is a unique figure (character.unique-ki-nexus).
@@ -66,8 +71,9 @@ test('every actor figure of the bundled catalog has role, play and year; technic
   assert.deepEqual(['louis', 'sebastian', 'theresa', 'vanessa'].map(id => at(`character.${id}--nexus`).rarity), ['gold', 'rot', 'rot', 'hellblau']);
   // The 34 former role variants are figures of their own, still shown as variants to older apps,
   // like Raphael in Anno 1146 on his Hades, and so are the Nexus and ten linked Hölle roles.
-  // Hatice's historical role has no linked app account or base figure.
-  assert.equal(c.baseOf.size, 69);
+  // Hatice's historical role has no linked app account or base figure. Jonas's crew figure is one
+  // of his as well.
+  assert.equal(c.baseOf.size, 70);
   assert.equal(c.baseOf.get('character.raphael--anno'), 'character.raphael--schicksal');
 });
 
