@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { AppError } from './theater.mjs';
 import { berlinDay } from './event-series.mjs';
+import { logMissionReroll, logMissionRun, logMissionsMade } from './runner-mission-log.mjs';
 
 // "Tagesmissionen" of the stage runner (`runnerMissions`): every person gets three missions per
 // Europe/Berlin calendar day, easy, medium and hard, measured on their own best runs.
@@ -266,7 +267,9 @@ export function missionsToday(t, personId, at, stats) {
   if (rec.day === day) return rec;
   const previous = rec.day === dayBefore(day) ? list(rec.missions).map(m => m.type) : [];
   const missions = dayMissions(personId, day, context(t, rec, stats), new Set(previous));
-  return t.store.put('runnerMissions', personId, { ...rec, day, stats, missions, rerolled: false, crate: false, todayMeters: 0, previousTypes: previous });
+  const made = t.store.put('runnerMissions', personId, { ...rec, day, stats, missions, rerolled: false, crate: false, todayMeters: 0, previousTypes: previous });
+  // History for balancing (runner-mission-log.mjs).
+  return logMissionsMade(t, made, context(t, rec, stats));
 }
 
 /** What a run brings a mission on its own; null if it cannot tell (no statistics). */
@@ -314,6 +317,7 @@ export function recordMissionRun(t, personId, run) {
     ...kept, missions, best: counted ? raiseBest(best, run) : best, runs: runs + (counted ? 1 : 0),
     todayMeters: (rec.todayMeters ?? 0) + run.meters, crate: rec.crate || crate,
   });
+  logMissionRun(t, rec, next, run);
   return { rewardPoints: reward, crate: crate ? 1 : 0, completed, record: next };
 }
 
@@ -403,6 +407,7 @@ export function rerollMission(t, uid, requestId, b) {
     const result = missionsView(t, t.store.put('runnerMissions', a.personId, { ...rec, rerolled: true, missions: rec.missions.map(m => m.slot === b.slot ? mission : m) }));
     t.store.db.prepare('INSERT INTO requests VALUES(?,?,?,?,?)').run(uid, key, 'runner.mission.reroll', JSON.stringify(result), t.clock().toISOString());
     t.store.audit(uid, 'runner.mission.reroll', `${b.slot} ${old.type}->${fresh.type}`);
+    logMissionReroll(t, rec, old, mission, context(t, rec, rec.stats !== false));
     return result;
   });
 }
