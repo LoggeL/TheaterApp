@@ -28,10 +28,14 @@ enum CrateLid {
 
   /// Fades open while threads gather in it (Schicksalsfäden).
   weave,
+
+  /// Smoulders and trembles hotter, ducks, then the lid blows open in a
+  /// burst of fire and the open crate bounces (Eine höllische Herausforderung).
+  blaze,
 }
 
 /// What flies out of a crate.
-enum CrateParticle { confetti, spark, leaf, pixel, dust, thread }
+enum CrateParticle { confetti, spark, leaf, pixel, dust, thread, ember }
 
 /// One opening animation, pure data: [CrateTarget.animation] names one of
 /// [variants]; an unknown name (a future play) plays `generic`. Only
@@ -46,6 +50,7 @@ class CrateMotion {
     this.gravity = 1,
     this.speed = 1,
     this.flash = false,
+    this.flashColor = Colors.white,
     this.scanlines = false,
     this.shake = .06,
     this.millis = 1300,
@@ -63,6 +68,9 @@ class CrateMotion {
 
   /// A white flash when it opens; scanlines while it flickers.
   final bool flash, scanlines;
+
+  /// The colour of the light that hides the swap of the two pictures.
+  final Color flashColor;
 
   /// How much the closed crate wobbles while the server draws (radians).
   final double shake;
@@ -145,6 +153,23 @@ class CrateMotion {
       speed: .7,
       shake: .03,
       millis: 1600,
+    ),
+    'inferno': CrateMotion(
+      lid: CrateLid.blaze,
+      particle: CrateParticle.ember,
+      colors: [
+        Color(0xFFFFE27A),
+        Color(0xFFFF9A1F),
+        Color(0xFFE8461E),
+        Color(0xFFB3121B),
+      ],
+      accent: Color(0xFFE8461E),
+      flashColor: Color(0xFFFFC46B),
+      count: 40,
+      gravity: -.6,
+      speed: .8,
+      shake: .05,
+      millis: 1500,
     ),
   };
 
@@ -274,7 +299,13 @@ class _CrateUnboxingState extends State<CrateUnboxing>
         animation: Listenable.merge([_idle, _open]),
         builder: (context, _) {
           final t = _open.value, idle = _idle.value;
-          final pose = _CratePose.of(_motion, t, idle, widget.opening);
+          final pose = _CratePose.of(
+            _motion,
+            t,
+            idle,
+            widget.opening,
+            quick: widget.quick,
+          );
           Widget layer(
             Widget child,
             double opacity,
@@ -300,7 +331,7 @@ class _CrateUnboxingState extends State<CrateUnboxing>
               // Glow and flash behind, particles in front: one painter each.
               Positioned.fill(
                 child: CustomPaint(
-                  painter: _BackPainter(_motion, t, pose.flash),
+                  painter: _BackPainter(_motion, t, pose.flash, pose.glow),
                 ),
               ),
               Transform.rotate(
@@ -355,6 +386,7 @@ class _CratePose {
     this.openSx = 1,
     this.openSy = 1,
     this.flash = 0,
+    this.glow = 0,
   });
 
   /// [flash] lights the stage behind the crate and, fainter, in front of it:
@@ -363,13 +395,29 @@ class _CratePose {
   final double angle, closed, open, sx, sy, openSx, openSy, flash;
   final Offset shift, openShift;
 
+  /// Extra light of the crate's own glow behind it (a smouldering crate).
+  final double glow;
+
   /// From 0 to 1 while [t] goes from [a] to [b].
   static double span(double t, double a, double b) =>
       ((t - a) / (b - a)).clamp(0, 1).toDouble();
 
-  factory _CratePose.of(CrateMotion m, double t, double idle, bool opening) {
+  /// [quick] (reduced motion) leaves out the fast flicker of a shimmer.
+  factory _CratePose.of(
+    CrateMotion m,
+    double t,
+    double idle,
+    bool opening, {
+    bool quick = false,
+  }) {
     final wobble = sin(idle * 2 * pi);
-    if (!opening) return _CratePose(angle: wobble * m.shake);
+    if (!opening) {
+      return _CratePose(
+        angle: wobble * m.shake,
+        // The hell crate smoulders while it waits: its glow breathes.
+        glow: m.lid == CrateLid.blaze ? .12 + .1 * sin(idle * 2 * pi) : 0,
+      );
+    }
     switch (m.lid) {
       case CrateLid.pop:
         // Wobbles harder, swells, bursts: the open crate pops in.
@@ -459,6 +507,35 @@ class _CratePose {
           open: out,
           flash: .75 * span(t, .3, .5) * (1 - span(t, .56, .9)),
         );
+      case CrateLid.blaze:
+        // Smoulders hotter (its glow swells and flickers) and trembles
+        // faster and harder, ducks, then the lid blows open in a fireball,
+        // the open crate bounces and the air above it shimmers in the heat.
+        final heat = span(t, 0, .36);
+        final duck = span(t, .18, .36) * (1 - span(t, .36, .4));
+        final out = span(t, .36, .42);
+        final bounce = sin(span(t, .42, .7) * pi) * (1 - span(t, .42, .7));
+        final shimmer = quick
+            ? 0.0
+            : span(t, .44, .52) * (1 - span(t, .62, .86)) * sin(t * 70);
+        return _CratePose(
+          angle:
+              sin(t * (30 + 60 * heat)) *
+              m.shake *
+              (.4 + 1.2 * heat) *
+              (1 - out),
+          sx: 1 + .04 * duck,
+          sy: 1 - .07 * duck,
+          openShift: Offset(.004 * shimmer, -.08 * bounce),
+          openSx: 1 - .03 * bounce + .012 * shimmer,
+          openSy: 1 + .06 * bounce,
+          closed: 1 - out,
+          open: out,
+          flash: span(t, .32, .4) * (1 - span(t, .44, .68)),
+          // From the smoulder of the waiting crate up to the blaze.
+          glow:
+              (.12 + heat * (.25 + .15 * sin(t * 60))) * (1 - span(t, .4, .7)),
+        );
     }
   }
 }
@@ -497,6 +574,16 @@ class _Particle {
   ];
 }
 
+/// A tongue of flame around the origin, tip up, about one unit wide; built
+/// once, scaled when drawn.
+final Path _flame = Path()
+  ..moveTo(0, -1.1)
+  ..quadraticBezierTo(.55, -.35, .45, .2)
+  ..quadraticBezierTo(.35, .6, 0, .6)
+  ..quadraticBezierTo(-.35, .6, -.45, .2)
+  ..quadraticBezierTo(-.55, -.35, 0, -1.1)
+  ..close();
+
 /// When the particles of each lid set off, as a share of the opening.
 double _burstAt(CrateLid lid) => switch (lid) {
   CrateLid.pop => .32,
@@ -505,18 +592,20 @@ double _burstAt(CrateLid lid) => switch (lid) {
   CrateLid.slide => .2,
   CrateLid.heavy => .4,
   CrateLid.weave => .15,
+  CrateLid.blaze => .38,
 };
 
 /// The glow behind the crate and the flash of an opening; plain circles.
 class _BackPainter extends CustomPainter {
-  _BackPainter(this.motion, this.t, this.flash);
+  _BackPainter(this.motion, this.t, this.flash, this.smoulder);
   final CrateMotion motion;
-  final double t, flash;
+  final double t, flash, smoulder;
 
   @override
   void paint(Canvas canvas, Size size) {
     final c = size.center(Offset.zero), r = size.shortestSide / 2;
-    final glow = .18 + .3 * _CratePose.span(t, _burstAt(motion.lid), 1);
+    final glow =
+        .18 + .3 * _CratePose.span(t, _burstAt(motion.lid), 1) + smoulder;
     for (var i = 3; i >= 1; i--) {
       canvas.drawCircle(
         c,
@@ -528,7 +617,7 @@ class _BackPainter extends CustomPainter {
       canvas.drawCircle(
         c,
         r * (.5 + .4 * flash),
-        Paint()..color = Colors.white.withValues(alpha: .4 * flash),
+        Paint()..color = motion.flashColor.withValues(alpha: .4 * flash),
       );
     }
     if (motion.scanlines && t > .1 && t < .75) {
@@ -543,7 +632,8 @@ class _BackPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_BackPainter old) => old.t != t || old.flash != flash;
+  bool shouldRepaint(_BackPainter old) =>
+      old.t != t || old.flash != flash || old.smoulder != smoulder;
 }
 
 /// The particles: the crate's fx sprite if it has one, else simple shapes.
@@ -569,7 +659,8 @@ class _ParticlePainter extends CustomPainter {
       canvas.drawCircle(
         c,
         crate * (.3 + .25 * flash),
-        Paint()..color = Colors.white.withValues(alpha: .35 * flash * flash),
+        Paint()
+          ..color = motion.flashColor.withValues(alpha: .35 * flash * flash),
       );
       canvas.drawCircle(
         c,
@@ -595,7 +686,12 @@ class _ParticlePainter extends CustomPainter {
       final color = motion.colors[p.color].withValues(alpha: alpha);
       canvas.save();
       canvas.translate(at.dx, at.dy);
-      canvas.rotate(p.spin * u);
+      // Embers and flames sway upright, everything else tumbles.
+      canvas.rotate(
+        motion.particle == CrateParticle.ember
+            ? sin(p.spin * u) * .3
+            : p.spin * u,
+      );
       // Every third one is the crate's own piece (a star, a coin, a leaf …)
       // if it has one, the others the simple shapes around it.
       final sprite = p.sprite ? fx : null;
@@ -657,6 +753,20 @@ class _ParticlePainter extends CustomPainter {
               paint,
             );
             paint.style = PaintingStyle.fill;
+          case CrateParticle.ember:
+            final flicker = .75 + .25 * sin(u * 30 + p.spin);
+            if (p.size > 1.1) {
+              // A tongue of flame that shrinks as it rises.
+              paint.color = color.withValues(alpha: alpha * flicker);
+              canvas.scale(s * (1.3 - .7 * u));
+              canvas.drawPath(_flame, paint);
+            } else {
+              // A glowing ember that flickers as it rises.
+              paint.color = color.withValues(alpha: alpha * .3 * flicker);
+              canvas.drawCircle(Offset.zero, s * .9, paint);
+              paint.color = color.withValues(alpha: alpha * flicker);
+              canvas.drawCircle(Offset.zero, s * .38, paint);
+            }
         }
       }
       canvas.restore();

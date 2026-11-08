@@ -682,6 +682,7 @@ void main() {
     for (final (id, animation) in [
       ('random', 'burst'),
       ('play:anno-1146', 'heavy'),
+      ('play:eine-hoellische-herausforderung', 'inferno'),
     ]) {
       testWidgets('the $animation crate opens with its own pictures', (
         tester,
@@ -741,6 +742,7 @@ void main() {
         'glitch',
         'heavy',
         'threads',
+        'inferno',
       ]) {
         expect(CrateMotion.variants.containsKey(name), isTrue, reason: name);
       }
@@ -755,6 +757,58 @@ void main() {
         ),
         isTrue,
       );
+    });
+
+    testWidgets('the inferno crate smoulders, then opens in fire and embers; '
+        'with reduced motion in a third of the time', (tester) async {
+      final controller = await _signedIn((_) => null);
+      const target = CrateTarget(
+        id: 'play:eine-hoellische-herausforderung',
+        kind: CrateTargetKind.play,
+        name: 'Eine höllische Herausforderung',
+        animation: 'inferno',
+      );
+      final inferno = CrateMotion.of('inferno');
+      expect(inferno, same(CrateMotion.variants['inferno']));
+      expect(inferno.lid, CrateLid.blaze);
+      expect(inferno.particle, CrateParticle.ember);
+      // Its light is fire, not the white flash of the others.
+      expect(inferno.flashColor, isNot(Colors.white));
+      for (final quick in [false, true]) {
+        var done = 0;
+        Widget crate(bool opening) => MaterialApp(
+          home: Scaffold(
+            backgroundColor: Colors.black,
+            body: Center(
+              child: CrateUnboxing(
+                target: target,
+                controller: controller,
+                opening: opening,
+                quick: quick,
+                onOpened: () => done++,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpWidget(crate(false));
+        // Smoulders while the server draws.
+        for (var i = 0; i < 6; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        expect(done, 0);
+        await tester.pumpWidget(crate(true));
+        final millis = (inferno.millis * (quick ? .33 : 1)).round();
+        // Through the burst and the shimmer, frame by frame.
+        for (var at = 16; at < millis - 20; at += 16) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        await tester.pump(Duration(milliseconds: (millis - 20) % 16));
+        expect(done, 0, reason: 'quick: $quick');
+        await tester.pump(const Duration(milliseconds: 40));
+        expect(done, 1, reason: 'quick: $quick');
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      }
     });
 
     for (final name in [...CrateMotion.variants.keys, 'unbekannt']) {
