@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/data/api_client.dart';
+import 'package:theater_app/features/events/events.dart';
 import 'package:theater_app/features/settings/settings.dart';
 
 import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
@@ -15,6 +18,8 @@ const _second =
     'https://app.example.invalid/api/calendar/BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB.ics';
 
 void main() {
+  setUpAll(() => initializeDateFormatting('de'));
+
   group('feed links', () {
     test('webcal and Google links point to the same address', () {
       final feed = CalendarFeed.fromJson({
@@ -23,6 +28,7 @@ void main() {
       });
       expect(feed.url.toString(), _first);
       expect(feed.createdAt, DateTime.utc(2026, 10, 19, 12));
+      expect(feed.download.toString(), '$_first?download=1');
       expect(
         feed.webcal.toString(),
         'webcal://app.example.invalid/api/calendar/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.ics',
@@ -52,6 +58,7 @@ void main() {
   group('settings', () {
     late List<Uri> opened;
     late bool accept;
+    final originalOpener = calendarOpener;
     setUp(() {
       opened = [];
       accept = true;
@@ -60,13 +67,17 @@ void main() {
         return accept;
       };
     });
+    tearDown(() => calendarOpener = originalOpener);
 
     Future<(AppController, List<String>)> open(
       WidgetTester tester, {
       bool supported = true,
       int status = 200,
+      bool schedule = false,
+      Size size = const Size(900, 1800),
+      double textScale = 1,
     }) async {
-      tester.view.physicalSize = const Size(900, 1800);
+      tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       final requests = <String>[];
@@ -101,7 +112,16 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-          home: SettingsScreen(controller: controller, devices: devices),
+          theme: StageTheme.build(Brightness.light),
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(textScale)),
+            child: child!,
+          ),
+          home: schedule
+              ? ScheduleScreen(controller: controller)
+              : SettingsScreen(controller: controller, devices: devices),
         ),
       );
       await tester.pumpAndSettle();
@@ -158,7 +178,7 @@ void main() {
       );
 
       opened.clear();
-      await tester.tap(find.text('In Apple-Kalender / Outlook öffnen'));
+      await tester.tap(find.text('Abo hinzufügen'));
       await tester.pumpAndSettle();
       expect(opened.single.toString(), _first.replaceFirst('https', 'webcal'));
 
@@ -172,9 +192,17 @@ void main() {
           .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
           .clearSnackBars();
       accept = false;
-      await tester.tap(find.text('In Apple-Kalender / Outlook öffnen'));
+      await tester.tap(find.text('Abo hinzufügen'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Keine Kalender-App'), findsOneWidget);
+
+      opened.clear();
+      accept = true;
+      await tester.ensureVisible(find.text('Als Datei herunterladen'));
+      await tester.tap(find.text('Als Datei herunterladen'));
+      await tester.pumpAndSettle();
+      expect(opened.single.toString(), '$_first?download=1');
+      expect(find.textContaining('einmalige Kopie'), findsOneWidget);
       await finish(tester, controller);
     });
 
@@ -218,6 +246,13 @@ void main() {
       await tester.tap(find.text('Link kopieren'));
       await tester.pumpAndSettle();
       expect(copied, _second);
+      expect(find.text(_second), findsOneWidget);
+      expect(find.text(_first), findsNothing);
+      opened.clear();
+      await tester.ensureVisible(find.text('Als Datei herunterladen'));
+      await tester.tap(find.text('Als Datei herunterladen'));
+      await tester.pumpAndSettle();
+      expect(opened.single.toString(), '$_second?download=1');
       await finish(tester, controller);
     });
 
@@ -234,5 +269,103 @@ void main() {
       expect(requests, hasLength(2));
       await finish(tester, controller);
     });
+
+    for (final size in [const Size(320, 740), const Size(1360, 1000)]) {
+      testWidgets('subscribe from the schedule menu at ${size.width}px', (
+        tester,
+      ) async {
+        final (controller, requests) = await open(
+          tester,
+          schedule: true,
+          size: size,
+        );
+        expect(find.text('Kalender abonnieren'), findsNothing);
+        expect(requests, isEmpty);
+        await tester.tap(find.byTooltip('Weitere Optionen'));
+        await tester.pumpAndSettle();
+        expect(find.text('Kalender abonnieren'), findsOneWidget);
+        await tester.tap(find.text('Kalender abonnieren'));
+        await tester.pumpAndSettle();
+        expect(find.byType(CalendarFeedScreen), findsOneWidget);
+        expect(requests, ['GET /api/mobile/v1/calendar-feed/']);
+        await tester.ensureVisible(find.text('Abo hinzufügen'));
+        await tester.tap(find.text('Abo hinzufügen'));
+        await tester.pumpAndSettle();
+        expect(
+          opened.single.toString(),
+          _first.replaceFirst('https', 'webcal'),
+        );
+        expect(tester.takeException(), isNull);
+        await finish(tester, controller);
+      });
+    }
+
+    testWidgets('schedule hides subscriptions for an older server', (
+      tester,
+    ) async {
+      final (controller, requests) = await open(
+        tester,
+        schedule: true,
+        supported: false,
+      );
+      await tester.tap(find.byTooltip('Weitere Optionen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Kalender abonnieren'), findsNothing);
+      expect(requests, isEmpty);
+      await finish(tester, controller);
+    });
+
+    testWidgets(
+      'instructions, link and download fit a narrow screen with large text',
+      (tester) async {
+        final (controller, _) = await open(
+          tester,
+          schedule: true,
+          size: const Size(320, 740),
+          textScale: 1.6,
+        );
+        await tester.tap(find.byTooltip('Weitere Optionen'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Kalender abonnieren'));
+        await tester.pumpAndSettle();
+        for (final title in [
+          'iPhone, iPad und Mac',
+          'Android und Google Kalender',
+          'Outlook',
+          'Thunderbird und andere Kalender',
+        ]) {
+          await tester.scrollUntilVisible(
+            find.text(title),
+            250,
+            scrollable: find.byType(Scrollable).first,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(title));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          await tester.ensureVisible(find.text(title));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(title));
+          await tester.pumpAndSettle();
+        }
+        await tester.scrollUntilVisible(
+          find.text('Link kopieren'),
+          -250,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text(_first), findsOneWidget);
+        await tester.scrollUntilVisible(
+          find.text('Als Datei herunterladen'),
+          250,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Als Datei herunterladen'));
+        expect(opened.single.toString(), '$_first?download=1');
+        expect(tester.takeException(), isNull);
+        await finish(tester, controller);
+      },
+    );
   });
 }

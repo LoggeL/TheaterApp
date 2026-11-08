@@ -36,7 +36,8 @@ async function serve(t, app, options = {}) {
   };
   // Calendar apps fetch the public address without any sign-in.
   const feed = async (url, headers = {}, method = 'GET') => {
-    const response = await fetch(`${base}${new URL(url).pathname}`, { method, headers });
+    const parsed = new URL(url);
+    const response = await fetch(`${base}${parsed.pathname}${parsed.search}`, { method, headers });
     return { status: response.status, headers: response.headers, text: await response.text() };
   };
   return { api, feed, base };
@@ -232,6 +233,29 @@ test('the public route serves text/calendar with an ETag, answers HEAD and 304',
   assert.equal(head.status, 200);
   assert.equal(head.text, '');
   assert.equal((await feed(url, {}, 'POST')).status, 404);
+});
+
+test('the download is an attachment of the same personal feed and respects revoked links', async t => {
+  const { app, sam, kim, event } = setup(t);
+  const mine = event({ title: 'Meine Probe', personIds: [sam] });
+  const other = event({ title: 'Andere Probe', personIds: [kim] });
+  const { api, feed } = await serve(t, app);
+  const url = (await api('sam', 'GET', '/calendar-feed')).body.url;
+  const subscription = await feed(url);
+  const download = await feed(`${url}?download=1`);
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get('content-type'), 'text/calendar; charset=utf-8');
+  assert.equal(subscription.headers.get('content-disposition'), 'inline; filename="kolpingtheater.ics"');
+  assert.equal(download.headers.get('content-disposition'), 'attachment; filename="kolpingtheater.ics"');
+  assert.equal(download.text, subscription.text);
+  assert.ok(download.text.includes(`UID:${mine}@`));
+  assert.ok(!download.text.includes(`UID:${other}@`));
+  const head = await feed(`${url}?download=1`, {}, 'HEAD');
+  assert.equal(head.headers.get('content-disposition'), download.headers.get('content-disposition'));
+  assert.equal(head.text, '');
+  const reset = await api('sam', 'POST', '/calendar-feed/reset');
+  assert.equal((await feed(`${url}?download=1`)).status, 404);
+  assert.equal((await feed(`${reset.body.url}?download=1`)).status, 200);
 });
 
 test('unknown tokens are limited per address without blocking valid links', async t => {

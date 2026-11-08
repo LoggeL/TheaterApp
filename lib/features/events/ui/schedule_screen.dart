@@ -9,6 +9,8 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/visible_listenable_builder.dart';
 import '../../absences/ui/absences_screen.dart';
+import '../../settings/settings.dart'
+    show CalendarFeedScreen, calendarFeedAvailable;
 import '../../slots/domain/slot_pool.dart';
 import '../../slots/ui/slot_pools_screen.dart';
 import '../admin/event_editor_screen.dart';
@@ -193,9 +195,18 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     onSelected: (choice) => openPage(context, switch (choice) {
       'manage' => EventsAdminScreen(controller: widget.controller),
       'slots' => SlotPoolsScreen(controller: widget.controller),
+      'subscribe' => CalendarFeedScreen(controller: widget.controller),
       _ => AddAbsenceScreen(controller: widget.controller),
     }),
     itemBuilder: (context) => [
+      if (calendarFeedAvailable(widget.controller))
+        const PopupMenuItem(
+          value: 'subscribe',
+          child: ListTile(
+            leading: Icon(Icons.event_repeat_outlined),
+            title: Text('Kalender abonnieren'),
+          ),
+        ),
       if (widget.controller.user?.canManageEvents == true)
         const PopupMenuItem(
           value: 'manage',

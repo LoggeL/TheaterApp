@@ -52,8 +52,17 @@ class _CalendarFeedScreenState extends State<CalendarFeedScreen> {
   }
 
   Future<void> _copy(CalendarFeed feed) async {
-    await Clipboard.setData(ClipboardData(text: feed.url.toString()));
-    if (mounted) showDone(context, 'Link kopiert');
+    try {
+      await Clipboard.setData(ClipboardData(text: feed.url.toString()));
+      if (mounted) showDone(context, 'Link kopiert');
+    } catch (_) {
+      if (mounted) {
+        showProblem(
+          context,
+          'Kopieren nicht möglich. Markiere den Link und kopiere ihn von Hand.',
+        );
+      }
+    }
   }
 
   Future<void> _reset() async {
@@ -138,7 +147,7 @@ class _CalendarFeedScreenState extends State<CalendarFeedScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Deine Termine im eigenen Kalender',
+                        'Dein persönlicher Kalender',
                         style: theme.textTheme.titleMedium,
                       ),
                     ),
@@ -146,7 +155,7 @@ class _CalendarFeedScreenState extends State<CalendarFeedScreen> {
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  'Mit dem Abo erscheinen deine Termine automatisch in deinem Kalender. Neue Termine und Änderungen kommen nach einiger Zeit an, je nach Kalender nach einer Stunde bis zu einem Tag. Termine, für die du abgesagt hast, stehen nicht darin.',
+                  'Mit dem Abo erscheinen deine Termine automatisch in deinem Kalender. Enthalten sind die Termine, zu denen du eingeladen bist, auch wenn du noch nicht zugesagt hast. Termine, für die du abgesagt hast, stehen nicht darin.',
                 ),
               ],
             ),
@@ -155,10 +164,31 @@ class _CalendarFeedScreenState extends State<CalendarFeedScreen> {
         const SectionTitle('Hinzufügen'),
         wide(
           FilledButton.icon(
-            onPressed: () => _open(
-              feed.google,
-              'Google Kalender konnte nicht geöffnet werden. Kopiere den Link und füge ihn dort unter „Andere Kalender → Per URL“ hinzu.',
-            ),
+            onPressed: _busy
+                ? null
+                : () => _open(
+                    feed.webcal,
+                    'Keine Kalender-App hat den Link angenommen. Kopiere ihn und füge ihn in deinem Kalender als Abo hinzu.',
+                  ),
+            icon: const Icon(Icons.event_repeat_outlined),
+            label: const Text('Abo hinzufügen'),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 6, 4, 14),
+          child: Text(
+            'Öffnet Apple Kalender, Outlook oder eine andere Kalender-App auf deinem Gerät.',
+            style: small,
+          ),
+        ),
+        wide(
+          OutlinedButton.icon(
+            onPressed: _busy
+                ? null
+                : () => _open(
+                    feed.google,
+                    'Google Kalender konnte nicht geöffnet werden. Kopiere den Link und füge ihn dort unter "Weitere Kalender → Per URL" hinzu.',
+                  ),
             icon: const Icon(Icons.add_link),
             label: const Text('In Google Kalender hinzufügen'),
           ),
@@ -166,26 +196,84 @@ class _CalendarFeedScreenState extends State<CalendarFeedScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 6, 4, 14),
           child: Text(
-            'Klappt am zuverlässigsten am Computer. Danach erscheint der Kalender auch in der Google-Kalender-App.',
+            'Am Computer im Browser hinzufügen. Danach kannst du den Kalender auch in der Google-Kalender-App anzeigen.',
             style: small,
           ),
         ),
-        wide(
-          OutlinedButton.icon(
-            onPressed: () => _open(
-              feed.webcal,
-              'Keine Kalender-App hat den Link angenommen. Kopiere ihn und füge ihn in deinem Kalender als Abo hinzu.',
+        const SectionTitle('Persönlicher Abo-Link'),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Füge diese Adresse in deinem Kalender als Abo per URL hinzu.',
+                ),
+                const SizedBox(height: 10),
+                SelectableText(feed.url.toString(), style: small),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : () => _copy(feed),
+                  icon: const Icon(Icons.copy_outlined),
+                  label: const Text('Link kopieren'),
+                ),
+              ],
             ),
-            icon: const Icon(Icons.calendar_month_outlined),
-            label: const Text('In Apple-Kalender / Outlook öffnen'),
           ),
         ),
-        const SizedBox(height: 10),
+        const SectionTitle('So geht es in deinem Kalender'),
+        Card(
+          child: Column(
+            children: [
+              _instructions('iPhone, iPad und Mac', [
+                'Tippe auf "Abo hinzufügen" und bestätige das Kalenderabo.',
+                'Alternativ: Kopiere den Abo-Link. Wähle in Apple Kalender "Kalenderabonnement hinzufügen" (am Mac "Ablage → Neues Kalenderabonnement") und füge den Link ein.',
+              ]),
+              const Divider(height: 1),
+              _instructions('Android und Google Kalender', [
+                'Öffne diese Seite am Computer und klicke auf "In Google Kalender hinzufügen". Bestätige das Abo mit deinem Google-Konto.',
+                'Alternativ: Kopiere den Abo-Link. Öffne Google Kalender im Browser, wähle neben "Weitere Kalender" das Plus und dann "Per URL". Füge den Link ein und bestätige mit "Kalender hinzufügen".',
+                'Verwende auf dem Handy dasselbe Google-Konto und aktiviere den abonnierten Kalender in der Kalenderliste. In der Google-Kalender-App selbst lässt sich kein neues Abo anlegen.',
+              ]),
+              const Divider(height: 1),
+              _instructions('Outlook', [
+                'Kopiere den Abo-Link und öffne den Kalender in Outlook.',
+                'Wähle "Kalender hinzufügen → Aus dem Internet abonnieren", füge den Link ein und bestätige. Je nach Outlook-Version heißt die Option "Aus dem Internet" oder "Aus dem Web abonnieren".',
+              ]),
+              const Divider(height: 1),
+              _instructions('Thunderbird und andere Kalender', [
+                'Kopiere den Abo-Link und lege einen neuen Kalender an.',
+                'Wähle "Im Netzwerk" oder "Per URL" und füge den Link ein. Falls nach dem Format gefragt wird, wähle "iCalendar (ICS)". Für den Abo-Link ist keine zusätzliche Anmeldung nötig.',
+              ]),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
+          child: Text(
+            'Dein Kalender ruft neue Termine, Änderungen und Absagen regelmäßig ab. Das kann einige Stunden oder länger als einen Tag dauern. Den aktuellen Stand siehst du hier in der Theater-App.',
+            style: small,
+          ),
+        ),
+        const SectionTitle('Einmalig als Datei'),
         wide(
           OutlinedButton.icon(
-            onPressed: () => _copy(feed),
-            icon: const Icon(Icons.copy_outlined),
-            label: const Text('Link kopieren'),
+            onPressed: _busy
+                ? null
+                : () => _open(
+                    feed.download,
+                    'Die Kalenderdatei konnte nicht geöffnet werden. Kopiere den Abo-Link und öffne ihn im Browser, um die Datei zu speichern.',
+                  ),
+            icon: const Icon(Icons.download_outlined),
+            label: const Text('Als Datei herunterladen'),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+          child: Text(
+            'Speichert deine Termine als ICS-Datei zum Importieren. Das ist eine einmalige Kopie: Spätere Änderungen kommen damit nicht automatisch an.',
+            style: small,
           ),
         ),
         const SectionTitle('Datenschutz'),
@@ -223,4 +311,17 @@ class _CalendarFeedScreenState extends State<CalendarFeedScreen> {
       ],
     );
   }
+
+  Widget _instructions(String title, List<String> steps) => ExpansionTile(
+    title: Text(title),
+    childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+    expandedCrossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      for (final (index, step) in steps.indexed)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text('${index + 1}. $step'),
+        ),
+    ],
+  );
 }

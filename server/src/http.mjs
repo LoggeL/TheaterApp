@@ -69,10 +69,11 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
         const wait = feed ? calendarLimiter.token(calendar[1]) : calendarLimiter.miss(clientAddress(req, clientIpHeader));
         if (wait) throw Object.assign(new AppError(429, 'Zu viele Abrufe. Bitte später erneut versuchen.', 'rate_limited'), { retryAfter: wait });
         if (!feed) throw new AppError(404, 'Nicht gefunden.');
-        const headers = { ETag: feed.etag, 'Cache-Control': 'private, max-age=300', 'X-Robots-Tag': 'noindex, nofollow' };
+        const disposition = requestUrl.searchParams.get('download') === '1' ? 'attachment' : 'inline';
+        const headers = { ETag: feed.etag, 'Cache-Control': 'private, max-age=300', 'X-Robots-Tag': 'noindex, nofollow', 'Content-Disposition': `${disposition}; filename="kolpingtheater.ics"` };
         if (String(req.headers['if-none-match'] ?? '').split(',').map(x => x.trim().replace(/^W\//, '')).includes(feed.etag)) { res.writeHead(304, headers); res.end(); return; }
         const body = Buffer.from(feed.body, 'utf8');
-        res.writeHead(200, { ...headers, 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Length': body.length, 'Content-Disposition': 'inline; filename="kolpingtheater.ics"' });
+        res.writeHead(200, { ...headers, 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Length': body.length });
         res.end(req.method === 'HEAD' ? undefined : body); return;
       }
       if (req.method === 'OPTIONS') { if (origin && !origins.has(origin)) throw new AppError(403, 'Diese App-Adresse ist nicht freigegeben.'); res.writeHead(204); res.end(); return; }

@@ -33,6 +33,10 @@ class CalendarFeed {
   /// Calendar, Outlook and others).
   Uri get webcal => url.replace(scheme: 'webcal');
 
+  /// A one-time copy of the same personal feed, served as a file attachment.
+  Uri get download =>
+      url.replace(queryParameters: {...url.queryParameters, 'download': '1'});
+
   /// Google Calendar's page to add a calendar by its address.
   Uri get google => Uri.https('calendar.google.com', '/calendar/r', {
     'cid': webcal.toString(),

@@ -27,6 +27,14 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.15.3',
+    date: '8. November 2026',
+    items: [
+      'Unter "Termine" findest du "Kalender abonnieren" jetzt im Drei-Punkte-Menü rechts oben. Dort kannst du deine Termine zu Google Kalender oder deiner Kalender-App hinzufügen.',
+      'Anleitungen helfen dir beim Einrichten des Abos. Du kannst den persönlichen Link kopieren oder deine Termine einmalig als Kalenderdatei herunterladen.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.15.2',
     date: '8. November 2026',
     items: ['Kleinere Verbesserungen an der Sammlung.'],
