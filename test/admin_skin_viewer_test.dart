@@ -7,6 +7,7 @@ import 'package:theater_app/core/device_services.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/core/telemetry/perf_stats.dart';
 import 'package:theater_app/features/games/data/admin_skins_api.dart';
+import 'package:theater_app/features/games/data/wardrobe_api.dart';
 import 'package:theater_app/features/games/ui/admin_skin_viewer.dart';
 import 'package:theater_app/features/games/ui/stage_runner_art.dart';
 import 'package:theater_app/features/games/ui/stage_runner_look.dart';
@@ -148,6 +149,54 @@ final _catalog = <String, Object?>{
         'personId': 35,
       },
     ),
+    // Disabled, with its picture, in a coming release.
+    _item(
+      'character.lea--freiheit',
+      'Lea',
+      role: 'Freya',
+      play: 'Traum von Freiheit',
+      year: 2026,
+      admin: {
+        'disabled': true,
+        'live': false,
+        'release': {
+          'id': 'traum-2026',
+          'name': 'Traum von Freiheit',
+          'startsAt': '2026-11-22T17:00:00.000Z',
+          'active': false,
+          'ready': false,
+          'part': 'items',
+        },
+        'waiting': false,
+        'secret': null,
+      },
+      extra: {
+        'portrait': '/admin/runner/skins/lea-portrait.webp?v=1',
+        'thumb': '/admin/runner/skins/lea-thumb.webp?v=1',
+      },
+    ),
+    // Its date has passed, but its pack still lacks pictures.
+    _item(
+      'character.emil--spaet',
+      'Emil',
+      role: 'Wache',
+      play: 'Spät',
+      year: 2026,
+      admin: {
+        'disabled': false,
+        'live': false,
+        'release': {
+          'id': 'spaet',
+          'name': 'Spätlese',
+          'startsAt': '2026-11-01T17:00:00.000Z',
+          'active': true,
+          'ready': false,
+          'part': 'items',
+        },
+        'waiting': true,
+        'secret': null,
+      },
+    ),
     _item('backdrop.forest', 'Wald', kind: 'backdrop'),
     _item('obstacles.tech', 'Technik-Kram', kind: 'obstacles'),
   ],
@@ -157,6 +206,33 @@ final _catalog = <String, Object?>{
       'name': 'Eine höllische Herausforderung',
       'startsAt': '2026-11-08T17:00:00.000Z',
       'active': false,
+      'ready': true,
+      'missing': <Object?>[],
+    },
+    {
+      'id': 'traum-2026',
+      'name': 'Traum von Freiheit',
+      'startsAt': '2026-11-22T17:00:00.000Z',
+      'active': false,
+      'ready': false,
+      'missing': [
+        {'id': 'character.lea--freiheit', 'name': 'Lea', 'reason': 'disabled'},
+      ],
+    },
+    {
+      'id': 'spaet',
+      'name': 'Spätlese',
+      'startsAt': '2026-11-01T17:00:00.000Z',
+      'active': true,
+      'ready': false,
+      'missing': [
+        {'id': 'character.gerda--spaet', 'name': 'Gerda', 'reason': 'disabled'},
+        {
+          'id': 'character.fritzi--spaet',
+          'name': 'Fritzi',
+          'reason': 'picture',
+        },
+      ],
     },
   ],
 };
@@ -204,8 +280,12 @@ Future<(AppController, List<String>)> _signedIn({
   return (controller, requests);
 }
 
-Future<void> _pump(WidgetTester tester, Widget home) async {
-  tester.view.physicalSize = const Size(900, 2400);
+Future<void> _pump(
+  WidgetTester tester,
+  Widget home, {
+  Size size = const Size(900, 4000),
+}) async {
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
@@ -222,18 +302,45 @@ void main() {
   test('every skin keeps its state: active, disabled, scheduled, gated', () {
     final data = AdminSkinCatalog.fromJson(_catalog);
     final byId = {for (final s in data.skins) s.item.id: s};
-    expect(data.skins, hasLength(8));
+    expect(data.skins, hasLength(10));
     expect(byId['character.elena--creep']!.status, AdminSkinStatus.active);
     expect(byId['character.nora--anno']!.status, AdminSkinStatus.disabled);
     final jonas = byId['character.jonas--hell']!;
     expect(jonas.status, AdminSkinStatus.scheduled);
     expect(jonas.release?.name, 'Eine höllische Herausforderung');
-    expect(statusText(jonas), startsWith('ab 08.11.2026'));
+    expect(statusText(jonas), 'Geplant');
+    expect(
+      releaseText(jonas),
+      'Erscheint am So., 08.11.2026, 18:00 · Eine höllische Herausforderung',
+    );
     final beatrice = byId['character.unique-beatrice']!;
     expect(beatrice.status, AdminSkinStatus.gated);
     expect(beatrice.unlock, 'alle Rollen aus Creepshow');
     expect(data.catalog.rarityOf(beatrice.item).name, 'Unique');
-    expect(data.releases.single.id, 'hell-2026');
+    expect(data.releases.map((r) => r.id), [
+      'hell-2026',
+      'traum-2026',
+      'spaet',
+    ]);
+    // A disabled skin keeps the date of its release.
+    final lea = byId['character.lea--freiheit']!;
+    expect(lea.status, AdminSkinStatus.disabled);
+    expect(lea.statuses, contains(AdminSkinStatus.scheduled));
+    expect(
+      lea.release!.startsAt!.isAtSameMomentAs(
+        DateTime.parse('2026-11-22T17:00:00Z'),
+      ),
+      isTrue,
+    );
+    // A started release whose pack waits: the missing items come from the
+    // catalog's list of releases.
+    final emil = byId['character.emil--spaet']!;
+    expect(emil.status, AdminSkinStatus.waiting);
+    expect(emil.release?.ready, isFalse);
+    expect(emil.release?.missing.map((m) => m.text), [
+      'Gerda (deaktiviert)',
+      'Fritzi (ohne Bild)',
+    ]);
   });
 
   test('the telemetry never holds the name of a skin', () {
@@ -288,7 +395,7 @@ void main() {
     await _pump(tester, AdminSkinViewerScreen(controller: controller));
     expect(requests, hasLength(1));
     expect(
-      find.text('8 von 8 Skins · nur für Admins sichtbar'),
+      find.text('10 von 10 Skins · nur für Admins sichtbar'),
       findsOneWidget,
     );
     // Grouped by play, newest first, then technicians and scenery.
@@ -309,24 +416,30 @@ void main() {
     // Names, roles and the status of each card.
     expect(find.text('Beatrice'), findsOneWidget);
     expect(find.text('Gated · Unique'), findsOneWidget);
-    expect(find.text('Disabled'), findsWidgets);
-    expect(find.textContaining('ab 08.11.2026'), findsOneWidget);
+    expect(find.text('Deaktiviert'), findsNWidgets(2));
+    expect(
+      find.text(
+        'Erscheint am So., 08.11.2026, 18:00 · Eine höllische Herausforderung',
+      ),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byKey(const ValueKey('admin-skins-status-disabled')));
     await tester.pump();
     expect(
-      find.text('1 von 8 Skins · nur für Admins sichtbar'),
+      find.text('2 von 10 Skins · nur für Admins sichtbar'),
       findsOneWidget,
     );
-    expect(find.text('Nora'), findsOneWidget);
+    expect(find.text('Nora'), findsWidgets);
+    expect(find.text('Lea'), findsOneWidget);
     expect(find.text('Elena'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('admin-skins-status-all')));
     await tester.tap(find.byKey(const ValueKey('admin-skins-category-legacy')));
     await tester.pump();
-    expect(find.text('Nora'), findsOneWidget);
+    expect(find.text('Nora'), findsWidgets);
     expect(
-      find.text('1 von 8 Skins · nur für Admins sichtbar'),
+      find.text('1 von 10 Skins · nur für Admins sichtbar'),
       findsOneWidget,
     );
 
@@ -396,7 +509,353 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('admin-move-crash')));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('ID'), findsOneWidget);
-    expect(find.text('Aktiv'), findsWidgets);
+    expect(find.text('Live'), findsWidgets);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  test('release dates read in Berlin time, with the weekday', () {
+    // Winter time (UTC+1) and summer time (UTC+2), whatever the device's
+    // time zone.
+    expect(
+      releaseDateText(DateTime.parse('2026-11-22T17:00:00Z').toLocal()),
+      'So., 22.11.2026, 18:00',
+    );
+    expect(
+      releaseDateText(DateTime.parse('2027-04-11T16:00:00Z')),
+      'So., 11.04.2027, 18:00',
+    );
+    expect(
+      releaseDateText(DateTime.parse('2027-03-28T00:30:00Z')),
+      'So., 28.03.2027, 01:30',
+    );
+    expect(
+      releaseDateText(DateTime.parse('2027-03-28T01:30:00Z')),
+      'So., 28.03.2027, 03:30',
+    );
+    expect(
+      releaseDateText(DateTime.parse('2026-12-31T23:05:00Z')),
+      'Fr., 01.01.2027, 00:05',
+    );
+  });
+
+  test('every skin says when it comes', () {
+    final item = WardrobeItem.fromJson(_item('character.x', 'X'))!;
+    AdminSkinRelease release({
+      bool active = false,
+      bool ready = true,
+      String part = 'items',
+    }) => AdminSkinRelease(
+      id: 'traum-2026',
+      name: 'Traum von Freiheit',
+      startsAt: DateTime.parse('2026-11-22T17:00:00Z'),
+      active: active,
+      ready: ready,
+      part: part,
+    );
+    const coming = 'Erscheint am So., 22.11.2026, 18:00 · Traum von Freiheit';
+    for (final (skin, text) in [
+      (AdminSkin(item: item), 'Live'),
+      (AdminSkin(item: item, live: false, release: release()), coming),
+      (
+        AdminSkin(
+          item: item,
+          disabled: true,
+          live: false,
+          release: release(ready: false),
+        ),
+        coming,
+      ),
+      (
+        AdminSkin(
+          item: item,
+          live: false,
+          waiting: true,
+          release: release(active: true, ready: false),
+        ),
+        'Termin vorbei, wartet auf Bilder',
+      ),
+      (
+        AdminSkin(
+          item: item,
+          disabled: true,
+          live: false,
+          waiting: true,
+          release: release(active: true, ready: false),
+        ),
+        'Termin vorbei, wartet auf Bilder',
+      ),
+      (
+        AdminSkin(item: item, disabled: true, live: false),
+        'Deaktiviert · kein Termin',
+      ),
+      (AdminSkin(item: item, secret: 'unique'), 'Gated · Unique'),
+      (AdminSkin(item: item, secret: 'reward'), 'Gated · Ensemble'),
+      (AdminSkin(item: item, release: release(active: true)), 'Live'),
+      (
+        AdminSkin(
+          item: item,
+          release: release(part: 'free'),
+        ),
+        'Live · Geschenk am So., 22.11.2026, 18:00 · Traum von Freiheit',
+      ),
+    ]) {
+      expect(releaseText(skin), text);
+    }
+    // A server before `waiting`: a started release that is not live yet.
+    final old = AdminSkin.fromJson(
+      _item(
+        'character.y',
+        'Y',
+        admin: {
+          'disabled': false,
+          'live': false,
+          'release': {
+            'id': 'spaet',
+            'name': 'Spätlese',
+            'startsAt': '2026-11-01T17:00:00.000Z',
+            'active': true,
+          },
+          'secret': null,
+        },
+      ),
+    )!;
+    expect(old.waiting, isTrue);
+    expect(old.status, AdminSkinStatus.waiting);
+  });
+
+  testWidgets('disabled skins show their state, date and a placeholder', (
+    tester,
+  ) async {
+    final pictures = <String>[];
+    final (controller, _) = await _signedIn(pictures: pictures);
+    await _pump(tester, AdminSkinViewerScreen(controller: controller));
+    // Nora has no picture yet: a placeholder with name, role and play.
+    final nora = find.byKey(
+      const ValueKey('admin-skin-placeholder-character.nora--anno'),
+    );
+    expect(nora, findsOneWidget);
+    for (final text in [
+      'Nora',
+      'als Magd',
+      'Anno 1146 2025',
+      'Noch kein Bild',
+    ]) {
+      expect(
+        find.descendant(of: nora, matching: find.text(text)),
+        findsOneWidget,
+        reason: text,
+      );
+    }
+    expect(
+      find.byKey(const ValueKey('admin-skin-release-character.nora--anno')),
+      findsOneWidget,
+    );
+    expect(find.text('Deaktiviert · kein Termin'), findsOneWidget);
+    // Lea has her picture: loaded from the admins' route, with her date.
+    expect(
+      find.byKey(
+        const ValueKey('admin-skin-placeholder-character.lea--freiheit'),
+      ),
+      findsNothing,
+    );
+    expect(pictures.where((p) => p.endsWith('lea-thumb.webp')), isNotEmpty);
+    expect(
+      find.text('Erscheint am So., 22.11.2026, 18:00 · Traum von Freiheit'),
+      findsOneWidget,
+    );
+    // Emil's date has passed, his pack waits for pictures.
+    expect(find.text('Wartet auf Bilder'), findsOneWidget);
+    expect(find.text('Termin vorbei, wartet auf Bilder'), findsOneWidget);
+    // Live skins without a release carry only their badge.
+    expect(
+      find.byKey(const ValueKey('admin-skin-release-character.elena--creep')),
+      findsNothing,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('admin-skins-status-waiting')));
+    await tester.pump();
+    expect(
+      find.text('1 von 10 Skins · nur für Admins sichtbar'),
+      findsOneWidget,
+    );
+    expect(find.text('Emil'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('admin-skins-status-scheduled')),
+    );
+    await tester.pump();
+    // Jonas, and Lea: disabled, but her release is coming.
+    expect(
+      find.text('2 von 10 Skins · nur für Admins sichtbar'),
+      findsOneWidget,
+    );
+    expect(find.text('Lea'), findsOneWidget);
+    expect(find.text('Jonas'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('admin-skins-status-all')));
+    await tester.enterText(
+      find.byKey(const ValueKey('admin-skins-search')),
+      'kein termin',
+    );
+    await tester.pump();
+    expect(
+      find.text('1 von 10 Skins · nur für Admins sichtbar'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the cards fit on phones of every width and text size', (
+    tester,
+  ) async {
+    final (controller, _) = await _signedIn();
+    // 381 to 398 wide (iPhone 12 to 16, Pixel 7 and 8) give three narrow
+    // columns, where the two lines of a release once pushed the rarity out.
+    for (final scale in [1.0, 1.3, 2.0]) {
+      for (final width in <double>[
+        320.0,
+        360,
+        375,
+        381,
+        385,
+        390,
+        393,
+        398,
+        412,
+        430,
+      ]) {
+        await _pump(
+          tester,
+          MediaQuery(
+            data: MediaQueryData(
+              size: Size(width, 4000),
+              textScaler: TextScaler.linear(scale),
+            ),
+            child: AdminSkinViewerScreen(controller: controller),
+          ),
+          size: Size(width, 4000),
+        );
+        expect(tester.takeException(), isNull, reason: '$width @ $scale');
+        expect(
+          find.text('Erscheint am So., 22.11.2026, 18:00 · Traum von Freiheit'),
+          findsOneWidget,
+          reason: '$width @ $scale',
+        );
+        await tester.pumpWidget(const SizedBox());
+      }
+    }
+  });
+
+  testWidgets('sorted by date: coming releases first, then waiting packs', (
+    tester,
+  ) async {
+    final (controller, _) = await _signedIn();
+    await _pump(tester, AdminSkinViewerScreen(controller: controller));
+    expect(find.text('Hölle 2027 · 1'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('admin-skins-sort-release')));
+    await tester.pump();
+    expect(find.text('Hölle 2027 · 1'), findsNothing);
+    const groups = [
+      'Erscheint am So., 08.11.2026, 18:00 · Eine höllische Herausforderung · 1',
+      'Erscheint am So., 22.11.2026, 18:00 · Traum von Freiheit · 1',
+      'Spätlese · Termin vorbei, wartet auf Bilder · 1',
+      'Deaktiviert · kein Termin · 1',
+      'Ohne Termin · 6',
+    ];
+    double top(String text) => tester.getTopLeft(find.text(text)).dy;
+    for (final group in groups) {
+      expect(find.text(group), findsOneWidget, reason: group);
+    }
+    for (var i = 1; i < groups.length; i++) {
+      expect(top(groups[i - 1]), lessThan(top(groups[i])), reason: groups[i]);
+    }
+    // The filters still apply in this order.
+    await tester.tap(find.byKey(const ValueKey('admin-skins-status-disabled')));
+    await tester.pump();
+    expect(find.text(groups[1]), findsOneWidget);
+    expect(find.text(groups[3]), findsOneWidget);
+    expect(find.text(groups[0]), findsNothing);
+    // And back to the plays.
+    await tester.tap(find.byKey(const ValueKey('admin-skins-sort-play')));
+    await tester.pump();
+    expect(find.text('Anno 1146 2025 · 1'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the page of a skin shows its release and what its pack lacks', (
+    tester,
+  ) async {
+    final (controller, _) = await _signedIn();
+    final data = AdminSkinCatalog.fromJson(_catalog);
+    final atlas = await tester.runAsync(
+      () => createTestImage(width: 1124, height: 577),
+    );
+    final backdrop = await tester.runAsync(
+      () => createTestImage(width: 64, height: 32),
+    );
+    final art = RunnerArt.test(atlas!, backdrop!);
+    AdminSkin skin(String id) => data.skins.firstWhere((s) => s.item.id == id);
+
+    await _pump(
+      tester,
+      AdminSkinDetailPage(
+        skin: skin('character.emil--spaet'),
+        catalog: data.catalog,
+        controller: controller,
+        art: art,
+      ),
+    );
+    expect(find.text('Termin'), findsOneWidget);
+    expect(find.text('Termin vorbei, wartet auf Bilder'), findsOneWidget);
+    expect(
+      find.text(
+        'Spätlese · So., 01.11.2026, 18:00 · gestartet · Set unvollständig',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Es fehlen'), findsOneWidget);
+    expect(
+      find.text('Gerda (deaktiviert), Fritzi (ohne Bild)'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox());
+
+    await _pump(
+      tester,
+      AdminSkinDetailPage(
+        skin: skin('character.nora--anno'),
+        catalog: data.catalog,
+        controller: controller,
+        art: art,
+      ),
+    );
+    expect(
+      find.byKey(
+        const ValueKey('admin-detail-placeholder-character.nora--anno'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('admin-showcase-character.nora--anno')),
+      findsNothing,
+    );
+    expect(find.text('Deaktiviert · kein Termin'), findsOneWidget);
+    expect(find.text('Deaktiviert'), findsWidgets);
+    expect(find.text('Es fehlen'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+
+    await _pump(
+      tester,
+      AdminSkinDetailPage(
+        skin: skin('character.lea--freiheit'),
+        catalog: data.catalog,
+        controller: controller,
+        art: art,
+      ),
+    );
+    expect(
+      find.text('Erscheint am So., 22.11.2026, 18:00 · Traum von Freiheit'),
+      findsOneWidget,
+    );
+    expect(find.text('Lea (deaktiviert)'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 }

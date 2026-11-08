@@ -14,7 +14,7 @@ import { bundledCatalog, loadCatalog } from '../src/runner-wardrobe.mjs';
 const startsAt = '2026-11-08T17:00:00.000Z';
 const fixture = new URL('./fixtures/wardrobe/figure.webp', import.meta.url);
 // One picture per state, so a leak of each shows on its own.
-const pictures = ['live.webp', 'live-portrait.webp', 'live-thumb.webp', 'future.webp', 'unique.webp', 'reward.webp', 'waiting.webp', 'waiting-portrait.webp', 'waiting-thumb.webp', 'waiting-unique.webp'];
+const pictures = ['live.webp', 'live-portrait.webp', 'live-thumb.webp', 'future.webp', 'unique.webp', 'reward.webp', 'waiting.webp', 'waiting-portrait.webp', 'waiting-thumb.webp', 'waiting-unique.webp', 'pack.webp'];
 function imageDir(t) {
   const dir = mkdtempSync(join(tmpdir(), 'runner-admin-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -38,11 +38,19 @@ const data = {
     { id: 'waiting.c', kind: 'character', name: 'Cleo', role: 'Hexe', play: 'Spuk', year: 2026, rarity: 'gold', personId: 903, disabled: true, image: 'waiting.webp', portrait: 'waiting-portrait.webp', harness: { cheer: [40, 60], bogus: [1, 2] } },
     { id: 'waiting.alt', kind: 'character', name: 'Dora', role: 'Wirtin', play: 'Alt', year: 2020, rarity: 'blue', personId: 904, disabled: true },
     { id: 'waiting.unique', kind: 'character', name: 'Altgeist', role: 'Altgeist', play: 'Alt', year: 2020, rarity: 'unique', unlock: { play: 'Alt' }, disabled: true, image: 'waiting-unique.webp' },
+    // The pack of a release whose date has passed, held back as two of its figures lack pictures.
+    { id: 'pack.e', kind: 'character', name: 'Emil', role: 'Wache', play: 'Spät', year: 2026, rarity: 'blue', personId: 905, image: 'pack.webp' },
+    { id: 'pack.f', kind: 'character', name: 'Fritzi', role: 'Zofe', play: 'Spät', year: 2026, rarity: 'blue', personId: 906 },
+    { id: 'pack.g', kind: 'character', name: 'Gerda', role: 'Köchin', play: 'Spät', year: 2026, rarity: 'blue', personId: 907, disabled: true },
     // A waiting entry may still be incomplete: an unknown rarity or a bad file name must not break the view.
     { id: 'waiting.rough', kind: 'obstacles', name: 'Rohbau', rarity: 'nope', disabled: true, image: '../secret.webp' },
   ],
 };
-const releases = [{ id: 'neu', name: 'Neues Stück', startsAt, itemIds: ['future.b'], gatedItemIds: [] }];
+const passed = '2026-11-01T17:00:00.000Z';
+const releases = [
+  { id: 'neu', name: 'Neues Stück', startsAt, itemIds: ['future.b'], gatedItemIds: [] },
+  { id: 'spaet', name: 'Spätlese', startsAt: passed, itemIds: ['pack.e', 'pack.f', 'pack.g', 'pack.ghost'], gatedItemIds: [] },
+];
 
 function setup(t) {
   const store = new Store(); t.after(() => store.close());
@@ -64,14 +72,14 @@ test('admins see every entry with its state: live, unreleased, secret and disabl
   const { app, clock } = setup(t);
   const view = app.runnerAdminCatalog('admin');
   const byId = new Map(view.items.map(x => [x.id, x]));
-  assert.deepEqual([...byId.keys()].sort(), ['backdrop.default', 'character.default', 'future.b', 'fx.default', 'live.a', 'obstacles.default', 'reward.map', 'unique.spuk', 'waiting.alt', 'waiting.c', 'waiting.rough', 'waiting.unique']);
-  assert.deepEqual(byId.get('live.a').admin, { disabled: false, live: true, release: null, secret: null });
-  assert.deepEqual(byId.get('future.b').admin, { disabled: false, live: false, release: { id: 'neu', name: 'Neues Stück', startsAt, active: false, part: 'items' }, secret: null });
-  assert.deepEqual(byId.get('unique.spuk').admin, { disabled: false, live: true, release: null, secret: 'unique' });
+  assert.deepEqual([...byId.keys()].sort(), ['backdrop.default', 'character.default', 'future.b', 'fx.default', 'live.a', 'obstacles.default', 'pack.e', 'pack.f', 'pack.g', 'reward.map', 'unique.spuk', 'waiting.alt', 'waiting.c', 'waiting.rough', 'waiting.unique']);
+  assert.deepEqual(byId.get('live.a').admin, { disabled: false, live: true, release: null, waiting: false, secret: null });
+  assert.deepEqual(byId.get('future.b').admin, { disabled: false, live: false, release: { id: 'neu', name: 'Neues Stück', startsAt, active: false, ready: true, part: 'items' }, waiting: false, secret: null });
+  assert.deepEqual(byId.get('unique.spuk').admin, { disabled: false, live: true, release: null, waiting: false, secret: 'unique' });
   assert.equal(byId.get('unique.spuk').name, 'Plüschi', 'admins see the secret name');
-  assert.deepEqual(byId.get('reward.map').admin, { disabled: false, live: true, release: null, secret: 'reward', milestoneKm: 5 });
+  assert.deepEqual(byId.get('reward.map').admin, { disabled: false, live: true, release: null, waiting: false, secret: 'reward', milestoneKm: 5 });
   const waiting = byId.get('waiting.c');
-  assert.deepEqual(waiting.admin, { disabled: true, live: false, release: null, secret: null });
+  assert.deepEqual(waiting.admin, { disabled: true, live: false, release: null, waiting: false, secret: null });
   assert.deepEqual([waiting.role, waiting.play, waiting.year, waiting.rarity, waiting.personId], ['Hexe', 'Spuk', 2026, 'gold', 903]);
   assert.deepEqual(waiting.harness, { cheer: [40, 60] });
   assert.deepEqual([byId.get('waiting.unique').unique, byId.get('waiting.unique').admin.secret], [true, 'unique']);
@@ -86,7 +94,12 @@ test('admins see every entry with its state: live, unreleased, secret and disabl
   assert.match(waiting.thumb, /^\/admin\/runner\/skins\/waiting-thumb\.webp\?v=/);
   assert.ok(links.every(link => /^\/admin\/runner\/skins\/[a-z0-9._-]+\?v=[0-9a-f]{16}$/.test(link)), links.join(' '));
   assert.deepEqual(view.uniqueRarity, { id: 'unique', name: 'Unique', color: '#B388FF', style: 'holo' });
-  assert.deepEqual(view.releases, [{ id: 'neu', name: 'Neues Stück', startsAt, active: false }]);
+  assert.deepEqual(view.releases, [
+    { id: 'neu', name: 'Neues Stück', startsAt, active: false, ready: true, missing: [] },
+    { id: 'spaet', name: 'Spätlese', startsAt: passed, active: true, ready: false, missing: [
+      { id: 'pack.f', name: 'Fritzi', reason: 'picture' }, { id: 'pack.g', name: 'Gerda', reason: 'disabled' }, { id: 'pack.ghost', name: 'pack.ghost', reason: 'unknown' },
+    ] },
+  ]);
   // Every picture of the view loads for admins, disabled ones included.
   for (const link of links) assert.ok(app.runnerAdminSkin('admin', fileOf(link)).bytes.length > 0);
   // At the release the unreleased figure goes live; the view follows the server's clock.
@@ -94,6 +107,26 @@ test('admins see every entry with its state: live, unreleased, secret and disabl
   const after = new Map(app.runnerAdminCatalog('admin').items.map(x => [x.id, x]));
   assert.deepEqual([after.get('future.b').admin.live, after.get('future.b').admin.release.active], [true, true]);
   assert.equal(after.get('waiting.c').admin.live, false);
+});
+
+test('disabled skins and held-back packs carry their release: date, waiting and what is missing', t => {
+  const { app, clock } = setup(t);
+  const byId = new Map(app.runnerAdminCatalog('admin').items.map(x => [x.id, x]));
+  const spaet = { id: 'spaet', name: 'Spätlese', startsAt: passed, active: true, ready: false, part: 'items' };
+  // The date has passed, but the pack waits: its ready figure is not live, and says so.
+  assert.deepEqual(byId.get('pack.e').admin, { disabled: false, live: false, release: spaet, waiting: true, secret: null });
+  assert.deepEqual(byId.get('pack.f').admin, { disabled: false, live: false, release: spaet, waiting: true, secret: null });
+  // A disabled figure keeps its release, with the date, and waits with its pack.
+  const gerda = byId.get('pack.g');
+  assert.deepEqual(gerda.admin, { disabled: true, live: false, release: spaet, waiting: true, secret: null });
+  assert.deepEqual([gerda.name, gerda.role, gerda.play, gerda.image, gerda.portrait], ['Gerda', 'Köchin', 'Spät', undefined, undefined]);
+  // A disabled skin without a release has no date.
+  assert.equal(byId.get('waiting.alt').admin.release, null);
+  // Before its date a release is not waiting yet, only coming.
+  clock.at = new Date(Date.parse(passed) - 1);
+  const before = new Map(app.runnerAdminCatalog('admin').items.map(x => [x.id, x]));
+  assert.deepEqual([before.get('pack.g').admin.release.active, before.get('pack.g').admin.waiting], [false, false]);
+  assert.match(byId.get('pack.e').image, /^\/admin\/runner\/skins\/pack\.webp\?v=/);
 });
 
 test('members get nothing of the admin view, and the members\' route stays as strict, for admins too', t => {
@@ -106,10 +139,10 @@ test('members get nothing of the admin view, and the members\' route stays as st
   }
   // The members' own wardrobe holds none of the hidden entries.
   const own = JSON.stringify(app.runnerWardrobe('sam', { roles: true, unique: true }));
-  for (const secret of ['future.b', 'waiting.c', 'waiting.unique', 'waiting.rough', 'Cleo', 'Altgeist', 'Plüschi', 'Secret stage', 'future.webp', 'waiting', '/admin/']) assert.ok(!own.includes(secret), secret);
+  for (const secret of ['future.b', 'pack.e', 'pack.g', 'Emil', 'Gerda', 'pack.webp', 'waiting.c', 'waiting.unique', 'waiting.rough', 'Cleo', 'Altgeist', 'Plüschi', 'Secret stage', 'future.webp', 'waiting', '/admin/']) assert.ok(!own.includes(secret), secret);
   // Unreleased, disabled and secret pictures stay 404 on the members' route, whoever asks.
   for (const uid of ['sam', 'admin']) {
-    for (const name of ['future.webp', 'unique.webp', 'reward.webp', 'waiting.webp', 'waiting-portrait.webp', 'waiting-thumb.webp', 'waiting-unique.webp']) assert.throws(() => app.runnerSkin(uid, name), { status: 404 }, `${uid} ${name}`);
+    for (const name of ['future.webp', 'pack.webp', 'unique.webp', 'reward.webp', 'waiting.webp', 'waiting-portrait.webp', 'waiting-thumb.webp', 'waiting-unique.webp']) assert.throws(() => app.runnerSkin(uid, name), { status: 404 }, `${uid} ${name}`);
     assert.ok(app.runnerSkin(uid, 'live.webp').bytes.length > 0);
   }
   // Admins get 404 for anything that is not a picture of the view.
@@ -159,4 +192,13 @@ test('the bundled catalog: the admin view holds every entry of catalog.json', t 
   // The raw entries behind the view never travel with a catalog.
   assert.ok(!Object.keys(bundledCatalog()).includes('source'));
   assert.ok(!Object.keys(app.runnerCatalog).includes('source'));
+  // Disabled entries of a scheduled set keep its date, and its pack names them as missing.
+  const releases = new Map(view.releases.map(r => [r.id, r]));
+  for (const item of view.items.filter(x => x.admin.disabled && x.admin.release?.part === 'items')) {
+    const release = releases.get(item.admin.release.id);
+    assert.ok(Number.isFinite(Date.parse(item.admin.release.startsAt)), item.id);
+    assert.equal(release.ready, false, item.id);
+    assert.ok(release.missing.some(m => m.id === item.id && m.reason === 'disabled' && m.name === item.name), item.id);
+  }
+  for (const release of view.releases) assert.equal(release.ready, release.missing.length === 0, release.id);
 });

@@ -2,7 +2,6 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
@@ -11,6 +10,7 @@ import '../../../shared/navigation.dart';
 import '../data/admin_skins_api.dart';
 import '../data/wardrobe_api.dart';
 import 'figure_detail.dart';
+import 'runner_menu.dart' show berlinWallClock;
 import 'stage_runner_art.dart';
 import 'stage_runner_look.dart';
 import 'wardrobe_cards.dart';
@@ -90,13 +90,64 @@ Set<_Category> _categoriesOf(WardrobeCatalog catalog, WardrobeItem item) => {
   };
 }
 
+/// How the viewer lists the skins: by play (as the wardrobe does) or by the
+/// date of their release, upcoming first.
+enum _Sort {
+  play('Nach Stück'),
+  release('Nach Termin');
+
+  const _Sort(this.label);
+  final String label;
+}
+
+/// The group of [skin] by its release: the coming ones by date (soonest
+/// first), then those whose date has passed while their pack waits, then
+/// the started ones (latest first), the disabled ones without a date, and
+/// the rest.
+({String title, (int, int, String) order}) _releaseGroupOf(AdminSkin skin) {
+  final release = skin.release;
+  if (release == null) {
+    return skin.disabled
+        ? (title: 'Deaktiviert · kein Termin', order: (3, 0, ''))
+        : (title: 'Ohne Termin', order: (4, 0, ''));
+  }
+  final at = release.startsAt;
+  final millis = at?.millisecondsSinceEpoch ?? 0;
+  final date = at == null ? 'ohne Datum' : releaseDateText(at);
+  if (!release.active) {
+    return (
+      title: 'Erscheint am $date · ${release.name}',
+      order: (0, millis, release.id),
+    );
+  }
+  if (!release.ready) {
+    return (
+      title: '${release.name} · Termin vorbei, wartet auf Bilder',
+      order: (1, millis, release.id),
+    );
+  }
+  return (
+    title: '${release.name} · seit $date',
+    order: (2, -millis, release.id),
+  );
+}
+
 int _compareOrder((int, int, String) a, (int, int, String) b) {
   if (a.$1 != b.$1) return a.$1.compareTo(b.$1);
   if (a.$2 != b.$2) return a.$2.compareTo(b.$2);
   return a.$3.compareTo(b.$3);
 }
 
-final _date = DateFormat('dd.MM.yyyy, HH:mm');
+const _weekdays = ['Mo.', 'Di.', 'Mi.', 'Do.', 'Fr.', 'Sa.', 'So.'];
+
+/// "So., 22.11.2026, 18:00": [time] on the wall clock in Berlin, where the
+/// releases start, whatever the device's time zone.
+String releaseDateText(DateTime time) {
+  final at = berlinWallClock(time);
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${_weekdays[at.weekday - 1]}, ${two(at.day)}.${two(at.month)}.'
+      '${at.year}, ${two(at.hour)}:${two(at.minute)}';
+}
 
 /// A skin that should bring a picture of its own but has none (yet): the
 /// game then draws the default art in its place.
@@ -106,28 +157,57 @@ bool _withoutPicture(WardrobeItem item) =>
     item.kind != WardrobeKind.fx &&
     !hasOwnPictures(item);
 
+/// A disabled skin without any picture yet: its card shows a placeholder
+/// with its name, role and play instead of an empty picture.
+bool _placeholderOf(AdminSkin skin) =>
+    skin.disabled && _withoutPicture(skin.item);
+
 /// The badge colour of a status.
 Color _statusColor(AdminSkinStatus status) => switch (status) {
   AdminSkinStatus.active => const Color(0xFF3FA66B),
   AdminSkinStatus.disabled => const Color(0xFF7A7F7C),
+  AdminSkinStatus.waiting => const Color(0xFFD9653B),
   AdminSkinStatus.scheduled => const Color(0xFFE0A23A),
   AdminSkinStatus.gated => const Color(0xFFA77BF0),
 };
 
-/// The status in words: "Aktiv", "Disabled", "ab 08.11.2026, 18:00",
-/// "Gated · Unique" …
-String statusText(AdminSkin skin) {
+/// The status in words, for the badge: "Live", "Deaktiviert", "Geplant",
+/// "Wartet auf Bilder", "Gated · Unique" …
+String statusText(AdminSkin skin) => switch (skin.status) {
+  AdminSkinStatus.gated => _secretText(skin),
+  final status => status.label,
+};
+
+String _secretText(AdminSkin skin) =>
+    skin.secret == 'reward' ? 'Gated · Ensemble' : 'Gated · Unique';
+
+/// When the skin comes, in words: "Live", "Erscheint am So., 22.11.2026,
+/// 18:00 · Traum von Freiheit", "Termin vorbei, wartet auf Bilder",
+/// "Deaktiviert · kein Termin", or the secret of a unique figure or
+/// ensemble reward ("Gated · Unique").
+String releaseText(AdminSkin skin) {
   final release = skin.release;
-  return switch (skin.status) {
-    AdminSkinStatus.active => 'Aktiv',
-    AdminSkinStatus.disabled => 'Disabled',
-    AdminSkinStatus.scheduled =>
-      release?.startsAt != null && release?.active != true
-          ? 'ab ${_date.format(release!.startsAt!)}'
-          : 'Release wartet auf alle Bilder',
-    AdminSkinStatus.gated =>
-      skin.secret == 'unique' ? 'Gated · Unique' : 'Gated · Ensemble',
-  };
+  String fallback() => skin.secret != null
+      ? _secretText(skin)
+      : skin.live
+      ? 'Live'
+      : 'Nicht live';
+  if (release == null) {
+    return skin.disabled ? 'Deaktiviert · kein Termin' : fallback();
+  }
+  if (!release.active) {
+    final date = release.startsAt == null
+        ? 'bald'
+        : 'am ${releaseDateText(release.startsAt!)}';
+    // A free item is everybody's already; only the gift waits for the date.
+    if (release.part == 'free' && skin.live && !skin.disabled) {
+      return 'Live · Geschenk $date · ${release.name}';
+    }
+    return 'Erscheint $date · ${release.name}';
+  }
+  if (skin.waiting) return 'Termin vorbei, wartet auf Bilder';
+  if (skin.disabled) return 'Termin vorbei, noch deaktiviert';
+  return fallback();
 }
 
 /// The admins' Skin-Viewer: every skin of the stage runner (figures of
@@ -149,6 +229,7 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
   final _search = TextEditingController();
   _Category _category = _Category.all;
   AdminSkinStatus? _status;
+  _Sort _sort = _Sort.play;
 
   bool get _allowed => adminSkinsAvailable(widget.controller);
 
@@ -194,6 +275,7 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
       ...data.catalog.raritiesOf(item).map((r) => r.name),
       skin.release?.name,
       statusText(skin),
+      releaseText(skin),
     ].whereType<String>().join(' ').toLowerCase();
     return query.split(RegExp(r'\s+')).every(haystack.contains);
   }
@@ -257,7 +339,9 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
     final groups =
         <String, ({(int, int, String) order, List<AdminSkin> skins})>{};
     for (final skin in shown) {
-      final g = _groupOf(skin.item);
+      final g = _sort == _Sort.release
+          ? _releaseGroupOf(skin)
+          : _groupOf(skin.item);
       (groups[g.title] ??= (
         order: g.order,
         skins: <AdminSkin>[],
@@ -343,6 +427,34 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
                     ),
                 ],
               ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: SegmentedButton<_Sort>(
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  segments: [
+                    for (final sort in _Sort.values)
+                      ButtonSegment(
+                        value: sort,
+                        icon: Icon(
+                          sort == _Sort.play
+                              ? Icons.theater_comedy_outlined
+                              : Icons.event_outlined,
+                        ),
+                        label: Text(
+                          sort.label,
+                          key: ValueKey('admin-skins-sort-${sort.name}'),
+                        ),
+                      ),
+                  ],
+                  selected: {_sort},
+                  onSelectionChanged: (choice) =>
+                      setState(() => _sort = choice.single),
+                ),
+              ),
               const SizedBox(height: 8),
               Text(
                 '${shown.length} von ${data.skins.length} Skins · nur für Admins sichtbar',
@@ -377,7 +489,7 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
                 mainAxisSpacing: 8,
                 crossAxisSpacing: 8,
                 childAspectRatio:
-                    .6 /
+                    .5 /
                     (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(
                       1.0,
                       1.6,
@@ -475,11 +587,18 @@ class _SkinCard extends StatelessWidget {
         ? role.role
         : 'als ${role.role}';
     final dim = skin.status == AdminSkinStatus.disabled;
+    final placeholder = _placeholderOf(skin);
+    // The date of its release, or that it has none: for every skin of a
+    // release and every disabled one (for the others the badge says it).
+    final release = skin.release != null || skin.disabled
+        ? releaseText(skin)
+        : null;
     return Semantics(
       button: true,
       label:
           '${item.name}, ${line ?? item.kind.singular}, '
-          '${rarities.map((r) => r.name).join(', ')}, ${statusText(skin)}',
+          '${rarities.map((r) => r.name).join(', ')}, ${statusText(skin)}'
+          '${release == null ? '' : ', $release'}',
       child: Card(
         margin: EdgeInsets.zero,
         clipBehavior: Clip.antiAlias,
@@ -498,16 +617,22 @@ class _SkinCard extends StatelessWidget {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        Opacity(
-                          opacity: dim ? .7 : 1,
-                          child: WardrobeItemArt(
+                        if (placeholder)
+                          _PicturePlaceholder(
+                            key: ValueKey('admin-skin-placeholder-${item.id}'),
                             item: item,
-                            controller: controller,
-                            art: art,
-                            antique: catalog.rarityOf(item).antique,
-                            small: true,
+                          )
+                        else
+                          Opacity(
+                            opacity: dim ? .7 : 1,
+                            child: WardrobeItemArt(
+                              item: item,
+                              controller: controller,
+                              art: art,
+                              antique: catalog.rarityOf(item).antique,
+                              small: true,
+                            ),
                           ),
-                        ),
                         if (item.unique)
                           const IgnorePointer(
                             child: HoloOverlay(animate: false, strength: .25),
@@ -521,7 +646,7 @@ class _SkinCard extends StatelessWidget {
                             child: _StatusBadge(skin),
                           ),
                         ),
-                        if (_withoutPicture(item))
+                        if (_withoutPicture(item) && !placeholder)
                           const Positioned(
                             right: 4,
                             bottom: 4,
@@ -580,7 +705,30 @@ class _SkinCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall,
                           ),
-                        const Spacer(),
+                        // The release takes the room left between the
+                        // role and the rarity: two lines where they fit, one
+                        // on a narrow card, so the column never overflows.
+                        if (release != null)
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: _ReleaseLine(
+                                key: ValueKey('admin-skin-release-${item.id}'),
+                                text: release,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: skin.waiting
+                                      ? StageTheme.legible(
+                                          _statusColor(AdminSkinStatus.waiting),
+                                          theme.colorScheme.surface,
+                                          minimum: 4.5,
+                                        )
+                                      : theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          const Spacer(),
                         Text(
                           rarities.map((r) => r.name).join(' · '),
                           maxLines: 1,
@@ -602,6 +750,128 @@ class _SkinCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The release line of a card: as many lines (one or two) as the room
+/// left on the card holds, ending in an ellipsis instead of overflowing.
+class _ReleaseLine extends StatelessWidget {
+  const _ReleaseLine({super.key, required this.text, required this.style});
+  final String text;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final scaler = MediaQuery.textScalerOf(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(
+            text: text,
+            style: DefaultTextStyle.of(context).style.merge(style),
+          ),
+          textDirection: Directionality.of(context),
+          textScaler: scaler,
+          maxLines: 1,
+        )..layout();
+        final lineHeight = painter.height;
+        painter.dispose();
+        final lines = lineHeight <= 0 || !constraints.maxHeight.isFinite
+            ? 2
+            : (constraints.maxHeight / lineHeight).floor().clamp(1, 2);
+        return Text(
+          text,
+          maxLines: lines,
+          overflow: TextOverflow.ellipsis,
+          style: style,
+        );
+      },
+    );
+  }
+}
+
+/// The picture of a disabled skin that has none yet: its name, role and
+/// play on the dark ground of the cards, instead of an empty frame.
+class _PicturePlaceholder extends StatelessWidget {
+  const _PicturePlaceholder({
+    super.key,
+    required this.item,
+    this.large = false,
+  });
+  final WardrobeItem item;
+  final bool large;
+
+  @override
+  Widget build(BuildContext context) {
+    final role = item.role;
+    final lines = [
+      if (role != null && !role.isFunction) 'als ${role.role}',
+      if (role != null && role.isFunction) role.role,
+      ?role?.production,
+      if (role == null) item.kind.singular,
+    ];
+    final scale = large ? 1.6 : 1.0;
+    return Container(
+      margin: EdgeInsets.all(8 * scale),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10 * scale),
+        border: Border.all(color: const Color(0x40FFFFFF), width: 1.2),
+        color: const Color(0x0FFFFFFF),
+      ),
+      padding: EdgeInsets.all(8 * scale),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.hide_image_outlined,
+            size: 26 * scale,
+            color: const Color(0x99FFFFFF),
+          ),
+          SizedBox(height: 6 * scale),
+          // Flexible: on a small card (or with large text) the lines give
+          // way instead of overflowing.
+          Flexible(
+            child: Text(
+              item.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 13 * scale,
+              ),
+            ),
+          ),
+          for (final text in lines)
+            Flexible(
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: const Color(0xCCFFFFFF),
+                  fontSize: 11 * scale,
+                ),
+              ),
+            ),
+          SizedBox(height: 4 * scale),
+          Flexible(
+            child: Text(
+              'Noch kein Bild',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: const Color(0x99FFFFFF),
+                fontSize: 10 * scale,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -673,6 +943,11 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
       if (mounted) setState(() => _dressing = false);
       return;
     }
+    if (_placeholderOf(widget.skin)) {
+      // Nothing to dress or load: the skin has no picture yet.
+      if (mounted) setState(() => _dressing = false);
+      return;
+    }
     switch (item.kind) {
       case WardrobeKind.character:
         final dressed = await dressFigure(base, item, widget.controller);
@@ -733,22 +1008,32 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
       ('Seltenheit', rarities.map((r) => r.name).join(' · ')),
       if (catalog.labelOf(item) case final label?) ('Abteilung', label),
       ('Status', statusText(skin)),
+      ('Termin', releaseText(skin)),
       if (_withoutPicture(item))
-        ('Bild', 'fehlt: das Spiel zeigt die Standard-Grafik'),
+        (
+          'Bild',
+          skin.disabled
+              ? 'fehlt noch'
+              : 'fehlt: das Spiel zeigt die Standard-Grafik',
+        ),
       if (item.placeholder) ('Bild', 'Platzhalter: Standard-Grafik getönt'),
       if (release != null)
         (
           'Release',
           [
             release.name,
-            if (release.startsAt case final at?) _date.format(at),
+            if (release.startsAt case final at?) releaseDateText(at),
             switch (release.part) {
               'gated' => 'gated bis zum Start',
               'free' => 'für alle frei',
               _ => release.active ? 'gestartet' : 'noch nicht gestartet',
             },
+            if (release.part != 'free')
+              release.ready ? 'Set vollständig' : 'Set unvollständig',
           ].join(' · '),
         ),
+      if (release != null && !release.ready && release.missing.isNotEmpty)
+        ('Es fehlen', release.missing.map((m) => m.text).join(', ')),
       if (skin.unlock case final unlock?) ('Freischaltung', unlock),
       if (skin.milestoneKm case final km?)
         ('Ensemble', 'Belohnung bei ${kmText((km * 1000).round())}'),
@@ -926,6 +1211,12 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
         item.isDefault &&
         _base != null) {
       content = RawImage(image: _base!.backdrop, fit: BoxFit.cover);
+    } else if (_placeholderOf(widget.skin)) {
+      content = _PicturePlaceholder(
+        key: ValueKey('admin-detail-placeholder-${item.id}'),
+        item: item,
+        large: true,
+      );
     } else {
       content = Padding(
         padding: const EdgeInsets.all(24),
@@ -1006,7 +1297,9 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
           Padding(
             padding: const EdgeInsets.only(top: 10),
             child: Text(
-              item.image == null
+              _placeholderOf(widget.skin)
+                  ? 'Noch kein Bild: deaktiviert, bis die Bilder da sind.'
+                  : item.image == null
                   ? 'Kein eigener Atlas: die Figur zeigt ihr Bild.'
                   : 'Atlas lädt nicht oder hat falsche Maße: nur das Bild.',
               style: theme.textTheme.bodySmall,
