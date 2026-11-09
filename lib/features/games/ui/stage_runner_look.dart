@@ -633,6 +633,13 @@ Future<RunnerArt> dressArt(
     ownPile:
         set != null &&
         await RunnerArt.draws(set, RunnerSprite.pile, path: worn.obstacleAtlas),
+    ownTruss:
+        set != null &&
+        await RunnerArt.draws(
+          set,
+          RunnerSprite.trussAssembly,
+          path: worn.obstacleAtlas,
+        ),
     ownTallCrate:
         set != null &&
         await RunnerArt.draws(

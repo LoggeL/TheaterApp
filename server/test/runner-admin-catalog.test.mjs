@@ -202,3 +202,18 @@ test('the bundled catalog: the admin view holds every entry of catalog.json', t 
   }
   for (const release of view.releases) assert.equal(release.ready, release.missing.length === 0, release.id);
 });
+
+test('admins can preview every Sagenhaft image before the scheduled March release', t => {
+  const store = new Store(); t.after(() => store.close());
+  const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', clock: () => new Date('2026-11-09T12:00:00Z') });
+  app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
+  const stage = app.runnerAdminCatalog('admin').items.find(x => x.id === 'backdrop.sagenhaft');
+  assert.equal(stage.admin.live, false);
+  assert.equal(stage.admin.release.startsAt, '2027-03-14T17:00:00.000Z');
+  for (const key of ['image', 'portrait', 'obstacles', 'collectibles']) {
+    assert.match(stage[key], /^\/admin\/runner\/skins\//);
+    const name = fileOf(stage[key]);
+    assert.equal(app.runnerAdminSkin('admin', name).mime, 'image/webp');
+    assert.throws(() => app.runnerSkin('admin', name), { status: 404 });
+  }
+});

@@ -65,7 +65,7 @@ test('the catalog brings a thumbnail with every figure\'s portrait and a square 
     assert.ok(thumb.bytes.length < c.files.get(fileOf(x.portrait)).bytes.length, `${x.id}: smaller than its portrait`);
   }
   const stages = c.items.filter(x => x.kind === 'backdrop' && x.image);
-  assert.equal(stages.length, 8);
+  assert.equal(stages.length, 9);
   for (const x of stages) {
     assert.equal(fileOf(x.portrait), fileOf(x.image).replace('.webp', '-portrait.webp'));
     assert.equal(x.thumb, undefined, 'the portrait of a stage already has the size of a thumbnail');

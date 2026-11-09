@@ -9,9 +9,11 @@ import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../data/admin_skins_api.dart';
 import '../data/wardrobe_api.dart';
+import '../domain/stage_runner.dart';
 import 'figure_detail.dart';
 import 'runner_menu.dart' show berlinWallClock;
 import 'stage_runner_art.dart';
+import 'stage_runner_fx.dart' show obstacleName;
 import 'stage_runner_look.dart';
 import 'wardrobe_cards.dart';
 
@@ -919,7 +921,8 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
   _Move _move = _Move.stage;
 
   // The pictures of a backdrop or obstacle set, as far as they load.
-  ui.Image? _backdrop, _obstacles, _collectibles;
+  ui.Image? _backdrop, _collectibles;
+  RunnerArt? _obstacleArt;
 
   WardrobeItem get item => widget.skin.item;
 
@@ -977,10 +980,27 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
             backdrop ? item.collectibles : null,
           ),
         ]);
+        final set = images[1];
+        final obstacles = set == null || !fits(set)
+            ? null
+            : base.dressed(
+                obstacles: set,
+                ownPile: await RunnerArt.draws(set, RunnerSprite.pile),
+                ownScenery: await RunnerArt.draws(
+                  set,
+                  RunnerSprite.threeCrates,
+                ),
+                ownTruss: await RunnerArt.draws(
+                  set,
+                  RunnerSprite.trussAssembly,
+                ),
+                border: item.borderColor,
+                obstacleFilter: tintFilter(item.tint),
+              );
         if (!mounted) return;
         setState(() {
           _backdrop = images[0];
-          _obstacles = fits(images[1]) ? images[1] : null;
+          _obstacleArt = obstacles;
           _collectibles = fits(images[2]) ? images[2] : null;
           _dressing = false;
         });
@@ -1383,15 +1403,32 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
         ),
       ],
     );
-    const obstacles = [
-      RunnerSprite.crate,
-      RunnerSprite.lamp,
-      RunnerSprite.sandbag,
-      RunnerSprite.flat,
-      RunnerSprite.drum,
-      RunnerSprite.truss,
-      RunnerSprite.drop,
-    ];
+    Widget obstacles(String title) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        Text(title, style: theme.textTheme.titleSmall),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final kind in ObstacleKind.values)
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox.square(
+                    dimension: 76,
+                    child: ObstacleIcon(kind, art: _obstacleArt ?? base),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(obstacleName(kind), style: theme.textTheme.labelSmall),
+                ],
+              ),
+          ],
+        ),
+      ],
+    );
     const pickups = [RunnerSprite.rose, RunnerSprite.mask, RunnerSprite.star];
     final missing = <String>[
       if (item.kind == WardrobeKind.backdrop &&
@@ -1401,7 +1438,7 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
         'Hintergrundbild lädt nicht',
       if (item.kind == WardrobeKind.backdrop &&
           item.obstacles != null &&
-          _obstacles == null &&
+          _obstacleArt == null &&
           !_dressing)
         'Hindernis-Sheet lädt nicht oder hat falsche Maße',
       if (item.kind == WardrobeKind.backdrop &&
@@ -1411,16 +1448,16 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
         'Sammel-Sheet lädt nicht oder hat falsche Maße',
       if (item.kind == WardrobeKind.obstacles &&
           item.image != null &&
-          _obstacles == null &&
+          _obstacleArt == null &&
           !_dressing)
         'Hindernis-Sheet lädt nicht oder hat falsche Maße',
     ];
     return switch (item.kind) {
       WardrobeKind.backdrop => [
-        sprites(
-          _obstacles == null ? 'Hindernisse (Standard)' : 'Eigene Hindernisse',
-          _obstacles ?? base.atlas,
-          obstacles,
+        obstacles(
+          _obstacleArt == null
+              ? 'Hindernisse (Standard)'
+              : 'Eigene Hindernisse',
         ),
         sprites(
           _collectibles == null
@@ -1437,7 +1474,7 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
           ),
       ],
       WardrobeKind.obstacles => [
-        sprites('Hindernisse', _obstacles ?? base.atlas, obstacles),
+        obstacles('Hindernisse'),
         for (final m in missing)
           Padding(
             padding: const EdgeInsets.only(top: 8),

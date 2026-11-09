@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -9,6 +12,7 @@ import 'package:theater_app/core/telemetry/perf_stats.dart';
 import 'package:theater_app/features/games/data/admin_skins_api.dart';
 import 'package:theater_app/features/games/data/wardrobe_api.dart';
 import 'package:theater_app/features/games/ui/admin_skin_viewer.dart';
+import 'package:theater_app/features/games/ui/wardrobe_cards.dart';
 import 'package:theater_app/features/games/ui/stage_runner_art.dart';
 import 'package:theater_app/features/games/ui/stage_runner_look.dart';
 import 'package:theater_app/features/settings/settings.dart';
@@ -466,6 +470,92 @@ void main() {
     expect(pictures.where((p) => p.endsWith('elena-portrait.webp')), isEmpty);
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets(
+    'Sagenhaft previews the scheduled backdrop, all hazards and pickups',
+    (tester) async {
+      final (controller, _) = await _signedIn();
+      final source = jsonDecode(
+        File('server/src/wardrobe/catalog.json').readAsStringSync(),
+      );
+      final item = Map<String, dynamic>.from(
+        source['items'].firstWhere((e) => e['id'] == 'backdrop.sagenhaft'),
+      );
+      for (final key in ['image', 'obstacles', 'collectibles', 'portrait']) {
+        final file = item[key] as String;
+        final path = '/admin/runner/skins/$file';
+        WardrobePictures.keepFileForTest(
+          path,
+          File('server/src/wardrobe/images/$file').readAsBytesSync(),
+        );
+        item[key] = path;
+      }
+      final art = await tester.runAsync(() async {
+        for (final key in ['image', 'obstacles', 'collectibles', 'portrait']) {
+          final image = await WardrobePictures.load(
+            controller,
+            item[key] as String,
+          );
+          expect(image, isNotNull);
+          if (key == 'obstacles')
+            await RunnerArt.draws(image!, RunnerSprite.pile);
+        }
+        return RunnerArt.test(
+          await createTestImage(width: 1124, height: 577),
+          await createTestImage(width: 64, height: 32),
+        );
+      });
+      final skin = AdminSkin(
+        item: WardrobeItem.fromJson(item)!,
+        live: false,
+        release: AdminSkinRelease(
+          id: 'sagenhaft-2027',
+          active: false,
+          name: 'Sagenhaft',
+          startsAt: DateTime.parse('2027-03-14T17:00:00Z'),
+        ),
+      );
+      await _pump(
+        tester,
+        AdminSkinDetailPage(
+          skin: skin,
+          catalog: AdminSkinCatalog.fromJson(_catalog).catalog,
+          controller: controller,
+          art: art,
+        ),
+      );
+      for (
+        var i = 0;
+        i < 8 && find.text('Eigene Hindernisse').evaluate().isEmpty;
+        i++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+      expect(find.text('Eigene Hindernisse'), findsOneWidget);
+      expect(find.text('Eigene Sammelobjekte'), findsOneWidget);
+      final icons = tester
+          .widgetList<ObstacleIcon>(find.byType(ObstacleIcon))
+          .toList();
+      expect(icons.length, 9);
+      final rendered = icons.first.art!;
+      expect(rendered.ownPile, isTrue);
+      expect(rendered.ownTruss, isTrue);
+      expect(rendered.border, const Color(0xFF16482F));
+      for (final name in [
+        'Soffitte',
+        'Kistenstapel',
+        'Lichttraverse',
+        'Pergamentrolle',
+        'Blumenstrauß',
+        'Ritterhelm',
+      ]) {
+        expect(find.text(name), findsOneWidget);
+      }
+    },
+  );
 
   testWidgets('the page of a figure plays its moves and shows every pose', (
     tester,

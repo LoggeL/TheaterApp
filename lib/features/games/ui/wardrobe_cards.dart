@@ -990,6 +990,7 @@ class _ObstaclePainter extends CustomPainter {
     final sprite = RunnerSprite.ofObstacle(
       kind,
       ownPile: a?.ownPile ?? false,
+      ownTruss: a?.ownTruss ?? false,
       ownScenery: a?.ownScenery ?? false,
     );
     if (sprite == null || a == null) {
@@ -1000,7 +1001,10 @@ class _ObstaclePainter extends CustomPainter {
         inner.width * .6,
         inner.height * .8,
       );
-      canvas.drawRect(cloth, Paint()..color = const Color(0xFF8E2420));
+      canvas.drawRect(
+        cloth,
+        Paint()..color = a?.border ?? const Color(0xFF8E2420),
+      );
       canvas.drawRect(
         Rect.fromLTWH(cloth.left, cloth.bottom - 3, cloth.width, 3),
         Paint()..color = const Color(0xFFD9A441),

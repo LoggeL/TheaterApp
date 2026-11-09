@@ -475,6 +475,9 @@ void main() {
           'Büste des Grafen',
           'Daumenschraube',
           'Ausgestopfter Falke',
+          'Pergamentrolle',
+          'Blumenstrauß',
+          'Ritterhelm',
         ].map(collectiblePlural),
         [
           'Bonbons',
@@ -490,6 +493,9 @@ void main() {
           'Büsten des Grafen',
           'Daumenschrauben',
           'Ausgestopfte Falken',
+          'Pergamentrollen',
+          'Blumensträuße',
+          'Ritterhelme',
         ],
       );
     });

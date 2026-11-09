@@ -45,6 +45,8 @@ enum RunnerSprite {
   drum(713, 208, 150, 150),
   truss(152, 386, 420, 64),
   drop(479, 4, 128, 176),
+  // A complete hanging beam, including its fixtures, in one optional cell.
+  trussAssembly(364, 456, 204, 96),
   // A pile in one picture (Creepshow's sarcophagus), shaped like its two
   // hitboxes: the lower half as wide as the cell, the upper half over its
   // middle half. Only obstacle sets that draw something here have one
@@ -151,6 +153,7 @@ enum RunnerSprite {
   static RunnerSprite? ofObstacle(
     ObstacleKind kind, {
     bool ownPile = false,
+    bool ownTruss = false,
     bool ownScenery = false,
   }) => switch (kind) {
     ObstacleKind.crate => crate,
@@ -165,7 +168,7 @@ enum RunnerSprite {
           : ownPile
           ? pile
           : crate,
-    ObstacleKind.truss => truss,
+    ObstacleKind.truss => ownTruss ? trussAssembly : truss,
     ObstacleKind.drop => drop,
   };
 }
@@ -194,6 +197,7 @@ class RunnerArt {
       border = null,
       obstacleCrashLines = const {},
       pickupNames = const {},
+      ownTruss = false,
       ownPile = false,
       ownTallCrate = false,
       ownScenery = false,
@@ -217,6 +221,7 @@ class RunnerArt {
     this.border,
     this.obstacleCrashLines = const {},
     this.pickupNames = const {},
+    this.ownTruss = false,
     this.ownPile = false,
     this.ownTallCrate = false,
     this.ownScenery = false,
@@ -248,8 +253,12 @@ class RunnerArt {
   /// Closing lines for the loaded obstacle set; empty for the default art.
   final Map<ObstacleKind, String> obstacleCrashLines;
 
+  /// Whether the set has a complete [RunnerSprite.trussAssembly].
+  final bool ownTruss;
+
   /// Whether the obstacle set draws a pile in one picture
-  /// ([RunnerSprite.pile]) instead of crates; never the default art.
+  /// ([RunnerSprite.pile]) instead of crates. The same picture serves for a
+  /// tall crate if there is no separate tall-crate sprite.
   final bool ownPile;
 
   /// Whether the obstacle set draws a tall crate in one picture
@@ -309,6 +318,7 @@ class RunnerArt {
   /// The cells an obstacle set may leave empty.
   static const _optionalCells = [
     RunnerSprite.pile,
+    RunnerSprite.trussAssembly,
     RunnerSprite.tallCrate,
     RunnerSprite.threeCrates,
   ];
@@ -403,6 +413,7 @@ class RunnerArt {
     Map<ObstacleKind, String> obstacleCrashLines = const {},
     Map<PickupKind, String> pickupNames = const {},
     bool ownPile = false,
+    bool ownTruss = false,
     bool ownTallCrate = false,
     bool ownScenery = false,
     Map<String, String> sceneryCrashLines = const {},
@@ -421,6 +432,7 @@ class RunnerArt {
     obstacleCrashLines: obstacles == null ? const {} : obstacleCrashLines,
     pickupNames: pickups == null ? const {} : pickupNames,
     ownPile: obstacles != null && ownPile,
+    ownTruss: obstacles != null && ownTruss,
     ownTallCrate: obstacles != null && ownTallCrate,
     ownScenery: obstacles != null && ownScenery,
     sceneryCrashLines: obstacles == null ? const {} : sceneryCrashLines,

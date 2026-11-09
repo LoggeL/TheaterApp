@@ -2420,6 +2420,8 @@ class _StagePainter extends CustomPainter {
           rect,
           a.obstaclePaint,
         );
+      case ObstacleKind.crate when a.ownPile && o.tall:
+        _sprite(canvas, a, RunnerSprite.pile, rect);
       case ObstacleKind.crate:
         // A tall pile is two crates, so none gets stretched much.
         if (o.tall) {
@@ -2524,20 +2526,27 @@ class _StagePainter extends CustomPainter {
           );
         }
       case ObstacleKind.truss:
-        // Four lamps under the truss, the outer ones flush with its ends.
-        final bar = RunnerSprite.truss;
-        final lampWidth = rect.width * .19;
-        final lampHeight =
-            lampWidth * RunnerSprite.lamp.height / RunnerSprite.lamp.width;
+        final bar = a.ownTruss
+            ? RunnerSprite.trussAssembly
+            : RunnerSprite.truss;
         final barHeight = rect.width * bar.height / bar.width;
-        final barTop = rect.bottom - lampHeight - barHeight * .5;
-        for (var i = 0; i < 4; i++) {
-          final x =
-              rect.left + lampWidth / 2 + i * (rect.width - lampWidth) / 3;
-          _lamp(canvas, a, x, rect.bottom, lampWidth, floorY);
+        var barTop = rect.bottom - barHeight;
+        var suspensionY = rect.bottom;
+        if (!a.ownTruss) {
+          // Four lamps under a plain truss, the outer ones flush with its ends.
+          final lampWidth = rect.width * .19;
+          final lampHeight =
+              lampWidth * RunnerSprite.lamp.height / RunnerSprite.lamp.width;
+          barTop = rect.bottom - lampHeight - barHeight * .5;
+          suspensionY = barTop;
+          for (var i = 0; i < 4; i++) {
+            final x =
+                rect.left + lampWidth / 2 + i * (rect.width - lampWidth) / 3;
+            _lamp(canvas, a, x, rect.bottom, lampWidth, floorY);
+          }
         }
         for (final x in [rect.left + s * .012, rect.right - s * .012]) {
-          canvas.drawLine(Offset(x, 0), Offset(x, barTop), _ropePaint);
+          canvas.drawLine(Offset(x, 0), Offset(x, suspensionY), _ropePaint);
         }
         _sprite(
           canvas,

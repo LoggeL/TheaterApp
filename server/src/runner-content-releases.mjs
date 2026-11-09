@@ -41,8 +41,12 @@ const filesOf = entries => new Set(entries.flatMap(x => assetKeys.flatMap(key =>
 
 /** Preserves parsed item objects (including non-enumerable draw/legacy metadata). */
 export function releasedCatalog(base, releases, at) {
-  const hidden = new Set(releases.flatMap(r => !releaseIsActive(r, at) ? [...r.itemIds, ...r.gatedItemIds]
-    : !releasePackReady(base, r) ? [...r.itemIds, ...r.gatedItemIds.filter(id => base.byId.get(id)?.kind !== 'backdrop')] : []));
+  const hidden = new Set(releases.flatMap(r => {
+    if (!releaseIsActive(r, at)) return [...r.itemIds, ...r.gatedItemIds];
+    if (releasePackReady(base, r)) return [];
+    // Milestone backdrops have their own unlock. A free pack backdrop arrives with its roles.
+    return [...r.itemIds, ...r.gatedItemIds.filter(id => r.freeItemIds.includes(id) || base.byId.get(id)?.kind !== 'backdrop')];
+  }));
   if (!hidden.size) return base;
   const items = base.items.filter(x => !hidden.has(x.id));
   const byId = new Map(items.map(x => [x.id, x]));

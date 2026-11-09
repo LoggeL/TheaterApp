@@ -792,6 +792,11 @@ void main() {
             image,
             RunnerSprite.pile,
           );
+          expect(
+            await RunnerArt.draws(image, RunnerSprite.trussAssembly),
+            f.uri.pathSegments.last == 'obstacles-sagenhaft.webp',
+            reason: f.path,
+          );
           // Asked again, the answer is remembered.
           expect(
             await RunnerArt.draws(image, RunnerSprite.pile),
@@ -806,7 +811,7 @@ void main() {
           for (final MapEntry(:key, :value) in found.entries)
             if (value) key,
         },
-        {'obstacles-creepshow.webp'},
+        {'obstacles-creepshow.webp', 'obstacles-sagenhaft.webp'},
       );
     });
 
@@ -830,6 +835,57 @@ void main() {
       expect(art.dressed(ownPile: true).ownPile, isFalse);
       expect(art.dressed(obstacles: art.atlas, ownPile: true).ownPile, isTrue);
     });
+  });
+
+  testWidgets('Sagenhaft paints the thorn bushes and the complete torch beam', (
+    tester,
+  ) async {
+    final (set, baseAtlas) = (await tester.runAsync(() async {
+      final codec = await ui.instantiateImageCodec(
+        File(
+          'server/src/wardrobe/images/obstacles-sagenhaft.webp',
+        ).readAsBytesSync(),
+      );
+      final image = (await codec.getNextFrame()).image;
+      codec.dispose();
+      return (image, await createTestImage(width: 1124, height: 577));
+    }))!;
+    final hasPile = (await tester.runAsync(
+      () => RunnerArt.draws(set, RunnerSprite.pile),
+    ))!;
+    final hasTruss = (await tester.runAsync(
+      () => RunnerArt.draws(set, RunnerSprite.trussAssembly),
+    ))!;
+    final art = RunnerArt.test(
+      baseAtlas,
+      baseAtlas,
+    ).dressed(obstacles: set, ownPile: hasPile, ownTruss: hasTruss);
+    final game = StageRunner(random: Random(1))
+      ..obstacles.clear()
+      ..pickups.clear();
+    for (final (kind, height) in [
+      (ObstacleKind.crate, .12),
+      (ObstacleKind.crate, .21),
+      (ObstacleKind.truss, .32),
+    ]) {
+      game.obstacles.add(
+        Obstacle()
+          ..kind = kind
+          ..left = 1
+          ..width = .12
+          ..top = StageRunner.floor - height
+          ..bottom = StageRunner.floor,
+      );
+    }
+    final canvas = _DrawnCells(set);
+    stagePainterFor(game, art).paint(canvas, const Size(640, 400));
+    expect(canvas.cells, [
+      RunnerSprite.crate.rect,
+      RunnerSprite.pile.rect,
+      RunnerSprite.trussAssembly.rect,
+    ]);
+    set.dispose();
+    baseAtlas.dispose();
   });
 
   group('a tall crate of its own', () {

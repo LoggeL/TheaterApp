@@ -27,6 +27,13 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.16.1',
+    date: '9. November 2026',
+    items: [
+      'Für die Theaterleitung: Im Skin-Viewer siehst du jetzt auch Kistenstapel, Soffitten und die vollständige Lichttraverse der geplanten Bühnenbilder.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.16.0',
     date: '8. November 2026',
     items: [

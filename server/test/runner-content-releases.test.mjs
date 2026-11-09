@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { Store } from '../src/store.mjs';
 import { Theater } from '../src/theater.mjs';
 import { bundledCatalog, loadCatalog } from '../src/runner-wardrobe.mjs';
@@ -245,4 +246,42 @@ test('bundled manifest pins the approved Berlin dates and known role pools', () 
   assert.ok(c.byId.has('backdrop.creepshow'));
   assert.throws(() => parseContentReleases([{ id: 'bad', name: 'Bad', startsAt: '2026-11-08' }]), /Invalid/);
   assert.throws(() => parseContentReleases([releases[1], { ...releases[1], id: 'duplicate-pool' }]), /scheduled twice/);
+});
+
+test('Sagenhaft is free to wear together with its complete March role pack', t => {
+  const release = bundledContentReleases().find(r => r.id === 'sagenhaft-2027');
+  const id = 'backdrop.sagenhaft', files = ['backdrop-sagenhaft.webp', 'backdrop-sagenhaft-portrait.webp', 'collectibles-sagenhaft.webp', 'obstacles-sagenhaft.webp'];
+  assert.equal(release.startsAt, '2027-03-14T17:00:00.000Z');
+  assert.deepEqual(release.gatedItemIds, [id]);
+  assert.deepEqual(release.freeItemIds, [id]);
+  assert.ok(!release.itemIds.includes(id), 'set crates still contain roles only');
+  const { app, clock } = setup(t);
+  const source = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url)));
+  // Stand in for the upcoming role illustrations; load the real backdrop through the normal catalog.
+  const stageCatalog = missingRole => loadCatalog({ ...source, items: source.items.map(x =>
+    release.itemIds.includes(x.id)
+      ? { ...x, disabled: x.id === missingRole, image: 'character-theresa.webp', portrait: 'character-theresa-portrait.webp' }
+      : x) }, new URL('../src/wardrobe/images/', import.meta.url), new URL('../src/wardrobe/music/', import.meta.url));
+  const complete = stageCatalog();
+  app.runnerReleases = [release];
+  function expectHidden() {
+    assert.ok(!JSON.stringify(app.runnerWardrobe('sam', { roles: true })).includes(id));
+    assert.throws(() => app.runnerOutfit('sam', { kind: 'backdrop', itemId: id }), { status: 404 });
+    for (const name of files) assert.throws(() => app.runnerSkin('sam', name), { status: 404 });
+  }
+  clock.at = new Date(Date.parse(release.startsAt) - 1);
+  app.runnerCatalog = complete;
+  expectHidden();
+  clock.at = new Date(release.startsAt);
+  app.runnerCatalog = stageCatalog(release.itemIds[0]);
+  expectHidden();
+  app.runnerCatalog = complete;
+  const wardrobe = app.runnerWardrobe('sam', { roles: true });
+  assert.ok(wardrobe.owned.includes(id));
+  assert.deepEqual(wardrobe.catalog.items.find(x => x.id === id).collectibleNames, {
+    rose: 'Pergamentrolle', mask: 'Blumenstrauß', star: 'Ritterhelm',
+  });
+  app.runnerOutfit('sam', { kind: 'backdrop', itemId: id });
+  assert.equal(app.runnerWardrobe('sam').selected.backdrop, id);
+  for (const name of files) assert.equal(app.runnerSkin('sam', name).mime, 'image/webp');
 });

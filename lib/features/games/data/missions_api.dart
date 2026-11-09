@@ -24,6 +24,7 @@ const _plurals = {
   'Siegel': 'Siegel',
   'Krone': 'Kronen',
   'Garnrolle': 'Garnrollen',
+  'Blumenstrauß': 'Blumensträuße',
   'Lorbeerkranz': 'Lorbeerkränze',
   'Kranz': 'Kränze',
   'Glut': 'Glutstücke',

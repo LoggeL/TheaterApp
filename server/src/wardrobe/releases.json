@@ -259,7 +259,8 @@
       "character.lina--sagenhaft",
       "character.nela--sagenhaft"
     ],
-    "gatedItemIds": []
+    "gatedItemIds": ["backdrop.sagenhaft"],
+    "freeItemIds": ["backdrop.sagenhaft"]
   },
   {
     "id": "black-swan-2027",

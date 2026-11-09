@@ -17,7 +17,7 @@ Die Freischaltung erfolgt im Server anhand seiner Uhr. Der Mac muss dafür nicht
 | 31.01.2027 | Dystopia | Historische Aufnahmen vorhanden |
 | 14.02.2027 | Bluttribut | Historische Aufnahmen vorhanden |
 | 28.02.2027 | Verrat im Kloster | Historische Aufnahmen vorhanden |
-| 14.03.2027 | Sagenhaft | Quellen und Rollen einzeln prüfen |
+| 14.03.2027 | Sagenhaft, Rollenpaket und Bühnenbild für alle | Waldkulisse, Sammelobjekte und Hindernisse fertig. Die Bühne wird mit den fertigen Rollen freigeschaltet. |
 | 28.03.2027 | Die Geschichte der Black Swan, fehlende Rollen | Quellen und Rollen einzeln prüfen |
 | 11.04.2027 | Anno 1146, fehlende Rollen | Ergänzungen zum bestehenden Set |
 | 25.04.2027 | Creepshow, fehlende Rollen | Ergänzungen zum bestehenden Set |
