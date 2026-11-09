@@ -598,10 +598,36 @@ Future<RunnerArt> dressArt(
 ) async {
   dressCount++;
   final worn = _Worn(wardrobe);
-  final character = worn.character, backdrop = worn.backdrop;
-  final obstacles = worn.obstacles, stageSet = worn.stageSet;
-  final fx = worn.fx, shiny = worn.shiny;
   WardrobePictures.wear(worn.pictures.nonNulls);
+  return loadRunnerLook(
+    base,
+    controller,
+    character: worn.character,
+    backdrop: worn.backdrop,
+    obstacles: worn.obstacles,
+    fx: worn.fx,
+    shiny: worn.shiny,
+    retryMissing: true,
+  );
+}
+
+/// Dress the same stage for a run or an admin preview. Only a worn outfit
+/// pins pictures in the cache. A preview can use the admin catalog's URLs.
+Future<RunnerArt> loadRunnerLook(
+  RunnerArt base,
+  AppController controller, {
+  WardrobeItem? character,
+  WardrobeItem? backdrop,
+  WardrobeItem? obstacles,
+  WardrobeItem? fx,
+  bool shiny = false,
+  bool retryMissing = false,
+}) async {
+  final stageSet = backdrop?.obstacles;
+  final obstacleAtlas = stageSet ?? obstacles?.image;
+  final load = retryMissing
+      ? WardrobePictures.loadOrRetry
+      : WardrobePictures.load;
   bool fits(ui.Image? image) =>
       image != null &&
       image.width == base.atlas.width &&
@@ -609,11 +635,11 @@ Future<RunnerArt> dressArt(
   // A picture that fails is tried once more before the default art stands
   // in for it (Engel Logge instead of the worn figure).
   final images = await Future.wait([
-    WardrobePictures.loadOrRetry(controller, character?.image),
-    WardrobePictures.loadOrRetry(controller, stageSet ?? obstacles?.image),
-    WardrobePictures.loadOrRetry(controller, backdrop?.image),
+    load(controller, character?.image),
+    load(controller, obstacleAtlas),
+    load(controller, backdrop?.image),
     // The backdrop's own collectibles; without them the game's own.
-    WardrobePictures.loadOrRetry(controller, backdrop?.collectibles),
+    load(controller, backdrop?.collectibles),
   ]);
   final runner = fits(images[0]) ? images[0] : null;
   final set = fits(images[1]) ? images[1] : null;
@@ -632,27 +658,23 @@ Future<RunnerArt> dressArt(
     obstacles: set,
     ownPile:
         set != null &&
-        await RunnerArt.draws(set, RunnerSprite.pile, path: worn.obstacleAtlas),
+        await RunnerArt.draws(set, RunnerSprite.pile, path: obstacleAtlas),
     ownTruss:
         set != null &&
         await RunnerArt.draws(
           set,
           RunnerSprite.trussAssembly,
-          path: worn.obstacleAtlas,
+          path: obstacleAtlas,
         ),
     ownTallCrate:
         set != null &&
-        await RunnerArt.draws(
-          set,
-          RunnerSprite.tallCrate,
-          path: worn.obstacleAtlas,
-        ),
+        await RunnerArt.draws(set, RunnerSprite.tallCrate, path: obstacleAtlas),
     ownScenery:
         set != null &&
         await RunnerArt.draws(
           set,
           RunnerSprite.threeCrates,
-          path: worn.obstacleAtlas,
+          path: obstacleAtlas,
         ),
     pickups: fits(images[3]) ? images[3] : null,
     backdrop: images[2],

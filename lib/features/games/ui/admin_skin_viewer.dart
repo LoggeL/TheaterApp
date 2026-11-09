@@ -10,6 +10,7 @@ import '../../../shared/navigation.dart';
 import '../data/admin_skins_api.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
+import 'admin_skin_scene.dart';
 import 'figure_detail.dart';
 import 'runner_menu.dart' show berlinWallClock;
 import 'stage_runner_art.dart';
@@ -922,7 +923,7 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
 
   // The pictures of a backdrop or obstacle set, as far as they load.
   ui.Image? _backdrop, _collectibles;
-  RunnerArt? _obstacleArt;
+  RunnerArt? _obstacleArt, _sceneArt;
 
   WardrobeItem get item => widget.skin.item;
 
@@ -951,62 +952,52 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
       if (mounted) setState(() => _dressing = false);
       return;
     }
-    switch (item.kind) {
-      case WardrobeKind.character:
-        final dressed = await dressFigure(base, item, widget.controller);
-        if (mounted) {
-          setState(() {
-            _dressed = dressed;
-            _dressing = false;
-          });
-        }
-      case WardrobeKind.backdrop || WardrobeKind.obstacles:
-        bool fits(ui.Image? image) =>
-            image != null &&
-            image.width == base.atlas.width &&
-            image.height == base.atlas.height;
-        final backdrop = item.kind == WardrobeKind.backdrop;
-        final images = await Future.wait([
-          WardrobePictures.load(
-            widget.controller,
-            backdrop ? item.image : null,
-          ),
-          WardrobePictures.load(
-            widget.controller,
-            backdrop ? item.obstacles : item.image,
-          ),
-          WardrobePictures.load(
-            widget.controller,
-            backdrop ? item.collectibles : null,
-          ),
-        ]);
-        final set = images[1];
-        final obstacles = set == null || !fits(set)
-            ? null
-            : base.dressed(
-                obstacles: set,
-                ownPile: await RunnerArt.draws(set, RunnerSprite.pile),
-                ownScenery: await RunnerArt.draws(
-                  set,
-                  RunnerSprite.threeCrates,
-                ),
-                ownTruss: await RunnerArt.draws(
-                  set,
-                  RunnerSprite.trussAssembly,
-                ),
-                border: item.borderColor,
-                obstacleFilter: tintFilter(item.tint),
-              );
-        if (!mounted) return;
-        setState(() {
-          _backdrop = images[0];
-          _obstacleArt = obstacles;
-          _collectibles = fits(images[2]) ? images[2] : null;
-          _dressing = false;
-        });
-      case WardrobeKind.fx:
-        setState(() => _dressing = false);
-    }
+    final play = item.role?.play;
+    final stage = switch (item.kind) {
+      WardrobeKind.backdrop => item,
+      WardrobeKind.character when play != null =>
+        widget.catalog.items
+            .where(
+              (candidate) =>
+                  candidate.kind == WardrobeKind.backdrop &&
+                  candidate.name == play &&
+                  candidate.image != null,
+            )
+            .firstOrNull,
+      _ => null,
+    };
+    final art = await loadRunnerLook(
+      base,
+      widget.controller,
+      character: item.kind == WardrobeKind.character ? item : null,
+      backdrop: stage,
+      obstacles: item.kind == WardrobeKind.obstacles ? item : null,
+      fx: item.kind == WardrobeKind.fx ? item : null,
+    );
+    if (!mounted) return;
+    final missing = switch (item.kind) {
+      WardrobeKind.character =>
+        item.image != null && art.runnerAtlas == base.atlas,
+      WardrobeKind.backdrop =>
+        item.image != null && art.backdrop == base.backdrop,
+      WardrobeKind.obstacles =>
+        item.image != null && art.obstacleAtlas == base.atlas,
+      WardrobeKind.fx => !item.isDefault && item.effect == null,
+    };
+    // A portrait alone cannot supply the runner's poses or scenery.
+    final playable =
+        item.isDefault ||
+        item.image != null ||
+        item.tint != null ||
+        item.effect != null;
+    setState(() {
+      _sceneArt = playable && !missing ? art : null;
+      _dressed = item.kind == WardrobeKind.character && !missing ? art : null;
+      _obstacleArt = art.obstacleAtlas == base.atlas ? null : art;
+      _collectibles = art.pickupAtlas == base.atlas ? null : art.pickupAtlas;
+      _backdrop = art.backdrop == base.backdrop ? null : art.backdrop;
+      _dressing = false;
+    });
   }
 
   @override
@@ -1145,6 +1136,13 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
       ..._extras(context),
     ];
     final stage = _stage(context, colors.first);
+    final scene = AdminSkinScene(
+      key: ValueKey('admin-scene-${item.id}'),
+      name: item.name,
+      art: _sceneArt,
+      loading: _dressing,
+      controller: widget.controller,
+    );
     return Scaffold(
       appBar: AppBar(title: Text(item.name)),
       body: SafeArea(
@@ -1166,6 +1164,8 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
                       child: ListView(
                         padding: const EdgeInsets.only(bottom: 24),
                         children: [
+                          scene,
+                          const SizedBox(height: 12),
                           SizedBox(
                             height: min(420, constraints.maxHeight * .6),
                             child: stage,
@@ -1193,6 +1193,8 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
             return ListView(
               padding: EdgeInsets.fromLTRB(side, 12, side, 24),
               children: [
+                scene,
+                const SizedBox(height: 12),
                 SizedBox(height: height, child: stage),
                 ..._moves(context),
                 const SizedBox(height: 16),

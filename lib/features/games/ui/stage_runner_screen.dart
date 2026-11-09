@@ -1533,12 +1533,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   /// The stage's painter, kept across rebuilds (its laid-out texts and
   /// shader stay); a new one only for another pixel ratio.
-  _StagePainter? _painter;
-  _StagePainter _stagePainter(double ratio) {
+  StageRunnerPainter? _painter;
+  StageRunnerPainter _stagePainter(double ratio) {
     final kept = _painter;
     if (kept != null && kept.pixelRatio == ratio) return kept;
     kept?.dispose();
-    return _painter = _StagePainter(
+    return _painter = StageRunnerPainter._(
       () => _game,
       () => _fx,
       () => _art,
@@ -2035,9 +2035,8 @@ class _LegendPainter extends CustomPainter {
   bool shouldRepaint(_LegendPainter old) => old.kind != kind || old.art != art;
 }
 
-/// The painter of the stage for one fixed [game], for tests and renders.
-@visibleForTesting
-CustomPainter stagePainterFor(
+/// The painter for a fixed game state, also used for wardrobe previews.
+StageRunnerPainter stagePainterFor(
   StageRunner game,
   RunnerArt? art, {
   RunnerFx? fx,
@@ -2048,7 +2047,7 @@ CustomPainter stagePainterFor(
   GhostSkins? ghostSkins,
 }) {
   final f = fx ?? RunnerFx(), t = trail ?? RunnerTrail();
-  return _StagePainter(
+  return StageRunnerPainter._(
     () => game,
     () => f,
     () => art,
@@ -2083,8 +2082,8 @@ final _never = ValueNotifier(0);
 /// Paints the run. Paints, paths and text are created once; per frame it
 /// issues a few dozen rectangles, circles and sprite copies from one atlas.
 /// Without the pictures (offline on the web) it draws simple shapes.
-class _StagePainter extends CustomPainter {
-  _StagePainter(
+class StageRunnerPainter extends CustomPainter {
+  StageRunnerPainter._(
     this.game,
     this.fx,
     this.art,
@@ -3464,7 +3463,7 @@ class _StagePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_StagePainter old) =>
+  bool shouldRepaint(StageRunnerPainter old) =>
       old.pixelRatio != pixelRatio || old.sceneryMotion() != sceneryMotion();
 }
 

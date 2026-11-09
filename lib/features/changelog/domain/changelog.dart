@@ -27,6 +27,13 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.16.2',
+    date: '10. November 2026',
+    items: [
+      'Für die Theaterleitung: Im Skin-Viewer kannst du Figuren, Bühnenbilder, Hindernisse und Effekte in einer vergrößerbaren Spielszene ansehen.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.16.1',
     date: '9. November 2026',
     items: [
