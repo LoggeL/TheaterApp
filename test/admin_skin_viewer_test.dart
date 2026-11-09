@@ -497,8 +497,9 @@ void main() {
             item[key] as String,
           );
           expect(image, isNotNull);
-          if (key == 'obstacles')
+          if (key == 'obstacles') {
             await RunnerArt.draws(image!, RunnerSprite.pile);
+          }
         }
         return RunnerArt.test(
           await createTestImage(width: 1124, height: 577),
