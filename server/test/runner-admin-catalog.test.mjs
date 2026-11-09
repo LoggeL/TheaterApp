@@ -203,6 +203,48 @@ test('the bundled catalog: the admin view holds every entry of catalog.json', t 
   for (const release of view.releases) assert.equal(release.ready, release.missing.length === 0, release.id);
 });
 
+test('the 24 Advent doors preview their own figures and pictures without unlocking them', t => {
+  const store = new Store(); t.after(() => store.close());
+  const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', clock: () => new Date('2026-12-24T12:00:00Z') });
+  app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
+  const personId = app.action('admin', { action: 'member.save', name: 'Sam' }, 'member-sam').id;
+  app.session({ uid: 'sam', name: 'Sam', email: 'sam@example.invalid', email_verified: true });
+  app.action('admin', { action: 'account.approve', uid: 'sam', personId, version: 1, role: 'member' }, 'approve-sam');
+
+  const view = app.runnerAdminCatalog('admin');
+  const ids = [
+    'yunus--explosion', 'nele--mumie', 'sophie--waisenhaus', 'elena--ritterin', 'marcella--dienerin',
+    'carina--anno-mathilde', 'logge--creepshow', 'nele--ballkleid', 'hendrik--partygast', 'maren--creepshow',
+    'nela--gauklerin', 'lina--gauklerin', 'theresa--falkenstein', 'jakob--partygast', 'julian--partygast',
+    'elena--strohkleid', 'theo--dorfbewohner', 'theresa--isets-ballkleid', 'till--creepshow',
+    'logge--partygast', 'niko--butlerpraktikant', 'elena--bademantel', 'lena--anno', 'kuschel--weihnachten',
+  ].map(id => `character.${id}`);
+  assert.deepEqual(view.adventCalendar.map(d => d.item), ids);
+  assert.ok(view.adventCalendar.every(d => typeof d.title === 'string' && d.title.trim()));
+  assert.equal(new Set(view.adventCalendar.map(d => d.title)).size, 24);
+  const byId = new Map(view.items.map(item => [item.id, item]));
+  const wardrobe = JSON.stringify(app.runnerWardrobe('sam', { roles: true, unique: true }));
+  assert.ok(!wardrobe.includes('adventCalendar'));
+  assert.throws(() => app.runnerAdminCatalog('sam'), { status: 403 });
+  for (const id of ids) {
+    const item = byId.get(id);
+    assert.equal(item?.kind, 'character', id);
+    assert.equal(item.admin.disabled, true, id);
+    assert.ok(!wardrobe.includes(`"${id}"`), id);
+    for (const key of ['image', 'portrait', 'thumb']) {
+      assert.match(item[key] ?? '', /^\/admin\/runner\/skins\//, `${id} ${key}`);
+      const name = fileOf(item[key]);
+      assert.equal(app.runnerAdminSkin('admin', name).mime, 'image/webp', name);
+      assert.throws(() => app.runnerAdminSkin('sam', name), { status: 403 }, name);
+      assert.throws(() => app.runnerSkin('sam', name), { status: 404 }, name);
+    }
+  }
+  assert.equal(new Set(ids.map(id => byId.get(id).image)).size, 24);
+  assert.equal(byId.get('character.carina--anno-mathilde').role, 'Mathilde');
+  assert.equal(byId.get('character.carina--anno').role, 'Maribel');
+  assert.notEqual(byId.get('character.carina--anno-mathilde').image, byId.get('character.carina--anno').image);
+});
+
 test('admins can preview every Sagenhaft image before the scheduled March release', t => {
   const store = new Store(); t.after(() => store.close());
   const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', clock: () => new Date('2026-11-09T12:00:00Z') });

@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:theater_app/app/shell/app_navigation.dart';
 import 'package:theater_app/app/theme/stage_theme.dart';
 import 'package:theater_app/core/app_controller.dart';
 import 'package:theater_app/core/device_services.dart';
@@ -249,6 +251,7 @@ Future<(AppController, List<String>)> _signedIn({
   String role = 'admin',
   List<String> features = _features,
   List<String>? pictures,
+  JsonMap? catalog,
 }) async {
   final server = TestServer();
   server.data['capabilities'] = {'features': features};
@@ -258,7 +261,7 @@ Future<(AppController, List<String>)> _signedIn({
     final path = _path(request);
     if (path.endsWith('/admin/runner/catalog')) {
       requests.add(path);
-      return Future.value(jsonResponse(_catalog));
+      return Future.value(jsonResponse(catalog ?? _catalog));
     }
     if (path.endsWith('/auth/login')) {
       return Future.value(
@@ -288,14 +291,37 @@ Future<void> _pump(
   WidgetTester tester,
   Widget home, {
   Size size = const Size(900, 4000),
+  AppController? navigationController,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  await tester.pumpWidget(
-    MaterialApp(theme: StageTheme.build(Brightness.light), home: home),
+  final app = MaterialApp(
+    theme: StageTheme.build(Brightness.light),
+    home: home,
   );
+  if (navigationController == null) {
+    await tester.pumpWidget(app);
+  } else {
+    final selection = ValueNotifier(0);
+    addTearDown(selection.dispose);
+    await tester.pumpWidget(
+      AppNavigationScope(
+        controller: navigationController,
+        selection: selection,
+        child: app,
+      ),
+    );
+  }
   for (var i = 0; i < 6; i++) {
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+}
+
+// The figure's showcase keeps animating after the route transition.
+Future<void> _finishTransition(WidgetTester tester) async {
+  await tester.pump();
+  for (var frame = 0; frame < 5; frame++) {
     await tester.pump(const Duration(milliseconds: 100));
   }
 }
@@ -347,6 +373,167 @@ void main() {
     ]);
   });
 
+  test(
+    'unknown doors do not renumber the calendar and older catalogs have none',
+    () {
+      expect(AdminSkinCatalog.fromJson(_catalog).adventCalendar, isEmpty);
+      final data = AdminSkinCatalog.fromJson({
+        ..._catalog,
+        'adventCalendar': [
+          {'item': 'missing', 'title': 'Fehlt'},
+          {'item': 'character.elena--creep', 'title': 'Lucy im Bademantel'},
+        ],
+      });
+      expect(data.adventCalendar.single.day, 2);
+      expect(data.adventCalendar.single.title, 'Lucy im Bademantel');
+      expect(data.adventCalendar.single.skin.item.id, 'character.elena--creep');
+    },
+  );
+
+  testWidgets(
+    'on a phone an admin can open and return from the first and last doors',
+    (tester) async {
+      final items = [
+        for (var i = 1; i <= 24; i++)
+          _item(
+            'character.door-$i',
+            'Figur $i',
+            role: 'Rolle $i',
+            play: 'Creepshow',
+            year: 2026,
+          ),
+      ];
+      final catalog = {
+        ..._catalog,
+        'items': items,
+        'adventCalendar': [
+          for (var i = 1; i <= 24; i++)
+            {'item': 'character.door-$i', 'title': 'Kostüm $i'},
+        ],
+      };
+      final (controller, requests) = await _signedIn(catalog: catalog);
+      await _pump(
+        tester,
+        AdminSkinViewerScreen(controller: controller),
+        size: const Size(320, 640),
+      );
+      await tester.tap(find.text('Adventskalender'));
+      await _finishTransition(tester);
+      expect(find.text('Dezember 2026'), findsOneWidget);
+      for (final day in [1, 24]) {
+        final door = find.byKey(ValueKey('advent-door-$day'));
+        if (day == 24) {
+          await tester.scrollUntilVisible(
+            door,
+            450,
+            scrollable: find.byType(Scrollable),
+          );
+        }
+        expect(find.text('Kostüm $day'), findsOneWidget);
+        await tester.tap(door);
+        await _finishTransition(tester);
+        final detail = tester.widget<AdminSkinDetailPage>(
+          find.byType(AdminSkinDetailPage),
+        );
+        expect(detail.skin.item.id, 'character.door-$day');
+        await tester.tap(find.byType(BackButton).hitTestable());
+        await _finishTransition(tester);
+        expect(door, findsOneWidget);
+        expect(find.byType(AdminSkinDetailPage), findsNothing);
+      }
+      await tester.tap(find.byType(BackButton).hitTestable());
+      await _finishTransition(tester);
+      expect(find.text('Skin-Viewer'), findsOneWidget);
+      expect(requests, hasLength(1));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('signing out hides an open figure and its calendar', (
+    tester,
+  ) async {
+    final (controller, _) = await _signedIn(
+      catalog: {
+        ..._catalog,
+        'adventCalendar': [
+          {'item': 'character.elena--creep', 'title': 'Lucy im Bademantel'},
+        ],
+      },
+    );
+    await _pump(
+      tester,
+      AdminSkinViewerScreen(controller: controller),
+      size: const Size(375, 720),
+      navigationController: controller,
+    );
+    await tester.tap(find.text('Adventskalender'));
+    await _finishTransition(tester);
+    await tester.tap(find.byKey(const ValueKey('advent-door-1')));
+    await _finishTransition(tester);
+    expect(find.byType(AdminSkinDetailPage), findsOneWidget);
+    await controller.logout();
+    await tester.pump();
+    expect(find.text('Nur für Admins.'), findsOneWidget);
+    expect(find.text('Elena'), findsNothing);
+    await tester.tap(find.byType(BackButton).hitTestable());
+    await _finishTransition(tester);
+    expect(find.text('Nur für Admins.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('advent-door-1')), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'every calendar atlas draws all eight of the game’s character frames',
+    (tester) async {
+      await tester.runAsync(() async {
+        final raw =
+            jsonDecode(
+                  File('server/src/wardrobe/catalog.json').readAsStringSync(),
+                )
+                as JsonMap;
+        final items = {for (final item in raw['items']) item['id']: item};
+        final doors = raw['adventCalendar'] as List;
+        expect(doors, hasLength(24));
+        final poses = RunnerSprite.values
+            .where((s) => s.layer == RunnerLayer.runner)
+            .toList();
+        expect(poses, hasLength(8));
+        for (final door in doors) {
+          final item = items[door['item']];
+          final file = File('server/src/wardrobe/images/${item['image']}');
+          final codec = await ui.instantiateImageCodec(file.readAsBytesSync());
+          final image = (await codec.getNextFrame()).image;
+          try {
+            expect((image.width, image.height), (1124, 577), reason: file.path);
+            final pixels = (await image.toByteData(
+              format: ui.ImageByteFormat.rawRgba,
+            ))!;
+            for (final pose in poses) {
+              final rect = pose.rect;
+              var opaque = 0;
+              for (var y = rect.top.toInt(); y < rect.bottom.toInt(); y++) {
+                for (var x = rect.left.toInt(); x < rect.right.toInt(); x++) {
+                  if (pixels.getUint8(4 * (image.width * y + x) + 3) > 127) {
+                    opaque++;
+                  }
+                }
+              }
+              expect(
+                opaque,
+                greaterThan(100),
+                reason: "${item['id']} ${pose.name}",
+              );
+            }
+          } finally {
+            image.dispose();
+            codec.dispose();
+          }
+        }
+      });
+    },
+  );
+
   test('the telemetry never holds the name of a skin', () {
     expect(
       apiPathPattern('/admin/runner/skins/character-geheim-thumb.webp?v=abc'),
@@ -388,6 +575,7 @@ void main() {
     final (controller, requests) = await _signedIn(role: 'member');
     await _pump(tester, AdminSkinViewerScreen(controller: controller));
     expect(find.text('Nur für Admins.'), findsOneWidget);
+    expect(find.text('Adventskalender'), findsNothing);
     expect(requests, isEmpty);
     await tester.pumpWidget(const SizedBox());
   });
@@ -398,6 +586,7 @@ void main() {
     final (controller, requests) = await _signedIn();
     await _pump(tester, AdminSkinViewerScreen(controller: controller));
     expect(requests, hasLength(1));
+    expect(find.text('Adventskalender'), findsNothing);
     expect(
       find.text('10 von 10 Skins · nur für Admins sichtbar'),
       findsOneWidget,

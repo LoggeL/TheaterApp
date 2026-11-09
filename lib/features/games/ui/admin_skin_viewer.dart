@@ -18,6 +18,8 @@ import 'stage_runner_fx.dart' show obstacleName;
 import 'stage_runner_look.dart';
 import 'wardrobe_cards.dart';
 
+part 'admin_advent_calendar.dart';
+
 /// Opens the admins' Skin-Viewer; nothing for anybody else.
 Future<void> openAdminSkinViewer(
   BuildContext context,
@@ -26,6 +28,24 @@ Future<void> openAdminSkinViewer(
   if (!adminSkinsAvailable(controller)) return;
   await openPage<void>(context, AdminSkinViewerScreen(controller: controller));
 }
+
+class _AdminSkinsDenied extends StatelessWidget {
+  const _AdminSkinsDenied();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Skin-Viewer')),
+    body: const Center(child: Text('Nur für Admins.')),
+  );
+}
+
+Widget _adminView(AppController controller, WidgetBuilder buildPage) =>
+    ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => adminSkinsAvailable(controller)
+          ? buildPage(context)
+          : const _AdminSkinsDenied(),
+    );
 
 /// The groups the viewer can be narrowed to.
 enum _Category {
@@ -284,13 +304,9 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    if (!_allowed) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Skin-Viewer')),
-        body: const Center(child: Text('Nur für Admins.')),
-      );
-    }
+  Widget build(BuildContext context) => _adminView(widget.controller, _page);
+
+  Widget _page(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Skin-Viewer'),
@@ -336,6 +352,17 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
     );
   }
 
+  void _openSkin(BuildContext context, AdminSkinCatalog data, AdminSkin skin) =>
+      openPage<void>(
+        context,
+        AdminSkinDetailPage(
+          skin: skin,
+          catalog: data.catalog,
+          controller: widget.controller,
+          art: _art,
+        ),
+      );
+
   Widget _list(BuildContext context, AdminSkinCatalog data) {
     final theme = Theme.of(context);
     final shown = data.skins.where((s) => _matches(data, s)).toList();
@@ -372,6 +399,26 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
           padding: EdgeInsets.fromLTRB(side, 12, side, 4),
           sliver: SliverList.list(
             children: [
+              if (data.adventCalendar.isNotEmpty)
+                Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListTile(
+                    leading: const Icon(Icons.calendar_month_outlined),
+                    title: const Text('Adventskalender'),
+                    subtitle: Text('${data.adventCalendar.length} Türchen'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => openPage<void>(
+                      context,
+                      AdminAdventCalendar(
+                        catalog: data,
+                        art: _art,
+                        controller: widget.controller,
+                        onOpen: (doorContext, skin) =>
+                            _openSkin(doorContext, data, skin),
+                      ),
+                    ),
+                  ),
+                ),
               TextField(
                 key: const ValueKey('admin-skins-search'),
                 controller: _search,
@@ -507,15 +554,7 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
                   catalog: data.catalog,
                   controller: widget.controller,
                   art: _art,
-                  onTap: () => openPage<void>(
-                    context,
-                    AdminSkinDetailPage(
-                      skin: skin,
-                      catalog: data.catalog,
-                      controller: widget.controller,
-                      art: _art,
-                    ),
-                  ),
+                  onTap: () => _openSkin(context, data, skin),
                 );
               },
             ),
@@ -930,6 +969,7 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
   @override
   void initState() {
     super.initState();
+    if (!adminSkinsAvailable(widget.controller)) return;
     if (_base == null) {
       RunnerArt.load().then((art) {
         if (!mounted) return;
@@ -1001,7 +1041,9 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => _adminView(widget.controller, _page);
+
+  Widget _page(BuildContext context) {
     final skin = widget.skin, catalog = widget.catalog;
     final theme = Theme.of(context);
     final colors = rarityColors(catalog, item);

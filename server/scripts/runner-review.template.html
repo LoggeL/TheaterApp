@@ -192,6 +192,7 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4p
     <span class="brand">Bühnenlauf-Review</span>
     <div class="seg" role="tablist" aria-label="Bereich">
       <button data-tab="chars" aria-pressed="true">Figuren</button>
+      <button data-tab="advent" aria-pressed="false">Adventskalender</button>
       <button data-tab="scenery" aria-pressed="false">Kulissen</button>
     </div>
     <div class="progress" title="Bewertungsfortschritt im aktuellen Bereich (Figuren/Kulissen mit Bild)">
@@ -382,6 +383,10 @@ function partLabel(x, p) {
 
 // ---------- UI state ----------
 const ui = Object.assign({ tab: 'chars', group: 'play', search: '', fRating: 'all', fImage: 'with', fCatalog: 'all', fWarn: false, overlay: false, bg: 'check', size: '0.55', speed: 0.55, autoNext: false, collapsed: {}, theme: '' }, store.ui);
+if (location.hash === '#adventskalender') {
+  Object.assign(ui, { tab: 'advent', search: '', fRating: 'all', fImage: 'all', fCatalog: 'all', fWarn: false });
+  delete ui.collapsed.advent;
+}
 function persistUi() { store.ui = ui; save(200); }
 let selected = null; // id of the selected entry
 let order = []; // visible entries in display order
@@ -399,8 +404,13 @@ function setRating(id, patch) {
 const changedSince = x => { const r = rating(x.id); return !!(r && r.h && r.h !== hashOf(x)); };
 
 // ---------- Filtering and grouping ----------
+const advent = new Map(D.adventCalendar.map((door, i) => [door.item, { day: i + 1, title: door.title }]));
+function inTab(x) {
+  if (ui.tab === 'advent') return advent.has(x.id);
+  return ui.tab === 'chars' ? x.kind === 'character' : x.kind !== 'character';
+}
 function passes(x) {
-  if (ui.tab === 'chars' ? x.kind !== 'character' : x.kind === 'character') return false;
+  if (!inTab(x)) return false;
   const r = rating(x.id);
   switch (ui.fRating) {
     case 'unrated': if (r?.r) return false; break;
@@ -417,7 +427,7 @@ function passes(x) {
   if (ui.fCatalog === 'pending' && !releaseInfo(x)?.future) return false;
   if (ui.fWarn && !levelOf(x)) return false;
   if (ui.search) {
-    const hay = [x.id, x.name, x.role, x.play, x.year, x.image?.file, x.portrait?.file, x.backdrop?.file, rarityOf(x.rarity)?.name, r?.c].join(' ').toLowerCase();
+    const hay = [ui.tab === 'advent' ? advent.get(x.id)?.title : '', x.id, x.name, x.role, x.play, x.year, x.image?.file, x.portrait?.file, x.backdrop?.file, rarityOf(x.rarity)?.name, r?.c].join(' ').toLowerCase();
     if (!ui.search.toLowerCase().split(/\s+/).filter(Boolean).every(w => hay.includes(w))) return false;
   }
   return true;
@@ -426,6 +436,7 @@ function passes(x) {
 const playYear = new Map();
 for (const c of D.characters) if (c.play) playYear.set(c.play, Math.max(playYear.get(c.play) ?? 0, c.year || 0));
 function groupKey(x) {
+  if (ui.tab === 'advent') return ['advent', 'Dezember 2026', 0, ''];
   if (x.kind !== 'character') return x.kind === 'backdrop' ? ['backdrop', 'Hintergründe', 0, ''] : ['obstacles', 'Hindernis-Sets', 1, ''];
   if (ui.group === 'rarity') {
     const r = rarityOf(x.rarity);
@@ -447,6 +458,7 @@ function groupKey(x) {
   return ['s:' + x.play, `${x.play}${year ? ' (' + year + ')' : ''}`, 10 + (3000 - year), x.play];
 }
 function sortWithin(a, b) {
+  if (ui.tab === 'advent') return advent.get(a.id).day - advent.get(b.id).day;
   if (ui.group === 'person' && a.kind === 'character') return (b.year || 0) - (a.year || 0) || (a.play || '').localeCompare(b.play || '');
   if (ui.group === 'rarity' && a.kind === 'character') return (a.play || '').localeCompare(b.play || '') || a.name.localeCompare(b.name);
   const ra = rarityOf(a.rarity)?.rank ?? -1, rb = rarityOf(b.rarity)?.rank ?? -1;
@@ -532,6 +544,10 @@ function rateHtml(x) {
   </div>`;
 }
 function titleLine(x) {
+  if (ui.tab === 'advent' && advent.has(x.id)) {
+    const door = advent.get(x.id);
+    return { title: door.day + '. Dezember · ' + door.title, sub: esc([x.name, x.role, x.play].filter(Boolean).join(' · ')) };
+  }
   if (x.kind !== 'character') return { title: x.name, sub: x.kind === 'backdrop' ? 'Hintergrund' + (x.borderColor ? ` · Vorhang <span class="swatch" style="background:${x.borderColor}"></span> ${x.borderColor}` : '') + (x.music ? ` · Musik ${esc(x.music)}` : '') : 'Hindernis-Set' };
   const sub = x.orphan ? `Datei ohne Katalogeintrag${x.playSlug ? ' · Stück-Kürzel „' + esc(x.playSlug) + '“' : ''}` : [x.role && (x.role !== x.name ? `als <b>${esc(x.role)}</b>` : ''), x.play && `${esc(x.play)}${x.year ? ' ' + x.year : ''}`, x.importance !== undefined && `Wichtigkeit ${x.importance}`].filter(Boolean).join(' · ');
   return { title: x.name, sub };
@@ -586,7 +602,7 @@ function render() {
   order = gs.filter(g => !ui.collapsed[g.key]).flatMap(g => g.items);
   if (selected && !order.some(x => x.id === selected)) selected = null;
   const total = gs.reduce((n, g) => n + g.items.length, 0);
-  $('#count').textContent = `${total} ${ui.tab === 'chars' ? 'Figuren' : 'Kulissen'} in ${gs.length} Gruppen`;
+  $('#count').textContent = `${total} ${ui.tab === 'advent' ? 'Türchen' : ui.tab === 'chars' ? 'Figuren' : 'Kulissen'} in ${gs.length} Gruppen`;
   if (!gs.length) { list.innerHTML = '<div class="empty">Nichts passt zu den Filtern.</div>'; updateProgress(); return; }
   list.innerHTML = gs.map(g => {
     const rated = g.items.filter(x => rating(x.id)?.r).length;
@@ -623,7 +639,7 @@ function refreshCard(id) {
   old.replaceWith(card);
 }
 function updateProgress() {
-  const pool = allEntries.filter(x => (ui.tab === 'chars' ? x.kind === 'character' : x.kind !== 'character') && hasSheet(x));
+  const pool = allEntries.filter(x => inTab(x) && hasSheet(x));
   const n = { ok: 0, fix: 0, redo: 0 };
   for (const x of pool) { const r = rating(x.id)?.r; if (r) n[r]++; }
   const done = n.ok + n.fix + n.redo, total = pool.length || 1;

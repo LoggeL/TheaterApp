@@ -53,6 +53,12 @@ Die zusätzlichen Unique-Figuren Kristall und Rabe haben in dieser Prüfung noch
 
 `source-coverage.json` im privaten Referenzverzeichnis enthält pro Rollen-ID die gefundenen Asset-Kandidaten. Für Hölle ist die ergänzte Datei `hell-2024/role-references.json` maßgeblich. `historical-samples/contact-sheet.jpg` dokumentiert die Sichtprüfung der alten Bühnenfotos.
 
+## Sagenhaft
+
+Das ergänzend bereitgestellte Google-Fotos-Album „Skins Sagenhaft Referenzmaterial“ umfasst 17 Aufnahmen vom 29.12.2023. Drei Aufnahmen sind bildgleich mit der beschrifteten Produktionsgalerie. Bei Zählung ab eins entspricht Albumfoto 2 dem Galeriebild 9 (Emma und Berthold bei der Hochzeit), Foto 7 dem Bild 1 (die jungen Schwestern) und Foto 14 dem Bild 10 (Logge als Bote). Weitere Aufnahmen zeigen unter anderem die Jagd mit dem Knappen, den Heiratsanwärter im blauen Kostüm, den Bären und den Waldgeist. Die Galeriebilder 4, 6, 7 und 15 benennen diese Rollen. [Produktionsgalerie Sagenhaft](https://kolpingtheater-ramsen.de/gallery/sagenhaft)
+
+Die vorhandenen Archivbeschriftungen lösen die Zuordnung der Schwesterkostüme auf. In `DSC00050.jpg` ist Nela (junge Marie) links im dunklen Kleid über weißer Bluse markiert, Lina R. (junge Johanna) rechts in heller Bluse und beigem Rock. In `DSC00154.jpg` und `DSC00291.jpg` trägt Elena (Johanna) das rot-dunkle Kleid und Nele (Marie) das blaue Kleid mit hellem Mittelteil. Die Bilder dienen dem separaten Sagenhaft-Rollenpaket.
+
 ## Freigabe der Bilder
 
 Ein Skin wird erst aktiviert, wenn seine Rolle durch eine Textquelle zugeordnet, sein Kostüm anhand eines passenden Fotos umgesetzt und Atlas, Porträt sowie Seilpunkte im Spiel geprüft sind. Ein Referenztreffer allein ist noch kein fertiger Skin. Romeo und Julia bleibt bis zu echten Kostümfotos vorbereitet; der geplante Termin nach den Aufführungen ersetzt diese Voraussetzung nicht.

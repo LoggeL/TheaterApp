@@ -320,6 +320,7 @@ const data = {
   poseOrder: ['runA', 'passA', 'runB', 'passB', 'fly', 'dangle', 'cheer', 'crash'], strides: ['runA', 'passA', 'runB', 'passB'],
   rarities, departments: Object.fromEntries((catalog.departments ?? []).map(d => [d.id, d.name])),
   releases: releases.map(r => ({ id: r.id, name: r.name, startsAt: r.startsAt, itemIds: r.itemIds ?? [], gatedItemIds: r.gatedItemIds ?? [], freeItemIds: r.freeItemIds ?? [] })),
+  adventCalendar: catalog.adventCalendar ?? [],
   defaultBackdrop, characters, scenery,
 };
 const json = JSON.stringify(data).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');

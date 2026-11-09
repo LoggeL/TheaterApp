@@ -228,6 +228,9 @@ String? _unlockText(Object? value) {
   return 'alle Rollen aus $names';
 }
 
+/// One door in the order supplied by the admin catalog.
+typedef AdventDoor = ({int day, String title, AdminSkin skin});
+
 /// The admins' full catalog (`GET /admin/runner/catalog`): every skin with
 /// its state, and the rarities and departments to show them with.
 class AdminSkinCatalog {
@@ -235,12 +238,14 @@ class AdminSkinCatalog {
     required this.catalog,
     required this.skins,
     this.releases = const [],
+    this.adventCalendar = const [],
   });
 
   /// All items as a [WardrobeCatalog], for rarities, labels and colours.
   final WardrobeCatalog catalog;
   final List<AdminSkin> skins;
   final List<AdminSkinRelease> releases;
+  final List<AdventDoor> adventCalendar;
 
   factory AdminSkinCatalog.fromJson(JsonMap json) {
     final releases = [
@@ -263,7 +268,21 @@ class AdminSkinCatalog {
                   unlock: skin.unlock,
                 ),
     ];
+    final byId = {for (final skin in skins) skin.item.id: skin};
+    final doors = <AdventDoor>[];
+    for (final (index, value) in jsonList(json['adventCalendar']).indexed) {
+      final entry = jsonMap(value);
+      final skin = byId[entry['item']];
+      if (skin != null) {
+        doors.add((
+          day: index + 1,
+          title: textValue(entry['title'], skin.item.name),
+          skin: skin,
+        ));
+      }
+    }
     return AdminSkinCatalog(
+      adventCalendar: doors,
       // The items come apart (with their state); the catalog only lends
       // rarities, departments and colours.
       catalog: WardrobeCatalog.fromJson({

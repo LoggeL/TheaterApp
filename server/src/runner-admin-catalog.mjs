@@ -174,6 +174,7 @@ export function adminRunnerCatalog(t, uid) {
       ...base.items.map(x => ({ ...shown(x), admin: state(x, false) })),
       ...disabled.items.map(x => ({ ...x, admin: state(x, true) })),
     ],
+    adventCalendar: base.source?.data?.adventCalendar ?? [],
     releases: releases.map(({ shown, missing }) => ({ ...shown, missing })),
     serverTime: at.toISOString(),
   };
