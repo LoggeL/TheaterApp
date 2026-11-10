@@ -4,6 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'app/perf_screens.dart';
 import 'app/theater_app.dart';
 import 'core/app_controller.dart';
+import 'core/frame_pacing.dart';
 import 'core/identity.dart';
 import 'core/telemetry/controller_uplink.dart';
 import 'core/telemetry/perf_telemetry.dart';
@@ -12,11 +13,17 @@ export 'app/shell/app_shell.dart' show AppShell;
 export 'app/theater_app.dart' show TheaterApp;
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  // Safari stamps frames unevenly; there the frames begin with paced
+  // stamps (see FramePacing).
+  FramePacing.ensureInitialized();
   // On the web, Flutter builds its accessibility tree once a screen reader
   // asks for it (via its hidden "Enable accessibility" control). Forcing it
   // on for everyone roughly doubled the work of every scrolled frame.
   final controller = AppController(identity: FirebaseIdentity());
+  // The server can switch the pacing off (`noFramePacing`).
+  controller.addListener(
+    () => FramePacing.enabled = !controller.supports('noFramePacing'),
+  );
   // Anonymous frame, start and API timings; see lib/core/telemetry.
   PerfTelemetry.instance
     ..screenNames = perfScreenNames

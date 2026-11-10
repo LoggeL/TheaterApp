@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/api_client.dart';
 import '../app_version.dart';
+import '../frame_pacing.dart';
 import 'perf_platform.dart' as platform;
 import 'perf_stats.dart';
 
@@ -266,9 +267,9 @@ class PerfTelemetry {
       vsyncClock?.call() ??
       (_testing
           ? -1
-          : SchedulerBinding
-                .instance
-                .currentSystemFrameTimeStamp
+          // Where the frames begin with paced stamps, the engine's own one.
+          : (FramePacing.rawTimeStamp ??
+                    SchedulerBinding.instance.currentSystemFrameTimeStamp)
                 .inMicroseconds);
 
   /// The current frame's number (the one of FrameTiming), -1 when unknown;
@@ -656,6 +657,13 @@ class PerfTelemetry {
     if (count > 0 && instance._active) instance.mark('img');
   }
 
+  /// Notes [event] like [mark], while the telemetry measures: for what the
+  /// app does outside its frames, e.g. `read` (the pixels of an atlas read
+  /// back).
+  static void note(String event) {
+    if (instance._active) instance.mark(event);
+  }
+
   /// The events of the last second before [nowUs], e.g. `route,api`.
   String? _eventsBefore(int nowUs) {
     String? out;
@@ -719,12 +727,31 @@ class PerfTelemetry {
     );
   }
 
+  /// The renderer's memory as of the last frame, in bytes; tests can
+  /// replace where it comes from.
+  int? _heapBytes;
+  @visibleForTesting
+  int? Function()? heapClock;
+
+  /// Marks `grow` when the renderer's WebAssembly memory grew since the
+  /// last frame: a slow frame then lists it. Where the browser cannot grow
+  /// that memory in place (Safari on iOS), growing copies all of it.
+  void _watchHeap(int nowUs) {
+    final heap =
+        heapClock?.call() ?? (_testing ? null : platform.rendererHeapBytes());
+    if (heap == null) return;
+    final last = _heapBytes;
+    _heapBytes = heap;
+    if (last != null && heap > last) _eventAt['grow'] = nowUs;
+  }
+
   /// A frame was built at [nowUs]. While frames follow each other (an
   /// animation requested the next one), the frame time is the distance to
   /// the previous frame; for a frame caused by input it is the time since
   /// the input. Other frames (after idle pauses) are not sampled.
   @visibleForTesting
   void frameEnded(int nowUs, {required bool nextScheduled}) {
+    _watchHeap(nowUs);
     _noteStamp();
     double? sample;
     String? input;

@@ -1,3 +1,4 @@
+import '../../../core/frame_pacing.dart';
 import '../../../core/telemetry/perf_telemetry.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
@@ -31,6 +32,11 @@ class RunnerPerf {
   /// noted (the first obstacle, a sound) is not what happened in the game.
   void step(double seconds) {
     if (seconds <= 0) return;
+    // Where the frames begin with paced stamps, the telemetry still counts
+    // the distance of the engine's own ones: what the main thread did.
+    if (FramePacing.rawInterval case final raw?) {
+      seconds = raw.inMicroseconds / 1e6;
+    }
     if (_firstStepMs == null) {
       _firstStepMs = seconds * 1000;
       _recorder.clear();

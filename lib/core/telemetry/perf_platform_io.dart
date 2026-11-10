@@ -8,6 +8,9 @@ const _device = MethodChannel('theater/device');
 /// Milliseconds since the page started loading; only on the web.
 double? pageClockMs() => null;
 
+/// The size of the renderer's WebAssembly memory; only in the browser.
+int? rendererHeapBytes() => null;
+
 /// Device facts that do not change while the app runs. On Android also
 /// `processAgeMs`: how long the process has been running at the answer.
 Future<Map<String, Object>> probeDevice() async {

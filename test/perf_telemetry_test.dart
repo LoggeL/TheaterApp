@@ -321,6 +321,38 @@ void main() {
       );
     });
 
+    test('a slow frame lists that the renderer\'s memory grew', () {
+      var heap = 32 << 20;
+      t.heapClock = () => heap;
+      t.frameEnded(1000000, nextScheduled: true);
+      t.frameEnded(1016700, nextScheduled: true);
+      heap = 48 << 20;
+      t.frameEnded(1136700, nextScheduled: true);
+      t.frameEnded(1153400, nextScheduled: false);
+      // Over a second later it no longer counts, and nothing grew since.
+      t.frameEnded(3000000, nextScheduled: true);
+      t.frameEnded(3090000, nextScheduled: false);
+      t.heapClock = null;
+      final worst = (t.buildReport()['worst']! as List).cast<Map>();
+      expect(
+        worst.firstWhere((w) => w['ms'] == 120),
+        containsPair('ev', 'grow'),
+      );
+      expect(worst.firstWhere((w) => w['ms'] == 90)['ev'], isNull);
+    });
+
+    test('what the app notes outside its frames is listed, too', () {
+      t.clock = () => 1000000;
+      PerfTelemetry.note('read');
+      t.mark('read');
+      animate(t, 1200000, [80]);
+      t.clock = null;
+      expect(
+        (t.buildReport()['worst']! as List).single,
+        containsPair('ev', 'read'),
+      );
+    });
+
     test('API calls across a pause only count as paused', () {
       t.clock = () => 10000000;
       t.recordApi(

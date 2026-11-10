@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/telemetry/perf_telemetry.dart';
 import '../domain/stage_runner.dart';
 
 /// A trail behind the flying runner, from a worn effect.
@@ -359,6 +360,8 @@ class RunnerArt {
       if (kDebugMode) debugPrint('Bühnenlauf: Atlas nicht lesbar: $e');
       return null;
     }
+    // A slow frame around the read lists it.
+    PerfTelemetry.note('read');
     if (bytes == null) return null;
     return {
       for (final sprite in _optionalCells)

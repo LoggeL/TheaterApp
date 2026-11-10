@@ -7,6 +7,7 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../../../core/app_controller.dart';
+import '../../../core/frame_pacing.dart';
 import '../../../core/telemetry/perf_telemetry.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
@@ -451,7 +452,11 @@ abstract final class WardrobePictures {
   static void _frame(Duration now) {
     _frameAsked = false;
     final last = _lastFrame;
-    final ms = last == null ? 0.0 : (now - last).inMicroseconds / 1000;
+    // Where the frames begin with paced stamps (Safari), the distance of
+    // the engine's own ones: a frame the main thread was late for counts.
+    final ms = last == null
+        ? 0.0
+        : (FramePacing.rawInterval ?? now - last).inMicroseconds / 1000;
     // Held back and hardly quicker: the pictures are not why. A display at
     // 30 Hz (a phone saving power) has every frame above the budget.
     final slow =

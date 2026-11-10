@@ -1,4 +1,5 @@
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 
 import 'package:flutter/foundation.dart';
 import 'package:web/web.dart' as web;
@@ -36,6 +37,26 @@ _Navigator get _navigator => _Navigator(web.window.navigator);
 
 /// Milliseconds since the page started loading (`performance.now()`).
 double? pageClockMs() => web.window.performance.now();
+
+@JS('window.flutterCanvasKit')
+external JSObject? get _canvasKit;
+
+@JS('window._flutter_skwasmInstance')
+external JSObject? get _skwasm;
+
+/// The size of the renderer's WebAssembly memory in bytes (CanvasKit's heap
+/// or Skwasm's), null where it cannot be read. It only ever grows, and in
+/// Safari on iOS growing may copy all of it.
+int? rendererHeapBytes() {
+  try {
+    final heap = _canvasKit?.getProperty<JSObject?>('HEAPU8'.toJS);
+    final memory = heap ?? _skwasm?.getProperty<JSObject?>('wasmMemory'.toJS);
+    final buffer = memory?.getProperty<JSObject?>('buffer'.toJS);
+    return buffer?.getProperty<JSNumber?>('byteLength'.toJS)?.toDartInt;
+  } catch (_) {
+    return null;
+  }
+}
 
 bool _standalone() =>
     web.window.matchMedia('(display-mode: standalone)').matches ||
