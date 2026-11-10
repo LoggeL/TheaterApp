@@ -18,10 +18,10 @@ Die Zuordnung nutzt vorhandene Textbeschriftungen in Immich und ausdrücklich be
 
 ## Eine höllische Herausforderung
 
-Das Album "Kreativbühne Theaterfest" enthält 16 Bühnenfotos vom 27. und 28.12.2024. Die offizielle Galerie ergänzt die Professorin und Willi. Damit gibt es Bildvorlagen für die zehn zuvor eingetragenen menschlichen Rollen, die zusätzlich belegte Mammodia und Willi. Die Katalog- und Kostümkorrekturen beruhen auf den Szenenbeschriftungen:
+Das Album "Kreativbühne Theaterfest" enthält 16 Bühnenfotos vom 27. und 28.12.2024. Die offizielle Galerie ergänzt die Professorin und Willi. Damit gibt es Bildvorlagen für die zehn zuvor eingetragenen menschlichen Rollen, die zusätzlich belegte Asmodia und Willi. Die Szenenbeschriftungen belegen die Kostüme. Für Fernanda und Hatice gelten die am 9. November 2026 von Sebastian Sattler bestätigten Rollennamen:
 
-- Fernanda spielt die Assistentin des Teufels. Die frühere Katalogrolle "Mammonia" war falsch. Das Kostüm besteht aus weißer Bluse, dunkler Weste und Hose; ein Klemmbrett ist auf dem Foto zu sehen (Szene 4).
-- Mammodia wird in Szene 7 Hatice zugeordnet. Immich schreibt den vorhandenen Namen "Hatiche". Diese Figur ist von Fernandas Assistentin zu trennen.
+- Fernanda spielt Mammonia, die Assistentin des Teufels. Das Kostüm besteht aus weißer Bluse, dunkler Weste und Hose; ein Klemmbrett ist auf dem Foto zu sehen (Szene 4).
+- Hatice spielt Asmodia. Szene 7 ist ihr Kostümbeleg; die Schreibweise der Rolle in der Galerie weicht ab. Immich schreibt den vorhandenen Namen "Hatiche". Diese Figur ist von Fernandas Assistentin zu trennen.
 - Vanessa ist ein Engel undercover. Schwarzes Kleid und rote Hörner sind daher das belegte Bühnenkostüm, obwohl die Rollenbezeichnung Engel lautet (Szene 6).
 - Nora ist als Prof. Dr. Dr. Glutheiß beschriftet. Szene 4 zeigt einen roten Blazer über weißer Bluse, schwarze Hose, Brille und kleine rote Hörner.
 - Willi ist die Handpuppe auf Szene 3, mit grünbraunem Körper, hellerem Bauch und rotem Maul.
@@ -57,7 +57,23 @@ Die zusätzlichen Unique-Figuren Kristall und Rabe haben in dieser Prüfung noch
 
 Das ergänzend bereitgestellte Google-Fotos-Album „Skins Sagenhaft Referenzmaterial“ umfasst 17 Aufnahmen vom 29.12.2023. Drei Aufnahmen sind bildgleich mit der beschrifteten Produktionsgalerie. Bei Zählung ab eins entspricht Albumfoto 2 dem Galeriebild 9 (Emma und Berthold bei der Hochzeit), Foto 7 dem Bild 1 (die jungen Schwestern) und Foto 14 dem Bild 10 (Logge als Bote). Weitere Aufnahmen zeigen unter anderem die Jagd mit dem Knappen, den Heiratsanwärter im blauen Kostüm, den Bären und den Waldgeist. Die Galeriebilder 4, 6, 7 und 15 benennen diese Rollen. [Produktionsgalerie Sagenhaft](https://kolpingtheater-ramsen.de/gallery/sagenhaft)
 
-Die vorhandenen Archivbeschriftungen lösen die Zuordnung der Schwesterkostüme auf. In `DSC00050.jpg` ist Nela (junge Marie) links im dunklen Kleid über weißer Bluse markiert, Lina R. (junge Johanna) rechts in heller Bluse und beigem Rock. In `DSC00154.jpg` und `DSC00291.jpg` trägt Elena (Johanna) das rot-dunkle Kleid und Nele (Marie) das blaue Kleid mit hellem Mittelteil. Die Bilder dienen dem separaten Sagenhaft-Rollenpaket.
+Die vorhandenen Archivbeschriftungen lösen die Zuordnung der Schwesterkostüme auf. In `DSC00050.jpg` ist Nela (junge Marie) links im dunklen Kleid über weißer Bluse markiert, Lina R. (junge Johanna) rechts in heller Bluse und beigem Rock. In `DSC00154.jpg` und `DSC00291.jpg` trägt Elena (Johanna) das rot-dunkle Kleid und Nele (Marie) das blaue Kleid mit hellem Mittelteil. Die 13 Figuren des Rollenpakets sind nach diesen Vorlagen gezeichnet. Bei Doppelrollen zeigt der Skin das im Album belegte Kostüm.
+
+| Figur im Spiel | Albumfoto | Kostüm der Produktion |
+| --- | --- | --- |
+| Theresa als Emma | 2, 4, 8 | Helles, ärmelloses Schnürkleid |
+| Jonas als Berthold | 2, 4, 9 | Zweifarbiger Waffenrock, silberne Hals- und Schulterpanzerung |
+| Elena als Johanna | 8, 11, 14 | Rot-schwarzes Kleid mit schmaler heller Borte |
+| Nele als Marie | 3, 8 | Blaues Kleid mit hellem Mittelteil und weiten Ärmeln |
+| Nora als Chronistin | 7, 10 | Langer roter Mantel mit kurzem Schultercape, weiße Ärmel, dunkle Kappe |
+| Vanessa als Waldgeist | 15, 16 | Dunkles Kleid mit grünen Blattranken |
+| Fernanda als Magd | 3, 13 | Langärmeliges dunkelrotes Kleid, Brille und Dutt |
+| Logge als Bote | 4, 14 | Dunkles Wams, blaue Ärmel, weiche braune Mütze und hohe Stiefel |
+| Raphael als Heiratsanwärter | 11, 12 | Blaue Tunika und Kopfbedeckung mit herabhängender Stoffbahn |
+| Tobias als Bär | 1, 17 | Heller Plüschanzug mit runden Ohren, sichtbarem Gesicht und schwarzer Nase |
+| Niko als Knappe | 4, 9 | Braun gesteppte Weste über hellem Hemd |
+| Lina R. als junge Johanna | 7 | Helle Bluse und langer beiger Rock |
+| Nela als junge Marie | 7 | Dunkles Trägerkleid über weißer Bluse und dunkler Strumpfhose |
 
 ## Freigabe der Bilder
 
@@ -67,4 +83,4 @@ Geprüft wurden die Hilfe des Werkzeugs und ein echter Metadatenabruf für die 1
 
 ## Fertiggestellte Spielgrafiken
 
-Die elf Höllen-Rollen und Willi wurden anschließend mit dem eingebauten Imagegen anhand dieser Referenzen erstellt. Je Figur liegen ein Atlas mit acht Posen, ein Porträt und geprüfte Seilpunkte vor. Maße, Transparenz und Bildbudgets wurden geprüft; die Optimierung reduzierte die neuen Spielbilder ohne Änderung ihrer Atlasfelder. Die Figuren sind für die Freischaltung am 08.11.2026 vorbereitet. Die übrigen Packs bleiben in der dokumentierten Vorbereitung. Prompts und Integrationsdaten liegen lokal in `artifacts/hell-art-a` bis `artifacts/hell-art-d`; private Fotoquellen bleiben in `.secrets/`.
+Die elf Höllen-Rollen und Willi wurden anschließend mit dem eingebauten Imagegen anhand dieser Referenzen erstellt. Je Figur liegen ein Atlas mit acht Posen, ein Porträt und geprüfte Seilpunkte vor. Maße, Transparenz und Bildbudgets wurden geprüft; die Optimierung reduzierte die neuen Spielbilder ohne Änderung ihrer Atlasfelder. Die Figuren sind für die Freischaltung am 08.11.2026 vorbereitet. Der Vergleich für Sagenhaft steht oben im Abschnitt zum Stück. Prompts und Integrationsdaten liegen lokal in `artifacts/hell-art-a` bis `artifacts/hell-art-d`; private Fotoquellen bleiben in `.secrets/`.

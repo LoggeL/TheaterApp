@@ -17,7 +17,7 @@ Die Freischaltung erfolgt im Server anhand seiner Uhr. Der Mac muss dafür nicht
 | 31.01.2027 | Dystopia | Historische Aufnahmen vorhanden |
 | 14.02.2027 | Bluttribut | Historische Aufnahmen vorhanden |
 | 28.02.2027 | Verrat im Kloster | Historische Aufnahmen vorhanden |
-| 14.03.2027 | Sagenhaft, Rollenpaket und Bühnenbild für alle | Waldkulisse, Sammelobjekte und Hindernisse fertig. Die Bühne wird mit den fertigen Rollen freigeschaltet. |
+| 14.03.2027 | Sagenhaft, Rollenpaket und Bühnenbild für alle | 13 Figuren nach den Kostümfotos fertig, mit Porträts und je acht Spielposen. Die Waldkulisse wird mit dem Rollenpaket freigeschaltet. |
 | 28.03.2027 | Die Geschichte der Black Swan, fehlende Rollen | Quellen und Rollen einzeln prüfen |
 | 11.04.2027 | Anno 1146, fehlende Rollen | Ergänzungen zum bestehenden Set |
 | 25.04.2027 | Creepshow, fehlende Rollen | Ergänzungen zum bestehenden Set |
@@ -37,7 +37,7 @@ Das Fotoarchiv läuft unter `https://photo.rittmann.cloud`. Sein API-Schlüssel 
 
 `tool/wardrobe-photo-references.py` lädt Metadaten über diesen Schlüssel. Private Originale und Zuordnungen liegen im ignorierten Verzeichnis `.secrets/wardrobe-photo-references/`. Vorhandene Namensbeschriftungen und offizielle Bildunterschriften dienen als Zuordnung; unbeschriftete Gesichter werden nicht identifiziert. Bei fehlenden Kostümvorlagen bleibt eine Figur zurückgestellt.
 
-Die [offizielle Höllen-Galerie](https://kolpingtheater-ramsen.de/gallery/hell) belegt auch die Korrektur von Fernandas Rolle und Hatices Mammodia. Der Figurenname Niko folgt der bestehenden App; die Galerie nennt die Rolle Belzebub mit Darsteller Nikodem.
+Die [offizielle Höllen-Galerie](https://kolpingtheater-ramsen.de/gallery/hell) zeigt die Kostüme von Fernanda und Hatice. Sebastian Sattler hat die Rollennamen bestätigt: Fernanda spielt Mammonia, Hatice spielt Asmodia. Der Figurenname Niko folgt der bestehenden App; die Galerie nennt die Rolle Belzebub mit Darsteller Nikodem.
 
 ## Betrieb
 

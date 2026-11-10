@@ -257,12 +257,14 @@ test('Sagenhaft is free to wear together with its complete March role pack', t =
   assert.ok(!release.itemIds.includes(id), 'set crates still contain roles only');
   const { app, clock } = setup(t);
   const source = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url)));
-  // Stand in for the upcoming role illustrations; load the real backdrop through the normal catalog.
-  const stageCatalog = missingRole => loadCatalog({ ...source, items: source.items.map(x =>
-    release.itemIds.includes(x.id)
-      ? { ...x, disabled: x.id === missingRole, image: 'character-theresa.webp', portrait: 'character-theresa-portrait.webp' }
-      : x) }, new URL('../src/wardrobe/images/', import.meta.url), new URL('../src/wardrobe/music/', import.meta.url));
-  const complete = stageCatalog();
+  const roles = source.items.filter(x => x.kind === 'character' && x.play === 'Sagenhaft');
+  assert.equal(roles.length, 13);
+  assert.deepEqual(new Set(release.itemIds), new Set(roles.map(x => x.id)));
+  for (const role of roles) files.push(role.image, role.portrait, role.portrait.replace('-portrait.', '-thumb.'));
+  const complete = bundledCatalog();
+  const incomplete = loadCatalog({ ...source, items: source.items.map(x =>
+    x.id === release.itemIds[0] ? { ...x, disabled: true } : x) },
+    new URL('../src/wardrobe/images/', import.meta.url), new URL('../src/wardrobe/music/', import.meta.url));
   app.runnerReleases = [release];
   function expectHidden() {
     assert.ok(!JSON.stringify(app.runnerWardrobe('sam', { roles: true })).includes(id));
@@ -273,7 +275,7 @@ test('Sagenhaft is free to wear together with its complete March role pack', t =
   app.runnerCatalog = complete;
   expectHidden();
   clock.at = new Date(release.startsAt);
-  app.runnerCatalog = stageCatalog(release.itemIds[0]);
+  app.runnerCatalog = incomplete;
   expectHidden();
   app.runnerCatalog = complete;
   const wardrobe = app.runnerWardrobe('sam', { roles: true });
