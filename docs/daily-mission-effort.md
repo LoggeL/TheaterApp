@@ -39,11 +39,42 @@ specialty choices/change of play style break a stationary-performance assumption
 
 ## Compatibility and rollout
 
-No schema migration, historical rewrite, reward reset or retrospective payout. Missions already
-created for a day keep their goals, progress, completed status, rewards and crate flag; policy 2
-applies when creating new missions (including a requested reroll). Timestamped samples accumulate
-prospectively. The first new day uses capped cold-start goals until five comparable samples exist.
-Existing reward/idempotency paths remain unchanged.
+No schema migration or historical-day rewrite. On the next authenticated mission fetch, reroll or
+accepted run after server rollout, **already-generated open missions of the current Berlin day**
+are balanced once (policy-version marker), inside the existing serialized SQLite transaction:
+
+- Lower target numbers and series minimum distances only; never harden an existing goal.
+- Preserve mission identity/type/kind/slot, actual progress (including series counts), rewards,
+  completed missions, reroll usage, best records and every other person's data. Do not reconstruct
+  previously failed lower-threshold runs from retry buffers. A series may therefore still need
+  a new qualifying run even if an earlier unrecorded run would have qualified under the new minimum.
+- Use recent timestamped measurements if available; otherwise capped cold-start goals. Existing
+  specialties no longer eligible for generation retain their kind and get their conservative start
+  cap. Types without a meaningful same-kind option (e.g. legacy `debut`, an unreachable `reach`)
+  stay unchanged, with an explicit `unsupported-or-ineligible` reason in `effortRebalance.changes`.
+- Explicit server-written per-mission `targetOverride.source=admin` for the same day is respected.
+  This is not client-settable and does not establish a global floor or affect future days.
+- If preserved progress meets the lowered target, the shared normal completion rules award the
+  original points and, when all three are done, one crate. Existing done/crate flags and the policy
+  marker prevent double grants, including retries. No payouts for previous days.
+- Freeze the new basis for subsequent rerolls. Record before/after targets, progress, policy version
+  and observation timestamp in the current log row and `runner.mission.rebalance` audit, without
+  incrementing runs or fabricating historical completion times. Rebalance-earned crates have
+  `crateCompletionSource=effortRebalance`, not an invented `crateRuns`/time-to-crate measurement.
+
+Timestamped samples accumulate prospectively. First-day generation uses capped cold-start goals
+until five comparable samples exist. No manual production-wide migration is needed or authorized
+by merging. Rollout is lazy; merging alone is not evidence that all accounts have been adjusted.
+
+### Rollback
+
+Roll back server code through the documented deployer to the previous release. Do not restore a
+whole database over later gameplay. Existing lowered targets, completed flags and granted rewards
+must remain; reverting code does not claw back legitimate rewards. Any per-record rollback needs
+a fresh backup, explicit approval and a compare-and-set review of `effortRebalance` against current
+progress/rewards. Before any separately authorized live override, take an integrity-checked online
+SQLite backup, rehearse on a disposable copy, then use a guarded transaction and verify unrelated
+entities/history remain byte-for-byte unchanged. Store backups privately, outside the repository.
 
 **A push to `main` currently triggers the workflow's Google Play release job.** For a code/push-only
 request with no deployment authorization, push the feature branch; do not trigger that release

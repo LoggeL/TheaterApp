@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { missionEffort, recentMissionOptions } from './runner-mission-effort.mjs';
 import { AppError } from './theater.mjs';
 import { berlinDay } from './event-series.mjs';
-import { logMissionReroll, logMissionRun, logMissionsMade } from './runner-mission-log.mjs';
+import { logMissionRebalance, logMissionReroll, logMissionRun, logMissionsMade } from './runner-mission-log.mjs';
+import { runnerProgress } from './runner-wardrobe.mjs';
 
 // "Tagesmissionen" of the stage runner (`runnerMissions`): every person gets three missions per
 // Europe/Berlin calendar day, easy, medium and hard, measured on recent ordinary performance.
@@ -13,8 +14,8 @@ import { logMissionReroll, logMissionRun, logMissionsMade } from './runner-missi
 //   start goals cap record-derived targets. No high-score/admin or timestamp-less retry bootstrap.
 // - The whole crate targets median completion <= ten runs (not merely a ten-run sample window).
 //   See runner-mission-effort.mjs and docs/daily-mission-effort.md for assumptions and validation.
-// - The basis freezes for the Berlin day, including its reroll. Existing goals/rewards are not
-//   rewritten. Sustained changes can lower future goals; a single lucky run is not the baseline.
+// - The basis freezes for the Berlin day, including its reroll. Legacy open goals are lowered once,
+//   with progress/rewards and explicit admin overrides preserved; completed missions stay intact.
 // - Which missions: deterministic from person and day (and yesterday's types, which are avoided),
 //   never two of a type on one day. One mission per day may be rerolled for free.
 // - A run's statistics are checked for plausibility (sums, pickup points, obstacles per metre,
@@ -292,10 +293,64 @@ const context = (t, rec, stats, at = t.clock()) => ({
  * The person's missions of the Berlin day of [at]; made on the first request of the day. [stats]:
  * whether the asking app sends run statistics (else only types checkable without them).
  */
+/** Shared completion/idempotence rules for runs and downward balancing. */
+function completeMissions(rec, candidates, at, source) {
+  const completed = [];
+  const missions = candidates.map(m => {
+    if (m.done || m.progress < m.target) return m;
+    completed.push(m.slot);
+    return { ...m, done: true, doneAt: at.toISOString(), ...(source ? { completionSource: source } : {}) };
+  });
+  return { missions, completed,
+    rewardPoints: missions.filter(m => completed.includes(m.slot)).reduce((n, m) => n + rewardPoints(m), 0),
+    crate: !rec.crate && missions.length === missionSlots.length && missions.every(m => m.done) ? 1 : 0 };
+}
+
+/** Once per legacy day, lower open goals without replacing slots or reconstructing old runs. */
+function rebalanceToday(t, rec, at) {
+  if ((rec.effortVersion ?? 0) >= missionEffort.version) return rec;
+  const basis = { rules: rulesOf(t), stats: rec.stats, ...bestsOf(rec), recent: recentOf(rec, at) };
+  const changes = [];
+  const candidates = list(rec.missions).map(m => {
+    if (m.done) return m;
+    if (m.targetOverride?.source === 'admin' && m.targetOverride.day === rec.day) {
+      changes.push({ slot: m.slot, type: m.type, reason: 'explicit-admin-override' });
+      return m;
+    }
+    let option = missionOptions(m.type, m.slot, basis).find(o => o.kind === m.kind);
+    // Do not replace an existing specialty just because it would no longer be generated.
+    // Keep its meaning and use its conservative starting cap, without claiming measured support.
+    if (!option) {
+      const d = basis.rules.types[m.type], i = missionSlots.indexOf(m.slot);
+      const start = m.type === 'collect' ? d?.kinds?.[m.kind]?.start?.[i]
+        : m.type === 'pass' ? d?.start?.[m.kind]?.[i]
+        : ['ground', 'ceiling', 'noPickup'].includes(m.type) ? d?.start?.[i] : undefined;
+      if (Number.isFinite(start) && start > 0) option = { target: start, fallback: true };
+    }
+    if (!option) { changes.push({ slot: m.slot, type: m.type, reason: 'unsupported-or-ineligible' }); return m; }
+    const next = { ...m, target: Math.min(m.target, option.target), ...(m.type === 'runs' ? { min: Math.min(m.min, option.min) } : {}) };
+    changes.push({ slot: m.slot, type: m.type, before: { target: m.target, ...(m.min !== undefined ? { min: m.min } : {}) },
+      after: { target: next.target, ...(next.min !== undefined ? { min: next.min } : {}) }, progress: m.progress, ...(option.fallback ? { source: 'coldStartFallback' } : {}) });
+    return next;
+  });
+  const settled = completeMissions(rec, candidates, at, 'effortRebalance');
+  const { best, runs, recent } = basis;
+  const next = t.store.put('runnerMissions', rec.personId, { ...rec, missions: settled.missions, crate: rec.crate || !!settled.crate,
+    effortVersion: missionEffort.version, effortBasis: { best, runs, recent }, effortRebalance: { version: missionEffort.version, at: at.toISOString(), changes } });
+  if (settled.rewardPoints || settled.crate) {
+    const p = runnerProgress(t, rec.personId);
+    t.store.put('runnerProgress', rec.personId, { ...p, missionPoints: (p.missionPoints ?? 0) + settled.rewardPoints,
+      missionCrates: (p.missionCrates ?? 0) + settled.crate });
+  }
+  logMissionRebalance(t, rec, next, at);
+  t.store.audit('system', 'runner.mission.rebalance', JSON.stringify({ personId: rec.personId, day: rec.day, version: missionEffort.version, changes, completed: settled.completed }));
+  return next;
+}
+
 export function missionsToday(t, personId, at, stats) {
   const rec = t.store.get('runnerMissions', personId) ?? { personId };
   const day = berlinDay(at.toISOString());
-  if (rec.day === day) return rec;
+  if (rec.day === day) return rebalanceToday(t, rec, at);
   const previous = rec.day === dayBefore(day) ? list(rec.missions).map(m => m.type) : [];
   const basis = context(t, rec, stats, at);
   const missions = dayMissions(personId, day, basis, new Set(previous));
@@ -329,19 +384,15 @@ export function recordMissionRun(t, personId, run) {
   const rules = rulesOf(t);
   if (!rules) return { rewardPoints: 0, crate: 0, completed: [], record: null };
   const rec = missionsToday(t, personId, run.at, run.statsSent);
-  const completed = [];
-  const missions = list(rec.missions).map(m => {
+  const candidates = list(rec.missions).map(m => {
     if (m.done) return m;
     let progress = m.progress;
     if (m.type === 'dailyDistance') progress += run.meters;
     else if (m.type === 'runs') progress += run.meters >= m.min ? 1 : 0;
     else { const v = runValue(m, run); if (v !== null) progress = Math.max(progress, v); }
-    const done = progress >= m.target;
-    if (done) completed.push(m.slot);
-    return { ...m, progress, done, ...(done ? { doneAt: run.at.toISOString() } : {}) };
+    return { ...m, progress };
   });
-  const reward = missions.filter(m => completed.includes(m.slot)).reduce((a, m) => a + rewardPoints(m), 0);
-  const crate = !rec.crate && missions.length === missionSlots.length && missions.every(m => m.done);
+  const { missions, completed, rewardPoints: reward, crate } = completeMissions(rec, candidates, run.at);
   // Preserve records separately from timestamped ordinary calibration samples. Neither changes
   // today's frozen missions or reroll basis. The old timestamp-less window is no longer needed.
   const { best, runs } = bestsOf(rec);
@@ -352,7 +403,7 @@ export function recordMissionRun(t, personId, run) {
     recent: (counted && !run.weekly ? [...recentOf(rec, run.at), {
       at: run.at.toISOString(), m: run.meters, s: run.score, ...(run.stats ? { st: run.stats } : {}),
     }] : recentOf(rec, run.at)).slice(-missionEffort.window),
-    todayMeters: (rec.todayMeters ?? 0) + run.meters, crate: rec.crate || crate,
+    todayMeters: (rec.todayMeters ?? 0) + run.meters, crate: rec.crate || !!crate,
   });
   logMissionRun(t, rec, next, run);
   return { rewardPoints: reward, crate: crate ? 1 : 0, completed, record: next };

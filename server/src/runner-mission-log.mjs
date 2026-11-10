@@ -107,6 +107,29 @@ export function logMissionRun(t, before, after, run) {
   });
 }
 
+/** Balance is not a played run: preserve run counters and label the observed award separately. */
+export function logMissionRebalance(t, before, after, instant) {
+  guard('rebalance', () => {
+    const db = t.store.db, at = instant.toISOString();
+    for (const m of list(after.missions)) {
+      const old = list(before.missions).find(x => x.slot === m.slot);
+      if (old?.done) continue;
+      const row = rowOf(db, after.personId, after.day, m);
+      if (!row) continue;
+      const data = JSON.parse(row.data);
+      const balance = after.effortRebalance.changes.find(x => x.slot === m.slot);
+      db.prepare('UPDATE runner_mission_log SET target=?, progress=?, done=?, updated_at=?, data=? WHERE id=?')
+        .run(m.target, m.progress, flag(m.done), at, JSON.stringify({ ...data, ...(m.min !== undefined ? { min: m.min } : {}),
+          effortRebalance: { ...balance, version: missionEffort.version, at }, ...(m.done ? { doneAt: at, completionSource: 'effortRebalance' } : {}) }), row.id);
+    }
+    if (after.crate && !before.crate) {
+      // No fabricated historical time-to-crate: award happened on normalization, not on an old run.
+      db.prepare("UPDATE runner_mission_log SET crate=1, updated_at=?, data=json_set(data,'$.crateCompletionSource','effortRebalance','$.crateAwardedAt',?) WHERE person_id=? AND day=?")
+        .run(at, at, after.personId, after.day);
+    }
+  });
+}
+
 /** A reroll in [rec] (the day's record before it) of [old] to [fresh] (with `rerolled`); [ctx] as made. */
 export function logMissionReroll(t, rec, old, fresh, ctx) {
   guard('reroll', () => {
