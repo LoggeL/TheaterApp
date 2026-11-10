@@ -328,6 +328,7 @@ Future<WeeklyStart> startWeeklyRound(
     method: 'POST',
     body: {
       'weekly': {'week': week, 'ranked': ranked},
+      'order': runOrder(controller).next(),
     },
   );
   final weekly = data['weekly'] is Map

@@ -139,6 +139,47 @@ test('open runs in parallel do not multiply the plausible time', t => {
   assert.equal(app.runnerScore('sam', { roundId: b, score: runnerMaxScore(10 * 60000) }).improved, true);
 });
 
+test('a start that arrives after the next run\'s start does not end that run', t => {
+  const { app, store, sam, tick } = setup(t);
+  const order = seq => ({ order: { client: 'session-1', seq } });
+  // The app started run A (its request stalls), it crashed, "Nochmal" started run B, whose request
+  // got here at once; A's start follows half a second later. B then runs for 40 s (300 m).
+  const b = app.runnerStart('sam', order(2)).roundId; tick(500);
+  const a = app.runnerStart('sam', order(1)).roundId; tick(41000);
+  const meters = Math.floor(runnerMaxMeters(40));
+  assert.equal(meters, 300);
+  assert.equal(app.runnerScore('sam', { roundId: b, score: meters, meters }).improved, true);
+  // The overtaken run A was over before B began: no time is measured for it (only the slack).
+  const open = store.get('runnerRounds', sam).open;
+  assert.deepEqual(open.map(x => x.roundId), [a]);
+  assert.equal(open[0].until, open[0].startedAt);
+  assert.throws(() => app.runnerScore('sam', { roundId: a, score: 100, meters: 100 }), { status: 400, code: 'implausible' });
+  assert.equal(app.runnerScore('sam', { roundId: a, score: 20, meters: 20 }).improved, false);
+  // In the order they were started, a start ends the run before it as ever.
+  const c = app.runnerStart('sam', order(3)).roundId; tick(1000);
+  const d = app.runnerStart('sam', order(4)).roundId; tick(10 * 60000);
+  assert.throws(() => app.runnerScore('sam', { roundId: c, score: 300, meters: 300 }), { status: 400, code: 'implausible' });
+  assert.equal(app.runnerScore('sam', { roundId: d, score: 400, meters: 400 }).improved, true);
+});
+
+test('starts without an order, of another app session or with a malformed one end each other as they arrive', t => {
+  const { app, tick } = setup(t);
+  const late = (first, second) => {
+    const b = app.runnerStart('sam', first).roundId; tick(500);
+    app.runnerStart('sam', second); tick(41000);
+    assert.throws(() => app.runnerScore('sam', { roundId: b, score: 300, meters: 300 }), { status: 400, code: 'implausible' });
+  };
+  // Older apps name no order.
+  late({}, {});
+  late({ order: { client: 'session-1', seq: 2 } }, {});
+  // Another app session (a second device) cannot keep its runs out of the count.
+  late({ order: { client: 'session-1', seq: 2 } }, { order: { client: 'session-2', seq: 1 } });
+  // Malformed orders count as none.
+  for (const order of [null, 'x', { client: '', seq: 1 }, { client: 'x'.repeat(65), seq: 1 }, { client: 'session-1', seq: -1 }, { client: 'session-1', seq: 1.5 }, { client: 7, seq: 1 }]) {
+    late({ order: { client: 'session-1', seq: 2 } }, { order });
+  }
+});
+
 test('the same result sent twice counts once and gets the same answer', t => {
   const { app, store, sam, tick } = setup(t);
   const { roundId } = app.runnerStart('sam'); tick(30000);

@@ -6,7 +6,7 @@ import { migrateSharedSpeakers, sharedSpeakersMigrationId, splitSharedSpeakers }
 import { feedbackList, feedbackTicketsMigrationId, forgetFeedbackAccount, forgetFeedbackPerson, migrateFeedbackTickets, setFeedbackStatus, submitFeedback } from './feedback-tickets.mjs';
 import { checkRunStats, missions, rerollMission, runnerCourse } from './runner-missions.mjs';
 import { forgetMissionLog } from './runner-mission-log.mjs';
-import { findRound, finishRound, startRound } from './runner-rounds.mjs';
+import { findRound, finishRound, roundOrder, startRound } from './runner-rounds.mjs';
 import { autoCheckins, eventCrateNotice, forgetEventCrates, settleCheckinCrate } from './runner-event-crates.mjs';
 import { buyItem, bundledCatalog, collectionBoard, ensembleSeen, galaSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
 import { bundledContentReleases, parseContentReleases, releasedCatalog, releaseIsActive } from './runner-content-releases.mjs';
@@ -486,8 +486,10 @@ export class Theater {
       const a = this.account(uid), at = this.clock();
       // Observe readiness before this round starts, so delayed artwork never credits an older run.
       packGoalsView(this, a.personId);
-      if (b?.weekly !== undefined && b?.weekly !== null) return startWeeklyRound(this, a.personId, b.weekly, at, extra => startRound(this, a.personId, at, stageRunner, extra));
-      const { roundId, startedAt } = startRound(this, a.personId, at, stageRunner);
+      // The order of the app's starts, for requests that overtake each other (runner-rounds.mjs).
+      const order = roundOrder(b?.order);
+      if (b?.weekly !== undefined && b?.weekly !== null) return startWeeklyRound(this, a.personId, b.weekly, at, extra => startRound(this, a.personId, at, stageRunner, extra, order));
+      const { roundId, startedAt } = startRound(this, a.personId, at, stageRunner, {}, order);
       return { roundId, startedAt };
     });
   }

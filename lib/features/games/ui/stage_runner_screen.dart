@@ -611,6 +611,18 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     // page's theme colour.
     if (_phase == _Phase.playing) {
       _perf?.finish(_wardrobe, end: 'quit');
+      // Crashed, but left before the curtain had closed: that run is over
+      // and counts like any other. The outbox outlives this page. A run
+      // left in mid-flight stays abandoned.
+      if (_game.over) {
+        if (_runScore() case final score?) {
+          unawaited(
+            runnerScoreOutbox(
+              controller,
+            ).send(score).then<void>((_) {}, onError: (Object _) {}),
+          );
+        }
+      }
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         SystemChrome.setSystemUIOverlayStyle(runnerBarsDefault);
       }
@@ -764,9 +776,9 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     final fx = _fx = RunnerFx(
       // Training counts for no list: no record to break.
       best: weekly == null
-          ? _board?.own?.score
+          ? _knownBest
           : weekly.ranked
-          ? weekly.challenge.best?.score
+          ? _knownWeeklyBest(weekly.challenge)
           : null,
       onSound: (sfx) {
         perf.played();
@@ -790,6 +802,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     widget.onRun?.call(_game);
     _hud.value = (0, 0);
     _pointers = 0;
+    _heldOver.clear();
     _saveError = null;
     _improved = false;
     _saving = false;
@@ -862,7 +875,70 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     }
   }
 
+  /// The run as it ended, with its own server round; null when the server
+  /// does not time it (no shared list, the demo).
+  RunScore? _runScore() {
+    final start = _start;
+    if (start == null) return null;
+    return RunScore(
+      round: start,
+      score: _game.score,
+      meters: _game.meters,
+      hitBy: _game.hitBy,
+      missionStats: _game.missionStats,
+      ghost: _recorder?.encode(crashed: _game.over),
+      character: _runFigure,
+    );
+  }
+
+  /// The best score of this visit's normal runs that went to the server.
+  /// The list ([_board]) knows a run only once its result is back, which a
+  /// quick "Nochmal" does not wait for (and a result in the outbox may take
+  /// long): the next run would break the old record once more.
+  int _localBest = 0;
+
+  /// Likewise the best ranked run of a week of the Wochenprobe.
+  ({String week, int score})? _localWeeklyBest;
+
+  /// The own best a normal run has to beat, as far as known.
+  int? get _knownBest {
+    final board = _board;
+    return board == null ? null : max(board.own?.score ?? 0, _localBest);
+  }
+
+  /// The own best of [week] a ranked run has to beat; 0 for none yet.
+  int _knownWeeklyBest(WeeklyChallenge week) {
+    final local = _localWeeklyBest;
+    return max(
+      week.best?.score ?? 0,
+      local != null && local.week == week.week ? local.score : 0,
+    );
+  }
+
+  /// Hold keys that were still down when the run ended. Their repeats must
+  /// not press the focused button of the result ("Nochmal"): whoever still
+  /// holds the space bar would skip the result and fly on at once.
+  final _heldOver = <LogicalKeyboardKey>{};
+
+  KeyEventResult _menuKey(FocusNode node, KeyEvent event) {
+    if (_heldOver.isEmpty) return KeyEventResult.ignored;
+    if (event is KeyRepeatEvent) {
+      return _heldOver.contains(event.logicalKey)
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
+    }
+    // Let go, or pressed afresh (its release went elsewhere): from now on
+    // the key acts as usual.
+    _heldOver.remove(event.logicalKey);
+    return KeyEventResult.ignored;
+  }
+
   Future<void> _finish(int run) async {
+    _heldOver
+      ..clear()
+      ..addAll(
+        HardwareKeyboard.instance.logicalKeysPressed.where(_holdKeys.contains),
+      );
     setState(() {
       _phase = _Phase.finished;
       _line = curtainLine(
@@ -873,22 +949,22 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
             const {},
       );
     });
-    final start = _start;
-    if (start == null) return;
     // Fixed now, before anything is awaited: a quick "Nochmal" replaces
     // `_game` and `_start`, and this run must still be sent as it ended,
     // with its own round. The outbox sends it even when the next run plays.
+    final score = _runScore();
+    if (score == null) return;
     final outbox = runnerScoreOutbox(controller);
-    final score = RunScore(
-      round: start,
-      score: _game.score,
-      meters: _game.meters,
-      hitBy: _game.hitBy,
-      missionStats: _game.missionStats,
-      ghost: _recorder?.encode(crashed: _game.over),
-      character: _runFigure,
-    );
     final weekly = _weeklyPlay;
+    if (weekly == null) {
+      _localBest = max(_localBest, score.score);
+    } else if (weekly.ranked) {
+      final week = weekly.challenge.week;
+      _localWeeklyBest = (
+        week: week,
+        score: max(_knownWeeklyBest(weekly.challenge), score.score),
+      );
+    }
     setState(() => _saving = true);
     try {
       final result = await outbox.send(score);
@@ -980,7 +1056,14 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
             onKeyEvent: _key,
             child: _stage(context),
           ),
-          _ => _menuBody(context),
+          // Its own key: not the stage's focus node kept for the menu.
+          _ => Focus(
+            key: const ValueKey('runner-menu-keys'),
+            canRequestFocus: false,
+            skipTraversal: true,
+            onKeyEvent: _menuKey,
+            child: _menuBody(context),
+          ),
         },
       ),
     );

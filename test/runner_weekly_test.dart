@@ -436,6 +436,8 @@ void main() {
       expect(weekly.bodies['POST rounds'], [
         {
           'weekly': {'week': _week, 'ranked': true},
+          // Its place among this app session's starts.
+          'order': {'client': isA<String>(), 'seq': isA<int>()},
         },
       ]);
       final play = handed.single!;
@@ -763,6 +765,8 @@ void main() {
       expect(weekly.bodies['POST rounds'], [
         {
           'weekly': {'week': _week, 'ranked': false},
+          // Its place among this app session's starts.
+          'order': {'client': isA<String>(), 'seq': isA<int>()},
         },
       ]);
       final sent = weekly.bodies['POST scores']!.single;
@@ -785,7 +789,7 @@ void main() {
       await _tapKey(tester, 'runner-free-run');
       expect(games, hasLength(3));
       expect(find.byKey(const ValueKey('runner-weekly-hud')), findsNothing);
-      expect(weekly.bodies['POST rounds']!.last, isEmpty);
+      expect(weekly.bodies['POST rounds']!.last.keys, ['order']);
     });
 
     /// Starts a training run from the menu.

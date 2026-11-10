@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../../data/api_client.dart' show ApiException;
@@ -201,12 +203,47 @@ Future<CollectionBoard?> loadCollectionBoard(AppController controller) async {
   }
 }
 
+/// The order in which this app session started its runs (`order` with a
+/// start): a random name for the session and a number that grows with every
+/// start. A new start ends the measured time of the runs before it; a start
+/// whose request arrives late (after the one of the next run) must not end
+/// that later run, so the server needs to know which came first here.
+/// Older servers ignore it.
+class RunOrder {
+  RunOrder([Random? random])
+    : client = [
+        for (var i = 0, r = random ?? _secure(); i < 16; i++)
+          r.nextInt(256).toRadixString(16).padLeft(2, '0'),
+      ].join();
+
+  static Random _secure() {
+    try {
+      return Random.secure();
+    } on UnsupportedError {
+      return Random();
+    }
+  }
+
+  final String client;
+  int _seq = 0;
+
+  /// For the start made now; call it when the run starts, not when its
+  /// request is sent.
+  JsonMap next() => {'client': client, 'seq': ++_seq};
+}
+
+final _orders = Expando<RunOrder>();
+
+/// The run order of [controller]'s app session.
+RunOrder runOrder(AppController controller) =>
+    _orders[controller] ??= RunOrder();
+
 /// Starts a run on the server; returns its id.
 Future<String> startRound(AppController controller) async {
   final data = await controller.remote(
     '/games/runner/rounds',
     method: 'POST',
-    body: const {},
+    body: {'order': runOrder(controller).next()},
   );
   return textValue(data['roundId']);
 }

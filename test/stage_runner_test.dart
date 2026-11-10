@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -331,6 +332,19 @@ class _PerfUplink implements PerfUplink {
   bool supports(String feature) => true;
   @override
   Future<void> send(Map<String, Object?> report) async => sent.add(report);
+}
+
+/// Rolls the same course for every run: [StageRunner] takes one roll, its
+/// seed.
+class _Same implements Random {
+  _Same(this.seed);
+  final int seed;
+  @override
+  int nextInt(int max) => Random(seed).nextInt(max);
+  @override
+  double nextDouble() => Random(seed).nextDouble();
+  @override
+  bool nextBool() => Random(seed).nextBool();
 }
 
 /// Pumps frames until the run is over and the result shows.
@@ -1717,6 +1731,228 @@ void main() {
       expect(game.y, lessThan(floor - .1));
       await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
       await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a held space bar does not press "Nochmal" by repeating', (
+      tester,
+    ) async {
+      final games = <StageRunner>[];
+      await _pump(
+        tester,
+        StageRunnerScreen(
+          controller: await _demo(),
+          random: Random(3),
+          onRun: games.add,
+          sound: _FakeSound(),
+        ),
+      );
+      await tester.tap(find.text('Vorhang auf'));
+      await tester.pump();
+      // Held through the crash and the curtain, as the keyboard repeats it.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
+      for (
+        var i = 0;
+        i < 60 * 20 && find.text('Nochmal').evaluate().isEmpty;
+        i++
+      ) {
+        await tester.pump(const Duration(milliseconds: 50));
+        if (find.text('Nochmal').evaluate().isEmpty) {
+          await tester.sendKeyRepeatEvent(LogicalKeyboardKey.space);
+        }
+      }
+      await tester.pump();
+      expect(find.text('Der Vorhang fällt!'), findsOneWidget);
+      for (var i = 0; i < 3; i++) {
+        await tester.sendKeyRepeatEvent(LogicalKeyboardKey.space);
+        await tester.pump();
+      }
+      expect(games, hasLength(1));
+      expect(find.text('Der Vorhang fällt!'), findsOneWidget);
+      // Let go and pressed afresh, it starts the next run as ever.
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      expect(games, hasLength(2));
+      expect(find.byKey(const ValueKey('runner-stage')), findsOneWidget);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    group('results on their way', () {
+      /// A server with the shared list that takes every run; [own] is the
+      /// member's best so far, [hold] keeps the answers to the scores back.
+      /// Fills [starts] and [scores] with the bodies sent.
+      TestServer ranked({
+        required List<JsonMap> starts,
+        required List<JsonMap> scores,
+        int? own,
+        Future<void>? hold,
+      }) {
+        final server = TestServer();
+        server.data['capabilities'] = {
+          'features': ['stageRunner'],
+        };
+        JsonMap board(int? score) => _board(
+          top: [if (score != null) _entry(1, 1, 'Ich', score)],
+          own: score == null ? null : _entry(1, 1, 'Ich', score),
+        );
+        server.override = (request) {
+          final path = _path(request);
+          if (path.endsWith('/leaderboard')) {
+            return Future.value(jsonResponse(board(own)));
+          }
+          if (path.endsWith('/rounds')) {
+            starts.add(jsonDecode(request.body) as JsonMap);
+            return Future.value(
+              jsonResponse({'roundId': 'round-${starts.length}'}),
+            );
+          }
+          if (path.endsWith('/scores')) {
+            final body = jsonDecode(request.body) as JsonMap;
+            scores.add(body);
+            final reply = jsonResponse({
+              'improved': true,
+              'leaderboard': board(body['score'] as int),
+            });
+            return hold == null ? Future.value(reply) : hold.then((_) => reply);
+          }
+          return null;
+        };
+        return server;
+      }
+
+      testWidgets('a crashed run counts even when the page is left before '
+          'the curtain has closed', (tester) async {
+        final starts = <JsonMap>[], scores = <JsonMap>[];
+        final controller = ranked(starts: starts, scores: scores).controller();
+        addTearDown(controller.dispose);
+        await signIn(controller);
+        final games = <StageRunner>[];
+        await _pump(
+          tester,
+          StageRunnerScreen(
+            controller: controller,
+            random: Random(3),
+            onRun: games.add,
+            sound: _FakeSound(),
+          ),
+        );
+        await tester.tap(find.text('Vorhang auf'));
+        await tester.pump();
+        final game = games.single;
+        for (var i = 0; i < 60 * 20 && !game.over; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        expect(game.over, isTrue);
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text('Der Vorhang fällt!'), findsNothing);
+        expect(scores, isEmpty);
+        // Back, while the curtain still closes.
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(seconds: 1));
+        expect(scores, hasLength(1));
+        expect(scores.single['roundId'], 'round-1');
+        expect(scores.single['score'], game.score);
+        expect(scores.single['meters'], game.meters);
+        expect(scores.single['hitBy'], game.hitBy!.name);
+      });
+
+      testWidgets('a run left in mid-flight stays abandoned', (tester) async {
+        final starts = <JsonMap>[], scores = <JsonMap>[];
+        final controller = ranked(starts: starts, scores: scores).controller();
+        addTearDown(controller.dispose);
+        await signIn(controller);
+        await _pump(
+          tester,
+          StageRunnerScreen(
+            controller: controller,
+            random: Random(3),
+            sound: _FakeSound(),
+          ),
+        );
+        await tester.tap(find.text('Vorhang auf'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(seconds: 1));
+        expect(starts, hasLength(1));
+        expect(scores, isEmpty);
+      });
+
+      testWidgets('a quick "Nochmal" knows the record of the run before, '
+          'though its result is not back yet', (tester) async {
+        final starts = <JsonMap>[], scores = <JsonMap>[];
+        final hold = Completer<void>();
+        final controller = ranked(
+          starts: starts,
+          scores: scores,
+          own: 5,
+          hold: hold.future,
+        ).controller();
+        addTearDown(controller.dispose);
+        await signIn(controller);
+        final sound = _FakeSound();
+        final games = <StageRunner>[];
+        // The same course twice.
+        await _pump(
+          tester,
+          StageRunnerScreen(
+            controller: controller,
+            random: _Same(3),
+            onRun: games.add,
+            sound: sound,
+          ),
+        );
+        int records() =>
+            sound.played.where((s) => s == RunnerSfx.record).length;
+        await tester.tap(find.text('Vorhang auf'));
+        await _runUntilOver(tester);
+        final first = games.single.score;
+        expect(first, greaterThan(5));
+        expect(records(), 1);
+        // "Nochmal" while the result of the first run is still on its way.
+        await tester.tap(find.text('Nochmal'));
+        await tester.pump();
+        expect(scores, hasLength(1));
+        final second = games.last;
+        expect(second.seed, games.first.seed);
+        for (var i = 0; i < 60 * 20 && !second.over; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        // The same run again: it never got past the first one's score, so
+        // no record fell (before, the old best of 5 fell once more).
+        expect(second.score, first);
+        expect(records(), 1);
+        hold.complete();
+        await _runUntilOver(tester);
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('every start names its place in the order of this app '
+          "session's starts", (tester) async {
+        final starts = <JsonMap>[], scores = <JsonMap>[];
+        final controller = ranked(starts: starts, scores: scores).controller();
+        addTearDown(controller.dispose);
+        await signIn(controller);
+        await _pump(
+          tester,
+          StageRunnerScreen(
+            controller: controller,
+            random: Random(3),
+            sound: _FakeSound(),
+          ),
+        );
+        await tester.tap(find.text('Vorhang auf'));
+        await _runUntilOver(tester);
+        await tester.tap(find.text('Nochmal'));
+        await _runUntilOver(tester);
+        expect(starts, hasLength(2));
+        final orders = [for (final s in starts) s['order'] as JsonMap];
+        expect(orders.first['client'], matches(RegExp(r'^[0-9a-f]{32}$')));
+        expect(orders.last['client'], orders.first['client']);
+        expect(orders.last['seq'], (orders.first['seq'] as int) + 1);
+        await tester.pumpWidget(const SizedBox());
+      });
     });
 
     testWidgets('a failed save keeps the result and explains why', (
