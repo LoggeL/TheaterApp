@@ -881,14 +881,15 @@ export function runMeters(b, elapsedMs, maxMeters, { slackSeconds, tolerance }) 
 export function recordRun(t, personId, meters, hitBy, at = t.clock(), run = {}) {
   // First: on its first use the shared distance counts what was run before, without this run.
   ensembleState(t, credit);
+  // Normalize legacy missions before reading progress: balancing can credit already-earned rewards.
+  const mission = recordMissionRun(t, personId, { meters, score: run.score ?? meters, stats: run.stats ?? null, statsSent: run.statsSent === true, weekly: run.weekly === true, at });
   const p = countSection(t, runnerProgress(t, personId), meters, credit), before = cratesEarned(cratePoints(p));
   const points = run.points ?? run.score ?? meters;
   const kind = runnerObstacleKinds.includes(hitBy) ? hitBy : 'unknown';
   const daily = meters > 0 && bonusOpen(p, at), bonus = daily ? points : 0;
   const reachedNow = addEnsembleMeters(t, meters, credit);
   const packGoals = recordPackRun(t, personId, meters, run.startedAt ?? at);
-  // Tagesmissionen (runner-missions.mjs): their crate points and the Missionskiste, never the ensemble's.
-  const mission = recordMissionRun(t, personId, { meters, score: run.score ?? meters, stats: run.stats ?? null, statsSent: run.statsSent === true, at });
+  // Tagesmissionen use the shared completion rules; rewards never count toward the ensemble.
   const next = grantEnsembleCrates(t, t.store.put('runnerProgress', personId, {
     ...p, meters: p.meters + meters, points: (p.points ?? 0) + points, deaths: { ...p.deaths, [kind]: (p.deaths?.[kind] ?? 0) + 1 },
     ...(daily ? { bonusPoints: (p.bonusPoints ?? 0) + bonus, bonusDay: berlinDay(at.toISOString()) } : {}),

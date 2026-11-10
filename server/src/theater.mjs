@@ -515,7 +515,7 @@ export class Theater {
       const statsSent = b.missionStats !== undefined && b.missionStats !== null;
       // Apps whose obstacles join by metres say so (`course`); the Wochenprobe has only those.
       const stats = checkRunStats(b.missionStats, { meters, score: b.score, metersSent: Number.isInteger(b.meters), course: weekly ? runnerCourse : b.course });
-      const progress = recordRun(this, a.personId, meters, b.hitBy, new Date(at), { score: b.score, points, stats, statsSent, startedAt: new Date(round.startedAt) });
+      const progress = recordRun(this, a.personId, meters, b.hitBy, new Date(at), { score: b.score, points, stats, statsSent, weekly: !!weekly, startedAt: new Date(round.startedAt) });
       const old = this.store.get('runnerScores', a.personId), when = new Date(at).toISOString();
       // Every run counts as one (`rounds`, beside the deaths of `recordRun`); only a normal one can
       // be the all-time best.

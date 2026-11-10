@@ -27,10 +27,10 @@ const catalog = loadCatalog({ rarities, items, dupes: { shinyChance: { costume: 
 const rulesWith = (easy = []) => ({
   ...missionRules,
   types: {
-    distance: { ...missionRules.types.distance, slots: ['easy'] },
+    distance: { ...missionRules.types.distance, slots: ['easy'], start: [150, 250, 400], min: 100 },
     ...Object.fromEntries(easy.map(type => [type, { ...missionRules.types[type], slots: ['easy'] }])),
-    points: { ...missionRules.types.points, slots: ['medium'] },
-    runs: { ...missionRules.types.runs, slots: ['hard'], share: { hard: 0.33 }, start: [100, 150, 200] },
+    points: { ...missionRules.types.points, slots: ['medium'], start: [200, 330, 500], min: 120 },
+    runs: { ...missionRules.types.runs, slots: ['hard'], count: 3, share: { hard: 0.33 }, start: [100, 150, 200] },
   },
 });
 
@@ -94,6 +94,7 @@ test('runs are counted until a mission is done, with the minutes since the day\'
   // Done missions keep their runs; the day's runs go on in the details.
   assert.deepEqual([day.easy.runs, day.easy.data.dayRuns, day.easy.data.doneAt], [2, 4, '2026-10-24T08:20:00.000Z']);
   assert.ok(Object.values(day).every(r => r.crate === 1));
+  assert.ok(Object.values(day).every(r => r.data.crateRuns === 4));
   assert.equal(store.get('runnerMissions', sam).crate, true);
   play(300);
   assert.equal(bySlot(sam, '2026-10-24').hard.runs, 4, 'runs after done do not count for it');
@@ -134,24 +135,38 @@ test('a new day keeps the old day\'s rows as they ended and logs targets against
   // Six counted runs with a best of 1000 m and points: the targets are the shares of it (0.3, 0.33,
   // 0.44), rounded to even figures; the ratio is the one of the rounded target.
   assert.deepEqual(Object.values(next).map(r => [r.slot, r.target, r.best, r.data.derivation.share, r.data.derivation.source, r.data.derivation.ratio, r.runs]), [
-    ['easy', 300, 1000, 0.3, 'share', 0.3, 0], ['hard', 3, 1000, 0.33, 'share', 0.325, 0], ['medium', 450, 1000, 0.44, 'share', 0.45, 0],
+    ['easy', 1000, 1000, null, 'recentQuantile', 1, 0], ['hard', 2, 1000, null, 'recentQuantile', 1, 0], ['medium', 1000, 1000, null, 'recentQuantile', 1, 0],
   ]);
-  assert.equal(next.hard.data.min, 325);
+  assert.equal(next.hard.data.min, 1000);
   // A day nobody plays on stays complete: unfinished means not done.
   clock.now = new Date('2026-10-27T07:00:00Z');
   play(50);
   assert.ok(Object.values(bySlot(sam, '2026-10-25')).every(r => r.done === 0 && r.runs === 0));
 });
 
-test('the derivation names limits and the start value', () => {
+test('the derivation names conservative caps and specialty-only records', () => {
   const ctx = (best, runs = 10) => ({ rules: missionRules, best, runs });
-  assert.equal(missionDerivation({ slot: 'easy', type: 'distance', target: 100 }, ctx({ m: 200 })).source, 'min');
-  assert.equal(missionDerivation({ slot: 'hard', type: 'distance', target: 6000 }, ctx({ m: 20000 })).source, 'max');
-  assert.equal(missionDerivation({ slot: 'easy', type: 'distance', target: 150 }, ctx({ m: 300 }, 2)).source, 'start');
-  assert.deepEqual(missionDerivation({ slot: 'medium', type: 'collect', kind: 'mask', target: 9 }, ctx({ mask: 20 })), { best: 20, share: 0.45, raw: 9, value: 9, ratio: 0.45, source: 'share', few: false, countedRuns: 10, start: 4, bests: { m: null, s: null } });
-  assert.equal(missionDerivation({ slot: 'hard', type: 'reach', kind: 'drum', target: 185 }, ctx({ m: 300 })).source, 'band');
-  assert.deepEqual(missionDerivation({ slot: 'hard', type: 'debut', kind: 'drum', target: 250 }, ctx({ s: 400 })), {});
+  assert.equal(missionDerivation({ slot: 'easy', type: 'distance', target: 20 }, ctx({ m: 20 })).source, 'min');
+  assert.equal(missionDerivation({ slot: 'hard', type: 'distance', target: 200 }, ctx({ m: 20000 })).source, 'coldCap');
+  assert.equal(missionDerivation({ slot: 'easy', type: 'distance', target: 100 }, ctx({})).source, 'start');
+  const clean = missionDerivation({ slot: 'hard', type: 'noPickup', target: 20 }, ctx({ m: 9000, noPickup: 80 }));
+  assert.equal(clean.best, 80);
+  assert.equal(clean.source, 'coldCap');
+  assert.deepEqual(clean.effort, { version: 2, completionRuns: 10, samples: 0 });
   assert.deepEqual(missionDerivation({ slot: 'easy', type: 'unknown', target: 1 }, ctx({})), {});
+});
+
+test('adaptive derivation records the effort policy, not a fictitious lifetime share', t => {
+  const { app, store, sam, play, clock, bySlot } = setup(t);
+  for (let i = 0; i < 6; i++) play(100 + i * 10);
+  clock.now = new Date('2026-10-25T08:00:00Z');
+  app.runnerMissions('sam');
+  for (const row of Object.values(bySlot(sam, '2026-10-25'))) {
+    assert.equal(row.data.derivation.source, 'recentQuantile');
+    assert.equal(row.data.derivation.effort.completionRuns, 10);
+    assert.equal(row.data.derivation.effort.samples, 6);
+  }
+  assert.ok(store.get('runnerMissions', sam).effortBasis);
 });
 
 test('logging never breaks a run', t => {
@@ -224,6 +239,15 @@ test('the report aggregates by type and slot and flags missions that look too ea
   assert.doesNotMatch(missionReport(store.db, { now: new Date('2026-10-24T10:00:00Z') }), /\| runs \|/);
   assert.match(missionReport(store.db, { now: new Date('2026-10-24T10:00:00Z'), today: true }), /\| runs \| schwer \|/);
   assert.equal(missionFlag(missionStats([])), '');
+});
+
+test('crate report measures completion runs, not runs played after the crate', t => {
+  const { store, play } = setup(t);
+  play(100); play(400); play(250); play(250);
+  for (let i = 0; i < 12; i++) play(100);
+  const report = missionReport(store.db, { days: 1, now: new Date('2026-10-25T10:00:00Z') });
+  assert.match(report, /Kiste: Läufe p50/);
+  assert.match(report, /\| 2026-10-24 \| 1 \| 1 \| 1 \| 100 % \| 16 \| 4 \| 1 \| 1 \|/);
 });
 
 test('the report script runs read-only on a database file', t => {

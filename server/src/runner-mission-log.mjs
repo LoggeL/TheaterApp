@@ -11,6 +11,8 @@
 // - Reroll (`logMissionReroll`): the old row gets `rerolled_to`, the new one `rerolled_from`.
 // - A failure here never breaks the game: it is logged and the run or request goes on.
 
+import { missionEffort } from './runner-mission-effort.mjs';
+
 export const missionLog = Object.freeze({ retentionDays: 180 });
 
 const slots = ['easy', 'medium', 'hard'];
@@ -37,22 +39,25 @@ export function missionDerivation(m, ctx) {
     case 'ground': case 'ceiling': basis = best[m.type]; break;
     case 'collect': basis = best[m.kind]; start = d.kinds?.[m.kind]?.start?.[i]; min = d.kinds?.[m.kind]?.min; break;
     case 'pass': basis = best.passed?.[m.kind]; start = d.start?.[m.kind]?.[i]; break;
-    case 'noPickup': basis = best.m > 0 ? Math.max(best.noPickup ?? 0, best.m * d.ofDistance) : undefined; break;
+    case 'noPickup': basis = best.noPickup; break;
     case 'dailyDistance': basis = best.m; share = d.ofBest; start = d.start?.[0]; break;
     case 'runs': basis = best.m; break;
     // `reach` (runner-missions.mjs): the obstacle's metres against the distance share of the slot.
     case 'reach': basis = best.m; share = r.types.distance?.share?.[m.slot]; break;
     default: break;
   }
-  const raw = basis > 0 && share > 0 ? basis * share : null;
-  const source = m.type === 'reach' ? 'band' : !(basis > 0) ? 'start' : few && start !== undefined && start >= raw ? 'start'
+  const adaptive = (ctx.recent?.length ?? 0) >= missionEffort.minSamples;
+  const raw = !adaptive && basis > 0 && share > 0 ? basis * share : null;
+  const source = adaptive ? 'recentQuantile' : m.type === 'reach' ? 'band' : !(basis > 0) ? 'start' : start !== undefined && raw > start ? 'coldCap'
     : raw !== null && min !== undefined && raw < min ? 'min' : raw !== null && max !== undefined && raw > max ? 'max' : 'share';
   return {
-    best: num(basis), share: num(share), raw: raw === null ? null : Math.round(raw * 10) / 10, value: num(value),
+    best: num(basis), share: adaptive ? null : num(share), raw: raw === null ? null : Math.round(raw * 10) / 10, value: num(value),
     ratio: basis > 0 && num(value) !== null ? Math.round(value / basis * 1000) / 1000 : null,
     source, few, countedRuns: ctx.runs ?? 0, ...(start !== undefined ? { start } : {}),
     // The two bests every type relates to, for comparisons the report does not make yet.
     bests: { m: num(best.m), s: num(best.s) },
+    effort: { version: missionEffort.version, completionRuns: missionEffort.completionRuns,
+      samples: ctx.recent?.length ?? 0, ...(adaptive ? { quantile: missionEffort.quantile[m.type === 'runs' || m.type === 'dailyDistance' ? 'easy' : m.slot] } : {}) },
   };
 }
 
@@ -93,7 +98,35 @@ export function logMissionRun(t, before, after, run) {
       db.prepare(`UPDATE runner_mission_log SET runs=?, progress=?, updated_at=?, data=?${justDone ? ', done=1, runs_to_done=?, minutes_to_done=?' : ''} WHERE id=?`)
         .run(runs, m.progress ?? 0, at, JSON.stringify(next), ...(justDone ? [runs, minutes] : []), row.id);
     }
-    if (after.crate && !before.crate) db.prepare('UPDATE runner_mission_log SET crate=1, updated_at=? WHERE person_id=? AND day=?').run(at, personId, day);
+    if (after.crate && !before.crate) {
+      // Capture the absolute day-run count at the crate, not total runs played afterwards or
+      // runs since a reroll. Unrerolled slots keep dayRuns throughout the day, including after done.
+      const crateRuns = db.prepare("SELECT MAX(json_extract(data,'$.dayRuns')) AS n FROM runner_mission_log WHERE person_id=? AND day=?").get(personId, day)?.n;
+      db.prepare("UPDATE runner_mission_log SET crate=1, updated_at=?, data=json_set(data,'$.crateRuns',?) WHERE person_id=? AND day=?").run(at, crateRuns, personId, day);
+    }
+  });
+}
+
+/** Balance is not a played run: preserve run counters and label the observed award separately. */
+export function logMissionRebalance(t, before, after, instant) {
+  guard('rebalance', () => {
+    const db = t.store.db, at = instant.toISOString();
+    for (const m of list(after.missions)) {
+      const old = list(before.missions).find(x => x.slot === m.slot);
+      if (old?.done) continue;
+      const row = rowOf(db, after.personId, after.day, m);
+      if (!row) continue;
+      const data = JSON.parse(row.data);
+      const balance = after.effortRebalance.changes.find(x => x.slot === m.slot);
+      db.prepare('UPDATE runner_mission_log SET target=?, progress=?, done=?, updated_at=?, data=? WHERE id=?')
+        .run(m.target, m.progress, flag(m.done), at, JSON.stringify({ ...data, ...(m.min !== undefined ? { min: m.min } : {}),
+          effortRebalance: { ...balance, version: missionEffort.version, at }, ...(m.done ? { doneAt: at, completionSource: 'effortRebalance' } : {}) }), row.id);
+    }
+    if (after.crate && !before.crate) {
+      // No fabricated historical time-to-crate: award happened on normalization, not on an old run.
+      db.prepare("UPDATE runner_mission_log SET crate=1, updated_at=?, data=json_set(data,'$.crateCompletionSource','effortRebalance','$.crateAwardedAt',?) WHERE person_id=? AND day=?")
+        .run(at, at, after.personId, after.day);
+    }
   });
 }
 
