@@ -888,7 +888,7 @@ export function recordRun(t, personId, meters, hitBy, at = t.clock(), run = {}) 
   const reachedNow = addEnsembleMeters(t, meters, credit);
   const packGoals = recordPackRun(t, personId, meters, run.startedAt ?? at);
   // Tagesmissionen (runner-missions.mjs): their crate points and the Missionskiste, never the ensemble's.
-  const mission = recordMissionRun(t, personId, { meters, score: run.score ?? meters, stats: run.stats ?? null, statsSent: run.statsSent === true, at });
+  const mission = recordMissionRun(t, personId, { meters, score: run.score ?? meters, stats: run.stats ?? null, statsSent: run.statsSent === true, weekly: run.weekly === true, at });
   const next = grantEnsembleCrates(t, t.store.put('runnerProgress', personId, {
     ...p, meters: p.meters + meters, points: (p.points ?? 0) + points, deaths: { ...p.deaths, [kind]: (p.deaths?.[kind] ?? 0) + 1 },
     ...(daily ? { bonusPoints: (p.bonusPoints ?? 0) + bonus, bonusDay: berlinDay(at.toISOString()) } : {}),

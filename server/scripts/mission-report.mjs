@@ -71,7 +71,7 @@ export function missionReport(db, { days = 14, now = new Date(), today = false }
   const out = [`# Tagesmissionen: ${first} bis ${last} (${days} Tage${today ? ', mit heute' : ', nur abgeschlossene Tage'})`, '',
     `Missionen: ${rows.length} · Spieltage (Person × Tag mit Missionen): ${personDays.size} · Spieler: ${new Set(rows.map(r => r.person_id)).size} · ohne Laufstatistik (ältere Apps): ${pct(rows.filter(r => !r.client_stats).length, rows.length)}`];
   if (!rows.length) return [...out, '', '_Keine Missionen im Zeitraum._'].join('\n');
-  out.push('', '„gespielt“: Missionen mit mindestens einem Lauf, solange sie offen waren; „geschafft“ ist der Anteil davon. „weggewürfelt“: Anteil der angebotenen, die neu gewürfelt wurden. „Läufe bis geschafft“: Läufe des Tages mit der offenen Mission bis einschließlich des Laufs, der sie schafft. „Min. bis geschafft“: vom Ende des ersten Laufs des Tages bis zu diesem Lauf (0 = im ersten Lauf). „offen: Fortschritt“: Fortschritt / Ziel der gespielten, nicht geschafften. „Ziel/Bestwert“: Ziel (bei „runs“ die Mindestmeter) durch den Bestwert pro Lauf, aus dem es gemacht wurde. „Startwert“: Anteil der Ziele aus den Startwerten (noch kein Bestwert oder weniger als 5 gezählte Läufe).',
+  out.push('', '„gespielt“: Missionen mit mindestens einem Lauf, solange sie offen waren; „geschafft“ ist der Anteil davon. „weggewürfelt“: Anteil der angebotenen, die neu gewürfelt wurden. „Läufe bis geschafft“: Läufe des Tages mit der offenen Mission bis einschließlich des Laufs, der sie schafft. „Min. bis geschafft“: vom Ende des ersten Laufs des Tages bis zu diesem Lauf (0 = im ersten Lauf). „offen: Fortschritt“: Fortschritt / Ziel der gespielten, nicht geschafften. „Ziel/Bestwert“: Ziel (bei „runs“ die Mindestmeter) durch den gespeicherten Lebenszeit-Bestwert pro Lauf (bei adaptiven Zielen nur Vergleich, nicht Erzeugungsbasis). „Startwert“: Anteil ohne gemessene Basis; konservative Start-Caps und adaptive Quantile werden separat im Verlauf gekennzeichnet.',
     `Hinweise: „zu leicht?“ bei mehr als ${reportLimits.easyCompletion * 100} % geschafft mit höchstens ${reportLimits.easyRuns} Lauf (Median), „zu schwer?“ unter ${reportLimits.hardCompletion * 100} % geschafft; „kleine Stichprobe“ unter ${reportLimits.minPlayed} gespielten Missionen oder ${reportLimits.minPlayers} Spielern.`);
   out.push('', '## Nach Stufe', table(['Stufe', ...head], [...grouped(rows, r => r.slot)].sort(([a], [b]) => slotOrder(a, b)).map(([slot, g]) => [slotNames[slot] ?? slot, ...cells(missionStats(g))])));
   const types = [...grouped(rows, r => `${r.type}\u0000${r.slot}`)].sort(([a], [b]) => { const [ta, sa] = a.split('\u0000'), [tb, sb] = b.split('\u0000'); return ta.localeCompare(tb) || slotOrder(sa, sb); });
@@ -88,12 +88,14 @@ export function missionReport(db, { days = 14, now = new Date(), today = false }
     const people = [...grouped(g, r => r.person_id).values()];
     const played = people.filter(p => p.some(r => r.runs > 0 || r.done)), crates = people.filter(p => p.some(r => r.crate));
     const dayRuns = played.map(p => Math.max(...p.map(r => r.details.dayRuns ?? 0)));
-    return { day, people: people.length, played: played.length, crates: crates.length, runs: quantile(dayRuns, 0.5) };
+    const crateRuns = crates.map(p => p.find(r => Number.isInteger(r.details.crateRuns) && r.details.crateRuns > 0)?.details.crateRuns).filter(Number.isFinite);
+    return { day, people: people.length, played: played.length, crates: crates.length, runs: quantile(dayRuns, 0.5),
+      crateMedian: quantile(crateRuns, 0.5), measured: crateRuns.length, withinTen: crateRuns.filter(n => n <= 10).length };
   });
   const sum = k => dayRows.reduce((a, d) => a + d[k], 0);
-  out.push('', '## Missionskiste je Tag', 'Spieler: Personen mit Missionen an dem Tag; gespielt: davon mit mindestens einem Lauf; Kiste: alle drei geschafft (Anteil der gespielt habenden); Läufe: Median der Läufe pro Person mit Lauf.',
-    table(['Tag', 'Spieler', 'gespielt', 'Kiste', 'Kistenquote', 'Läufe p50'], [...dayRows.map(d => [d.day, d.people, d.played, d.crates, pct(d.crates, d.played), fmt(d.runs)]),
-      ['gesamt', sum('people'), sum('played'), sum('crates'), pct(sum('crates'), sum('played')), '']]));
+  out.push('', '## Missionskiste je Tag', 'Spieler: Personen mit Missionen an dem Tag; gespielt: davon mit mindestens einem Lauf; Kiste: alle drei geschafft (Anteil der gespielt habenden); Läufe: Median aller gespielten Läufe, NICHT Aufwand bis zur Kiste. Kiste: Läufe p50 zählt nur gemessene Abschlüsse (n). Ziel: die komplette Missionskiste im Median in höchstens 10 Läufen. Kiste bis Lauf 10 ist eine Anzahl, kein Erfolgsanteil nur unter Gewinnern; mit „gespielt“ und fehlenden Messungen zusammen lesen. Alte Kisten ohne Abschlusszähler bleiben unbekannt; bei kleinen Stichproben oder offenen/abgebrochenen Tagen ist kein Zielnachweis möglich.',
+    table(['Tag', 'Spieler', 'gespielt', 'Kiste', 'Kistenquote', 'Läufe p50', 'Kiste: Läufe p50', 'Kiste: gemessen n', 'Kiste bis Lauf 10'], [...dayRows.map(d => [d.day, d.people, d.played, d.crates, pct(d.crates, d.played), fmt(d.runs), fmt(d.crateMedian), d.measured, d.withinTen]),
+      ['gesamt', sum('people'), sum('played'), sum('crates'), pct(sum('crates'), sum('played')), '', '', sum('measured'), sum('withinTen')]]));
   return out.join('\n');
 }
 

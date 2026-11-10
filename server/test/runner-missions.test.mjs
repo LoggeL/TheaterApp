@@ -98,47 +98,24 @@ test('yesterday’s types are avoided where possible', () => {
   assert.ok(repeats < fresh / 2, `${repeats} repeats against ${fresh}`);
 });
 
-test('targets: start values for new players, shares of the own bests for experienced ones', () => {
+test('cold starts are conservative record-bounded goals; measured quantiles can adapt both ways', () => {
   const none = ctxOf([]);
-  assert.deepEqual(missionSlots.map(s => missionOptions('distance', s, none)[0].target), missionRules.types.distance.start);
+  assert.deepEqual(missionSlots.map(slot => missionOptions('distance', slot, none)[0].target), missionRules.types.distance.start);
   assert.deepEqual(missionOptions('collect', 'easy', none).map(o => [o.kind, o.target]), [['rose', 5], ['mask', 2], ['star', 1]]);
-  // Without enough runs no obstacle of a debut and no debut mission.
-  assert.ok(missionOptions('pass', 'hard', none).every(o => ['crate', 'flat', 'lamp', 'border', 'sandbag'].includes(o.kind)));
+  assert.deepEqual(missionOptions('noPickup', 'hard', none), []);
   assert.deepEqual(missionOptions('reach', 'medium', none), []);
-
-  // Runs of 80 … 320 m, best 320 m and 448 points: 30 %, 42 % and 57 % of the best distance.
-  const window = windowOf(200), ctx = ctxOf(window);
+  const ctx = ctxOf(windowOf(200));
   assert.deepEqual([ctx.best.m, ctx.best.s, ctx.runs], [320, 448, 30]);
-  assert.deepEqual(missionSlots.map(s => missionOptions('distance', s, ctx)[0].target), [100, 130, 180]);
-  assert.deepEqual(missionSlots.map(s => missionOptions('points', s, ctx)[0].target), [130, 200, 260]);
-  assert.deepEqual(missionOptions('runs', 'medium', ctx), [{ target: 3, min: 110 }]);
-  // Even figures: 1 below 30, then 5, 10, 25, 50, 100.
+  assert.deepEqual(missionSlots.map(slot => missionOptions('distance', slot, ctx)[0].target), [95, 130, 180]);
+  assert.deepEqual(missionOptions('runs', 'medium', ctx), [{ target: 2, min: 80 }]);
   assert.deepEqual([7.4, 47, 183, 812, 1424, 4321].map(nice), [7, 45, 180, 800, 1400, 4300]);
-  // Obstacles of a debut only where a run at the slot reaches them: the Kabeltrommel (185 m) not
-  // at 57 % of 320 m (182 m), but at 57 % of 400 m, not at 30 %; the Kistenstapel (370 m) never.
-  const further = ctxOf(windowOf(250));
-  assert.ok(!missionOptions('pass', 'hard', ctx).some(o => o.kind === 'drum'));
-  assert.ok(!missionOptions('pass', 'easy', further).some(o => o.kind === 'drum'));
-  const passKinds = missionOptions('pass', 'hard', further).map(o => o.kind);
-  assert.ok(passKinds.includes('drum'));
-  assert.ok(!passKinds.includes('pile') && !passKinds.includes('truss'));
-  // The debut near the slot's distance target (0.95 to 1.25 times it): 42 % of 800 m and 57 % of
-  // 320 m; none near 42 % of 320 m. Points no longer matter.
-  assert.deepEqual(missionOptions('reach', 'medium', ctxOf(windowOf(500), 99999)), [{ kind: 'pile', target: 370 }]);
-  assert.deepEqual(missionOptions('reach', 'hard', ctx), [{ kind: 'drum', target: 185 }]);
-  assert.deepEqual(missionOptions('reach', 'medium', ctxOf(window, 1000)), []);
-  // A type no longer made (`debut`, by points) offers nothing.
+  const huge = { stats: true, best: { m: 90000, s: 99000 }, runs: 100 };
+  assert.equal(missionOptions('distance', 'hard', huge)[0].target, 200);
+  assert.equal(missionOptions('points', 'hard', huge)[0].target, 300);
+  const measured = { ...huge, recent: Array.from({ length: 10 }, () => ({ m: 90000, s: 99000 })) };
+  assert.equal(missionOptions('distance', 'hard', measured)[0].target, missionRules.types.distance.max);
+  assert.deepEqual(missionOptions('ceiling', 'hard', measured), [], 'unmeasured specialties are not fabricated');
   assert.deepEqual(missionOptions('debut', 'hard', ctx), []);
-  // A kind of play the player hardly does is not offered rather than made too hard: one star at
-  // best, a little ceiling.
-  assert.ok(!missionOptions('collect', 'hard', ctx).some(o => o.kind === 'star'));
-  assert.deepEqual(missionOptions('ceiling', 'easy', ctx), []);
-  assert.deepEqual(missionOptions('ceiling', 'hard', ctx), [{ target: 13 }]);
-  // Limits: nothing below the minimum, nothing above the maximum.
-  const tiny = ctxOf(Array.from({ length: 10 }, () => ({ m: 25, s: 30 })), 30, false);
-  assert.equal(missionOptions('distance', 'easy', tiny)[0].target, missionRules.types.distance.min);
-  const huge = ctxOf(Array.from({ length: 10 }, () => ({ m: 90000, s: 99000 })), 99000, false);
-  assert.equal(missionOptions('distance', 'hard', huge)[0].target, missionRules.types.distance.max);
 });
 
 test('the bests only rise, statistics only from plausible runs, without a pickup only exact runs', () => {
@@ -155,30 +132,55 @@ test('the bests only rise, statistics only from plausible runs, without a pickup
   assert.equal(bestsOf({ best: { m: 50, s: 60 }, runs: 7 }, 80).best.s, 80);
 });
 
-test('bad runs on purpose lower no target; a new best raises them from the next day on', t => {
+test('records stay intact while sustained lower performance reduces only future targets', t => {
   const { app, store, sam, play, clock } = setup(t);
-  store.put('runnerMissions', sam, { personId: sam, best: { m: 1400, s: 2000, rose: 60, mask: 20, star: 4, ground: 350, ceiling: 100, passed: { crate: 30, border: 40, drum: 15 } }, runs: 40 });
-  clock.now = new Date('2026-10-24T08:00:00Z');
-  const before = store.get('runnerMissions', sam);
-  const targets = ctx => missionSlots.map(s => missionOptions('distance', s, ctx)[0].target);
-  const ctx = () => ({ stats: true, ...bestsOf(store.get('runnerMissions', sam)) });
-  assert.deepEqual(targets(ctx()), [425, 600, 800]);
-  const today = play(25, { stats: { ground: 25, ceiling: 0 } }).missions.missions;
-  for (let i = 0; i < 49; i++) play(25, { stats: { ground: 25, ceiling: 0 } });
-  assert.deepEqual(targets(ctx()), [425, 600, 800]);
-  assert.deepEqual(store.get('runnerMissions', sam).best, { ...before.best, passed: { ...Object.fromEntries(['crate', 'flat', 'lamp', 'border', 'sandbag', 'drum', 'pile', 'truss', 'drop'].map(k => [k, 0])), ...before.best.passed }, noPickup: 25 });
-  assert.equal(store.get('runnerMissions', sam).runs, 90);
-  // A new best: today's missions stay, tomorrow's targets are higher.
-  const after = play(2000, { stats: { ground: 400, ceiling: 0 } }).missions.missions;
-  assert.deepEqual(after.map(m => [m.type, m.kind, m.target]), today.map(m => [m.type, m.kind, m.target]));
-  assert.deepEqual(targets(ctx()), [600, 850, 1150]);
+  store.put('runnerMissions', sam, { personId: sam, best: { m: 1400, s: 2000 }, runs: 40 });
+  const today = app.runnerMissions('sam');
+  for (let i = 0; i < 10; i++) play(25, { stats: { ground: 25 } });
+  play(2000, { stats: { ground: 400 } });
+  assert.deepEqual(app.runnerMissions('sam').missions.map(m => [m.type, m.target, m.min]), today.missions.map(m => [m.type, m.target, m.min]));
+  assert.equal(store.get('runnerMissions', sam).best.m, 2000);
   clock.now = new Date('2026-10-25T08:00:00Z');
-  const expected = dayMissions(sam, '2026-10-25', ctx(), new Set(today.map(m => m.type)));
-  const tomorrow = app.runnerMissions('sam');
-  assert.equal(tomorrow.day, '2026-10-25');
-  assert.deepEqual(tomorrow.missions.map(m => [m.type, m.kind, m.target]), expected.map(m => [m.type, m.kind, m.target]));
-  const distance = tomorrow.missions.find(m => m.type === 'distance');
-  if (distance) assert.equal(distance.target, [600, 850, 1150][missionSlots.indexOf(distance.slot)]);
+  app.runnerMissions('sam');
+  const ctx = store.get('runnerMissions', sam).effortBasis;
+  assert.deepEqual(missionSlots.map(slot => missionOptions('distance', slot, ctx)[0].target), [25, 25, 25]);
+});
+
+test('adaptive samples are bounded, timestamped, ordinary only and frozen until the next day', t => {
+  const { app, store, sam, play, clock } = setup(t);
+  store.put('runnerMissions', sam, { personId: sam, best: { m: 9000, s: 20000 }, runs: 100 });
+  const today = app.runnerMissions('sam');
+  for (let i = 0; i < 12; i++) play(80 + i * 5, { stats: { ground: 25, beforePickup: 10, rose: 2 } });
+  const rec = store.get('runnerMissions', sam);
+  assert.equal(rec.recent.length, 10);
+  assert.ok(rec.recent.every(x => Number.isFinite(Date.parse(x.at)) && x.st.beforePickup === 10));
+  assert.deepEqual(app.runnerMissions('sam').missions.map(m => [m.type, m.target, m.min]), today.missions.map(m => [m.type, m.target, m.min]));
+  const basis = rec.effortBasis;
+  assert.equal(basis.recent.length, 0, 'today and its rerolls retain their original basis');
+  assert.deepEqual(rec.best.m, 9000, 'records survive independently of adaptive targets');
+  clock.now = new Date('2026-10-25T08:00:00Z');
+  app.runnerMissions('sam');
+  assert.equal(store.get('runnerMissions', sam).effortBasis.recent.length, 10);
+  clock.now = new Date('2026-12-01T08:00:00Z');
+  app.runnerMissions('sam');
+  assert.equal(store.get('runnerMissions', sam).effortBasis.recent.length, 0, 'stale samples are not recent');
+});
+
+test('weekly results and retries never contaminate ordinary calibration samples', t => {
+  const { app, store, sam, clock } = setup(t);
+  const week = app.runnerWeekly('sam').week;
+  const { roundId } = app.runnerStart('sam', { weekly: { week, ranked: false } });
+  clock.now = new Date(+clock.now + 600000);
+  const body = { roundId, score: 500, meters: 500 };
+  app.runnerScore('sam', body);
+  app.runnerScore('sam', body);
+  assert.deepEqual(store.get('runnerMissions', sam).recent, []);
+  const normal = app.runnerStart('sam');
+  clock.now = new Date(+clock.now + 600000);
+  const ordinary = { roundId: normal.roundId, score: 100, meters: 100 };
+  app.runnerScore('sam', ordinary);
+  app.runnerScore('sam', ordinary);
+  assert.equal(store.get('runnerMissions', sam).recent.length, 1);
 });
 
 test('texts name the target in German', () => {
@@ -342,7 +344,7 @@ test('without a pickup: the bests take the longest stretch, also of runs that co
   assert.equal(raiseBest({ m: 300, s: 400 }, { meters: 500, score: 520, stats: { ...stats, beforePickup: 0 } }).noPickup, undefined);
   // Above the share of the best distance it raises the targets of the coming days.
   const ctx = { stats: true, runs: 10, best: { m: 500, s: 500, noPickup: 400 } };
-  assert.deepEqual(missionOptions('noPickup', 'hard', ctx), [{ target: 180 }]);
+  assert.deepEqual(missionOptions('noPickup', 'hard', ctx), [{ target: 20 }]);
 });
 
 test('without a pickup: a result sent again counts once and gets the first answer', t => {

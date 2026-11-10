@@ -1,19 +1,20 @@
 import { createHash } from 'node:crypto';
+import { missionEffort, recentMissionOptions } from './runner-mission-effort.mjs';
 import { AppError } from './theater.mjs';
 import { berlinDay } from './event-series.mjs';
 import { logMissionReroll, logMissionRun, logMissionsMade } from './runner-mission-log.mjs';
 
 // "Tagesmissionen" of the stage runner (`runnerMissions`): every person gets three missions per
-// Europe/Berlin calendar day, easy, medium and hard, measured on their own best runs.
+// Europe/Berlin calendar day, easy, medium and hard, measured on recent ordinary performance.
 //
-// - The server keeps per person (`runnerMissions`) the best per run of every measured value, which
-//   only ever rises: metres, points and, from apps that send plausible statistics, pickups by kind,
-//   metres on the floor and right below the fly loft, obstacles passed by kind, metres without a
-//   pickup. Targets are a share of these bests by slot, rounded to even figures and kept within
-//   each type's limits; with fewer than `minRuns` counted runs the start values are their floor.
-//   Bad runs on purpose therefore lower nothing. A new best counts from the next day's missions on.
-// - Records of the earlier version (a window of the last runs) start their bests once from that
-//   window's maxima and the high score.
+// - Records remain intact, but do not permanently ratchet goals. Five or more timestamped ordinary
+//   runs enable per-dimension quantiles from at most ten samples, at most 30 days old. Zeros count;
+//   missing statistics do not become fabricated specialty performance. Before that, conservative
+//   start goals cap record-derived targets. No high-score/admin or timestamp-less retry bootstrap.
+// - The whole crate targets median completion <= ten runs (not merely a ten-run sample window).
+//   See runner-mission-effort.mjs and docs/daily-mission-effort.md for assumptions and validation.
+// - The basis freezes for the Berlin day, including its reroll. Existing goals/rewards are not
+//   rewritten. Sustained changes can lower future goals; a single lucky run is not the baseline.
 // - Which missions: deterministic from person and day (and yesterday's types, which are avoided),
 //   never two of a type on one day. One mission per day may be rerolled for free.
 // - A run's statistics are checked for plausibility (sums, pickup points, obstacles per metre,
@@ -60,8 +61,7 @@ export const missionObstacles = Object.freeze(['crate', 'flat', 'lamp', 'border'
  * a type is chosen; `basic`: checkable without the run's statistics (older apps).
  */
 export const missionRules = Object.freeze({
-  // With fewer counted runs the start values are the floor of a target (a first lucky or unlucky
-  // run says little).
+  // Legacy record context; comparable recent samples have their own minimum in missionEffort.
   minRuns: 5,
   // Runs this short (an instant crash) count for nothing: no best, no counted run.
   minMeters: 20,
@@ -69,27 +69,26 @@ export const missionRules = Object.freeze({
   slots: { easy: { reward: 450 }, medium: { reward: 900 }, hard: { reward: 1500 } },
   // A type of yesterday is chosen with this share of its weight.
   repeatWeight: 0.2,
-  // `share`: the target as a share of the person's best per run, by slot; calibrated with a
-  // simulation so that one run makes easy ≈ 50 %, medium ≈ 25 %, hard ≈ 9 % of the time.
+  // `share`: conservative cold-start record fractions, capped by start. Once sampled, the effort
+  // policy uses the 50th/60th/70th per-dimension percentile instead of lifetime fractions.
   types: {
-    distance: { weight: 3, basic: true, slots: missionSlots, share: { easy: 0.3, medium: 0.42, hard: 0.57 }, min: 100, max: 6000, start: [150, 250, 400] },
-    points: { weight: 2, basic: true, slots: missionSlots, share: { easy: 0.3, medium: 0.44, hard: 0.58 }, min: 120, max: 9000, start: [200, 330, 500] },
+    distance: { weight: 3, basic: true, slots: missionSlots, share: { easy: 0.3, medium: 0.42, hard: 0.57 }, min: 20, max: 6000, start: [100, 150, 200] },
+    points: { weight: 2, basic: true, slots: missionSlots, share: { easy: 0.3, medium: 0.44, hard: 0.58 }, min: 20, max: 9000, start: [120, 200, 300] },
     collect: { weight: 2, slots: missionSlots, share: { easy: 0.3, medium: 0.45, hard: 0.6 }, kinds: { rose: { min: 3, start: [5, 9, 14] }, mask: { min: 2, start: [2, 4, 6] }, star: { min: 1, start: [1, 2, 3] } }, max: 400 },
     ground: { weight: 1.5, slots: missionSlots, share: { easy: 0.25, medium: 0.38, hard: 0.55 }, min: 20, max: 4000, start: [20, 35, 55] },
     ceiling: { weight: 1.5, slots: missionSlots, share: { easy: 0.25, medium: 0.38, hard: 0.55 }, min: 10, max: 3000, start: [10, 20, 35] },
     // Obstacles of a debut only for those whose runs at this slot reach its metres; `min` is 1 for them.
     pass: { weight: 2, slots: missionSlots, share: { easy: 0.3, medium: 0.45, hard: 0.65 }, min: 2, debutMin: 1, max: 400, start: { crate: [4, 7, 10], flat: [3, 5, 8], lamp: [4, 7, 10], border: [3, 6, 9], sandbag: [2, 4, 6] } },
-    // Distance before the first pickup: shares of the best such stretch or, if higher, of
-    // `ofDistance` times the best run (avoiding every pickup costs distance).
-    noPickup: { weight: 1, slots: missionSlots, share: { easy: 0.22, medium: 0.32, hard: 0.45 }, ofDistance: 0.6, min: 80, max: 4000, start: [100, 150, 220] },
-    // Metres today in total: `ofBest` times the best run. Only easy.
-    dailyDistance: { weight: 1.5, basic: true, slots: ['easy'], ofBest: 1, min: 500, max: 30000, start: [600] },
+    // Distance before the first pickup: its OWN measured dimension, never normal distance.
+    noPickup: { weight: 1, slots: missionSlots, share: { easy: 0.22, medium: 0.32, hard: 0.45 }, min: 5, max: 4000, start: [10, 15, 20] },
+    // Metres today: three recent median runs, or a capped cold-start goal. Only easy.
+    dailyDistance: { weight: 1.5, basic: true, slots: ['easy'], ofBest: 1, min: 60, max: 30000, start: [300] },
     // Reach an obstacle's metres in a run, if they lie near this slot's distance target: within
     // `band` times it (the highest such obstacle). A type of its own: apps up to 0.14 count the
     // missions of type `debut` (made before, by points) live with the score, and this one not at all.
     reach: { weight: 1.5, basic: true, slots: ['medium', 'hard'], band: [0.95, 1.25] },
-    // Own idea: a series, `count` runs today of at least `share` of the best run.
-    runs: { weight: 1, basic: true, slots: ['easy', 'medium'], count: 3, share: { easy: 0.22, medium: 0.33 }, min: 60, max: 4000, start: [100, 150] },
+    // Two qualifying runs at the recent median, not three rare record-fraction successes.
+    runs: { weight: 1, basic: true, slots: ['easy', 'medium'], count: 2, share: { easy: 0.22, medium: 0.33 }, min: 20, max: 4000, start: [60, 80] },
   },
 });
 
@@ -170,23 +169,28 @@ export function checkRunStats(raw, { meters, score, metersSent, course }) {
 const metersBeforePickup = ({ meters, score, stats }) => stats.beforePickup ?? (score === meters ? meters : 0);
 
 /**
- * Targets a type offers in [slot] for the person's bests in [ctx] (`best`: per run, only ever
- * rising; `runs`: runs counted): `[{ kind?, target, min? }]`, empty if none. A best not measured yet
- * means the type's start values.
+ * Targets a type offers in [slot]: recent comparable quantiles when available; otherwise
+ * conservative start-capped record fractions. Returns `[{ kind?, target, min? }]`, empty when
+ * a measured specialty is too rare or unknown no-pickup performance cannot justify an offer.
  */
 export function missionOptions(type, slot, ctx) {
   const r = ctx.rules ?? missionRules, d = r.types[type], i = missionSlots.indexOf(slot), best = ctx.best ?? {};
   if (!d) return [];
+  const adaptive = recentMissionOptions(type, slot, { ...ctx, rules: r }, nice, runnerDebuts);
+  if (adaptive !== null) return adaptive;
   const few = (ctx.runs ?? 0) < r.minRuns;
-  // share × best within the limits; with few runs at least the start value. [strict]: a kind of play
+  // Cold-start share × best, capped by start. [strict]: a kind of play
   // the person hardly does (below the minimum) is not offered rather than made too hard.
   const target = (value, share, start, min, max, strict = false) => {
     if (!(value > 0)) return strict && value === 0 ? [] : start === undefined ? [] : [within(start, min, max)];
     if (!(share > 0) || (strict && value * share < min)) return [];
-    return [within(Math.max(value * share, few && start !== undefined ? start : 0), min, max)];
+    // Until comparable recent samples exist, lifetime records may only LOWER the conservative
+    // starting goal, never ratchet it upward. Unknown debut-count goals are not offered.
+    if (start === undefined && strict) return [];
+    return [within(Math.min(start ?? max, value * share), min, max)];
   };
   const share = d.share?.[slot];
-  const reach = slotShare => best.m * r.types.distance.share[slotShare];
+  const reach = slotShare => Math.min(best.m * r.types.distance.share[slotShare], r.types.distance.start[missionSlots.indexOf(slotShare)]);
   switch (type) {
     case 'distance': case 'points':
       return target(best[type === 'distance' ? 'm' : 's'], share, d.start[i], d.min, d.max).map(t => ({ target: t }));
@@ -198,18 +202,18 @@ export function missionOptions(type, slot, ctx) {
       if (!best.passed) return Object.entries(d.start).map(([kind, start]) => ({ kind, target: within(start[i], d.min, d.max) }));
       // An obstacle of a debut only if a run at this slot's share of the best distance gets there.
       return missionObstacles.filter(kind => !debutOf(kind) || reach(slot) >= debutOf(kind))
-        .flatMap(kind => target(best.passed[kind] ?? 0, share, undefined, debutOf(kind) ? d.debutMin : d.min, d.max, true).map(t => ({ kind, target: t })));
+        .flatMap(kind => target(best.passed[kind] ?? 0, share, d.start[kind]?.[i], debutOf(kind) ? d.debutMin : d.min, d.max, true).map(t => ({ kind, target: t })));
     }
     case 'noPickup': {
-      const base = best.m > 0 ? Math.max(best.noPickup ?? 0, best.m * d.ofDistance) : undefined;
-      return target(base, share, d.start[i], d.min, d.max).map(t => ({ target: t }));
+      const base = best.noPickup;
+      return base > 0 ? target(base, share, d.start[i], d.min, d.max, true).map(t => ({ target: t })) : [];
     }
     case 'dailyDistance': return target(best.m, d.ofBest, d.start[0], d.min, d.max).map(t => ({ target: t }));
     case 'runs': return target(best.m, share, d.start[i], d.min, d.max).map(min => ({ target: d.count, min }));
     case 'reach': {
       if (!(best.m > 0) || few || !d.slots.includes(slot)) return [];
       const [low, high] = d.band.map(f => reach(slot) * f);
-      const hit = runnerDebuts.findLast(([m]) => m > low && m <= high);
+      const hit = runnerDebuts.findLast(([m]) => m > low && m <= high && m <= reach(slot));
       return hit ? [{ kind: hit[1], target: hit[0] }] : [];
     }
     default: return [];
@@ -267,14 +271,22 @@ export function chooseMission(slot, ctx, exclude, previous, random) {
 /** The three missions of [day]: deterministic from person, day, the runs so far and yesterday's types. */
 export function dayMissions(personId, day, ctx, previous = new Set()) {
   const taken = new Set();
-  return missionSlots.map(slot => {
+  // Allocate the most restricted slot first so easy cannot consume hard's only eligible type.
+  const chosen = new Map();
+  for (const slot of [...missionSlots].reverse()) {
     const m = chooseMission(slot, ctx, taken, previous, seeded(personId, day, slot));
-    if (m) taken.add(m.type);
-    return m;
-  }).filter(Boolean);
+    if (m) { taken.add(m.type); chosen.set(slot, m); }
+  }
+  return missionSlots.map(slot => chosen.get(slot)).filter(Boolean);
 }
 
-const context = (t, rec, stats) => ({ rules: rulesOf(t), stats, ...bestsOf(rec, t.store.get('runnerScores', rec.personId)?.best ?? 0) });
+const recentOf = (rec, at) => list(rec.recent).filter(x => Number.isFinite(Date.parse(x.at)) && Date.parse(x.at) <= +at && +at - Date.parse(x.at) <= missionEffort.maxAgeDays * 86400000).slice(-missionEffort.window);
+const context = (t, rec, stats, at = t.clock()) => ({
+  rules: rulesOf(t), stats,
+  ...(rec.day === berlinDay(at.toISOString()) && rec.effortBasis ? rec.effortBasis : {
+    ...bestsOf(rec), recent: recentOf(rec, at),
+  }),
+});
 
 /**
  * The person's missions of the Berlin day of [at]; made on the first request of the day. [stats]:
@@ -285,10 +297,12 @@ export function missionsToday(t, personId, at, stats) {
   const day = berlinDay(at.toISOString());
   if (rec.day === day) return rec;
   const previous = rec.day === dayBefore(day) ? list(rec.missions).map(m => m.type) : [];
-  const missions = dayMissions(personId, day, context(t, rec, stats), new Set(previous));
-  const made = t.store.put('runnerMissions', personId, { ...rec, day, stats, missions, rerolled: false, crate: false, todayMeters: 0, previousTypes: previous });
-  // History for balancing (runner-mission-log.mjs).
-  return logMissionsMade(t, made, context(t, rec, stats));
+  const basis = context(t, rec, stats, at);
+  const missions = dayMissions(personId, day, basis, new Set(previous));
+  const { best, runs, recent } = basis;
+  const made = t.store.put('runnerMissions', personId, { ...rec, day, stats, missions, effortBasis: { best, runs, recent }, effortVersion: missionEffort.version, rerolled: false, crate: false, todayMeters: 0, previousTypes: previous });
+  // History for balancing (runner-mission-log.mjs), using the exact frozen generation basis.
+  return logMissionsMade(t, made, basis);
 }
 
 /** What a run brings a mission on its own; null if it cannot tell (no statistics). */
@@ -328,13 +342,16 @@ export function recordMissionRun(t, personId, run) {
   });
   const reward = missions.filter(m => completed.includes(m.slot)).reduce((a, m) => a + rewardPoints(m), 0);
   const crate = !rec.crate && missions.length === missionSlots.length && missions.every(m => m.done);
-  // The bests rise with this run for the coming days; today's missions stay as they are. The
-  // window of earlier runs was only needed once, to start the bests.
+  // Preserve records separately from timestamped ordinary calibration samples. Neither changes
+  // today's frozen missions or reroll basis. The old timestamp-less window is no longer needed.
   const { best, runs } = bestsOf(rec);
   const counted = run.meters >= rules.minMeters;
   const { window, ...kept } = rec;
   const next = t.store.put('runnerMissions', personId, {
     ...kept, missions, best: counted ? raiseBest(best, run) : best, runs: runs + (counted ? 1 : 0),
+    recent: (counted && !run.weekly ? [...recentOf(rec, run.at), {
+      at: run.at.toISOString(), m: run.meters, s: run.score, ...(run.stats ? { st: run.stats } : {}),
+    }] : recentOf(rec, run.at)).slice(-missionEffort.window),
     todayMeters: (rec.todayMeters ?? 0) + run.meters, crate: rec.crate || crate,
   });
   logMissionRun(t, rec, next, run);
