@@ -107,7 +107,7 @@ test('a crate brings its pictures by name and its animation from the catalog', t
 test('the bundled catalog aims at the plays with role figures and the technicians, each with its animation', () => {
   const c = bundledCatalog();
   assert.deepEqual(c.crateTargets.map(x => [x.id, x.animation]), [
-    ['random', 'burst'], ['tech', 'flightcase'], ['play:creepshow', 'maw'], ['play:anno-1146', 'heavy'], ['play:schicksalsfaeden', 'threads'], ['play:eine-hoellische-herausforderung', 'inferno'], ['play:nexus', 'glitch'],
+    ['random', 'burst'], ['tech', 'flightcase'], ['play:creepshow', 'maw'], ['play:anno-1146', 'heavy'], ['play:schicksalsfaeden', 'threads'], ['play:eine-hoellische-herausforderung', 'inferno'], ['play:nexus', 'glitch'], ['play:sagenhaft', 'heavy'],
   ]);
   assert.ok(c.crateTargets.every(x => crateAnimations.includes(x.animation)));
   // Every themed crate has its full artwork: closed, open, particle and where it stands.

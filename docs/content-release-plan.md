@@ -17,7 +17,7 @@ Die Freischaltung erfolgt im Server anhand seiner Uhr. Der Mac muss dafür nicht
 | 31.01.2027 | Dystopia | Historische Aufnahmen vorhanden |
 | 14.02.2027 | Bluttribut | Historische Aufnahmen vorhanden |
 | 28.02.2027 | Verrat im Kloster | Historische Aufnahmen vorhanden |
-| 14.03.2027 | Sagenhaft, Rollenpaket und Bühnenbild für alle | 13 Figuren nach den Kostümfotos fertig, mit Porträts und je acht Spielposen. Die Waldkulisse wird mit dem Rollenpaket freigeschaltet. |
+| 14.03.2027 | Sagenhaft, Rollenpaket und Bühnenbild für alle | 13 Figuren nach den Kostümfotos fertig, mit Porträts und je acht Spielposen. Waldkulisse und Stückkiste mit Eichenblattmotiv werden mit dem Rollenpaket freigeschaltet. |
 | 28.03.2027 | Die Geschichte der Black Swan, fehlende Rollen | Quellen und Rollen einzeln prüfen |
 | 11.04.2027 | Anno 1146, fehlende Rollen | Ergänzungen zum bestehenden Set |
 | 25.04.2027 | Creepshow, fehlende Rollen | Ergänzungen zum bestehenden Set |

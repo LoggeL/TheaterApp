@@ -261,6 +261,7 @@ test('Sagenhaft is free to wear together with its complete March role pack', t =
   assert.equal(roles.length, 13);
   assert.deepEqual(new Set(release.itemIds), new Set(roles.map(x => x.id)));
   for (const role of roles) files.push(role.image, role.portrait, role.portrait.replace('-portrait.', '-thumb.'));
+  files.push('crate-play-sagenhaft.webp', 'crate-play-sagenhaft-open.webp', 'crate-play-sagenhaft-fx.webp');
   const complete = bundledCatalog();
   const incomplete = loadCatalog({ ...source, items: source.items.map(x =>
     x.id === release.itemIds[0] ? { ...x, disabled: true } : x) },
