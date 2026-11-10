@@ -735,7 +735,9 @@ String? uniqueHint(Wardrobe wardrobe, WardrobeItem item) {
 /// role is the character itself, so not "als Captain Kuschel"); across
 /// plays ([progress]) "Unique · Creepshow und Nexus".
 String uniqueRoleLine(WardrobeRole role, [UniqueFigureProgress? progress]) =>
-    progress?.allTechnicians == true
+    progress?.allAdventCalendar == true
+    ? 'Unique · ${progress!.production}'
+    : progress?.allTechnicians == true
     ? 'Unique · Technik'
     : progress != null && progress.several
     ? 'Unique · ${progress.play}'

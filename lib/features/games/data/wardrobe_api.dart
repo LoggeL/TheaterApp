@@ -1570,6 +1570,7 @@ class UniqueFigureProgress {
     this.name = '???',
     this.parts = const [],
     this.allTechnicians = false,
+    this.allAdventCalendar = false,
   });
   final String play, name;
   final int? year;
@@ -1578,6 +1579,7 @@ class UniqueFigureProgress {
 
   /// All active collectible technicians, independent of the actors' roles.
   final bool allTechnicians;
+  final bool allAdventCalendar;
   final String? itemId;
 
   /// Per play of a figure across plays; empty for a single play.
@@ -1591,7 +1593,9 @@ class UniqueFigureProgress {
       allTechnicians ? 'Technik' : [play, ?year?.toString()].join(' ');
 
   /// "9/14 Rollen aus Creepshow", "23/52 Rollen aus Creepshow und Nexus".
-  String get line => allTechnicians
+  String get line => allAdventCalendar
+      ? '$have/$total Adventskalender-Skins gesammelt'
+      : allTechnicians
       ? '$have/$total Techniker gesammelt'
       : '$have/$total Rollen aus $play';
 
@@ -1609,6 +1613,7 @@ class UniqueFigureProgress {
       itemId: unlocked && id.isNotEmpty ? id : null,
       name: unlocked ? textValue(json['name'], '???') : '???',
       allTechnicians: json['allTechnicians'] == true,
+      allAdventCalendar: json['allAdventCalendar'] == true,
       parts: [
         for (final p in jsonList(json['plays']))
           if (p is Map) ?UniqueFigurePart.fromJson(jsonMap(p)),

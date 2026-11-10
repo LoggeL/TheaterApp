@@ -66,7 +66,7 @@ const isRoleOf = (x, p) => x?.kind === 'character' && !x.default && !x.unlock &&
 export const isUniqueEntry = (x, rarity) => x?.rarity === rarity.id || list(x?.rarities).includes(rarity.id);
 
 /** Checks a unique figure's entry; [raw] are all entries, disabled ones included. */
-export function checkUniqueEntry(x, rarity, raw, bad) {
+export function checkUniqueEntry(x, rarity, raw, bad, calendar = []) {
   const what = x?.id ?? JSON.stringify(x);
   if (x.kind !== 'character') bad(`${what}: a unique figure is a character`);
   if (x.rarities !== undefined && !(list(x.rarities).length === 1 && x.rarities[0] === rarity.id)) bad(`${what}: a unique figure has no other rarity`);
@@ -74,6 +74,18 @@ export function checkUniqueEntry(x, rarity, raw, bad) {
   if (!text(x.role)) bad(`${what}: a unique figure needs a role`);
   const u = x.unlock;
   if (!u || typeof u !== 'object') bad(`unlock of ${what}`);
+  if (u.allAdventCalendar !== undefined) {
+    if (u.allAdventCalendar !== true || u.allTechnicians !== undefined || u.play !== undefined
+      || u.plays !== undefined || u.year !== undefined || !text(x.play) || !Number.isInteger(x.year)) bad(`unlock of ${what}: allAdventCalendar`);
+    const ids = list(calendar).map(day => day?.item);
+    if (ids.length !== 24 || new Set(ids).size !== 24 || !ids.includes(x.id)
+      || ids.some(id => !raw.some(item => item.id === id && item.kind === 'character'))) bad(`unlock of ${what}: allAdventCalendar needs all 24 calendar entries`);
+    const required = ids.filter(id => id !== x.id);
+    if (required.some(id => raw.some(item => item.id === id && (item.default || item.reward || isUniqueEntry(item, rarity))))) bad(`unlock of ${what}: allAdventCalendar requires collectible skins`);
+    if (raw.filter(item => isUniqueEntry(item, rarity) && item.unlock?.allAdventCalendar === true).length !== 1) bad(`${what}: one allAdventCalendar reward`);
+    // Keep the complete requirement even while some doors are disabled or unreleased.
+    return { allAdventCalendar: true, items: required };
+  }
   if (u.allTechnicians !== undefined) {
     if (u.allTechnicians !== true || u.play !== undefined || u.plays !== undefined || u.year !== undefined
       || x.play !== undefined || x.year !== undefined) bad(`unlock of ${what}: allTechnicians has no play or year`);
@@ -90,7 +102,7 @@ export function checkUniqueEntry(x, rarity, raw, bad) {
   if (new Set(plays.map(p => playsKey([p]))).size !== plays.length) bad(`unlock of ${what}: a play twice`);
   for (const p of plays) if (!raw.some(o => isRoleOf(o, p))) bad(`unlock of ${what}: no role figure of ${p.play}`);
   const key = playsKey(plays);
-  const same = raw.filter(o => o?.unlock && !o.unlock.allTechnicians && typeof o.unlock === 'object' && isUniqueEntry(o, rarity) && playsKey(unlockPlays(o.unlock)) === key);
+  const same = raw.filter(o => o?.unlock && !o.unlock.allTechnicians && !o.unlock.allAdventCalendar && typeof o.unlock === 'object' && isUniqueEntry(o, rarity) && playsKey(unlockPlays(o.unlock)) === key);
   if (same.length > 1) bad(`${what}: one unique figure per play (${same.map(o => o.id).join(', ')})`);
   if (several) return { plays: plays.map(p => p.year !== undefined ? { ...p } : p.play) };
   return { play: u.play, ...(u.year !== undefined ? { year: u.year } : {}) };
@@ -107,6 +119,10 @@ export function uniqueRequirement(c, u) {
   let byUnique = required.get(c);
   if (!byUnique) required.set(c, byUnique = new Map());
   if (!byUnique.has(u.id)) {
+    if (u.unlock.allAdventCalendar) {
+      byUnique.set(u.id, [{ play: 'Adventskalender', year: u.year, ids: u.unlock.items }]);
+      return byUnique.get(u.id);
+    }
     if (u.unlock.allTechnicians) {
       const ids = c.items.filter(x => x.kind === 'character' && !x.default && !x.reward && !x.unique
         && list(x.rarities).some(id => c.rarities.some(r => r.id === id && r.crew))).map(x => x.id);
@@ -131,7 +147,8 @@ export function uniqueRequirement(c, u) {
 export function uniqueCount(c, u, owned) {
   const plays = uniqueRequirement(c, u).map(({ ids, ...p }) => ({ ...p, have: ids.filter(id => owned.has(id)).length, total: ids.length }));
   const sum = k => plays.reduce((n, p) => n + p[k], 0);
-  return { have: sum('have'), total: sum('total'), plays, ready: plays.length > 0 && plays.every(p => p.total > 0) };
+  const available = !u.unlock.allAdventCalendar || u.unlock.items.every(id => c.byId.has(id));
+  return { have: sum('have'), total: sum('total'), plays, ready: available && plays.length > 0 && plays.every(p => p.total > 0) };
 }
 
 /** Unique figures [p] has unlocked and the catalog has (with picture). */
@@ -168,7 +185,9 @@ export function uniqueView(c, p, owned) {
   const plays = c.uniques.map(u => {
     const { have, total, ready, plays: parts } = uniqueCount(c, u, owned), unlocked = mine.has(u.id);
     if (!ready && !unlocked) return null;
-    const where = u.unlock.allTechnicians
+    const where = u.unlock.allAdventCalendar
+      ? { play: 'Adventskalender', year: u.year, allAdventCalendar: true }
+      : u.unlock.allTechnicians
       ? { play: 'Technik', allTechnicians: true, plays: parts }
       : Array.isArray(u.unlock.plays)
       ? { play: playsText(parts.map(x => x.play)), plays: parts }

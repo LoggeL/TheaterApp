@@ -287,7 +287,7 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
   // The unique figures' look: apart from the draw's rarities, like the ensemble's.
   const uniqueRarity = parseUniqueRarity(data?.uniqueFigures, rarity, bad);
   // Every unique figure is checked, waiting ones (`disabled`) included.
-  for (const x of list(data?.items)) if (isUniqueEntry(x, uniqueRarity)) checkUniqueEntry(x, uniqueRarity, list(data?.items), bad);
+  for (const x of list(data?.items)) if (isUniqueEntry(x, uniqueRarity)) checkUniqueEntry(x, uniqueRarity, list(data?.items), bad, data?.adventCalendar);
   const rewardIds = new Set((ensemble?.milestones ?? []).map(m => m.item).filter(Boolean));
   const files = new Map(), byId = new Map();
   // Pictures and music share one route (`/games/runner/skins/<file>`); their names never overlap.
@@ -318,7 +318,7 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
     const reward = x.reward === true;
     if (reward !== rewardIds.has(x.id) || (reward && x.default === true)) bad(`reward ${x.id} needs exactly one ensemble milestone`);
     // A unique figure: unlocked by all role figures of its play, never drawn, traded or bought.
-    const unique = isUniqueEntry(x, uniqueRarity), unlock = unique ? checkUniqueEntry(x, uniqueRarity, list(data?.items), bad) : null;
+    const unique = isUniqueEntry(x, uniqueRarity), unlock = unique ? checkUniqueEntry(x, uniqueRarity, list(data?.items), bad, data?.adventCalendar) : null;
     const fixed = x.rarities !== undefined ? list(x.rarities) : x.rarity !== undefined ? [x.rarity] : [];
     const own = reward && !fixed.length ? [ensemble.rarity.id] : [...new Set([...fixed, ...(x.score !== undefined && byScore(x.score) ? [byScore(x.score)] : [])])];
     if (!own.length || own.some(id => !rarity.has(id) && !(reward && id === ensemble.rarity.id) && !(unique && id === uniqueRarity.id))) bad(`unknown rarity of ${x.id}`);

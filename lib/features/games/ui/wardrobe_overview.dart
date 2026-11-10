@@ -76,7 +76,11 @@ class PlayTally {
     if (u == null) return null;
     if (u.unlocked) return 'Unique freigeschaltet';
     final left = (u.total - u.have).clamp(0, u.total);
-    final what = u.allTechnicians
+    final what = u.allAdventCalendar
+        ? left == 1
+              ? 'Adventskalender-Skin'
+              : 'Adventskalender-Skins'
+        : u.allTechnicians
         ? 'Techniker'
         : left == 1
         ? 'Rolle'

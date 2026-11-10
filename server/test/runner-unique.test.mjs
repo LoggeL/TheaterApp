@@ -6,6 +6,7 @@ import { Theater, apiFeatures } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
 import { bundledCatalog, crateMilestone, drawWithDupes, loadCatalog, openRarities } from '../src/runner-wardrobe.mjs';
 import { uniqueCount, uniqueRequirement } from '../src/runner-unique.mjs';
+import { parseContentReleases, releasedCatalog } from '../src/runner-content-releases.mjs';
 
 // Unique figures (`runnerUniqueFigures`): one non-human character per play, unlocked for good by
 // owning all of the play's active role figures; a secret until then, never in crates or the shop,
@@ -363,9 +364,9 @@ test('the bundled catalog: play-specific uniques and Kolping for the complete te
   const raw = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url), 'utf8')).items;
   const beatrice = c.byId.get('character.unique-beatrice');
   assert.deepEqual([beatrice.name, beatrice.play, beatrice.year, beatrice.unlock], ['Beatrice', 'Creepshow', 2026, { play: 'Creepshow' }]);
-  // The others still wait for their pictures.
+  // The Christmas reward retains the calendar gate; the others wait for pictures.
   assert.deepEqual(raw.filter(x => x.rarity === 'unique' && x.disabled).map(x => x.id),
-    ['character.unique-kristall', 'character.unique-rabe']);
+    ['character.kuschel--weihnachten', 'character.unique-kristall', 'character.unique-rabe']);
   // Willi requires the whole Hölle cast, including Hatice's documented role without an app account.
   const willi = c.byId.get('character.unique-willi'), hell = uniqueRequirement(c, willi)[0].ids;
   assert.equal(hell.length, 11);
@@ -414,4 +415,63 @@ test('over HTTP: the flag in the query and the body, the seen route, and the pic
   assert.deepEqual((await seen.json()).uniqueFigures.unseen, []);
   const worn = await call('/games/runner/outfit', 'PUT', { kind: 'character', itemId: 'u.spuk', roles: true, unique: true });
   assert.equal((await worn.json()).selected.character, 'u.spuk');
+});
+
+test('the Christmas Captain is unique after the other 23 calendar skins, independent of their plays', t => {
+  const days = Array.from({ length: 23 }, (_, i) => role(`day.${i + 1}`, 1000 + i, i % 2 ? 'Spuk' : 'Alt', 2026));
+  const christmas = { ...kuschel, id: 'u.advent', role: 'Weihnachtskuschel', unlock: { allAdventCalendar: true } };
+  const adventCalendar = [...days, christmas].map(item => ({ item: item.id, title: item.id }));
+  const c = catalogOf([...defaults, ...days, role('unrelated', 1200, 'Spuk', 2026), christmas], { adventCalendar });
+  const u = c.byId.get(christmas.id);
+  assert.deepEqual(uniqueRequirement(c, u), [{ play: 'Adventskalender', year: 2026, ids: days.map(x => x.id) }]);
+  assert.ok(!c.collectible.includes(u));
+  const { app, give, saved } = setup(t, { catalog: c });
+  give(days.slice(0, -1).map(x => x.id));
+  let w = app.runnerWardrobe('sam', now);
+  assert.deepEqual(w.uniqueFigures.plays, [{ play: 'Adventskalender', year: 2026, allAdventCalendar: true, have: 22, total: 23, unlocked: false, hidden: true, name: '???' }]);
+  assert.ok(!w.owned.includes(christmas.id));
+  assert.throws(() => app.runnerSkin('sam', 'figure.webp'), { status: 404 });
+  give(days.map(x => x.id));
+  w = app.runnerWardrobe('sam', now);
+  assert.ok(w.owned.includes(christmas.id));
+  assert.equal(w.uniqueFigures.plays[0].have, 23);
+  assert.equal(w.uniqueFigures.plays[0].total, 23);
+  assert.equal(w.uniqueFigures.plays[0].itemId, christmas.id);
+  assert.deepEqual(saved().uniques, [christmas.id]);
+  assert.equal(app.runnerSkin('sam', 'figure.webp').mime, 'image/webp');
+  assert.throws(() => app.runnerSkin('kim', 'figure.webp'), { status: 404 });
+  assert.deepEqual(app.runnerWardrobe('sam', now).owned.filter(id => id === christmas.id), [christmas.id]);
+});
+
+test('the calendar requirement stays 23 and cannot unlock while a calendar skin is disabled or unreleased', t => {
+  const days = Array.from({ length: 23 }, (_, i) => role(`day.${i + 1}`, 1000 + i, 'Spuk', 2026, i === 22 ? { disabled: true } : {}));
+  const christmas = { ...kuschel, id: 'u.advent', unlock: { allAdventCalendar: true } };
+  const adventCalendar = [...days, christmas].map(item => ({ item: item.id }));
+  const c = catalogOf([...defaults, ...days, christmas], { adventCalendar });
+  const u = c.byId.get(christmas.id);
+  assert.equal(uniqueCount(c, u, new Set(days.map(x => x.id))).total, 23);
+  assert.equal(uniqueCount(c, u, new Set(days.map(x => x.id))).ready, false);
+  const { app, give, saved } = setup(t, { catalog: c });
+  give(days.map(x => x.id));
+  assert.ok(!app.runnerWardrobe('sam', now).owned.includes(christmas.id));
+  assert.equal(saved().uniques, undefined);
+  const active = catalogOf([...defaults, ...days.map(({ disabled, ...day }) => day), christmas], { adventCalendar });
+  const released = releasedCatalog(active, parseContentReleases([{ id: 'future-door', name: 'Future door', startsAt: '2026-12-23T00:00:00Z', itemIds: ['day.1'] }]), clock());
+  assert.equal(uniqueCount(released, active.byId.get(christmas.id), new Set(days.map(x => x.id))).ready, false);
+  assert.equal(uniqueCount(released, active.byId.get(christmas.id), new Set(days.map(x => x.id))).total, 23);
+});
+
+test('the Christmas reward validates the full calendar and its bundled Unique classification', () => {
+  const days = Array.from({ length: 23 }, (_, i) => role(`day.${i + 1}`, 1000 + i, 'Spuk', 2026));
+  const christmas = { ...kuschel, id: 'u.advent', unlock: { allAdventCalendar: true } };
+  const items = [...defaults, ...days, christmas];
+  const adventCalendar = [...days, christmas].map(item => ({ item: item.id }));
+  for (const calendar of [[], adventCalendar.slice(1), adventCalendar.map((x, i) => i === 23 ? adventCalendar[0] : x)]) {
+    assert.throws(() => catalogOf(items, { adventCalendar: calendar }), /allAdventCalendar/);
+  }
+  assert.throws(() => catalogOf(items.map(x => x.id === christmas.id ? { ...x, unlock: { allAdventCalendar: true, play: 'Spuk' } } : x), { adventCalendar }), /allAdventCalendar/);
+  const c = bundledCatalog(), entry = c.source.data.items.find(x => x.id === 'character.kuschel--weihnachten');
+  assert.equal(entry.rarity, 'unique');
+  assert.deepEqual(entry.unlock, { allAdventCalendar: true });
+  assert.equal(entry.disabled, true, 'retain the existing calendar release gate');
 });
