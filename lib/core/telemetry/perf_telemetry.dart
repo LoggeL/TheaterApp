@@ -441,6 +441,7 @@ class PerfTelemetry {
     _active = false;
     _timer?.cancel();
     _timer = null;
+    _stopProbe();
     _lifecycle?.dispose();
     _lifecycle = null;
     if (_hooked) WidgetsBinding.instance.removeTimingsCallback(_onTimings);
@@ -716,6 +717,7 @@ class PerfTelemetry {
   void inputArrived(int atUs, String kind, {required bool requestedFrame}) {
     _lastInput = kind;
     _lastInputUs = atUs;
+    if (kind == 'drag') _moves++;
     if (requestedFrame && _inputAt < 0) _inputAt = atUs;
   }
 
@@ -745,6 +747,78 @@ class PerfTelemetry {
     if (last != null && heap > last) _eventAt['grow'] = nowUs;
   }
 
+  /// Watches the main thread between frames, so a slow frame can say
+  /// whether it was busy or waited for the browser ([ThreadProbe]). Only on
+  /// the web: elsewhere the engine draws on a thread of its own, and build
+  /// and raster times tell it all.
+  final _probe = ThreadProbe();
+  Timer? _probeTimer;
+  @visibleForTesting
+  ThreadProbe get threadProbe => _probe;
+
+  void _watchThread(int nowUs, {required bool nextScheduled}) {
+    _stopProbe();
+    if (!nextScheduled || _suspended || !(kIsWeb || _testing)) return;
+    _probe.start(nowUs);
+    if (_testing) return;
+    _setProbe();
+    // Runs when the next frame begins, after the animations' callbacks;
+    // it asks for no frame itself.
+    SchedulerBinding.instance.scheduleFrameCallback(
+      _frameBegan,
+      scheduleNewFrame: false,
+    );
+  }
+
+  void _setProbe() => _probeTimer = Timer(
+    const Duration(microseconds: ThreadProbe.delayUs),
+    _probeFired,
+  );
+
+  void _probeFired() {
+    _probeTimer = null;
+    if (_probe.fired(_now())) _setProbe();
+  }
+
+  void _frameBegan(Duration _) => _probe.began(_now());
+
+  void _stopProbe() {
+    _probeTimer?.cancel();
+    _probeTimer = null;
+    _probe.stop();
+  }
+
+  /// Frames drawn while a finger (or the mouse) dragged, each right after
+  /// another such frame: how many there were, how many came more than
+  /// 25 ms after the one before, how many drew two or more moves at once,
+  /// and how many did both.
+  ///
+  /// A drag moves the content by what arrived since the last frame. Where
+  /// the browser hands over the moves out of step with its frames, one
+  /// frame gets none (and is not drawn) and the next one two: the content
+  /// stands still for a frame and then jumps, although nothing was slow.
+  /// Late frames without a double move are a slow finger or a slow frame.
+  final _drag = List<int>.filled(4, 0);
+
+  /// Moves since the last frame, and whether that frame drew any.
+  int _moves = 0;
+  bool _dragged = false;
+
+  void _watchDrag(int nowUs) {
+    final moves = _moves, last = _lastFrameUs;
+    _moves = 0;
+    final gap = nowUs - last;
+    // Further apart, the finger rested.
+    if (moves > 0 && _dragged && !_suspended && last >= 0 && gap < 100000) {
+      final late = gap > 25000;
+      _drag[0]++;
+      if (late) _drag[1]++;
+      if (moves > 1) _drag[2]++;
+      if (moves > 1 && late) _drag[3]++;
+    }
+    _dragged = moves > 0;
+  }
+
   /// A frame was built at [nowUs]. While frames follow each other (an
   /// animation requested the next one), the frame time is the distance to
   /// the previous frame; for a frame caused by input it is the time since
@@ -753,11 +827,15 @@ class PerfTelemetry {
   void frameEnded(int nowUs, {required bool nextScheduled}) {
     _watchHeap(nowUs);
     _noteStamp();
+    _watchDrag(nowUs);
+    final gap = _probe.take();
     double? sample;
     String? input;
+    ThreadGap? thread;
     if (!_suspended) {
       if (_continuous && _lastFrameUs >= 0) {
         sample = (nowUs - _lastFrameUs) / 1000;
+        thread = gap;
       } else if (_inputAt >= 0) {
         sample = (nowUs - _inputAt) / 1000;
         input = _lastInput;
@@ -768,11 +846,12 @@ class PerfTelemetry {
     _continuous = nextScheduled;
     // Longer gaps are suspended pages (e.g. a locked screen), not frames.
     if (sample != null && sample >= 0 && sample < 5000) {
-      _record(sample, nowUs, input);
+      _record(sample, nowUs, input, thread);
     }
+    _watchThread(nowUs, nextScheduled: nextScheduled);
   }
 
-  void _record(double ms, int nowUs, String? input) {
+  void _record(double ms, int nowUs, String? input, ThreadGap? thread) {
     _commitHeld();
     final route = _currentRoute();
     WorstFrame? worst;
@@ -783,6 +862,7 @@ class PerfTelemetry {
         at: nowUs / 1e6,
         input: input ?? (_lastInputUs > nowUs - 1000000 ? _lastInput : null),
         events: _eventsBefore(nowUs),
+        thread: thread,
       );
       _awaitTimings(worst, ms);
     }
@@ -1090,6 +1170,8 @@ class PerfTelemetry {
           },
       ],
       if (!_worst.isEmpty) 'worst': _worst.toJson(),
+      if (_drag[0] > 0)
+        'drag': {'n': _drag[0], 'g': _drag[1], 'd': _drag[2], 'gd': _drag[3]},
       'api': [
         for (final e in api)
           e.value.toJson(e.key.split(' ').first, e.key.split(' ').last),
@@ -1126,6 +1208,7 @@ class PerfTelemetry {
     _total.reset();
     _timings = 0;
     _worst.reset();
+    _drag.fillRange(0, _drag.length, 0);
     for (final r in _routes.values) {
       r.reset();
     }
@@ -1250,6 +1333,7 @@ class PerfTelemetry {
     _pausedUs = now;
     _suspended = true;
     _continuous = false;
+    _stopProbe();
     closeWindow();
     unawaited(flush());
   }
@@ -1257,6 +1341,7 @@ class PerfTelemetry {
   @visibleForTesting
   void stopForTest() {
     _timer?.cancel();
+    _stopProbe();
     _lifecycle?.dispose();
     _active = false;
   }

@@ -74,8 +74,14 @@ const frames = v => {
 const route = v => str(v, 48, /[^\w.:-]/g);
 const events = v => str(v, 64, /[^\w,.:-]/g);
 // `b`/`ra`: the longest build and raster time (FrameTiming) of the frames around the jank (`r` is
-// the screen).
-const worst = v => isObject(v) && ms(v.ms) !== undefined ? compact({ ms: ms(v.ms), r: route(v.r), t: num(v.t, 1e7), in: str(v.in, 12, /[^\w-]/g), ev: events(v.ev), m: int(v.m, 1e7), b: ms(v.b), ra: ms(v.ra) }) : undefined;
+// the screen). `sy`/`bs`/`wt`/`pn` (web): what the main thread did between the frame before and this
+// one: busy right after that frame, busy in all, free and waiting for the browser to begin the
+// frame, and how often the app asked (every 10 ms).
+const worst = v => isObject(v) && ms(v.ms) !== undefined ? compact({ ms: ms(v.ms), r: route(v.r), t: num(v.t, 1e7), in: str(v.in, 12, /[^\w-]/g), ev: events(v.ev), m: int(v.m, 1e7), b: ms(v.b), ra: ms(v.ra), sy: ms(v.sy), bs: ms(v.bs), wt: ms(v.wt), pn: int(v.pn, 1000) }) : undefined;
+const drag = v => {
+  const n = isObject(v) ? int(v.n, 1e7) : undefined;
+  return n ? compact({ n, g: int(v.g, n), d: int(v.d, n), gd: int(v.gd, n) }) : undefined;
+};
 const api = v => {
   if (!isObject(v)) return undefined;
   const m = oneOf(v.m, methods), p = str(v.p, 80, /[^\w/:.-]/g), n = int(v.n, 1e6);
@@ -111,6 +117,9 @@ export function sanitizePerfReport(body) {
     frames: frames(body.frames),
     routes: list(body.routes, perfTelemetry.maxRoutes, x => { const f = frames(x), name = route(x?.r); return f && name ? { r: name, ...f } : undefined; }),
     worst: list(body.worst, perfTelemetry.maxWorst, worst),
+    // Frames drawn while dragging, each right after another: all, those more than 25 ms after the
+    // one before, those with two or more moves at once, and those with both.
+    drag: drag(body.drag),
     api: list(body.api, perfTelemetry.maxApi, api),
     // `snd`: sound on; `f0`: the first step of the run in ms.
     run: kind === 'stageRunner' ? compact({ ms: int(r.ms, 864e5), m: int(r.m, 1e7), score: int(r.score, 1e8), character: route(r.character), backdrop: route(r.backdrop), fx: route(r.fx), end: str(r.end, 16, /[^\w-]/g), snd: bool(r.snd), f0: ms(r.f0) }) : undefined,

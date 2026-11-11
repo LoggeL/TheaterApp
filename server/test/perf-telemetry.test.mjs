@@ -84,12 +84,15 @@ test('newer apps add optional fields; older reports stay valid', () => {
   const report = sanitizePerfReport({
     ...android, rid: '0123456789abcdef',
     startup: { ...android.startup, vis: 'hidden', hidden: true, fcp: 812.4, paint: 3 },
-    worst: [{ ms: 120, r: 'WardrobeScreen', t: 4, ev: 'skin,img', b: 31.24, ra: 70000, gap: 9 }],
+    worst: [{ ms: 120, r: 'WardrobeScreen', t: 4, ev: 'skin,img', b: 31.24, ra: 70000, gap: 9, sy: 12.34, bs: 300.06, wt: 1e9, pn: 3.7 }],
+    drag: { n: 200, g: 30, d: 999, gd: 12, x: 1 },
     api: [{ m: 'GET', p: '/games/runner/skins/:id.webp', n: 4, susp: 9, srv, h: hist({}).slice(0, 13) }, { m: 'GET', p: '/snapshot', n: 1, srv: [1, 2] }],
   });
   assert.equal(report.rid, '0123456789abcdef');
+  assert.deepEqual(report.drag, { n: 200, g: 30, d: 200, gd: 12 }, 'never more than the frames drawn while dragging');
+  assert.equal(sanitizePerfReport({ ...android, drag: { n: 0, g: 3 } }).drag, undefined);
   assert.deepEqual(report.startup, { ...android.startup, vis: 'hidden', hidden: true, fcp: 812 });
-  assert.deepEqual(report.worst, [{ ms: 120, r: 'WardrobeScreen', t: 4, ev: 'skin,img', b: 31.2, ra: 60000 }], 'unknown worst-frame fields are dropped');
+  assert.deepEqual(report.worst, [{ ms: 120, r: 'WardrobeScreen', t: 4, ev: 'skin,img', b: 31.2, ra: 60000, sy: 12.3, bs: 300.1, wt: 60000, pn: 4 }], 'unknown worst-frame fields are dropped');
   assert.deepEqual(report.api[0].srv, srv);
   assert.equal(report.api[0].susp, 4, 'never more paused calls than calls');
   assert.equal(report.api[1].srv, undefined, 'a server histogram of the wrong length is dropped');
@@ -330,8 +333,12 @@ test('the report shows server time, paused calls and frame timings once apps sen
   const { store } = setup(t);
   const srv = Array.from({ length: serverEdges.length + 1 }, (_, i) => (i === 1 ? 4 : 0));
   insertRaw(store, '2026-10-22T10:00:00.000Z', { ...chromePwa, startup: { ...chromePwa.startup, fcp: 1500, hidden: true },
-    api: [{ ...chromePwa.api[0], susp: 1, srv }], worst: [{ ms: 140, r: 'today', t: 3.2, ev: 'img', b: 12, ra: 30 }] });
+    api: [{ ...chromePwa.api[0], susp: 1, srv }], worst: [{ ms: 140, r: 'today', t: 3.2, ev: 'img', b: 12, ra: 30, sy: 20, bs: 40, wt: 90, pn: 9 }], drag: { n: 400, g: 60, d: 50, gd: 40 } });
   const text = perfReport(store.db, { days: 7, now: new Date('2026-10-24T12:00:00Z') });
+  assert.match(text, /## Ziehen mit dem Finger \(Scrollen\)\n[^]*\| 1 \| 400 \| 15\.0 % \| 12\.5 % \| 10\.0 % \|/);
+  // Where the long frame's time went: busy right after the frame, busy later, waiting, the rest.
+  assert.match(text, /## Web: Wo die Zeit langer Bilder bleibt\n[^]*\| 1 \| 140 \| 14\.3 % \| 14\.3 % \| 64\.3 % \| 7\.1 % \| 9 \|/);
+  assert.match(text, /\| Hauptthread belegt\/frei ms \|\n[^]*\| 40 \/ 90 \|/);
   assert.match(text, /\| Aufruf \| Inst\. \| Anzahl \| p50 ms \| p95 ms \| max ms \| Fehler \| offline \| Server p50 ms \| Server p95 ms \| pausiert \|/);
   assert.match(text, /\| GET \/snapshot \| 1 \| 2 \| [\d.]+ \| [\d.]+ \| 2600 \| 0 % \| 50\.0 % \| 1\.5 \| 1\.9 \| 50\.0 % \|/);
   assert.match(text, /\| web · skwasm · cached · verdeckt \| 1 \| 1 \| 1900 \/ 1900 \| 1500 \/ 1500 \| 450 \/ 450 \|/);

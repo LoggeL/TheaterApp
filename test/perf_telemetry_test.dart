@@ -208,6 +208,50 @@ void main() {
     });
   });
 
+  group('main thread probe', () {
+    test('a timer in time means waiting, a late one busy', () {
+      final probe = ThreadProbe()..start(0);
+      expect(probe.take(), isNull);
+      // In time, then 230 ms late, then the frame begins.
+      expect(probe.fired(10000), isTrue);
+      expect(probe.fired(250000), isTrue);
+      probe.began(255000);
+      expect(probe.fired(260000), isFalse);
+      final gap = probe.take()!;
+      expect(gap.sync, 0);
+      expect(gap.busy, 230);
+      expect(gap.wait, 25);
+      expect(gap.checks, 2);
+      expect(probe.take(), isNull);
+    });
+
+    test('a frame that begins before the late timer ran counts as busy', () {
+      final probe = ThreadProbe()
+        ..start(1000)
+        ..began(301000);
+      final gap = probe.take()!;
+      expect(gap.sync, 290);
+      expect(gap.busy, 290);
+      expect(gap.wait, 10);
+      expect(gap.checks, 0);
+    });
+
+    test('smooth frames are neither, and a pause ends the asking', () {
+      final probe = ThreadProbe()
+        ..start(0)
+        ..fired(10000)
+        ..began(14000);
+      final gap = probe.take()!;
+      expect([gap.sync, gap.busy, gap.wait], [0, 0, 14]);
+      probe.start(0);
+      expect(probe.fired(4999000), isTrue);
+      expect(probe.fired(5009000), isFalse);
+      probe.stop();
+      probe.began(5010000);
+      expect(probe.take(), isNull);
+    });
+  });
+
   group('sampling', () {
     late PerfTelemetry t;
     late _Uplink uplink;
@@ -351,6 +395,73 @@ void main() {
         (t.buildReport()['worst']! as List).single,
         containsPair('ev', 'read'),
       );
+    });
+
+    test('a slow frame says whether the main thread was busy or waiting', () {
+      t.frameEnded(1000000, nextScheduled: true);
+      // Asked every 10 ms and always in time: free, yet no frame began.
+      for (var at = 1010000; at < 1395000; at += 10000) {
+        expect(t.threadProbe.fired(at), isTrue);
+      }
+      t.threadProbe.began(1395000);
+      t.frameEnded(1400000, nextScheduled: true);
+      // The timer runs 290 ms late: busy since the frame.
+      t.threadProbe.fired(1700000);
+      t.threadProbe.began(1700500);
+      t.frameEnded(1705000, nextScheduled: true);
+      // A frame after input was not watched.
+      t.threadProbe.began(1720000);
+      t.frameEnded(1721000, nextScheduled: false);
+      t.inputArrived(3000000, 'tap', requestedFrame: true);
+      t.frameEnded(3060000, nextScheduled: false);
+      final worst = (t.buildReport()['worst']! as List).cast<Map>();
+      expect(
+        worst.firstWhere((w) => w['ms'] == 400),
+        allOf(
+          containsPair('sy', 0),
+          containsPair('bs', 0),
+          containsPair('wt', 395),
+          containsPair('pn', 39),
+        ),
+      );
+      expect(
+        worst.firstWhere((w) => w['ms'] == 305),
+        allOf(
+          containsPair('sy', 290),
+          containsPair('bs', 290),
+          containsPair('wt', 10.5),
+          containsPair('pn', 1),
+        ),
+      );
+      expect(worst.firstWhere((w) => w['ms'] == 60).containsKey('wt'), isFalse);
+    });
+
+    test('frames while dragging count late ones and double moves', () {
+      void frame(int atUs, int moves) {
+        for (var i = 0; i < moves; i++) {
+          t.inputArrived(atUs - 1000, 'drag', requestedFrame: true);
+        }
+        t.frameEnded(atUs, nextScheduled: false);
+      }
+
+      // The first frame of a drag only starts it.
+      frame(1000000, 1);
+      frame(1016700, 1);
+      // No move in time for one frame, two for the next.
+      frame(1050000, 2);
+      frame(1066700, 1);
+      // A slow frame, and two moves in a frame in time.
+      frame(1100000, 1);
+      frame(1116700, 2);
+      // The finger rested: a new drag.
+      frame(1400000, 1);
+      // A tap in between is no drag.
+      t.inputArrived(1410000, 'tap', requestedFrame: true);
+      t.frameEnded(1416700, nextScheduled: false);
+      frame(1433400, 1);
+      expect(t.buildReport()['drag'], {'n': 5, 'g': 2, 'd': 2, 'gd': 1});
+      t.closeWindow();
+      expect(t.buildReport().containsKey('drag'), isFalse);
     });
 
     test('API calls across a pause only count as paused', () {

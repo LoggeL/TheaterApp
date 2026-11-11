@@ -131,6 +131,98 @@ class TimingStats {
   void reset() => _frames.reset();
 }
 
+/// What the main thread did between the end of one frame and the begin of
+/// the next (see [ThreadProbe]), in milliseconds.
+class ThreadGap {
+  const ThreadGap(this.sync, this.busy, this.wait, this.checks);
+
+  /// How long it was busy right after the frame: drawing it, and whatever
+  /// followed before it took the next task.
+  final double sync;
+
+  /// How long it was busy in all, [sync] included.
+  final double busy;
+
+  /// The rest: it took tasks in time, and still no frame began.
+  final double wait;
+
+  /// How often it was asked.
+  final int checks;
+}
+
+/// Tells a main thread that is busy between two frames from one that waits
+/// for the next frame.
+///
+/// A slow frame says how long the next one took to come, not why. On the
+/// web the app draws on the main thread, and the browser begins a frame
+/// when it sees fit: the time is lost either in work on the main thread
+/// (drawing, decoding, uploading a texture, collecting garbage) or while
+/// the main thread is free and the browser does not begin the frame (its
+/// compositor or GPU process is behind). A timer tells which: set every
+/// [delayUs] from the end of a frame on, it runs late by as long as the
+/// main thread was busy.
+///
+/// The telemetry sets the timer and calls [fired] and [began]; this only
+/// counts, in microseconds of one clock.
+class ThreadProbe {
+  /// The timer's delay. Shorter than a frame at 60 Hz, so a busy stretch of
+  /// a frame's length shows; between smooth frames it runs about once.
+  static const delayUs = 10000;
+
+  /// Frames further apart are pauses; the timer is not set again.
+  static const _longestUs = 5000000;
+
+  int _fromUs = -1, _setUs = 0, _beganUs = -1;
+  int _syncUs = -1, _busyUs = 0, _checks = 0;
+
+  /// Whether a frame ended and the next has not begun.
+  bool get watching => _fromUs >= 0 && _beganUs < 0;
+
+  /// A frame ended at [nowUs] and the timer was set.
+  void start(int nowUs) {
+    _fromUs = _setUs = nowUs;
+    _beganUs = _syncUs = -1;
+    _busyUs = _checks = 0;
+  }
+
+  void stop() => _fromUs = -1;
+
+  /// The timer ran at [nowUs]; whether to set it again.
+  bool fired(int nowUs) {
+    if (!watching) return false;
+    _late(nowUs);
+    _checks++;
+    _setUs = nowUs;
+    return nowUs - _fromUs < _longestUs;
+  }
+
+  /// The next frame began at [nowUs].
+  void began(int nowUs) {
+    if (!watching) return;
+    _late(nowUs);
+    _beganUs = nowUs;
+  }
+
+  void _late(int nowUs) {
+    final late = math.max(0, nowUs - _setUs - delayUs);
+    if (_syncUs < 0) _syncUs = late;
+    _busyUs += late;
+  }
+
+  /// What was seen between the two frames; null unless both were.
+  ThreadGap? take() {
+    if (_fromUs < 0 || _beganUs < 0) return null;
+    final gap = ThreadGap(
+      _syncUs / 1000,
+      _busyUs / 1000,
+      math.max(0, _beganUs - _fromUs - _busyUs) / 1000,
+      _checks,
+    );
+    _fromUs = -1;
+    return gap;
+  }
+}
+
 /// One of the worst frames with what happened around it.
 class WorstFrame {
   WorstFrame(
@@ -140,9 +232,13 @@ class WorstFrame {
     this.input,
     this.events,
     this.meters,
+    this.thread,
   });
   final double ms;
   final String? route, input, events;
+
+  /// What the main thread did while this frame took its time (web).
+  final ThreadGap? thread;
 
   /// The longest build and raster time (FrameTiming) of the frames around
   /// this one; filled in when the engine reports them, a little later.
@@ -163,6 +259,12 @@ class WorstFrame {
     'm': ?meters,
     if (build != null) 'b': _round(build!),
     if (raster != null) 'ra': _round(raster!),
+    if (thread case final g?) ...{
+      'sy': _round(g.sync),
+      'bs': _round(g.busy),
+      'wt': _round(g.wait),
+      'pn': g.checks,
+    },
   };
 }
 

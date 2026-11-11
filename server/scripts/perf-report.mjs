@@ -203,16 +203,56 @@ const triggers = rows => {
   return { worst, starts: starts[0] + starts[1], text: table(['Ereignis im Ruckel-Bild (≥50 ms)', 'Ruckler', 'Anteil'], eventRows) };
 };
 
+/**
+ * Where the time of the long frames (≥100 ms) of `rows` went, for those that carry the main
+ * thread's probe (`sy`/`bs`/`wt`, web): busy right after the frame before (drawing it and what
+ * followed), busy later (tasks between the frames), free while the browser began no frame, and the
+ * rest, which is building the frame itself.
+ */
+const threadTable = rows => {
+  const groups = new Map();
+  for (const r of rows) for (const w of r.data.worst ?? []) {
+    if (w.ms < 100 || w.wt === undefined) continue;
+    const k = keys.browser(r);
+    if (!groups.has(k)) groups.set(k, { n: 0, ms: 0, sync: 0, later: 0, wait: 0, checks: 0 });
+    const g = groups.get(k), sync = Math.min(w.sy ?? 0, w.ms), busy = Math.min(Math.max(w.bs ?? 0, sync), w.ms);
+    g.n++; g.ms += w.ms; g.sync += sync; g.later += busy - sync; g.wait += Math.min(w.wt, w.ms - busy); g.checks += w.pn ?? 0;
+  }
+  if (!groups.size) return '_Noch keine Ruckler mit Hauptthread-Messung (Web-Apps ab dem Stand vom 11.11.2026)._';
+  return table(['Gruppe', 'Ruckler ≥100 ms', 'Ø ms', 'belegt direkt nach dem Bild', 'belegt später', 'frei, kein Bild', 'Rest (Bildaufbau)', 'Ø Abfragen'],
+    [...groups].sort((a, b) => b[1].n - a[1].n).map(([k, g]) => [k, g.n, fmt(g.ms / g.n, 0), pct(g.sync, g.ms), pct(g.later, g.ms), pct(g.wait, g.ms), pct(Math.max(0, g.ms - g.sync - g.later - g.wait), g.ms), fmt(g.checks / g.n, 1)]));
+};
+
+/**
+ * Frames drawn while dragging (`drag`), by browser: how many came late (more than 25 ms after the
+ * frame before), how many drew two or more moves at once, and how many did both: the mark of
+ * moves that arrive out of step with the frames.
+ */
+const dragTable = rows => {
+  const groups = new Map();
+  for (const r of rows) {
+    const d = r.data.drag;
+    if (!d?.n) continue;
+    const k = keys.browser(r);
+    if (!groups.has(k)) groups.set(k, { installs: new Set(), n: 0, g: 0, d: 0, gd: 0 });
+    const g = groups.get(k);
+    g.installs.add(r.install_id); g.n += d.n; g.g += d.g ?? 0; g.d += d.d ?? 0; g.gd += d.gd ?? 0;
+  }
+  if (!groups.size) return '_Noch keine Messung beim Ziehen (Apps ab dem Stand vom 11.11.2026)._';
+  return table(['Gruppe', 'Inst.', 'Bilder beim Ziehen', 'verspätet (>25 ms)', 'mit ≥2 Bewegungen', 'verspätet und doppelt'],
+    [...groups].sort((a, b) => b[1].n - a[1].n).map(([k, g]) => [k, g.installs.size, g.n, pct(g.g, g.n), pct(g.d, g.n), pct(g.gd, g.n)]));
+};
+
 // An app jank less than 0.5 s before the report (written when the app goes to the background) is
 // most likely the page being hidden, not the app.
 const beforeBackground = (w, row) => row.kind === 'app' && Number.isFinite(row.data.up) && Number.isFinite(w.t) && row.data.up - w.t < 0.5;
 const worstTable = (rows, limit) => {
   const all = rows.flatMap(r => (r.data.worst ?? []).map(w => ({ ...w, r: w.r ?? (r.kind === 'stageRunner' ? 'stageRunner' : '?'), row: r })));
   all.sort((a, b) => b.ms - a.ms);
-  const top = all.slice(0, limit), timings = top.some(w => w.b !== undefined || w.ra !== undefined);
+  const top = all.slice(0, limit), timings = top.some(w => w.b !== undefined || w.ra !== undefined), thread = top.some(w => w.wt !== undefined);
   const when = w => w.m !== undefined ? `${fmt(w.t, 1)} s · ${w.m} m${startFrame(w) ? ' · Startbild' : ''}` : `${fmt(w.t, 0)} s nach Start${beforeBackground(w, w.row) ? ' · vor Hintergrund' : ''}`;
-  return table(['ms', 'Kontext', 'Gerät', 'Version', 'Eingabe', 'Ereignisse', 'Zeitpunkt', ...(timings ? ['Build/Raster ms'] : [])], top.map(w => [fmt(w.ms, 0), w.r, `${keys.platform(w.row)} · ${w.row.browser ?? w.row.data.device?.model ?? ''}`, w.row.app_version ?? '?', w.in ?? '–', w.ev ?? '–', when(w),
-    ...(timings ? [`${fmt(w.b, 1)} / ${fmt(w.ra, 1)}`] : [])]));
+  return table(['ms', 'Kontext', 'Gerät', 'Version', 'Eingabe', 'Ereignisse', 'Zeitpunkt', ...(timings ? ['Build/Raster ms'] : []), ...(thread ? ['Hauptthread belegt/frei ms'] : [])], top.map(w => [fmt(w.ms, 0), w.r, `${keys.platform(w.row)} · ${w.row.browser ?? w.row.data.device?.model ?? ''}`, w.row.app_version ?? '?', w.in ?? '–', w.ev ?? '–', when(w),
+    ...(timings ? [`${fmt(w.b, 1)} / ${fmt(w.ra, 1)}`] : []), ...(thread ? [w.wt === undefined ? '–' : `${fmt(w.bs, 0)} / ${fmt(w.wt, 0)}`] : [])]));
 };
 
 /** The Markdown summary of the last `days` days in `db` (a DatabaseSync). */
@@ -242,6 +282,8 @@ export function perfReport(db, { days = 7, now = new Date() } = {}) {
   out.push('', '## FrameTiming (Build/Raster, Median über Berichte)', frameTimingTable(app));
   const appTriggers = triggers(app);
   out.push('', `## App: Ereignisse in Ruckel-Bildern (${appTriggers.worst} Ruckler ≥50 ms aus den je 5 schlimmsten pro Bericht)`, appTriggers.text);
+  out.push('', '## Web: Wo die Zeit langer Bilder bleibt', 'Die App fragt zwischen zwei Bildern alle 10 ms, ob der Hauptthread frei ist. „belegt“: Er arbeitete (Zeichnen, Dekodieren, Textur hochladen, Speicherbereinigung). „frei, kein Bild“: Er war frei, der Browser begann trotzdem kein Bild (Compositor oder GPU-Prozess im Rückstand). Anteile an der Summe der Ruckler-Zeit.', threadTable(app));
+  out.push('', '## Ziehen mit dem Finger (Scrollen)', 'Bilder, die beim Ziehen direkt auf ein anderes folgten. „verspätet und doppelt“: Das Bild kam eine Bildperiode zu spät und zeichnete dafür zwei Bewegungen auf einmal – der Browser liefert die Bewegungen nicht im Takt der Bilder, der Inhalt steht kurz und springt dann. Nur „verspätet“: langsamer Finger oder langsames Bild.', dragTable(app));
   out.push('', '## Start', 'vor Dart: Laden bis zum Start des Dart-Codes (Web: seit Navigation; Android: seit Prozessstart, bei Warmstarts ausgeblendet). FCP: erstes Zeichnen der Seite seit Navigation (Web). Erstes Bild, bereit (gespeicherte Daten sichtbar) und Daten (erste Antwort von /snapshot) zählen ab Dart-Start. „verdeckt“: Seite beim Start bzw. vor dem ersten Bild im Hintergrund; „erstes Bild > 10 s“: dasselbe bei älteren Apps, die das nicht melden.', startupTable(app));
   out.push('', '## API-Latenzen nach Aufruf', apiTable(rows, (r, a) => `${a.m} ${a.p}`, 25));
   out.push('', '## API-Latenzen nach Plattform und Netz', apiTable(rows, r => `${r.platform} · ${r.data.device?.net ?? '?'}`, 15));
