@@ -13,8 +13,15 @@ were NOT a measured 26.5-run median time to the crate.
 - Keep the latest 10 timestamped accepted **ordinary** runs of at least 20 m, at most 30 days old.
   No per-run identifiers, client timestamps or indefinite trace. Retry responses are deduplicated
   before recording; weekly/training runs still progress missions but do not enter the ordinary basis.
-- At least five comparable measurements enable per-dimension empirical quantiles: easy p50,
-  medium p60, hard p70 (lower order statistic, rounded down rather than beyond the quantile).
+- At least five comparable measurements enable per-dimension empirical quantiles: easy p40,
+  medium p60, hard p80 (lower order statistic, rounded down rather than beyond the quantile).
+  Of ten recent runs about seven reach the easy target, five the medium and three the hard one.
+  Until 2026-11-11 the quantiles were p50/p60/p70 (six, five and four of ten): hard was hardly
+  harder than easy for more than three times the reward. The spread rests on that reasoning and
+  on two players' samples, not on measured completion under policy 2 (the log of 2026-11-08 to
+  2026-11-10 is from the record-fraction rules before). With independent runs the crate still has
+  a median of about three runs; check with `mission-report.mjs` after a few days. Series and day
+  distance keep the median run (`missionEffort.median`). Missions already made keep their targets.
   Real zero measurements count. Missing statistics do not masquerade as zero or a measured record.
   Unsupported/too-rare specialties are omitted instead of forced up to an unattainable minimum.
 - `noPickup` uses only its own before-first-pickup measurements (older checked statistics: a

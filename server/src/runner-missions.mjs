@@ -71,7 +71,7 @@ export const missionRules = Object.freeze({
   // A type of yesterday is chosen with this share of its weight.
   repeatWeight: 0.2,
   // `share`: conservative cold-start record fractions, capped by start. Once sampled, the effort
-  // policy uses the 50th/60th/70th per-dimension percentile instead of lifetime fractions.
+  // policy uses the 40th/60th/80th per-dimension percentile instead of lifetime fractions.
   types: {
     distance: { weight: 3, basic: true, slots: missionSlots, share: { easy: 0.3, medium: 0.42, hard: 0.57 }, min: 20, max: 6000, start: [100, 150, 200] },
     points: { weight: 2, basic: true, slots: missionSlots, share: { easy: 0.3, medium: 0.44, hard: 0.58 }, min: 20, max: 9000, start: [120, 200, 300] },

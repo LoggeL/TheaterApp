@@ -1,7 +1,10 @@
 // Effort budget: the whole three-mission crate should have median completion <= 10 runs,
 // not a ten-run history mistaken for that outcome. Sample quantiles are estimates, not guarantees.
 export const missionEffort = Object.freeze({ version: 2, window: 10, minSamples: 5, maxAgeDays: 30,
-  completionRuns: 10, quantile: { easy: 0.5, medium: 0.6, hard: 0.7 }, seriesCount: 2, dailyRuns: 3 });
+  completionRuns: 10, quantile: { easy: 0.4, medium: 0.6, hard: 0.8 }, median: 0.5, seriesCount: 2, dailyRuns: 3 });
+// The slots are spread (11.11.2026): of ten recent runs about seven reach the easy target, five the
+// medium and three the hard one (0.5/0.6/0.7 before: six, five and four, so hard was hardly harder
+// than easy). Series and day distance stay on the median run (`median`), whatever their slot.
 
 const quantile = (values, q) => [...values].sort((a, b) => a - b)[Math.floor((values.length - 1) * q)];
 
@@ -28,11 +31,11 @@ export function recentMissionOptions(type, slot, ctx, nice, debuts) {
     case 'pass': return ['crate', 'flat', 'lamp', 'border', 'sandbag', ...debuts.map(([, k]) => k)]
       .flatMap(kind => option(values(x => x.st ? x.st.passed?.[kind] ?? 0 : undefined), debuts.some(([, k]) => k === kind) ? r.debutMin : r.min, r.max).map(o => ({ kind, ...o })));
     case 'runs': {
-      const min = target(metres, r.min, r.max, missionEffort.quantile.easy);
+      const min = target(metres, r.min, r.max, missionEffort.median);
       return min === null ? [] : [{ target: missionEffort.seriesCount, min }];
     }
     case 'dailyDistance': {
-      const base = target(metres, 1, r.max, missionEffort.quantile.easy);
+      const base = target(metres, 1, r.max, missionEffort.median);
       return base === null ? [] : [{ target: Math.min(r.max, base * missionEffort.dailyRuns) }];
     }
     case 'reach': {
