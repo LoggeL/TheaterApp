@@ -1,0 +1,1241 @@
+{
+  "date": "2026-11-15",
+  "tool": "built-in image_gen",
+  "scope": "identity and body proportions; approved costumes and eight target poses retained",
+  "counts": {
+    "calendarEntries": 24,
+    "characterAgents": 19,
+    "sheets": 19,
+    "portraits": 4,
+    "thumbnails": 4
+  },
+  "tests": {
+    "server": 45,
+    "flutter": 26,
+    "atlasWarnings": 0,
+    "optimizerCheck": "passed"
+  },
+  "records": [
+    {
+      "day": 1,
+      "id": "character.yunus--explosion",
+      "name": "Yunus",
+      "role": "Dr. Adrian von Düsterwald (Explosion)",
+      "play": "Creepshow",
+      "reference": "character.yunus",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-01.webp"
+      ],
+      "reason": "Spielmodell war deutlich schmaler und länger als Yunus im bestehenden Creepshow-Skin. Kompaktere Körperproportionen und Gesichtsgeometrie an die Referenz angepasst. Das vorhandene Porträt passt bereits zu Referenzgesicht und Explosionszustand und bleibt unverändert.",
+      "validation": "Alle acht Posen visuell geprüft: Laufphasen, stehende Hände an den Trägern, angewinkelte Beine beim Hängen, ausgestreckte Hände im Flug und Bauchlage erhalten. Versengtes Hemd, zerzauste Haare, Ruß, zerfetzte Weste und ein abgerissenes Hosenbein erhalten. Keine Jacke, kein Mantel, keine Handschuhe aus der Referenz übernommen. Transparenz und acht belegte Rasterzellen technisch geprüft. Raster mechanisch auf 1792×896 mit acht 448×448-Zellen gepackt, ohne Skalierung oder Neuzeichnung; alle Zellen belegt, keine sichtbaren Pixel am Zellrand.",
+      "harness": {
+        "runA": [
+          99,
+          69
+        ],
+        "passA": [
+          88,
+          69
+        ],
+        "runB": [
+          91,
+          73
+        ],
+        "passB": [
+          85,
+          67
+        ],
+        "fly": [
+          112,
+          66
+        ],
+        "dangle": [
+          60,
+          60
+        ],
+        "cheer": [
+          48,
+          61
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve.\nAsset: transparent production game sprite sheet, exactly 4 columns by 2 rows.\nImage 1 is the EDIT TARGET: the approved explosion costume and eight approved poses of Yunus as Dr. Adrian von Düsterwald. Image 2 is the established SAME PERSON and SAME PLAY character model, the identity/body reference. Image 3 is the identity/face reference. Image 4 is the approved explosion portrait, only costume and soot reference.\nCorrect ONLY the face and underlying anatomical proportions of Image 1 to faithfully match Image 2 and 3: the same young adult man, round black glasses, brown eyes, distinctive nose, cheek/jaw shape, small friendly smile and short brown hair, with the same larger head-to-body ratio, broader shoulders, compact torso, arms and legs as the established game model. Currently Image 1 is too thin and elongated and too realistic. Use the clear illustrated outlines, warm shading and compact proportions of Image 2, without changing who he is. Keep his hair singed and wildly tousled as in Image 1, and soot on skin and clothes.\nSTRICTLY PRESERVE the entire explosion outfit from Image 1: torn off-white shirt with singed holes and torn cuffs, tattered dark blue waistcoat, suspenders/harness, brown shoes, dark trousers with EXACTLY ONE trouser leg torn off above the knee exposing that leg. No jacket, no cape, no gloves, no repaired clothing.\nSTRICTLY PRESERVE every target pose and gesture from Image 1: first row four separate running phases in the existing order and rightward direction; second row standing upright both fists by chest gripping straps and looking upward, seated curled up knees together with fists near chest, horizontal flying both arms outstretched forward with open fingers, prone crash both arms forward. Match exact limb directions, hand placements, bent knees and face orientations, adapting only body shape.\nDo not copy the poses, outfit, gloves, cape, stars or props from Image 2. Do not invent props or facial expressions. Output ONLY the edited eight-pose grid with full figures, one in each equal cell, same 4x2 order, clear transparent padding around every figure. Wide 2:1 canvas. Real transparent alpha background, no shadows outside figures, no text or grid lines."
+      ]
+    },
+    {
+      "day": 2,
+      "id": "character.nele--mumie",
+      "name": "Nele",
+      "role": "Prinzessin Iset (Mumie)",
+      "play": "Creepshow",
+      "reference": "character.nele",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-02.webp",
+        "character-advent-02-portrait.webp",
+        "character-advent-02-thumb.webp"
+      ],
+      "reason": "Face and body proportions aligned to Nele as Princess Iset in Creepshow; mummy wraps, necklace, harness and all eight target gestures retained.",
+      "validation": "Visually checked against immutable target and same-play reference. Grid 1774x887, real alpha, all 8 cells nonempty. Portrait checked over neutral grey. No production assets changed.",
+      "harness": {
+        "runA": [
+          72,
+          63
+        ],
+        "passA": [
+          80,
+          64
+        ],
+        "runB": [
+          79,
+          63
+        ],
+        "passB": [
+          80,
+          60
+        ],
+        "cheer": [
+          59,
+          62
+        ],
+        "dangle": [
+          52,
+          49
+        ],
+        "fly": [
+          123,
+          54
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve. Asset: production illustrated 2D game sprite sheet with 8 poses, 4 columns by 2 rows. Image 1 is EDIT TARGET, image 2 is the same person's established model in the SAME play and identity/body reference, image 3 is her established portrait for facial anatomy. Correct ONLY the character model in image 1 to be the same Nele/Princess Iset as image 2: same face shape, eyes, brows, nose, jaw, skin tone, brown hair, apparent age and same head-to-body ratio, shoulder and torso build, and limb proportions. The current target has drifted in facial shape and anatomical proportions. Use the compact illustrated game anatomy from image 2, with clear outlines and readable shading. Do NOT copy image 2's clothing, props, poses, fan, boots or standing celebration. All target poses remain EXACTLY: top row four existing run phases and their different leg and arm angles, bottom row target cheer, target dangle, target fly, target prone crash. Preserve each gesture, facing direction and every approved costume detail. Do not add or remove costume accessories. Return only the corrected 4x2 sheet, wide 2:1 canvas, full figures fully inside their cell and clean generous transparent margins, real alpha background, no text, no grid lines, no ground, no labels. TARGET is MUMMY Iset: preserve the full off-white linen wrappings, wrapped hair and mouth, exposed eye area, the little brown curls visible at the forehead, golden pendant necklace, dark harness, all loose trailing bandage strips. Body remains feminine adult Nele like reference, not a different young girl. Preserve top-left running leg position. Bottom row: cheer BOTH fists overhead; seated dangle with hands down on thighs and bent knees; fly BOTH fists stretched forward; crash eyes closed head resting on arms. Keep the face covering and no exposed long hair.",
+        "Use case: identity-preserve. Image 1 is the EDIT TARGET: existing Nele/Princess Iset mummy portrait. Image 2 is the established SAME character Nele as Iset in the SAME play Creepshow, the identity and anatomy reference.\nCorrect only the underlying face and body model of Image 1 to be unmistakably the same woman as Image 2: match face width and cheek shape, exact eyes and brows, nose, lip shape and warm skin tone, and the same shoulders and natural torso build. Remove the excessively pinched narrow waist and overly narrow face. Keep her apparent age the same. Do not change the target's pose at all: one wrapped hand holds a bandage tail by her shoulder, other hand on hip, same head angle, framing and gaze.\nAll target COSTUME details are approved and locked: cream mummy linen wrappings from head through torso and both arms, exact face wrap crossing over lower face with eyes and lips exposed as in target, fully covered hair, dangling bandage ends, small gold pendant necklace. No new long hair, no reference fan, no reference shoulder collar, no other clothing or harness. Preserve the mummy target's exact illustration style, soft detailed warm shading and crisp dark edges, and its waist-up square portrait composition. Transparent background with real alpha, no backdrop, no floor, no text."
+      ]
+    },
+    {
+      "day": 3,
+      "id": "character.sophie--waisenhaus",
+      "name": "Sophie",
+      "role": "Mia im Waisenhauskleid",
+      "play": "Creepshow",
+      "reference": "character.sophie",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-03.webp"
+      ],
+      "reason": "Sprite proportions were too tall and slim relative to existing Creepshow Mia. Corrected to a larger head, youthful rounded face and compact body model. Approved portrait already matches reference and remains unchanged.",
+      "validation": {
+        "dimensions": [
+          1774,
+          887
+        ],
+        "hasAlpha": true,
+        "transparentPixels": 1172008,
+        "eightCellsPresent": true,
+        "visualReview": "All 8 original pose arrangements, hand gestures, candle, flame, patched cream dress, bare feet and harness retained. Four running phases, raised-candle cheer, tucked dangle, horizontal flight and prone crash checked against original. Generated sheet viewed over grey to inspect alpha edges. No visible outfit or pose regression found.",
+        "unchangedPortrait": "character-advent-03-portrait.webp"
+      },
+      "harness": {
+        "runA": [
+          85,
+          75
+        ],
+        "passA": [
+          76,
+          70
+        ],
+        "runB": [
+          77,
+          68
+        ],
+        "passB": [
+          79,
+          67
+        ],
+        "fly": [
+          121,
+          69
+        ],
+        "dangle": [
+          56,
+          60
+        ],
+        "cheer": [
+          42,
+          67
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve.\nAsset: production transparent 2D game sprite sheet, eight poses.\nImage 1 is the EDIT TARGET: Sophie as Mia in her patched orphanage dress, in 4 columns x 2 rows.\nImage 2 is the same established character Sophie/Mia from the SAME play Creepshow. Use it strictly as IDENTITY and BODY MODEL reference.\nImage 3 is the established face portrait. Image 4 is the approved Advent portrait showing the EXACT outfit.\nCorrect only the anatomical character model of Image 1 to match Image 2: youthful rounded cheek and jaw shape, large expressive brown eyes, larger head relative to torso, compact youthful body, shorter limbs, same warm skin tone and chestnut brown long hair with black bow. Do not grow her into a tall slim adult. Match the existing softly shaded 2D illustrated game style and outlines of Image 2.\nStrictly retain Image 1's exact approved costume: loose long cream/off-white patched orphanage dress with square ochre and tan stitched patches, gathered neckline and cuffs, black harness, bare feet. Retain its lit candle in the little brass candlestick in every pose. No yellow dress, apron, boots, stars or costume pieces from Image 2.\nStrictly lock Image 1's eight original poses, hand gestures, limb angles, camera direction, facing direction and composition: top row four right-facing running phases with candle held upright; bottom row standing cheer with candle raised and other fist close to shoulder, tucked seated/dangling with candle, horizontal flying with candle extended, prone crash with candle extended. The cheer must keep one arm holding the candle high, NOT both arms raised as in reference. Flying and crash remain horizontal. Keep all eight body arrangements; only adapt relative anatomy/proportions and garment fit to the reference model.\nOutput one sheet, 4 equal columns by 2 equal rows in same exact order, landscape 2:1 ratio. One complete figure per cell with generous transparent margin, fully uncropped candle flame, hair and toes. Real alpha transparency. No ground, shadow backgrounds, labels, grids, borders, additional characters or new props."
+      ]
+    },
+    {
+      "day": 4,
+      "id": "character.elena--ritterin",
+      "name": "Elena",
+      "role": "Johanna als Ritterin",
+      "play": "Anno 1146",
+      "reference": "character.elena--anno",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-04.webp"
+      ],
+      "reason": "Johanna face and compact original game-model anatomy restored while retaining approved costume and eight poses.",
+      "validation": "Visually compared all eight figures against edit target and same-play reference. RGBA transparent 1774x887, all eight equal cells populated. Portrait already closely matches reference, left unchanged. Parent should retain cleanup/atlas inspection for generated matting speckles.",
+      "harness": {
+        "runA": [
+          81,
+          73
+        ],
+        "passA": [
+          81,
+          71
+        ],
+        "runB": [
+          85,
+          84
+        ],
+        "passB": [
+          84,
+          68
+        ],
+        "fly": [
+          125,
+          55
+        ],
+        "dangle": [
+          56,
+          53
+        ],
+        "cheer": [
+          49,
+          53
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve. Production 2D illustrated game sprite sheet edit.\nImage 1 is the EDIT TARGET, eight approved poses, 4 columns by 2 rows. Image 2 is the SAME PERSON in the SAME PLAY, authoritative character model/body identity reference ONLY. Image 3 is the face reference of the same person.\nChange ONLY the underlying anatomy and face in Image 1 to match Image 2: same face geometry, eyes, nose, chin, hairline and thick dark brown tight curls, head-to-body ratio, torso/shoulder build and arm/leg proportions. The current target has a smaller head and taller elongated proportions; use the more compact cartoon model from the reference. Keep her an adult woman, not a child. Match the established hand-painted game style and clear dark contours of Image 2.\nEvery original target pose is APPROVED and MUST remain: preserve each direction, limb angle and hand gesture from Image 1. Never copy a pose, clothing or prop from Images 2/3. Preserve the expression intent in each target pose while using the same face.\nKeep EXACTLY the 4x2 grid: row1 four running phases; row2 cheer, knees-tucked dangle, forward flying, prone crash. Each of 8 complete figures is centered in its own cell with generous transparent margin. Real alpha transparent background. Wide 2:1 canvas. No scenery, ground, labels, dividers, stars or extra objects. Identity is Johanna (Elena), Anno 1146. Outfit LOCK: loose ivory peasant blouse with front brown lacing, wide brown leather waist belt, narrow leather thigh straps, fitted dark trousers, brown bracers, brown strap sandals and sheathed sword at belt. Do NOT add reference red skirt, boots, red ribbons, silver earrings or black shoulder harness. Keep same hand-on-hip plus bent raised fist cheer; seated knees tucked with both hands near chest; flying both arms extended; prone crash with one bent leg. Keep all sword details and target poses."
+      ]
+    },
+    {
+      "day": 5,
+      "id": "character.marcella--dienerin",
+      "name": "Marcella",
+      "role": "Dienerin",
+      "play": "Creepshow",
+      "reference": "character.marcella",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-05.webp",
+        "character-advent-05-portrait.webp",
+        "character-advent-05-thumb.webp"
+      ],
+      "reason": "Matched Marcella/Suzie same-play face and youthful proportions; retained approved maid outfit and all eight target poses. Portrait gaze restored to original direction after first generation.",
+      "validation": "Visually inspected the output on transparency and a neutral background. Eight occupied cells in 4x2 grid, original gesture sequence retained including two-arm flight and curled crash; true alpha present. Portrait keeps no cap and approved maid details. Detailed pixel/geometry checks in validation.json. Built-in output carries near-transparent matting pixels, to be handled by the existing optimizer during parent integration.",
+      "harness": {
+        "runA": [
+          78,
+          70
+        ],
+        "passA": [
+          87,
+          58
+        ],
+        "runB": [
+          86,
+          73
+        ],
+        "passB": [
+          83,
+          58
+        ],
+        "cheer": [
+          50,
+          62
+        ],
+        "dangle": [
+          55,
+          53
+        ],
+        "fly": [
+          115,
+          59
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve.\nAsset type: transparent 2D game sprite sheet, 8 poses in a 4-column x 2-row layout.\nInput image 1 is the EDIT TARGET, Marcella in her approved black-and-cream maid outfit. Input image 2 is the established same character Marcella as Suzie from the same play, authoritative for face, apparent age and body proportions. Input image 3 is Suzie's portrait, authoritative for facial identity.\nChange ONLY the underlying character model in image 1 to Marcella/Suzie from images 2 and 3. Match her childlike compact stature, head-to-body ratio, rounder cheek and jaw shape, brow/eye/nose structure and brown hair. Image 1 currently reads as a different older, narrower-faced character. Keep a consistent model across all eight poses, in the same outlined warm illustrated game style as image 2.\nLOCK the exact costume design from image 1: black long-sleeved dress with cream ruffled apron, cream collar and cuffs, layered cream skirt frills, dark tights, brown lace-up boots, existing black harness. No maid cap. Do NOT transfer the reference's beige patchwork dress, bare feet or props.\nLOCK all eight original pose silhouettes and joint directions from image 1. Top row: its four distinct running phases in the original order. Bottom row: both fists high cheering, seated with knees together and hands spread to the sides, horizontal flying right with BOTH arms stretched forward, side/prone curled resting crash pose with head on folded hands. Keep each expression appropriate to that target pose; closed eyes in crash. Do NOT replace these with any pose from image 2, especially reference's one-arm-forward flight or different crash. Keep camera directions, original hand gestures and clothing movement.\nOutput only the corrected 8-pose sheet in exactly a 4x2 equal-cell layout on a wide 2:1 canvas. All sprites wholly within their cells with generous empty margins. Real transparent alpha background. No labels, text, borders, floor, shadows, decorations or additional objects.",
+        "Use case: identity-preserve. Edit a transparent illustrated character portrait.\nImage 1 is the EDIT TARGET: Marcella in the approved black-and-cream maid dress. Image 2 is the exact same established character, Marcella as Suzie from the same play, authoritative identity reference.\nCorrect only the face and underlying body model in image 1 to exactly match image 2: her youthful fuller cheek/jaw shape, eyebrow shape, eye spacing, nose, mouth, warm skin tone, brown hair with the same hairline and texture, and compact shoulder/torso proportions. She should visibly be the identical person from image 2 wearing the outfit in image 1.\nKeep image 1's head orientation and restrained smile, gaze direction, body pose, arms, portrait framing and all costume details exactly unchanged: black long-sleeved dress, cream ruffled apron and shoulder ruffles, cream scalloped collar and cuffs, button details. Keep no cap, no added harness, no new jewelry or objects. Do not transfer the reference's patchwork dress or harness. Maintain the established warm outlined game illustration style, square transparent portrait. Preserve transparent alpha background, no backdrop, no text, no borders, no shadows.",
+        "Use case: identity-preserve, precise follow-up edit.\nImage 1 is the current Marcella maid portrait to edit. Image 2 is the original approved pose and costume. Image 3 is Marcella/Suzie facial identity.\nKeep the corrected same-character face identity and youthful proportions of image 1. Make one small targeted correction: restore the exact head orientation and eye gaze from image 2. She should look slightly toward the LEFT side of the picture with the original restrained sideways smile, rather than toward the right as image 1 currently does. Do not mirror the entire picture. Keep the body, shoulders, arms, dress, collar, ruffles, hair rendering, colors, crop and all other details from image 1 unchanged. Image 2 is only the reference for the head pose/gaze, not a new face. Match image 3's youthful cheeks, brow, nose, mouth identity. Same warm outlined game illustration. Real transparent alpha background, square portrait, no added objects or text."
+      ]
+    },
+    {
+      "day": 6,
+      "id": "character.carina--anno-mathilde",
+      "name": "Carina",
+      "role": "Mathilde",
+      "play": "Anno 1146",
+      "reference": "character.carina--anno",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-06.webp"
+      ],
+      "reason": "Spielgrafik an Carinas bestehenden Maribel-Körperbau und Gesicht im selben Stück angeglichen. Porträt besitzt bereits dasselbe Gesicht und bleibt unverändert.",
+      "validation": "Visuell alle acht Zielposen und Kostümdetails verglichen: vier Laufphasen, Fäuste oben, sitzende Hängepose, seitliche Arme im Flug, liegende Crashpose erhalten. Burgunderrock, braunes Mieder, cremefarbene Bluse, Gürtelbeutel, Stiefel und vorhandene Schultergurte erhalten; kein Referenzumhang übernommen. Alpha und Zellbelegung separat geprüft.",
+      "harness": {
+        "runA": [
+          87,
+          65
+        ],
+        "passA": [
+          86,
+          58
+        ],
+        "runB": [
+          100,
+          64
+        ],
+        "passB": [
+          86,
+          58
+        ],
+        "cheer": [
+          54,
+          61
+        ],
+        "dangle": [
+          54,
+          54
+        ],
+        "fly": [
+          140,
+          59
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve.\nAsset: production eight-pose illustrated game sprite sheet of Carina as Mathilde in Anno 1146.\nImage 1 is the EDIT TARGET, approved Mathilde outfit and poses. Image 2 is the established SAME PERSON in SAME PLAY, Carina as Maribel, used ONLY as body/face reference. Image 3 is the established Carina face portrait. Image 4 is the approved current Mathilde portrait, showing the outfit and her uncovered hair.\nCorrect only Image 1's character model to precisely match Image 2: compact stylized game proportions with slightly larger head relative to torso and limbs, same shoulder/torso build, same face silhouette, eyes, nose, jaw, warm brown long hair and apparent age. Preserve feminine adult identity; do not make a child or realistic fashion model. Use the reference's outlined illustrated game style.\nHARD LOCK OUTFIT from Image 1 in every cell: burgundy red long skirt, brown lace-up bodice, cream puff-sleeved blouse, brown boots, brown belt pouch, existing black shoulder harness. No hood, no cream cape, no gold/black dress from reference. Hair remains uncovered, freely flowing long brown hair. Do not introduce any new accessories.\nHARD LOCK POSES from Image 1, exactly 4 columns x 2 rows: top row four right-facing run gait phases with same arm/leg angles; bottom row left raised-fists cheer; second seated dangle with knees together and hands outward; third horizontal flight with both arms extended sideways/back; fourth prone crash facing right with hands planted ahead and closed pained eyes. Keep every gesture, pose, direction and clothing motion. Do not copy Image 2's alternate flight, seated or crash pose or stars.\nOutput only the corrected eight-pose sheet, 2:1 canvas, 4x2 equal cells, each complete figure within its own cell with clear transparent margins, genuine alpha transparency, no text, borders, floor or shadow. Identity/proportion edit only; all original outfit details and poses stay."
+      ]
+    },
+    {
+      "day": 7,
+      "id": "character.logge--creepshow",
+      "name": "Logge",
+      "role": "Diener 3",
+      "play": "Creepshow",
+      "reference": "character.logge",
+      "status": "unchanged",
+      "changedFiles": [],
+      "reason": "Servant portrait and all eight sprites already use the same face and compact illustrated character model as the original Creepshow messenger. No visible identity mismatch requiring a redraw.",
+      "validation": "Viewed original portrait, matching reference portrait, full target grid and full reference grid. Kept approved outfit and poses byte-for-byte by making no changes.",
+      "harness": null,
+      "prompts": []
+    },
+    {
+      "day": 8,
+      "id": "character.nele--ballkleid",
+      "name": "Nele",
+      "role": "Prinzessin Iset im Ballkleid",
+      "play": "Creepshow",
+      "reference": "character.nele",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-08.webp"
+      ],
+      "reason": "Sprite face and body proportions aligned to the same Nele model; Egyptian ballgown, head-worn mask and feather, ornaments, sandals and all eight approved target gestures retained. Existing ballgown portrait already matches the Iset reference and is preserved.",
+      "validation": "Visually checked against immutable target and same-play reference. Grid 1774x887, real alpha, all 8 cells nonempty. No production assets changed.",
+      "harness": {
+        "runA": [
+          102,
+          64
+        ],
+        "passA": [
+          90,
+          64
+        ],
+        "runB": [
+          86,
+          66
+        ],
+        "passB": [
+          86,
+          65
+        ],
+        "fly": [
+          116,
+          64
+        ],
+        "dangle": [
+          55,
+          53
+        ],
+        "cheer": [
+          50,
+          53
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve. Asset: production illustrated 2D game sprite sheet with 8 poses, 4 columns by 2 rows. Image 1 is EDIT TARGET, image 2 is the same person's established model in the SAME play and identity/body reference, image 3 is her established portrait for facial anatomy. Correct ONLY the character model in image 1 to be the same Nele/Princess Iset as image 2: same face shape, eyes, brows, nose, jaw, skin tone, brown hair, apparent age and same head-to-body ratio, shoulder and torso build, and limb proportions. The current target has drifted in facial shape and anatomical proportions. Use the compact illustrated game anatomy from image 2, with clear outlines and readable shading. Do NOT copy image 2's clothing, props, poses, fan, boots or standing celebration. All target poses remain EXACTLY: top row four existing run phases and their different leg and arm angles, bottom row target cheer, target dangle, target fly, target prone crash. Preserve each gesture, facing direction and every approved costume detail. Do not add or remove costume accessories. Return only the corrected 4x2 sheet, wide 2:1 canvas, full figures fully inside their cell and clean generous transparent margins, real alpha background, no text, no grid lines, no ground, no labels. TARGET is Iset in Egyptian BALLGOWN: preserve black-and-gold sleeveless bodice, broad gold belt, geometric gold apron panel, dusty mauve draped skirt, golden lace-up sandals, white forearm wraps, black-and-gold collar necklace, earrings, head-worn gold mask with black feather and hair ornaments, long wavy brown hair and existing harness. Do not turn the dress into the reference mummy costume. Bottom row: standing cheer both hands as fists near the shoulders/chest looking upward; seated knees drawn up under skirt with fists close to chest; fly BOTH arms stretched forward with open hands; crash prone both arms forward and eyes squeezed shut. Head/face and compact body build must match image 2 while keeping target pose geometry."
+      ]
+    },
+    {
+      "day": 9,
+      "id": "character.hendrik--partygast",
+      "name": "Hendrik",
+      "role": "Partygast",
+      "play": "Creepshow",
+      "reference": "character.hendrik",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-09.webp",
+        "character-advent-09-portrait.webp",
+        "character-advent-09-thumb.webp"
+      ],
+      "reason": "Portrait and all eight sprite poses now use youthful Karl identity, short brown hair, no glasses and compact child proportions. Approved party clothing and original pose gestures retained.",
+      "validation": {
+        "visual": "Compared all eight cells to approved target and identity reference. Outfit details and 8 gestures retained; youthful model restored. Parent sprite pilot accepted without further redraw.",
+        "grid": {
+          "width": 1774,
+          "height": 887,
+          "alphaMin": 0,
+          "alphaMax": 255,
+          "cellAlphaSums": [
+            9880182,
+            8100426,
+            9782405,
+            8290044,
+            9102682,
+            9931752,
+            8645193,
+            6907049
+          ]
+        },
+        "portrait": {
+          "width": 1254,
+          "height": 1254,
+          "alphaMin": 0,
+          "alphaMax": 255
+        }
+      },
+      "harness": {
+        "runA": [
+          83,
+          72
+        ],
+        "passA": [
+          81,
+          70
+        ],
+        "runB": [
+          83,
+          79
+        ],
+        "passB": [
+          77,
+          69
+        ],
+        "fly": [
+          114,
+          56
+        ],
+        "dangle": [
+          42,
+          57
+        ],
+        "cheer": [
+          30,
+          58
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve. Edit a production 2D game character sprite sheet.\nImage 1 is the EDIT TARGET: Hendrik as party guest, 8 existing approved poses in 4 columns x 2 rows. Image 2 is the SAME CHARACTER identity/body reference as Karl in Creepshow. Image 3 is the same-character face reference.\nCorrect ONLY identity, apparent age and anatomical proportions in Image 1 to match Image 2 exactly: the younger boy's rounder youthful face, eyes, nose, short brown hair, larger head-to-body ratio and compact childlike build. No eyeglasses because the established character has none. Do not copy the cap or brown orphan clothing.\nLOCK every approved outfit detail of Image 1: black/dark brown party shirt with red collar, dark long trousers, dark shoes, existing harness. LOCK all 8 poses and limb angles of Image 1, including top row four run phases; bottom row open raised palms near chest looking up, seated knees hugged, flying with both arms outstretched, prone crash. Keep the camera directions and each hand gesture. Only adapt clothing fit to the correct body shape.\nMatch the illustrated cartoon game style of Image 2: clear dark outlines and readable shading, not realistic anatomy. Output only the edited 8-pose sheet, exactly same 4x2 cell order, each figure fully contained with a clear transparent margin. Transparent background with real alpha, no ground, labels, borders or added objects. Wide 2:1 canvas.\n",
+        "Use case: identity-preserve. Precise edit of a transparent illustrated game character portrait.\nImage 1 is the EDIT TARGET: Hendrik as party guest. Image 2 is the identity reference: the established same character Karl/Hendrik in Creepshow.\nChange ONLY the character identity and physical proportions in Image 1 to match Image 2: identical younger face shape, eyes, brow, nose, ears, youthful smile, skin tone and smaller childlike torso/shoulder proportions. Use his short brown hair as shown around the reference cap, uncovered. Remove the target's eyeglasses because the established character has none. The result should clearly look like the exact boy from Image 2 wearing Image 1's party outfit.\nLOCK Image 1's pose, expression direction, arm positions, clenched left hand and relaxed right hand, camera framing, dark shirt with red collar, dark trousers and black harness with existing buckles. Adapt their fit to the same reference body model without redesigning them. Do not copy the reference cap, brown orphan outfit or any reference-only object.\nStyle: retain the same polished outlined 2D illustrated portrait style. Single character only, same square composition, head to upper thighs, natural transparent margin around head and arms. True transparent alpha background. No ground, text, watermark, border or extra objects."
+      ],
+      "integrationNote": "Complete sprite bounds extracted individually: flying shoe extended 7 pixels into the adjacent nominal cell. No artwork erased. Repacked atlas checked after extraction; harness positions corrected on final atlas."
+    },
+    {
+      "day": 10,
+      "id": "character.maren--creepshow",
+      "name": "Maren",
+      "role": "Dienerin",
+      "play": "Creepshow",
+      "reference": null,
+      "status": "unchanged",
+      "changedFiles": [],
+      "reason": "Keine unabhängige Referenz derselben Person im selben Stück vorhanden. Der Katalog führt für personId 39 nur die Creepshow-Dienerin selbst und Maren als Bühnentechnik ohne Stückzuordnung. Deshalb kein unbelegter Austausch des Charaktermodells.",
+      "validation": {
+        "catalogMatches": [
+          {
+            "id": "character.maren",
+            "role": "Bühnentechnik",
+            "play": null
+          },
+          {
+            "id": "character.maren--creepshow",
+            "role": "Dienerin",
+            "play": "Creepshow"
+          }
+        ],
+        "visualInspection": "Porträt und alle acht Spielposen geprüft. Rothaarige Figur mit schwarzer Brille, Haube, schwarzem Dienerinnenkleid, weißer Schürze und Handschuhen erscheint zwischen Porträt und Sheet konsistent. Ein Gleichheitsabgleich mit einer unabhängigen Creepshow-Referenz ist nicht möglich.",
+        "files": [
+          {
+            "file": "/Users/logge/Documents/Projects/TheaterApp/server/src/wardrobe/images/character-maren--creepshow.webp",
+            "sha256": "cb256c152ddb351eda123fd1584e7bcf3677f7060c11b395a1194f227547b6a1",
+            "unchanged": true,
+            "width": 1124,
+            "height": 577,
+            "hasAlpha": true
+          },
+          {
+            "file": "/Users/logge/Documents/Projects/TheaterApp/server/src/wardrobe/images/character-maren--creepshow-portrait.webp",
+            "sha256": "b7cfab7002256231c90e67343039001a3ae7aa10fd7ea24fd5be2aa6f3657753",
+            "unchanged": true,
+            "width": 512,
+            "height": 512,
+            "hasAlpha": true
+          },
+          {
+            "file": "/Users/logge/Documents/Projects/TheaterApp/server/src/wardrobe/images/character-maren--creepshow-thumb.webp",
+            "sha256": "7e8225f7f96dab20ee3208c6fa0f6a836a7e2669f6f51774c0cb24b7d211413b",
+            "unchanged": true,
+            "width": 384,
+            "height": 384,
+            "hasAlpha": true
+          }
+        ]
+      },
+      "harness": null,
+      "prompts": []
+    },
+    {
+      "day": 11,
+      "id": "character.nela--gauklerin",
+      "name": "Nela",
+      "role": "Gauklerin",
+      "play": "Anno 1146",
+      "reference": "character.nela--anno",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-11.webp"
+      ],
+      "reason": "Das Porträt entspricht bereits Marie (jung) aus Anno 1146 und bleibt unverändert. Spiel-Sheet an deren kompaktere Statur, Kopf-Körper-Verhältnis und Gesicht angenähert; freigegebenes Gauklerin-Outfit und alle acht Posen erhalten.",
+      "validation": {
+        "dimensions": [
+          1774,
+          887
+        ],
+        "alpha": true,
+        "cells": 8,
+        "cellOrder": [
+          "runA",
+          "passA",
+          "runB",
+          "passB",
+          "cheer",
+          "dangle",
+          "fly",
+          "crash"
+        ],
+        "minimumOpaqueMarginPixels": 11,
+        "visual": "Alle acht Figuren sichtbar und getrennt. Orange Bluse, braune Schnürweste, gestreifte Kniehose, nackte Füße und lange halboffene Frisur erhalten. Klatschpose, eingerolltes Hängen, ausgestreckte Flugpose und liegende Crashpose geprüft. Erste Variante war zu kindlich, zweite gezielt an Referenzproportionen angepasst.",
+        "productionFilesChanged": false
+      },
+      "harness": {
+        "runA": [
+          84,
+          82
+        ],
+        "passA": [
+          76,
+          77
+        ],
+        "runB": [
+          84,
+          87
+        ],
+        "passB": [
+          78,
+          82
+        ],
+        "fly": [
+          126,
+          65
+        ],
+        "dangle": [
+          62,
+          62
+        ],
+        "cheer": [
+          50,
+          59
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve. Edit a production illustrated 2D game sprite sheet.\nIMAGE 1 is the EDIT TARGET: Nela as the juggler/Gauklerin. IMAGE 2 is the SAME PERSON's established character model, Marie (young) from the SAME PLAY Anno 1146. IMAGE 3 is the exact face identity reference. IMAGE 4 is the already approved Advent portrait, whose identity matches; use it as an outfit and hairstyle guide, do not output a portrait.\nOnly correct the character's face, apparent age and anatomical proportions in IMAGE 1 to match IMAGE 2: youthful round face, same eyes/nose/mouth, larger head-to-body ratio, shorter more compact youthful torso and limbs. Keep long golden-brown hair with braided half-up bun and remaining long hair loose. She must read as the exact same game character wearing a different outfit. Match Image 2's illustrated game style, clear contours and compact anatomy, not a realistic adult.\nLOCK ALL approved clothing of IMAGE 1 in every pose: orange puff-sleeved blouse, dark brown sleeveless lace-front vest, orange-and-dark-brown vertically striped knee-length loose breeches, bare feet. Keep the same fabric, colors, trim and bare legs. NO new harness, straps, jewelry, footwear, skirt, props or embellishments. Do not copy Image 2's purple blouse, green skirt, harness, sandals or pose.\nLOCK ALL EIGHT POSES from IMAGE 1 exactly, including camera angle, facing direction, body tilt, hand gestures and order. Four separate run phases across the top row. Bottom row: standing and clapping hands together in front of her upper chest (NOT arms raised); curled dangling with knees close to chest and open hands low; horizontal flying right with both arms straight reaching forward and open hands; prone crash facing right with bent forearms and closed eyes. Retain these target limb gestures and expression intent while adjusting proportions. Do not substitute the reference's cheer, dangle, fly or crash pose.\nOutput only the corrected eight-sprite grid, 4 equally sized columns by 2 equally sized rows, wide 2:1 canvas. Each sprite completely inside its cell with a generous transparent margin. True transparent background, real alpha. No ground, shadow plane, labels, cell borders, extra images or text.",
+        "Use case: identity-preserve. Precise anatomical correction of a game sprite sheet.\nImage 1 is the edit target. It has the correct eight poses, clothing, hairstyle and transparent grid, but the heads are too large and faces look too young. Image 2 is the exact established game model to match. Image 3 is the exact existing face identity.\nCorrect ONLY head/face scale and age in all eight cells: reduce each head approximately 15 percent relative to its body, retain neck attachment, match the young adolescent Marie/Nela proportions from Image 2 rather than toddler/chibi proportions. Use the same face silhouette, eyes, nose, jaw and expression style as Image 2 and Image 3. Do not exaggerate eyes, cheeks or roundness. The character should look exactly the same person and age as the reference. Keep body build compact as in Image 2, do not return to tall adult anatomy.\nEverything else stays unchanged from Image 1: orange puff-sleeved blouse, brown laced vest, brown-orange striped breeches, bare feet, half-up braided bun and long loose golden-brown hair. No straps or props. Preserve all eight exact poses and gestures from Image 1, especially clapping with hands together at chest (no raised arms), curled seated dangle, straight arms in fly and prone crash. Do not copy the reference's clothing or poses.\nOutput only one transparent sprite sheet, exact 4 columns x 2 rows and same cell ordering as Image 1, each sprite contained with clear margins. Real alpha transparency; no background or text."
+      ]
+    },
+    {
+      "day": 12,
+      "id": "character.lina--gauklerin",
+      "name": "Lina R.",
+      "role": "Gauklerin",
+      "play": "Anno 1146",
+      "reference": "character.lina--anno",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-12.webp"
+      ],
+      "reason": "Lina's Advent portrait already matches the same-play Emma portrait closely and remains unchanged. Sprite anatomy was adjusted toward the existing Emma game model: more compact limbs/build and matching youthful face, while keeping the Gauklerin costume and the eight target poses.",
+      "validation": {
+        "method": "Visual comparison against original target and same-play reference; pixel alpha and per-cell occupancy checks",
+        "width": 1774,
+        "height": 887,
+        "alpha": true,
+        "poseOrder": [
+          "runA",
+          "passA",
+          "runB",
+          "passB",
+          "cheer",
+          "dangle",
+          "fly",
+          "crash"
+        ],
+        "nonEmptyCells": 8,
+        "minCellMarginAtAlphaAbove24": 32,
+        "poseDetails": "Both-fist cheer, tucked sitting pose with hands at sides, both arms swept backward in flight, curled side crash all retained. Four run phases retained. No reference book, dress, forward-fist flight or stars added.",
+        "outfit": "Ochre puff-sleeve blouse, lace-up dark bodice, vertically striped balloon breeches, brown boots and existing harness retained.",
+        "notes": "Use rounded fractional cell boundaries because generated dimensions are not divisible by 4 and 2. Alpha matting noise remains for normal parent optimization."
+      },
+      "harness": {
+        "runA": [
+          71,
+          63
+        ],
+        "passA": [
+          84,
+          50
+        ],
+        "runB": [
+          78,
+          70
+        ],
+        "passB": [
+          79,
+          49
+        ],
+        "cheer": [
+          52,
+          62
+        ],
+        "dangle": [
+          63,
+          41
+        ],
+        "fly": [
+          157,
+          42
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve.\nAsset: eight-pose illustrated 2D game sprite sheet, transparent background.\nImage 1 is the EDIT TARGET: Lina R. as Gauklerin in Anno 1146, four columns by two rows.\nImage 2 is the CHARACTER MODEL reference: the SAME Lina R. as Emma (young) in the SAME play. Image 3 is her face reference.\nCorrect ONLY her underlying face and body proportions in image 1 so every pose depicts exactly image 2's established character. Use reference face geometry, natural eye size and nose/chin, youthful apparent age, auburn light brown hair texture/color, compact game-character anatomy, head-to-torso ratio and limb thickness/proportions. Current target appears overly long-legged and its face/eyes too round and exaggerated.\nSTRICTLY PRESERVE target costume and all poses: ochre puff-sleeve blouse with short ruffled sleeves and waist frill, dark brown lace-up bodice, ochre-and-dark-brown vertically striped balloon knee breeches, brown ankle boots, existing black theatre harness. Keep long swept half-open hair. No book, green dress or other reference props/clothes.\nLOCK image 1's eight poses, not the reference poses: top row four distinct run phases facing right with exact arm/leg angles; bottom row (1) BOTH fists raised cheering, (2) seated tucked knees together, hands splayed at her sides, (3) horizontal flight with BOTH arms swept backward, (4) curled on her side, eyes shut, head resting on bent forearm. Never import reference book, one-arm cheer, forward fist flight, stars, or different sitting/crash pose.\nKeep same four-by-two layout and cell order. Each figure fully inside its own cell with clear transparent margin, no overlap. Match the reference's clean warm illustrated game shading and outlines. Wide 2:1 canvas, genuine transparent alpha, no background, text, frames or floor. Output only corrected sprite sheet."
+      ]
+    },
+    {
+      "day": 13,
+      "id": "character.theresa--falkenstein",
+      "name": "Theresa",
+      "role": "Clara (Echter Falkenstein)",
+      "play": "Creepshow",
+      "reference": "character.theresa",
+      "status": "unchanged",
+      "changedFiles": [],
+      "reason": "Sprite and portrait already closely match established Clara face, glasses, curls and proportions. Skirt and shoes are approved costume differences.",
+      "validation": "Compared all eight target poses and portrait to same-play character-theresa reference. Preserved originals.",
+      "harness": null,
+      "prompts": []
+    },
+    {
+      "day": 14,
+      "id": "character.jakob--partygast",
+      "name": "Jakob",
+      "role": "Partygast",
+      "play": "Creepshow",
+      "reference": "character.jakob",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-14.webp",
+        "character-advent-14-portrait.webp",
+        "character-advent-14-thumb.webp"
+      ],
+      "reason": "Corrected the elongated party-guest sprite model toward Bruno’s younger, more compact build and larger head-to-body ratio. Matched portrait face/neck and blond tousled hair more closely to the existing same-play character.",
+      "validation": {
+        "builtinImagegen": true,
+        "visual": "Inspected original target, same-play sprite and portrait references, and generated outputs on neutral background. All eight approved pose types, hand gestures and facing directions retained. Blue mask, magenta shirt, brocade waistcoat, dark trousers and shoes retained. No cap or orphan clothing copied.",
+        "gridDimensions": [
+          1774,
+          887
+        ],
+        "portraitDimensions": [
+          1254,
+          1254
+        ],
+        "realAlpha": true,
+        "nonemptyCells": 8,
+        "cellOpaquePixelCountsAtAlpha24": [
+          35824,
+          31905,
+          35347,
+          32133,
+          35880,
+          44284,
+          31095,
+          26757
+        ],
+        "productionFilesModified": false
+      },
+      "harness": {
+        "runA": [
+          82,
+          65
+        ],
+        "passA": [
+          78,
+          66
+        ],
+        "runB": [
+          83,
+          65
+        ],
+        "passB": [
+          78,
+          62
+        ],
+        "fly": [
+          111,
+          55
+        ],
+        "dangle": [
+          38,
+          58
+        ],
+        "cheer": [
+          35,
+          54
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve. Production 2D game character sprite sheet correction.\nImage 1 is the EDIT TARGET: Jakob, party guest, exactly 8 approved poses on a 4-column by 2-row transparent sprite grid. Image 2 is the SAME PERSON and SAME PLAY, Jakob as Bruno, and is the identity and anatomical proportions reference. Image 3 is Bruno's face reference.\nChange ONLY the character model underneath the party costume in Image 1: make him the same young boy as Image 2, with the same compact youthful torso, shorter limbs, larger head-to-body ratio, soft boyish face, nose, chin, ears, eyes, and blond short straight/tousled hair as Bruno. Retain the existing expression appropriate to each pose. He must read as the same child wearing different clothing. Match the reference's illustrated cartoon game rendering, clear outlines and shading.\nLOCK the exact outfit from Image 1: ornate BLUE masquerade eye mask, magenta/pink satin shirt with open folded collar, dark gold-and-red floral brocade waistcoat, dark long trousers, dark shoes. Keep the costume mask in every pose. Do not add a cap, brown orphan clothes, backpack, new props, or reference's hat.\nLOCK the exact eight approved poses, gestures, limb directions and camera angles from Image 1, never replace them with Image 2's poses. Top row = four right-facing run cycle phases. Bottom row = standing looking up with hands clasped at waist; sitting in air knees pulled to chest with arms around shins; horizontal flying right with both arms stretched forwards and open hands; prone crash right with face near hands. Preserve the small existing rear harness loops. Adjust garment fit to corrected body proportions, not outfit design.\nOutput only the corrected sprite grid, same 4x2 order and equal cell spacing, each whole figure inside its cell with generous transparent margins, no overlap. Wide 2:1 canvas with real transparent alpha. No text, frames, backgrounds, shadows or extra objects.",
+        "Use case: identity-preserve. Edit the first image, an illustrated game portrait of Jakob as a party guest. The second image is the exact same character Jakob as Bruno in the same play, and is the authoritative character face and stature reference.\nChange ONLY the underlying young boy's character model in image 1 to match image 2: same youthful face geometry, cheeks, jaw, chin, ears, nose, blond short tousled fringe, and compact childlike torso and neck proportions. Keep eyes and expression natural to the original first pose. He must be instantly the same boy as image 2 wearing the party clothing. Follow the drawing style of the existing portraits.\nPreserve EXACTLY the original pose and composition of image 1: head turned right and smiling, both hands held at waist while adjusting vest, same crop and camera. Preserve the approved ornate blue masquerade eye mask, magenta/pink satin collared shirt, dark gold-and-red floral brocade waistcoat and visible dark trousers. The mask must remain on his face. Do not copy the reference cap, harness or brown orphan clothes. No new items.\nTransparent background with actual alpha, square canvas. Only one portrait, no text or borders."
+      ]
+    },
+    {
+      "day": 15,
+      "id": "character.julian--partygast",
+      "name": "Julian",
+      "role": "Partygast",
+      "play": "Creepshow",
+      "reference": "character.julian",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-15.webp"
+      ],
+      "reason": "Sprite head/body ratio and face adjusted toward the established Julian Creepshow servant model. Existing portrait already closely matches original identity and is retained.",
+      "validation": "Visually checked all eight cells against original target. Tricorne, mask, jabot, red brocade waistcoat, gold-trimmed coat, bowing cheer, seated dangle, two-arm flight and prone crash retained. Real alpha confirmed. Generated 1774x887 image mechanically repacked into isolated 4x2 cells to prevent the flying coat tail crossing a cell boundary; no painted edits. Production atlas integration is left to parent.",
+      "harness": {
+        "runA": [
+          80,
+          72
+        ],
+        "passA": [
+          72,
+          72
+        ],
+        "runB": [
+          78,
+          73
+        ],
+        "passB": [
+          74,
+          76
+        ],
+        "fly": [
+          111,
+          55
+        ],
+        "dangle": [
+          42,
+          62
+        ],
+        "cheer": [
+          43,
+          73
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve.\nAsset: production 2D illustrated game sprite sheet, Julian in Creepshow.\nImage 1 is the EDIT TARGET, the approved eight-pose Advent party-guest costume sheet. Image 2 is the established SAME character as the Creepshow servant, solely a face/body proportions reference. Image 3 is the established same character's portrait, solely an identity reference.\nCorrect only the character model in Image 1 to match Image 2: same recognizable youthful adult man's face, brown wavy hair, brown mustache and short chin beard, wider cheek and jaw shape, large expressive eyes, same stylized larger head-to-body ratio, compact torso and limbs. The target's current head is too small and limbs too long. Keep a consistent anatomical model across all eight frames, matching Image 2's cartoon game anatomy and dark outlines. This is the same character changing costume.\nLOCK ALL costume details from Image 1: black tricorne with gold edging and gold draped decoration, silver-gold masquerade eye mask, white layered jabot, red floral brocade waistcoat, long black coat with gold edging and epaulettes/cords, dark long trousers and black boots. Do not copy the reference's servant clothes, bow tie, uncovered head or harness.\nLOCK ALL approved poses, facing directions, exact hand gestures, camera angles and limb angles from Image 1. Four top cells are the existing four running phases, facing right, not copied from Image 2. Bottom row: first cell is a courteous forward bow with one hand touching hat brim and other hand on abdomen; second cell is seated with knees raised and bent hands near chest; third cell flies horizontally to the right with BOTH hands reaching forward, coat trailing; fourth cell lies prone facing right with one arm forward and face lowered. Do not substitute the reference's fist-raised cheer, dangling open legs or one-arm flying pose. Preserve every target pose silhouette while adjusting body proportions.\nOutput only the edited sprite sheet, eight complete figures in precisely 4 columns x 2 rows, same order. Wide 2:1 canvas, transparent background with genuine alpha. Center each pose wholly inside its own cell with a clear transparent margin. No labels, grids, backdrop, floor shadows, new objects or duplicate missing frames."
+      ]
+    },
+    {
+      "day": 16,
+      "id": "character.elena--strohkleid",
+      "name": "Elena",
+      "role": "Johanna im Strohkleid",
+      "play": "Anno 1146",
+      "reference": "character.elena--anno",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-16.webp"
+      ],
+      "reason": "Johanna face and compact original game-model anatomy restored while retaining approved costume and eight poses.",
+      "validation": "Visually compared all eight figures against edit target and same-play reference. RGBA transparent 1774x887, all eight equal cells populated. Portrait already closely matches reference, left unchanged. Parent should retain cleanup/atlas inspection for generated matting speckles.",
+      "harness": {
+        "runA": [
+          85,
+          71
+        ],
+        "passA": [
+          77,
+          66
+        ],
+        "runB": [
+          94,
+          79
+        ],
+        "passB": [
+          81,
+          68
+        ],
+        "fly": [
+          123,
+          53
+        ],
+        "dangle": [
+          54,
+          53
+        ],
+        "cheer": [
+          49,
+          54
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve. Production 2D illustrated game sprite sheet edit.\nImage 1 is the EDIT TARGET, eight approved poses, 4 columns by 2 rows. Image 2 is the SAME PERSON in the SAME PLAY, authoritative character model/body identity reference ONLY. Image 3 is the face reference of the same person.\nChange ONLY the underlying anatomy and face in Image 1 to match Image 2: same face geometry, eyes, nose, chin, hairline and thick dark brown tight curls, head-to-body ratio, torso/shoulder build and arm/leg proportions. The current target has a smaller head and taller elongated proportions; use the more compact cartoon model from the reference. Keep her an adult woman, not a child. Match the established hand-painted game style and clear dark contours of Image 2.\nEvery original target pose is APPROVED and MUST remain: preserve each direction, limb angle and hand gesture from Image 1. Never copy a pose, clothing or prop from Images 2/3. Preserve the expression intent in each target pose while using the same face.\nKeep EXACTLY the 4x2 grid: row1 four running phases; row2 cheer, knees-tucked dangle, forward flying, prone crash. Each of 8 complete figures is centered in its own cell with generous transparent margin. Real alpha transparent background. Wide 2:1 canvas. No scenery, ground, labels, dividers, stars or extra objects. Identity is Johanna (Elena), Anno 1146. Outfit LOCK: loose ivory straw/orphan dress tied with straw cords and straw tassels, sleeves as target, black performance harness only where already present, bare feet. Preserve the simple wooden sword in every existing pose, held in same hand and same orientation. Do NOT add reference red skirt, brown boots, leather belt or metal sword. Keep bottom-left cheer with one hand holding wooden sword vertically and the other raised fist at chest, seated knees tucked with sword near shoulder, flying with wooden sword and free arm stretched, prone crash with sword stretched forward. Preserve all target pose and prop details."
+      ]
+    },
+    {
+      "day": 17,
+      "id": "character.theo--dorfbewohner",
+      "name": "Theo",
+      "role": "Dorfbewohner",
+      "play": "Anno 1146",
+      "reference": "character.theo",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-17.webp"
+      ],
+      "reason": "Spielgrafik auf jüngeres, kompakteres Anno-Wache-Modell mit größerem Kopf-Körper-Verhältnis und jugendlicherem Gesicht angepasst. Das vorhandene Porträt ist bereits eng an dieselbe Gesichtsreferenz angelehnt und bleibt erhalten.",
+      "validation": {
+        "dimensions": [
+          1774,
+          887
+        ],
+        "alpha": true,
+        "eightCellsVisible": true,
+        "cellOpaquePixelCounts": [
+          34350,
+          32177,
+          34768,
+          31033,
+          32422,
+          39551,
+          31571,
+          25527
+        ],
+        "visualReview": "Alle acht Posen einschließlich offener Hand in der Jubelpose, Knieumklammerung, Flug- und Bauchlage erhalten. Blaue Gugel, cremefarbenes Schnürhemd, dunkle Hose und braune Stiefel erhalten. Keine Waffe oder Rüstung aus der Referenz übernommen. Auf hellgrauem Hintergrund geprüft.",
+        "integrationNote": "Generated RGBA contains low-alpha matting noise. Use normal optimize-sprites alpha snapping when repacking; do not flatten final alpha. Source grid dimensions are 1774x887, with equal 4x2 cells."
+      },
+      "harness": {
+        "runA": [
+          88,
+          74
+        ],
+        "passA": [
+          84,
+          70
+        ],
+        "runB": [
+          89,
+          80
+        ],
+        "passB": [
+          83,
+          61
+        ],
+        "fly": [
+          101,
+          46
+        ],
+        "dangle": [
+          26,
+          58
+        ],
+        "cheer": [
+          46,
+          84
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve.\nAsset type: production 2D game sprite sheet, eight poses.\nImage 1 is the EDIT TARGET: Theo as a medieval villager. Image 2 is the existing SAME PERSON in SAME PLAY, Theo as the guard, and establishes the exact character model and anatomy. Image 3 is the established character's face reference.\nCorrect ONLY face and anatomical body proportions of Image 1 to match Image 2's youthful compact illustrated game character: youthful rounder face, exact eyes/nose/mouth, larger head-to-body ratio, shorter compact torso and legs, same shoulder width and limb thickness as the established guard model. Preserve the blue hood and covered hair of Image 1, with no chainmail or weapons from the reference.\nEvery outfit detail of Image 1 is APPROVED and must stay: blue cowl with pointed/scalloped shoulders, loose cream lace-up shirt, dark belt, black knee-breeches/trousers, brown tall leather boots, existing tiny suspension loop. Do not transfer any clothing, straps, armor, spear, props or pose from Image 2.\nAll EIGHT POSES of Image 1 are APPROVED and must stay in their exact individual 4-column by 2-row locations and directions. Top row left to right: running stride with left arm back/right fist forward; high-knee pass with elbows bent; opposite running stride; opposite high-knee pass. Bottom row left to right: standing cheer looking upward, one fist near shoulder and opposite open palm extended sideways; suspended seated knees hugged with both hands; horizontal flying with both arms extended forward; prone face-down crash with both arms extended forward on ground. Keep every hand gesture, gaze direction, joint angle and prop absence from Image 1. Adapt pose to corrected anatomical proportions only. Do not replace the cheer with raised fists, do not replace the seated pose with a dangling-leg pose.\nMatch the original reference's clean warm illustrated 2D cartoon shading and outlines. No realistic grown-up anatomy. Output only the corrected eight-pose sheet in exactly a four-column/two-row grid, wide 2:1 canvas, every complete figure inside its own equal cell with generous transparent clearance. Real alpha transparent background. No grid lines, text, ground, shadow, added props or extra figures."
+      ]
+    },
+    {
+      "day": 18,
+      "id": "character.theresa--isets-ballkleid",
+      "name": "Theresa",
+      "role": "Clara in Isets Ballkleid",
+      "play": "Creepshow",
+      "reference": "character.theresa",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-18.webp"
+      ],
+      "reason": "Corrected elongated slender sprite anatomy to the compact Clara model, with larger head-to-body ratio and fuller torso/limb proportions. Existing portrait already matches Clara and remains unchanged.",
+      "validation": "Visually inspected all eight generated poses. Run phases, hands-near-chin cheer, seated knees-held dangle, two-arm reaching fly and prone crash remain. Egyptian gown, mask, black feather, jewelry, glasses and wraps retained. Real alpha and cell boundaries checked.",
+      "harness": {
+        "runA": [
+          83,
+          72
+        ],
+        "passA": [
+          80,
+          74
+        ],
+        "runB": [
+          83,
+          72
+        ],
+        "passB": [
+          78,
+          74
+        ],
+        "fly": [
+          118,
+          65
+        ],
+        "dangle": [
+          55,
+          58
+        ],
+        "cheer": [
+          50,
+          58
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve.\nAsset: 8-pose 2D game sprite sheet, same established character wearing another outfit.\nImage 1 is the EDIT TARGET: Theresa as Clara in Iset's Egyptian ballgown. Preserve its exact eight poses, gestures and costume.\nImage 2 is the IDENTITY AND BODY MODEL REFERENCE: the existing Theresa/Clara character in the same play Creepshow. Match this face, apparent age, head shape, head-to-body ratio, torso width, arms and legs proportions and compact illustrated game character build.\nImage 3 is the FACE REFERENCE for Clara: dark brown curly hair, black rectangular glasses, smile and facial features.\nCorrect only body proportions and facial identity of Image 1 to faithfully match Image 2. In particular the target currently has an overly narrow elongated torso and smaller head; make the anatomy match the existing Clara sprite, while retaining the approved dress silhouette as clothing fitted over that exact model.\nLOCK every costume detail of Image 1: black sleeveless bodice, wide gold wrapped waist belt, draped mauve/taupe long skirt with triangular gold-and-black center decoration, gold sandals, cream bandage forearm wraps, layered Egyptian gold necklace, gold earrings, ornate gold mask resting on forehead with black feather, long brown curls and black glasses. Keep each approved expression and hand gesture. No replacement with reference's orphan dress, no extra straps, no copied reference props.\nLOCK each pose from Image 1, not Image 2: top row has four distinct right-facing running phases in its existing order. Bottom row left: standing cheer with both bent arms and clenched hands raised just beneath chin, upward happy face. Bottom row second: sitting suspended, knees raised together, hands holding sides of knees. Bottom row third: horizontal flying to right with BOTH arms reaching forward and legs trailing. Bottom row fourth: prone crash, both forearms extended forward, head low. Do not substitute reference poses.\nOutput ONLY the edited 4-column x 2-row sheet on a wide 2:1 canvas. Exactly one whole figure per equal cell, fully inside with transparent margin. Match reference's warm illustrated cartoon style, bold clear contour and readable shading. True transparent background alpha. No ground, labels, borders, added objects or reference pictures in output."
+      ]
+    },
+    {
+      "day": 19,
+      "id": "character.till--creepshow",
+      "name": "Till",
+      "role": "Diener 4",
+      "play": "Creepshow",
+      "reference": "character.till",
+      "status": "corrected",
+      "changedFiles": [
+        "character-till--creepshow.webp"
+      ],
+      "reason": "Das bestehende Porträt entspricht dem Schniebli-Gesicht und bleibt erhalten. Im Spiel-Sheet wurden breitere Schultern, kompaktere Statur, kräftigere Gliedmaßen und Kopf/Körper-Verhältnis an das vorhandene Schniebli-Modell angeglichen.",
+      "validation": "Visuell mit 19-target.png, 19-reference.png und beiden Porträts verglichen. Acht Posen und ihre Gesten erhalten, insbesondere offene Handflächen in der Jubelpose, angezogene Beine beim Hängen und offene Hände beim Fliegen. Weiße Ärmel, graubraune Weste, dunkle Hose/Schuhe und Brille erhalten. Keine Zigarre übernommen. PNG mit echtem Alpha; technische Zellprüfung separat durchgeführt.",
+      "harness": {
+        "runA": [
+          76,
+          61
+        ],
+        "passA": [
+          81,
+          64
+        ],
+        "runB": [
+          74,
+          62
+        ],
+        "passB": [
+          72,
+          68
+        ],
+        "fly": [
+          102,
+          56
+        ],
+        "dangle": [
+          33,
+          51
+        ],
+        "cheer": [
+          16,
+          58
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve. Asset: production illustrated 2D game sprite sheet.\nImage 1 is EDIT TARGET: Till as the Creepshow servant, eight approved poses in a 4-column x 2-row grid. Image 2 is the EXACT SAME CHARACTER's established Herr Schniebli sprite/model in the same play and is only an anatomy/identity/style reference. Image 3 is the established face reference.\nChange ONLY face/body consistency of Image 1. Match Image 2's broader stocky torso and shoulders, compact adult build, shorter thick limbs relative to torso, slightly larger head relative to body, broad cheeks/jaw, slicked-back brown hair, short brown beard and moustache, black rectangular eyeglasses. He must immediately look like the same illustrated character under a different costume, with the reference's bold dark outlines and clear cartoon shading. Avoid making him slender, taller or younger.\nLOCK Image 1's approved costume exactly: white long-sleeve collared shirt, gray-brown buttoned waistcoat, dark brown trousers, dark shoes and only the existing stage harness. No jacket, yellow waistcoat, beige trousers or cigar from Image 2.\nLOCK all eight poses of Image 1 and limb directions/hand gestures exactly. Top row: four running phases facing right in original order, same strides and arms. Bottom row: (1) leaning back looking up with BOTH OPEN PALMS up near chest, elbows bent, NOT raised fists; (2) tucked suspended seated pose with knees up, feet below, hands held together at chest, NOT reference's legs spread pose; (3) horizontal flying right with both arms extended and OPEN hands; (4) prone face-down crash with both arms extended forwards and head low. Preserve all facing directions, facial expressions, camera views and clothing colors.\nReturn ONLY one edited sprite sheet with exactly 8 isolated figures, 4 equal columns by 2 equal rows, same order and spacing as Image 1. Every figure entirely within its cell with generous transparent margins. Transparent background with real alpha; no ground shadow, no labels, borders, effects, extra props or reference costume. Wide 2:1 canvas."
+      ]
+    },
+    {
+      "day": 20,
+      "id": "character.logge--partygast",
+      "name": "Logge",
+      "role": "Partygast",
+      "play": "Creepshow",
+      "reference": "character.logge",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-20.webp"
+      ],
+      "reason": "Corrected elongated sprite anatomy and small head to the compact established Creepshow Logge model. The existing party portrait already shows the same characteristic smile and face under the approved mask and curls and is retained.",
+      "validation": "Built-in imagegen output visually inspected: eight poses remain in original 4x2 order, with all distinct running phases, mask-touching cheer, seated dangle, two-arm flight and prone crash retained. Black coat, red lining/collar, gold loops, ornate mask and curls retained. PNG 1774x887, true RGBA alpha. All eight cells have nonempty silhouettes entirely inside their cells; minimum margin 5 pixels at alpha >24. Production files not modified.",
+      "harness": {
+        "runA": [
+          83,
+          58
+        ],
+        "passA": [
+          82,
+          53
+        ],
+        "runB": [
+          87,
+          57
+        ],
+        "passB": [
+          76,
+          70
+        ],
+        "fly": [
+          119,
+          42
+        ],
+        "dangle": [
+          53,
+          46
+        ],
+        "cheer": [
+          42,
+          47
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve.\nAsset type: production 2D illustrated game character sprite sheet, 8 poses.\nImage 1 is the EDIT TARGET: Logge as a masked party guest. Image 2 is the SAME PERSON in the SAME PLAY, the established Creepshow messenger character, and is the strict anatomical and character-model reference. Image 3 is the established face reference. Image 4 is the approved party portrait for costume details and curls.\nCorrect ONLY the underlying anatomy and face of image 1 so this is unmistakably the same character model as image 2: same compact illustrated game proportions, same head-to-body ratio, same face shape and smile, same body build and shoulder proportions. The current target is too tall, slim and realistic, with undersized head and elongated legs. Match image 2's larger head, compact torso and limbs and readable outline/shading. This is an adult man, not a child.\nLOCK the costume exactly as image 1: long black coat with gold looped fastenings, high dark red collar and red inner lining, dark trousers and black shoes; ornate black/gold eye mask; approved plentiful curly golden-brown hair. Keep gloves exactly where present. Do NOT copy the messenger cap, yellow shirt, parcel, red trouser stripe or props. Do not add a hat or any prop.\nLOCK all EIGHT poses, limb angles, facing directions and hand gestures of IMAGE 1, NOT image 2. Top row: four distinct running cycle phases. Bottom left: standing and touching mask/temple with one raised hand, other hand at abdomen. Bottom second: seated knees together raised, both fists held at chest. Bottom third: flying horizontally toward right with BOTH arms reaching forward and open hands. Bottom fourth: face-down prone crash toward right, arms stretched forward. Preserve coat movement associated with each pose. Do not substitute the reference's cheer, dangle or flying gesture.\nOutput ONLY the edited target sheet, same 4 columns by 2 rows in precisely the same order, each figure completely contained in its equal-sized cell with transparent margins. Wide 2:1 canvas, real transparent alpha background. No labels, grids, borders, ground shadows or additional objects."
+      ]
+    },
+    {
+      "day": 21,
+      "id": "character.niko--butlerpraktikant",
+      "name": "Niko",
+      "role": "Butlerpraktikant Emil",
+      "play": "Creepshow",
+      "reference": "character.niko",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-21.webp"
+      ],
+      "reason": "Corrected smaller head and elongated stature in the Advent sprite sheet to the established compact youthful Emil model. Existing Advent portrait already has the same face and is preserved.",
+      "validation": "Visually inspected input and generated output. All eight poses and their original ordering are preserved, including open-palm cheer, knees-together dangling, two-arms-forward flying and prone crash. Red hoodie, oversized long black butler coat with gold buttons, beige full-length trousers and dark boots preserved; no hat or backpack added. Real alpha and eight occupied grid cells checked mechanically.",
+      "harness": {
+        "runA": [
+          72,
+          62
+        ],
+        "passA": [
+          79,
+          48
+        ],
+        "runB": [
+          73,
+          66
+        ],
+        "passB": [
+          80,
+          52
+        ],
+        "fly": [
+          109,
+          47
+        ],
+        "dangle": [
+          44,
+          47
+        ],
+        "cheer": [
+          30,
+          59
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve. Precisely edit this existing game character sprite sheet, changing only the underlying character model.\nINPUT 1 is the EDIT TARGET: Niko as Butlerpraktikant Emil, 8 approved poses in a 4 column x 2 row transparent grid. INPUT 2 is the SAME CHARACTER's established original sprite sheet, identity and body-proportion reference only. INPUT 3 is his established face reference. INPUT 4 is his approved Advent portrait, with correct same face and exact approved outfit.\nMake the boy in INPUT 1 recognizably the SAME youthful Emil model from INPUT 2: larger rounder head relative to body, compact youthful torso and shorter limbs, same brown hair, facial shape, eyes, nose, ears and smile. His age and proportions must remain those of the reference rather than a taller teenager. Match the lively clean outlined illustrated game style of INPUT 2, not realistic anatomy.\nKeep the EXACT outfit in INPUT 1 and INPUT 4: oversized long black butler tailcoat with gold buttons over red hoodie, beige full-length trousers, dark brown/black boots. No hat, no propeller cap, no backpack, no shorts. Do not copy any outfit or accessory from INPUT 2.\nPreserve all EIGHT approved poses from INPUT 1 exactly, with same facing, limb directions, expressions and hand gestures: top row four distinct running/passing phases; bottom-left standing cheer with one fist raised near shoulder and the other open palm outwards; bottom-second seated dangling with knees together raised and both fists grasping coat near chest; bottom-third horizontal flying with both arms stretched forward and open hands; bottom-right horizontal prone crash with eyes squeezed shut and both arms forward. Keep the small wire attachment ring where present. Do not change these into the poses of INPUT 2.\nOutput only the corrected 8 sprites in the exact same 4x2 cell ordering and a wide 2:1 canvas. Every figure must stay completely within its own cell, with spacious transparent margins. Real transparent alpha background, no ground, shadow, labels, frame lines or new objects."
+      ]
+    },
+    {
+      "day": 22,
+      "id": "character.elena--bademantel",
+      "name": "Elena",
+      "role": "Lucy im Bademantel",
+      "play": "Creepshow",
+      "reference": "character.elena",
+      "status": "corrected",
+      "changedFiles": [
+        "character-advent-22.webp"
+      ],
+      "reason": "Lucy face and compact original game-model anatomy restored while retaining bathrobe, slippers, red hair feather and eight approved poses.",
+      "validation": "Visually compared all eight figures against edit target and same-play reference. RGBA transparent 1774x887, all eight equal cells populated. Portrait already closely matches reference, left unchanged. Parent should retain cleanup/atlas inspection for generated matting speckles. A further targeted built-in alpha-cleanup attempt failed to remove visible disconnected colored/white residue. See alpha-cleanup-attempt.json. Do not treat this grid as integration-ready.",
+      "harness": {
+        "runA": [
+          91,
+          65
+        ],
+        "passA": [
+          85,
+          65
+        ],
+        "runB": [
+          84,
+          75
+        ],
+        "passB": [
+          84,
+          67
+        ],
+        "fly": [
+          122,
+          65
+        ],
+        "dangle": [
+          61,
+          53
+        ],
+        "cheer": [
+          50,
+          50
+        ]
+      },
+      "prompts": [
+        "Use case: identity-preserve. Production 2D illustrated game sprite sheet edit.\nImage 1 is the EDIT TARGET, eight approved poses, 4 columns by 2 rows. Image 2 is the SAME PERSON in the SAME PLAY, authoritative character model/body identity reference ONLY. Image 3 is the face reference of the same person.\nChange ONLY the underlying anatomy and face in Image 1 to match Image 2: same face geometry, eyes, nose, chin, hairline and thick dark brown tight curls, head-to-body ratio, torso/shoulder build and arm/leg proportions. The current target has a smaller head and taller elongated proportions; use the more compact cartoon model from the reference. Keep her an adult woman, not a child. Match the established hand-painted game style and clear dark contours of Image 2.\nEvery original target pose is APPROVED and MUST remain: preserve each direction, limb angle and hand gesture from Image 1. Never copy a pose, clothing or prop from Images 2/3. Preserve the expression intent in each target pose while using the same face.\nKeep EXACTLY the 4x2 grid: row1 four running phases; row2 cheer, knees-tucked dangle, forward flying, prone crash. Each of 8 complete figures is centered in its own cell with generous transparent margin. Real alpha transparent background. Wide 2:1 canvas. No scenery, ground, labels, dividers, stars or extra objects. Identity is Lucy (Elena), Creepshow. Use Image 2's Lucy model, with her adult face geometry and proportions, same thick brown ringlets and red hair feather. Do NOT make her younger. Outfit LOCK: white plush bathrobe tied at waist, white slippers, red feather in hair only. No handheld feather or fan, no red dress, heels, straps or harness. Keep original target cheer: eyes gently closed, pleased smile, one hand on hip and one fist lifted at chest; keep seated tucked knees and hands at chest; flying both arms stretched forward; crash flat prone. Retain every target pose and camera direction.",
+        "Use case: precise-object-edit. Image 1 is an eight pose transparent game sprite sheet of Lucy in a bathrobe, EDIT TARGET. Image 2 is the approved bathrobe outfit reference.\nMake ONE narrow correction: remove the newly added rectangular patch pockets from Lucy's bathrobe in ALL EIGHT poses to match the original pocket-free robe of Image 2. Keep the plush fabric, folds, collar and tied belt. Preserve all current anatomy, face identity, curly hair, red hair feather, white slippers, expressions, all eight poses, limb positions, grid positions and cell order of Image 1 exactly. In particular preserve bottom-left pleased closed-eye cheer with one hand on hip, then knees-tucked dangle, then flying, then flat prone crash.\nAlso ensure the transparent background is completely empty and clean: remove detached colored speckles/stray pixels outside the character silhouettes. Keep antialiasing around the silhouettes. Real alpha background. Maintain 4 columns x 2 rows, 2:1 canvas, all eight separate figures completely inside their own equal cells with generous clear margins. No other changes, no new props or decorations."
+      ],
+      "integrationNote": "Complete sprite bounds extracted individually: flying shoe extended 7 pixels into the adjacent nominal cell. No artwork erased. Repacked atlas checked after extraction; harness positions corrected on final atlas."
+    },
+    {
+      "day": 23,
+      "id": "character.lena--anno",
+      "name": "Lena",
+      "role": "Ensemble",
+      "play": "Anno 1146",
+      "reference": null,
+      "status": "unchanged",
+      "changedFiles": [],
+      "reason": "Für Lena (personId 13) existiert im Katalog und Bildbestand nur ein Anno-1146-Skin, character.lena--anno. Die zwei übrigen Figuren gehören zu Creepshow und Schicksalsfäden und sind keine Referenz desselben Stücks. Daher keine neue Identität oder Statur erfunden.",
+      "validation": {
+        "catalogSamePersonIds": [
+          "character.lena",
+          "character.lena--schicksal",
+          "character.lena--anno"
+        ],
+        "samePlayReferenceCount": 0,
+        "visual": "Porträt und alle acht Spielposen geprüft. Schulterlanges braunes Haar, runde Brille, Gesichtsform und Statur sind innerhalb dieses Skins konsistent. Outfit und Posen bleiben erhalten.",
+        "productionFiles": {
+          "character-lena--anno.webp": {
+            "sha256": "0b2c99d329a852aae789f0b821b1ecb30ef547008371baed6cb8879c7861aa02",
+            "byteIdentical": true
+          },
+          "character-lena--anno-portrait.webp": {
+            "sha256": "a90ad8c66be4eff064b69c5188f8aa7f6ca06ce0a4a372fd62d93a376e84e959",
+            "byteIdentical": true
+          },
+          "character-lena--anno-thumb.webp": {
+            "sha256": "c66cd136d2d9ac71bc07f020aa38c95f3c1c6265874d65471420cb194d11b016",
+            "byteIdentical": true
+          }
+        }
+      },
+      "harness": null,
+      "prompts": []
+    },
+    {
+      "day": 24,
+      "id": "character.kuschel--weihnachten",
+      "name": "Captain Kuschel",
+      "role": "Captain Kuschel (Weihnachtsedition)",
+      "play": "Creepshow",
+      "reference": "character.unique-captain-kuschel",
+      "status": "unchanged",
+      "changedFiles": [],
+      "reason": "Weihnachtsedition und bestehender Captain Kuschel zeigen bereits dasselbe Hasenmodell: gleiche große rosa Augen, rosa Nase, kurze runde Schnauze, lange Schlappohren, Kopf-Körper-Verhältnis und kompakter Körperbau. Sichtbare Unterschiede betreffen Weihnachtskleidung, Mimik und die freigegebenen Posen. Keine Identitätskorrektur erforderlich.",
+      "validation": {
+        "visual": "Porträts und alle acht Spielposen direkt verglichen; Weihnachtsmütze, Fliege/Schal, Westchen und sämtliche Posen bleiben erhalten.",
+        "files": [
+          {
+            "file": "character-advent-24.webp",
+            "width": 1124,
+            "height": 577,
+            "hasAlpha": true,
+            "unchanged": true,
+            "sha256": "34cd9d2c675ebd189d350b2e3dd7d839d42b15f5f23c883639f386a81eb292c3"
+          },
+          {
+            "file": "character-advent-24-portrait.webp",
+            "width": 512,
+            "height": 512,
+            "hasAlpha": true,
+            "unchanged": true,
+            "sha256": "d035aeb141470b7795799ff0c7438388c88aaeed226b2ea1036a8f23527e6bb8"
+          },
+          {
+            "file": "character-advent-24-thumb.webp",
+            "width": 384,
+            "height": 384,
+            "hasAlpha": true,
+            "unchanged": true,
+            "sha256": "d3757a12ded6bcaf81cc548029af7fcacb6937b9942d857b98d2b74cbff1064c"
+          }
+        ],
+        "poses": [
+          {
+            "pose": "runA",
+            "visiblePixels": 13371
+          },
+          {
+            "pose": "passA",
+            "visiblePixels": 12104
+          },
+          {
+            "pose": "runB",
+            "visiblePixels": 14181
+          },
+          {
+            "pose": "passB",
+            "visiblePixels": 11837
+          },
+          {
+            "pose": "cheer",
+            "visiblePixels": 11745
+          },
+          {
+            "pose": "dangle",
+            "visiblePixels": 10925
+          },
+          {
+            "pose": "fly",
+            "visiblePixels": 11100
+          },
+          {
+            "pose": "crash",
+            "visiblePixels": 7568
+          }
+        ]
+      },
+      "harness": null,
+      "prompts": []
+    }
+  ]
+}
