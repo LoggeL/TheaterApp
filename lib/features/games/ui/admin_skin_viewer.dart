@@ -18,7 +18,7 @@ import 'stage_runner_fx.dart' show obstacleName;
 import 'stage_runner_look.dart';
 import 'wardrobe_cards.dart';
 
-part 'admin_advent_calendar.dart';
+part 'admin_schedule.dart';
 
 /// Opens the admins' Skin-Viewer; nothing for anybody else.
 Future<void> openAdminSkinViewer(
@@ -399,22 +399,24 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
           padding: EdgeInsets.fromLTRB(side, 12, side, 4),
           sliver: SliverList.list(
             children: [
-              if (data.adventCalendar.isNotEmpty)
+              if (data.schedule.isNotEmpty)
                 Card(
                   margin: const EdgeInsets.only(bottom: 12),
                   child: ListTile(
                     leading: const Icon(Icons.calendar_month_outlined),
-                    title: const Text('Adventskalender'),
-                    subtitle: Text('${data.adventCalendar.length} Türchen'),
+                    title: Text(data.schedule.title),
+                    subtitle: Text(
+                      '${data.schedule.entries.length} ${data.schedule.units}',
+                    ),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => openPage<void>(
                       context,
-                      AdminAdventCalendar(
+                      AdminSchedulePage(
                         catalog: data,
                         art: _art,
                         controller: widget.controller,
-                        onOpen: (doorContext, skin) =>
-                            _openSkin(doorContext, data, skin),
+                        onOpen: (entryContext, skin) =>
+                            _openSkin(entryContext, data, skin),
                       ),
                     ),
                   ),

@@ -1570,7 +1570,7 @@ class UniqueFigureProgress {
     this.name = '???',
     this.parts = const [],
     this.allTechnicians = false,
-    this.allAdventCalendar = false,
+    this.itemNoun,
   });
   final String play, name;
   final int? year;
@@ -1579,7 +1579,13 @@ class UniqueFigureProgress {
 
   /// All active collectible technicians, independent of the actors' roles.
   final bool allTechnicians;
-  final bool allAdventCalendar;
+
+  /// For a figure that needs a set of items rather than roles, what one and
+  /// several of them are called (`itemNoun`, from the server).
+  final ({String one, String many})? itemNoun;
+
+  /// Whether it needs a set of items named by [itemNoun].
+  bool get itemSet => itemNoun != null;
   final String? itemId;
 
   /// Per play of a figure across plays; empty for a single play.
@@ -1593,8 +1599,8 @@ class UniqueFigureProgress {
       allTechnicians ? 'Technik' : [play, ?year?.toString()].join(' ');
 
   /// "9/14 Rollen aus Creepshow", "23/52 Rollen aus Creepshow und Nexus".
-  String get line => allAdventCalendar
-      ? '$have/$total Adventskalender-Skins gesammelt'
+  String get line => itemNoun != null
+      ? '$have/$total ${itemNoun!.many} gesammelt'
       : allTechnicians
       ? '$have/$total Techniker gesammelt'
       : '$have/$total Rollen aus $play';
@@ -1613,13 +1619,21 @@ class UniqueFigureProgress {
       itemId: unlocked && id.isNotEmpty ? id : null,
       name: unlocked ? textValue(json['name'], '???') : '???',
       allTechnicians: json['allTechnicians'] == true,
-      allAdventCalendar: json['allAdventCalendar'] == true,
+      itemNoun: _itemNoun(json['itemNoun']),
       parts: [
         for (final p in jsonList(json['plays']))
           if (p is Map) ?UniqueFigurePart.fromJson(jsonMap(p)),
       ],
     );
   }
+}
+
+/// `{ "one": …, "many": … }`, or null when either is missing.
+({String one, String many})? _itemNoun(Object? raw) {
+  if (raw is! Map) return null;
+  final one = textValue(raw['one']).trim(),
+      many = textValue(raw['many']).trim();
+  return one.isEmpty || many.isEmpty ? null : (one: one, many: many);
 }
 
 /// The unique figures of all plays (`runnerUniqueFigures`): the progress per

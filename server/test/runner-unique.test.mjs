@@ -428,7 +428,7 @@ test('the Christmas Captain is unique after the other 23 calendar skins, indepen
   const { app, give, saved } = setup(t, { catalog: c });
   give(days.slice(0, -1).map(x => x.id));
   let w = app.runnerWardrobe('sam', now);
-  assert.deepEqual(w.uniqueFigures.plays, [{ play: 'Adventskalender', year: 2026, allAdventCalendar: true, have: 22, total: 23, unlocked: false, hidden: true, name: '???' }]);
+  assert.deepEqual(w.uniqueFigures.plays, [{ play: 'Adventskalender', year: 2026, allAdventCalendar: true, itemNoun: { one: 'Adventskalender-Skin', many: 'Adventskalender-Skins' }, have: 22, total: 23, unlocked: false, hidden: true, name: '???' }]);
   assert.ok(!w.owned.includes(christmas.id));
   assert.throws(() => app.runnerSkin('sam', 'figure.webp'), { status: 404 });
   give(days.map(x => x.id));

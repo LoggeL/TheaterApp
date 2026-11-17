@@ -243,6 +243,15 @@ final _catalog = <String, Object?>{
   ],
 };
 
+/// A `schedule` as the server sends it, with labels of its own.
+JsonMap _schedule(List<JsonMap> entries) => {
+  'title': 'Sonderplan',
+  'heading': 'Monat X',
+  'unit': 'Feld',
+  'units': 'Felder',
+  'entries': entries,
+};
+
 String _path(http.Request request) =>
     request.url.path.replaceFirst(RegExp(r'/$'), '');
 
@@ -374,19 +383,46 @@ void main() {
   });
 
   test(
-    'unknown doors do not renumber the calendar and older catalogs have none',
+    'unknown entries do not renumber the schedule and older catalogs have none',
     () {
-      expect(AdminSkinCatalog.fromJson(_catalog).adventCalendar, isEmpty);
+      expect(AdminSkinCatalog.fromJson(_catalog).schedule.entries, isEmpty);
+      // The key of apps up to 0.16.4 is not read any more.
+      expect(
+        AdminSkinCatalog.fromJson({
+          ..._catalog,
+          'adventCalendar': [
+            {'item': 'character.elena--creep'},
+          ],
+        }).schedule.entries,
+        isEmpty,
+      );
       final data = AdminSkinCatalog.fromJson({
         ..._catalog,
-        'adventCalendar': [
+        'schedule': _schedule([
           {'item': 'missing', 'title': 'Fehlt'},
           {'item': 'character.elena--creep', 'title': 'Lucy im Bademantel'},
-        ],
+        ]),
       });
-      expect(data.adventCalendar.single.day, 2);
-      expect(data.adventCalendar.single.title, 'Lucy im Bademantel');
-      expect(data.adventCalendar.single.skin.item.id, 'character.elena--creep');
+      final entry = data.schedule.entries.single;
+      expect(entry.day, 2);
+      expect(entry.title, 'Lucy im Bademantel');
+      expect(entry.skin.item.id, 'character.elena--creep');
+      expect(data.schedule.title, 'Sonderplan');
+      expect(data.schedule.unit, 'Feld');
+      // Without labels from the server the screen still has plain ones.
+      final bare = AdminSkinCatalog.fromJson({
+        ..._catalog,
+        'schedule': {
+          'entries': [
+            {'item': 'character.elena--creep'},
+          ],
+        },
+      }).schedule;
+      expect(
+        (bare.title, bare.heading, bare.unit, bare.units),
+        ('Plan', '', 'Tag', 'Tage'),
+      );
+      expect(bare.entries.single.title, 'Elena');
     },
   );
 
@@ -406,10 +442,10 @@ void main() {
       final catalog = {
         ..._catalog,
         'items': items,
-        'adventCalendar': [
+        'schedule': _schedule([
           for (var i = 1; i <= 24; i++)
             {'item': 'character.door-$i', 'title': 'Kostüm $i'},
-        ],
+        ]),
       };
       final (controller, requests) = await _signedIn(catalog: catalog);
       await _pump(
@@ -417,11 +453,12 @@ void main() {
         AdminSkinViewerScreen(controller: controller),
         size: const Size(320, 640),
       );
-      await tester.tap(find.text('Adventskalender'));
+      expect(find.text('24 Felder'), findsOneWidget);
+      await tester.tap(find.text('Sonderplan'));
       await _finishTransition(tester);
-      expect(find.text('Dezember 2026'), findsOneWidget);
+      expect(find.text('Monat X'), findsOneWidget);
       for (final day in [1, 24]) {
-        final door = find.byKey(ValueKey('advent-door-$day'));
+        final door = find.byKey(ValueKey('schedule-entry-$day'));
         if (day == 24) {
           await tester.scrollUntilVisible(
             door,
@@ -456,9 +493,9 @@ void main() {
     final (controller, _) = await _signedIn(
       catalog: {
         ..._catalog,
-        'adventCalendar': [
+        'schedule': _schedule([
           {'item': 'character.elena--creep', 'title': 'Lucy im Bademantel'},
-        ],
+        ]),
       },
     );
     await _pump(
@@ -467,9 +504,9 @@ void main() {
       size: const Size(375, 720),
       navigationController: controller,
     );
-    await tester.tap(find.text('Adventskalender'));
+    await tester.tap(find.text('Sonderplan'));
     await _finishTransition(tester);
-    await tester.tap(find.byKey(const ValueKey('advent-door-1')));
+    await tester.tap(find.byKey(const ValueKey('schedule-entry-1')));
     await _finishTransition(tester);
     expect(find.byType(AdminSkinDetailPage), findsOneWidget);
     await controller.logout();
@@ -479,7 +516,7 @@ void main() {
     await tester.tap(find.byType(BackButton).hitTestable());
     await _finishTransition(tester);
     expect(find.text('Nur für Admins.'), findsOneWidget);
-    expect(find.byKey(const ValueKey('advent-door-1')), findsNothing);
+    expect(find.byKey(const ValueKey('schedule-entry-1')), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -575,7 +612,7 @@ void main() {
     final (controller, requests) = await _signedIn(role: 'member');
     await _pump(tester, AdminSkinViewerScreen(controller: controller));
     expect(find.text('Nur für Admins.'), findsOneWidget);
-    expect(find.text('Adventskalender'), findsNothing);
+    expect(find.text('Sonderplan'), findsNothing);
     expect(requests, isEmpty);
     await tester.pumpWidget(const SizedBox());
   });
@@ -586,7 +623,7 @@ void main() {
     final (controller, requests) = await _signedIn();
     await _pump(tester, AdminSkinViewerScreen(controller: controller));
     expect(requests, hasLength(1));
-    expect(find.text('Adventskalender'), findsNothing);
+    expect(find.text('Sonderplan'), findsNothing);
     expect(
       find.text('10 von 10 Skins · nur für Admins sichtbar'),
       findsOneWidget,

@@ -228,8 +228,63 @@ String? _unlockText(Object? value) {
   return 'alle Rollen aus $names';
 }
 
-/// One door in the order supplied by the admin catalog.
-typedef AdventDoor = ({int day, String title, AdminSkin skin});
+/// One entry of a [AdminSchedule], numbered by its place in the list.
+typedef ScheduleEntry = ({int day, String title, AdminSkin skin});
+
+/// A dated plan of skins from the admin catalog (`schedule`). Its labels come
+/// with the catalog, so the app carries no wording of its own for it.
+class AdminSchedule {
+  const AdminSchedule({
+    this.title = 'Plan',
+    this.heading = '',
+    this.unit = 'Tag',
+    this.units = 'Tage',
+    this.entries = const [],
+  });
+
+  /// The screen's title and the entry in the viewer.
+  final String title;
+
+  /// The line above the grid; empty for none.
+  final String heading;
+
+  /// What one entry is called ("Tag 3, Lucy") and several of them ("24 Tage").
+  final String unit, units;
+  final List<ScheduleEntry> entries;
+
+  bool get isEmpty => entries.isEmpty;
+  bool get isNotEmpty => entries.isNotEmpty;
+
+  /// Entries whose skin the catalog lacks keep their place, so the others are
+  /// not renumbered.
+  static AdminSchedule fromJson(Object? raw, Map<String, AdminSkin> byId) {
+    final json = jsonMap(raw);
+    final entries = <ScheduleEntry>[];
+    for (final (index, value) in jsonList(json['entries']).indexed) {
+      final entry = jsonMap(value);
+      final skin = byId[entry['item']];
+      if (skin != null) {
+        entries.add((
+          day: index + 1,
+          title: textValue(entry['title'], skin.item.name),
+          skin: skin,
+        ));
+      }
+    }
+    String label(String key, String fallback) {
+      final text = textValue(json[key]).trim();
+      return text.isEmpty ? fallback : text;
+    }
+
+    return AdminSchedule(
+      title: label('title', 'Plan'),
+      heading: label('heading', ''),
+      unit: label('unit', 'Tag'),
+      units: label('units', 'Tage'),
+      entries: entries,
+    );
+  }
+}
 
 /// The admins' full catalog (`GET /admin/runner/catalog`): every skin with
 /// its state, and the rarities and departments to show them with.
@@ -238,14 +293,14 @@ class AdminSkinCatalog {
     required this.catalog,
     required this.skins,
     this.releases = const [],
-    this.adventCalendar = const [],
+    this.schedule = const AdminSchedule(),
   });
 
   /// All items as a [WardrobeCatalog], for rarities, labels and colours.
   final WardrobeCatalog catalog;
   final List<AdminSkin> skins;
   final List<AdminSkinRelease> releases;
-  final List<AdventDoor> adventCalendar;
+  final AdminSchedule schedule;
 
   factory AdminSkinCatalog.fromJson(JsonMap json) {
     final releases = [
@@ -269,20 +324,8 @@ class AdminSkinCatalog {
                 ),
     ];
     final byId = {for (final skin in skins) skin.item.id: skin};
-    final doors = <AdventDoor>[];
-    for (final (index, value) in jsonList(json['adventCalendar']).indexed) {
-      final entry = jsonMap(value);
-      final skin = byId[entry['item']];
-      if (skin != null) {
-        doors.add((
-          day: index + 1,
-          title: textValue(entry['title'], skin.item.name),
-          skin: skin,
-        ));
-      }
-    }
     return AdminSkinCatalog(
-      adventCalendar: doors,
+      schedule: AdminSchedule.fromJson(json['schedule'], byId),
       // The items come apart (with their state); the catalog only lends
       // rarities, departments and colours.
       catalog: WardrobeCatalog.fromJson({

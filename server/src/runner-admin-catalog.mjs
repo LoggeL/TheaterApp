@@ -38,6 +38,8 @@ const poses = new Set(['fly', 'dangle', 'runA', 'passA', 'runB', 'passB', 'cheer
 const pictureKeys = ['image', 'portrait', 'thumb', 'obstacles', 'collectibles'];
 const kinds = new Set(['character', 'backdrop', 'obstacles', 'fx']);
 
+/** What the admin app calls the calendar of the catalog (`schedule`); the app has no wording for it. */
+const scheduleLabels = { title: 'Adventskalender', heading: 'Dezember 2026', unit: 'Türchen', units: 'Türchen' };
 /** The admins' link of a picture the members' catalog links as `/games/runner/skins/<file>?v=…`. */
 const adminLink = link => typeof link === 'string' ? link.replace(/^\/games\/runner\/skins\//, '/admin/runner/skins/') : link;
 
@@ -164,6 +166,7 @@ export function adminRunnerCatalog(t, uid) {
       ...(milestones.has(x.id) ? { milestoneKm: milestones.get(x.id) } : {}),
     };
   };
+  const calendar = base.source?.data?.adventCalendar ?? [];
   const shown = x => Object.fromEntries(Object.entries(x).filter(([key]) => key !== 'music').map(([key, value]) => [key, pictureKeys.includes(key) ? adminLink(value) : value]));
   return {
     kinds: ['character', 'backdrop', 'obstacles', 'fx'],
@@ -174,7 +177,10 @@ export function adminRunnerCatalog(t, uid) {
       ...base.items.map(x => ({ ...shown(x), admin: state(x, false) })),
       ...disabled.items.map(x => ({ ...x, admin: state(x, true) })),
     ],
-    adventCalendar: base.source?.data?.adventCalendar ?? [],
+    // Apps up to 0.16.4 read `adventCalendar`; later ones `schedule`, whose labels keep the
+    // wording out of the app bundle.
+    adventCalendar: calendar,
+    schedule: { ...scheduleLabels, entries: calendar },
     releases: releases.map(({ shown, missing }) => ({ ...shown, missing })),
     serverTime: at.toISOString(),
   };

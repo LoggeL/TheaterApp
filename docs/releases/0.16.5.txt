@@ -1,0 +1,1 @@
+Kleine Verbesserungen und Fehlerbehebungen im Hintergrund, damit die App zuverlässig läuft.

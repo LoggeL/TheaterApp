@@ -186,7 +186,8 @@ export function uniqueView(c, p, owned) {
     const { have, total, ready, plays: parts } = uniqueCount(c, u, owned), unlocked = mine.has(u.id);
     if (!ready && !unlocked) return null;
     const where = u.unlock.allAdventCalendar
-      ? { play: 'Adventskalender', year: u.year, allAdventCalendar: true }
+      // `allAdventCalendar` for apps up to 0.16.4; later ones name the items by `itemNoun`.
+      ? { play: 'Adventskalender', year: u.year, allAdventCalendar: true, itemNoun: { one: 'Adventskalender-Skin', many: 'Adventskalender-Skins' } }
       : u.unlock.allTechnicians
       ? { play: 'Technik', allTechnicians: true, plays: parts }
       : Array.isArray(u.unlock.plays)

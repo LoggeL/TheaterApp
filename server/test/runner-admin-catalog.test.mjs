@@ -222,9 +222,11 @@ test('the 24 Advent doors preview their own figures and pictures without unlocki
   assert.deepEqual(view.adventCalendar.map(d => d.item), ids);
   assert.ok(view.adventCalendar.every(d => typeof d.title === 'string' && d.title.trim()));
   assert.equal(new Set(view.adventCalendar.map(d => d.title)).size, 24);
+  assert.deepEqual(view.schedule, { title: 'Adventskalender', heading: 'Dezember 2026', unit: 'Türchen', units: 'Türchen', entries: view.adventCalendar });
   const byId = new Map(view.items.map(item => [item.id, item]));
   const wardrobe = JSON.stringify(app.runnerWardrobe('sam', { roles: true, unique: true }));
   assert.ok(!wardrobe.includes('adventCalendar'));
+  assert.ok(!wardrobe.includes('"schedule"'));
   assert.throws(() => app.runnerAdminCatalog('sam'), { status: 403 });
   for (const id of ids) {
     const item = byId.get(id);

@@ -1,7 +1,8 @@
 part of 'admin_skin_viewer.dart';
 
-class AdminAdventCalendar extends StatelessWidget {
-  const AdminAdventCalendar({
+/// The entries of the catalog's [AdminSchedule] as a grid of numbered cards.
+class AdminSchedulePage extends StatelessWidget {
+  const AdminSchedulePage({
     super.key,
     required this.catalog,
     required this.art,
@@ -20,7 +21,7 @@ class AdminAdventCalendar extends StatelessWidget {
   Widget _page(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Adventskalender')),
+      appBar: AppBar(title: Text(catalog.schedule.title)),
       body: SafeArea(
         child: Align(
           alignment: Alignment.topCenter,
@@ -45,17 +46,20 @@ class AdminAdventCalendar extends StatelessWidget {
                 final caption = metrics.preferredLineHeight.ceilToDouble() * 3;
                 metrics.dispose();
                 return CustomScrollView(
-                  key: const PageStorageKey('admin-advent-calendar'),
+                  key: const PageStorageKey('admin-schedule'),
                   slivers: [
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
-                      sliver: SliverToBoxAdapter(
-                        child: Text(
-                          'Dezember 2026',
-                          style: theme.textTheme.headlineSmall,
+                    if (catalog.schedule.heading.isNotEmpty)
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
+                        sliver: SliverToBoxAdapter(
+                          child: Text(
+                            catalog.schedule.heading,
+                            style: theme.textTheme.headlineSmall,
+                          ),
                         ),
-                      ),
-                    ),
+                      )
+                    else
+                      const SliverPadding(padding: EdgeInsets.only(top: 16)),
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                       sliver: SliverGrid.builder(
@@ -65,18 +69,19 @@ class AdminAdventCalendar extends StatelessWidget {
                           mainAxisSpacing: 10,
                           mainAxisExtent: width + caption + 20,
                         ),
-                        itemCount: catalog.adventCalendar.length,
+                        itemCount: catalog.schedule.entries.length,
                         itemBuilder: (context, index) {
-                          final door = catalog.adventCalendar[index];
+                          final entry = catalog.schedule.entries[index];
                           return Semantics(
                             button: true,
-                            label: 'Türchen ${door.day}, ${door.title}',
+                            label:
+                                '${catalog.schedule.unit} ${entry.day}, ${entry.title}',
                             child: Card(
-                              key: ValueKey('advent-door-${door.day}'),
+                              key: ValueKey('schedule-entry-${entry.day}'),
                               margin: EdgeInsets.zero,
                               clipBehavior: Clip.antiAlias,
                               child: InkWell(
-                                onTap: () => onOpen(context, door.skin),
+                                onTap: () => onOpen(context, entry.skin),
                                 child: ExcludeSemantics(
                                   child: Column(
                                     crossAxisAlignment:
@@ -99,7 +104,7 @@ class AdminAdventCalendar extends StatelessWidget {
                                                 ),
                                               ),
                                               child: WardrobeItemArt(
-                                                item: door.skin.item,
+                                                item: entry.skin.item,
                                                 controller: controller,
                                                 art: art,
                                                 small: true,
@@ -123,7 +128,7 @@ class AdminAdventCalendar extends StatelessWidget {
                                                         vertical: 2,
                                                       ),
                                                   child: Text(
-                                                    '${door.day}',
+                                                    '${entry.day}',
                                                     style: theme
                                                         .textTheme
                                                         .titleSmall
@@ -144,7 +149,7 @@ class AdminAdventCalendar extends StatelessWidget {
                                       Padding(
                                         padding: const EdgeInsets.all(8),
                                         child: Text(
-                                          door.title,
+                                          entry.title,
                                           maxLines: 3,
                                           overflow: TextOverflow.ellipsis,
                                           style: label,
