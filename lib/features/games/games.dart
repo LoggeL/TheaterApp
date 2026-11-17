@@ -1,12 +1,15 @@
 /// Public API of the games feature: a small game for the ensemble with a
 /// shared leaderboard, reached through [SecretTap]: five quick taps on the
 /// [HeaderLogo] or seven on the logo in "Über die App". Admins also find
-/// the Skin-Viewer of all its skins in the settings ([openAdminSkinViewer]).
+/// the Skin-Viewer of all its skins in the settings ([openAdminSkinViewer])
+/// and the dates of its drops ([openAdminReleaseSchedule]).
 /// Who has run more than ten times also finds it in the navigation
 /// ([gameEntryShown]).
 library;
 
+export 'data/admin_releases_api.dart' show adminReleasesAvailable;
 export 'data/admin_skins_api.dart' show adminSkinsAvailable;
+export 'ui/admin_release_schedule.dart' show openAdminReleaseSchedule;
 export 'ui/admin_skin_viewer.dart' show openAdminSkinViewer;
 export 'ui/game_entry.dart';
 export 'ui/header_logo.dart';

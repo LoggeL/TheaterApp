@@ -5,14 +5,18 @@ import { MediaService } from './media.mjs';
 import { Immich } from './immich.mjs';
 
 // The store's reviewer is an admin of the sample data, but the wardrobe is the real one: the admins'
-// Skin-Viewer would show every unreleased and secret figure. So it is neither announced nor served.
+// Skin-Viewer would show every unreleased and secret figure, the Release-Zeitplan every coming drop.
+// So neither is announced nor served.
+const adminOnly = new Set(['runnerAdminCatalog', 'runnerReleaseSchedule']);
 class ReviewTheater extends Theater {
   snapshot(uid) {
     const data = super.snapshot(uid);
-    return { ...data, capabilities: { ...data.capabilities, features: data.capabilities.features.filter(f => f !== 'runnerAdminCatalog') } };
+    return { ...data, capabilities: { ...data.capabilities, features: data.capabilities.features.filter(f => !adminOnly.has(f)) } };
   }
   runnerAdminCatalog() { throw new AppError(403, 'Hierfür ist ein Admin-Zugang erforderlich.'); }
   runnerAdminSkin() { throw new AppError(403, 'Hierfür ist ein Admin-Zugang erforderlich.'); }
+  runnerReleaseSchedule() { throw new AppError(403, 'Hierfür ist ein Admin-Zugang erforderlich.'); }
+  runnerReleaseReschedule() { throw new AppError(403, 'Hierfür ist ein Admin-Zugang erforderlich.'); }
 }
 
 // The reviewer uses the normal authenticated API with a separate database and
