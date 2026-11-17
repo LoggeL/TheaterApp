@@ -27,6 +27,13 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.16.3',
+    date: '17. November 2026',
+    items: [
+      'Für die Theaterleitung: Im Release-Zeitplan der Verwaltung siehst du, wann neue Inhalte erscheinen, und kannst die Termine ohne neues Update anpassen.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.16.2',
     date: '10. November 2026',
     items: [
