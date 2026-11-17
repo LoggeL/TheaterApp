@@ -163,7 +163,7 @@ int _compareOrder((int, int, String) a, (int, int, String) b) {
 
 const _weekdays = ['Mo.', 'Di.', 'Mi.', 'Do.', 'Fr.', 'Sa.', 'So.'];
 
-/// "So., 22.11.2026, 18:00": [time] on the wall clock in Berlin, where the
+/// "So., 17.01.2027, 18:00": [time] on the wall clock in Berlin, where the
 /// releases start, whatever the device's time zone.
 String releaseDateText(DateTime time) {
   final at = berlinWallClock(time);
@@ -204,7 +204,7 @@ String statusText(AdminSkin skin) => switch (skin.status) {
 String _secretText(AdminSkin skin) =>
     skin.secret == 'reward' ? 'Gated · Ensemble' : 'Gated · Unique';
 
-/// When the skin comes, in words: "Live", "Erscheint am So., 22.11.2026,
+/// When the skin comes, in words: "Live", "Erscheint am So., 17.01.2027,
 /// 18:00 · Traum von Freiheit", "Termin vorbei, wartet auf Bilder",
 /// "Deaktiviert · kein Termin", or the secret of a unique figure or
 /// ensemble reward ("Gated · Unique").

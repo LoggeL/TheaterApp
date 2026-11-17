@@ -42,64 +42,6 @@
     ]
   },
   {
-    "id": "romeo-julia-2026",
-    "name": "Romeo und Julia",
-    "startsAt": "2026-12-30T18:00:00+01:00",
-    "goalMeters": 100000,
-    "crateCount": 3,
-    "itemIds": [
-      "character.jule--romeo-julia",
-      "character.niko--romeo-julia",
-      "character.nela--romeo-julia",
-      "character.vanessa--romeo-julia",
-      "character.jakob--romeo-julia",
-      "character.hendrik--romeo-julia",
-      "character.linak--romeo-julia",
-      "character.marcella--romeo-julia",
-      "character.sophie--romeo-julia"
-    ],
-    "gatedItemIds": [
-      "backdrop.romeo-julia"
-    ]
-  },
-  {
-    "id": "traum-2026",
-    "name": "Traum von Freiheit",
-    "startsAt": "2026-11-22T18:00:00+01:00",
-    "goalMeters": 100000,
-    "crateCount": 3,
-    "itemIds": [
-      "character.lea--freiheit",
-      "character.fynn--freiheit",
-      "character.carina--freiheit",
-      "character.yunus--freiheit",
-      "character.louis--freiheit",
-      "character.sebastian--freiheit",
-      "character.anton--freiheit",
-      "character.maria--freiheit",
-      "character.magdalena--freiheit",
-      "character.nele--freiheit",
-      "character.nora--freiheit",
-      "character.elena--freiheit",
-      "character.fernanda--freiheit",
-      "character.jonas--freiheit",
-      "character.julian--freiheit",
-      "character.leon--freiheit",
-      "character.lina--freiheit",
-      "character.max--freiheit",
-      "character.maximilian--freiheit",
-      "character.nela--freiheit",
-      "character.niko--freiheit",
-      "character.theresa--freiheit",
-      "character.tobias--freiheit",
-      "character.logge--freiheit",
-      "character.raphael--freiheit",
-      "character.luisa--freiheit",
-      "character.franek--freiheit"
-    ],
-    "gatedItemIds": []
-  },
-  {
     "id": "goldfieber-2026",
     "name": "Goldfieber",
     "startsAt": "2026-12-06T18:00:00+01:00",
@@ -157,9 +99,67 @@
     "gatedItemIds": []
   },
   {
+    "id": "romeo-julia-2026",
+    "name": "Romeo und Julia",
+    "startsAt": "2026-12-30T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.jule--romeo-julia",
+      "character.niko--romeo-julia",
+      "character.nela--romeo-julia",
+      "character.vanessa--romeo-julia",
+      "character.jakob--romeo-julia",
+      "character.hendrik--romeo-julia",
+      "character.linak--romeo-julia",
+      "character.marcella--romeo-julia",
+      "character.sophie--romeo-julia"
+    ],
+    "gatedItemIds": [
+      "backdrop.romeo-julia"
+    ]
+  },
+  {
+    "id": "traum-2026",
+    "name": "Traum von Freiheit",
+    "startsAt": "2027-01-17T18:00:00+01:00",
+    "goalMeters": 100000,
+    "crateCount": 3,
+    "itemIds": [
+      "character.lea--freiheit",
+      "character.fynn--freiheit",
+      "character.carina--freiheit",
+      "character.yunus--freiheit",
+      "character.louis--freiheit",
+      "character.sebastian--freiheit",
+      "character.anton--freiheit",
+      "character.maria--freiheit",
+      "character.magdalena--freiheit",
+      "character.nele--freiheit",
+      "character.nora--freiheit",
+      "character.elena--freiheit",
+      "character.fernanda--freiheit",
+      "character.jonas--freiheit",
+      "character.julian--freiheit",
+      "character.leon--freiheit",
+      "character.lina--freiheit",
+      "character.max--freiheit",
+      "character.maximilian--freiheit",
+      "character.nela--freiheit",
+      "character.niko--freiheit",
+      "character.theresa--freiheit",
+      "character.tobias--freiheit",
+      "character.logge--freiheit",
+      "character.raphael--freiheit",
+      "character.luisa--freiheit",
+      "character.franek--freiheit"
+    ],
+    "gatedItemIds": []
+  },
+  {
     "id": "kristall-2027",
     "name": "Der Kristall der Träume",
-    "startsAt": "2027-01-17T18:00:00+01:00",
+    "startsAt": "2027-01-31T18:00:00+01:00",
     "goalMeters": 100000,
     "crateCount": 3,
     "itemIds": [
@@ -183,7 +183,7 @@
   {
     "id": "dystopia-2027",
     "name": "Dystopia",
-    "startsAt": "2027-01-31T18:00:00+01:00",
+    "startsAt": "2027-02-14T18:00:00+01:00",
     "goalMeters": 100000,
     "crateCount": 3,
     "itemIds": [
@@ -202,7 +202,7 @@
   {
     "id": "bluttribut-2027",
     "name": "Bluttribut",
-    "startsAt": "2027-02-14T18:00:00+01:00",
+    "startsAt": "2027-02-28T18:00:00+01:00",
     "goalMeters": 100000,
     "crateCount": 3,
     "itemIds": [
@@ -221,7 +221,7 @@
   {
     "id": "verrat-2027",
     "name": "Verrat im Kloster",
-    "startsAt": "2027-02-28T18:00:00+01:00",
+    "startsAt": "2027-03-14T18:00:00+01:00",
     "goalMeters": 100000,
     "crateCount": 3,
     "itemIds": [
@@ -241,7 +241,7 @@
   {
     "id": "sagenhaft-2027",
     "name": "Sagenhaft",
-    "startsAt": "2027-03-14T18:00:00+01:00",
+    "startsAt": "2027-03-28T18:00:00+02:00",
     "goalMeters": 100000,
     "crateCount": 3,
     "itemIds": [
@@ -265,7 +265,7 @@
   {
     "id": "black-swan-2027",
     "name": "Die Geschichte der Black Swan",
-    "startsAt": "2027-03-28T18:00:00+02:00",
+    "startsAt": "2027-04-11T18:00:00+02:00",
     "goalMeters": 100000,
     "crateCount": 3,
     "itemIds": [
@@ -277,7 +277,7 @@
   {
     "id": "anno-2027",
     "name": "Anno 1146",
-    "startsAt": "2027-04-11T18:00:00+02:00",
+    "startsAt": "2027-04-25T18:00:00+02:00",
     "goalMeters": 100000,
     "crateCount": 3,
     "itemIds": [
@@ -289,7 +289,7 @@
   {
     "id": "creepshow-2027",
     "name": "Creepshow",
-    "startsAt": "2027-04-25T18:00:00+02:00",
+    "startsAt": "2027-05-09T18:00:00+02:00",
     "goalMeters": 100000,
     "crateCount": 3,
     "itemIds": [
@@ -301,7 +301,7 @@
   {
     "id": "nexus-2027",
     "name": "Nexus",
-    "startsAt": "2027-05-09T18:00:00+02:00",
+    "startsAt": "2027-05-23T18:00:00+02:00",
     "goalMeters": 100000,
     "crateCount": 3,
     "itemIds": [

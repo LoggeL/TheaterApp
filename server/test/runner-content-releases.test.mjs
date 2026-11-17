@@ -237,10 +237,19 @@ test('a new unique waits for its full scheduled pack instead of unlocking from h
 
 test('bundled manifest pins the approved Berlin dates and known role pools', () => {
   const releases = bundledContentReleases(), c = bundledCatalog();
-  assert.deepEqual(releases.slice(0, 4).map(x => [x.id, x.startsAt]), [
+  // Chronological, 18:00 in Berlin; Traum von Freiheit moved from 22 November 2026 to 17 January 2027
+  // and everything from that day on moved two weeks later (summer time from 28 March 2027).
+  assert.deepEqual(releases.map(x => [x.id, x.startsAt]), [
     ['halloween-2026', '2026-10-30T17:00:00.000Z'], ['hell-2026', '2026-11-08T17:00:00.000Z'],
-    ['advent-2026', '2026-11-29T17:00:00.000Z'], ['romeo-julia-2026', '2026-12-30T17:00:00.000Z'],
+    ['advent-2026', '2026-11-29T17:00:00.000Z'], ['goldfieber-2026', '2026-12-06T17:00:00.000Z'],
+    ['malleus-2026', '2026-12-20T17:00:00.000Z'], ['romeo-julia-2026', '2026-12-30T17:00:00.000Z'],
+    ['traum-2026', '2027-01-17T17:00:00.000Z'], ['kristall-2027', '2027-01-31T17:00:00.000Z'],
+    ['dystopia-2027', '2027-02-14T17:00:00.000Z'], ['bluttribut-2027', '2027-02-28T17:00:00.000Z'],
+    ['verrat-2027', '2027-03-14T17:00:00.000Z'], ['sagenhaft-2027', '2027-03-28T16:00:00.000Z'],
+    ['black-swan-2027', '2027-04-11T16:00:00.000Z'], ['anno-2027', '2027-04-25T16:00:00.000Z'],
+    ['creepshow-2027', '2027-05-09T16:00:00.000Z'], ['nexus-2027', '2027-05-23T16:00:00.000Z'],
   ]);
+  assert.ok(!releases.some(x => x.startsAt.startsWith('2026-11-22')), 'nothing releases on 22 November 2026');
   assert.equal(releases.find(x => x.id === 'hell-2026').itemIds.length, 11);
   assert.equal(releases.find(x => x.id === 'romeo-julia-2026').itemIds.length, 9);
   assert.ok(c.byId.has('backdrop.creepshow'));
@@ -251,7 +260,7 @@ test('bundled manifest pins the approved Berlin dates and known role pools', () 
 test('Sagenhaft is free to wear together with its complete March role pack', t => {
   const release = bundledContentReleases().find(r => r.id === 'sagenhaft-2027');
   const id = 'backdrop.sagenhaft', files = ['backdrop-sagenhaft.webp', 'backdrop-sagenhaft-portrait.webp', 'collectibles-sagenhaft.webp', 'obstacles-sagenhaft.webp'];
-  assert.equal(release.startsAt, '2027-03-14T17:00:00.000Z');
+  assert.equal(release.startsAt, '2027-03-28T16:00:00.000Z');
   assert.deepEqual(release.gatedItemIds, [id]);
   assert.deepEqual(release.freeItemIds, [id]);
   assert.ok(!release.itemIds.includes(id), 'set crates still contain roles only');

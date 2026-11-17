@@ -251,7 +251,7 @@ test('admins can preview every Sagenhaft image before the scheduled March releas
   app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
   const stage = app.runnerAdminCatalog('admin').items.find(x => x.id === 'backdrop.sagenhaft');
   assert.equal(stage.admin.live, false);
-  assert.equal(stage.admin.release.startsAt, '2027-03-14T17:00:00.000Z');
+  assert.equal(stage.admin.release.startsAt, '2027-03-28T16:00:00.000Z');
   for (const key of ['image', 'portrait', 'obstacles', 'collectibles']) {
     assert.match(stage[key], /^\/admin\/runner\/skins\//);
     const name = fileOf(stage[key]);

@@ -168,7 +168,7 @@ final _catalog = <String, Object?>{
         'release': {
           'id': 'traum-2026',
           'name': 'Traum von Freiheit',
-          'startsAt': '2026-11-22T17:00:00.000Z',
+          'startsAt': '2027-01-17T17:00:00.000Z',
           'active': false,
           'ready': false,
           'part': 'items',
@@ -218,7 +218,7 @@ final _catalog = <String, Object?>{
     {
       'id': 'traum-2026',
       'name': 'Traum von Freiheit',
-      'startsAt': '2026-11-22T17:00:00.000Z',
+      'startsAt': '2027-01-17T17:00:00.000Z',
       'active': false,
       'ready': false,
       'missing': [
@@ -358,7 +358,7 @@ void main() {
     expect(lea.statuses, contains(AdminSkinStatus.scheduled));
     expect(
       lea.release!.startsAt!.isAtSameMomentAs(
-        DateTime.parse('2026-11-22T17:00:00Z'),
+        DateTime.parse('2027-01-17T17:00:00Z'),
       ),
       isTrue,
     );
@@ -797,8 +797,8 @@ void main() {
     // Winter time (UTC+1) and summer time (UTC+2), whatever the device's
     // time zone.
     expect(
-      releaseDateText(DateTime.parse('2026-11-22T17:00:00Z').toLocal()),
-      'So., 22.11.2026, 18:00',
+      releaseDateText(DateTime.parse('2027-01-17T17:00:00Z').toLocal()),
+      'So., 17.01.2027, 18:00',
     );
     expect(
       releaseDateText(DateTime.parse('2027-04-11T16:00:00Z')),
@@ -827,12 +827,12 @@ void main() {
     }) => AdminSkinRelease(
       id: 'traum-2026',
       name: 'Traum von Freiheit',
-      startsAt: DateTime.parse('2026-11-22T17:00:00Z'),
+      startsAt: DateTime.parse('2027-01-17T17:00:00Z'),
       active: active,
       ready: ready,
       part: part,
     );
-    const coming = 'Erscheint am So., 22.11.2026, 18:00 · Traum von Freiheit';
+    const coming = 'Erscheint am So., 17.01.2027, 18:00 · Traum von Freiheit';
     for (final (skin, text) in [
       (AdminSkin(item: item), 'Live'),
       (AdminSkin(item: item, live: false, release: release()), coming),
@@ -876,7 +876,7 @@ void main() {
           item: item,
           release: release(part: 'free'),
         ),
-        'Live · Geschenk am So., 22.11.2026, 18:00 · Traum von Freiheit',
+        'Live · Geschenk am So., 17.01.2027, 18:00 · Traum von Freiheit',
       ),
     ]) {
       expect(releaseText(skin), text);
@@ -940,7 +940,7 @@ void main() {
     );
     expect(pictures.where((p) => p.endsWith('lea-thumb.webp')), isNotEmpty);
     expect(
-      find.text('Erscheint am So., 22.11.2026, 18:00 · Traum von Freiheit'),
+      find.text('Erscheint am So., 17.01.2027, 18:00 · Traum von Freiheit'),
       findsOneWidget,
     );
     // Emil's date has passed, his pack waits for pictures.
@@ -1015,7 +1015,7 @@ void main() {
         );
         expect(tester.takeException(), isNull, reason: '$width @ $scale');
         expect(
-          find.text('Erscheint am So., 22.11.2026, 18:00 · Traum von Freiheit'),
+          find.text('Erscheint am So., 17.01.2027, 18:00 · Traum von Freiheit'),
           findsOneWidget,
           reason: '$width @ $scale',
         );
@@ -1035,7 +1035,7 @@ void main() {
     expect(find.text('Hölle 2027 · 1'), findsNothing);
     const groups = [
       'Erscheint am So., 08.11.2026, 18:00 · Eine höllische Herausforderung · 1',
-      'Erscheint am So., 22.11.2026, 18:00 · Traum von Freiheit · 1',
+      'Erscheint am So., 17.01.2027, 18:00 · Traum von Freiheit · 1',
       'Spätlese · Termin vorbei, wartet auf Bilder · 1',
       'Deaktiviert · kein Termin · 1',
       'Ohne Termin · 6',
@@ -1132,7 +1132,7 @@ void main() {
       ),
     );
     expect(
-      find.text('Erscheint am So., 22.11.2026, 18:00 · Traum von Freiheit'),
+      find.text('Erscheint am So., 17.01.2027, 18:00 · Traum von Freiheit'),
       findsOneWidget,
     );
     expect(find.text('Lea (deaktiviert)'), findsOneWidget);

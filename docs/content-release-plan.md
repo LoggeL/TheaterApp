@@ -1,6 +1,6 @@
 # Geplante Bühnen und Skinpacks
 
-Stand: 27. Oktober 2026. Alle Uhrzeiten gelten für Europe/Berlin. Die ersten drei Termine wurden vom Nutzer bestätigt. Romeo und Julia folgt nach der letzten Aufführung am 29. Dezember 2026, 21:30 Uhr; dieser Termin wurde am 27. Oktober aus der laufenden Theater-Datenbank zurückgelesen.
+Stand: 17. November 2026. Alle Uhrzeiten gelten für Europe/Berlin. Die ersten drei Termine wurden vom Nutzer bestätigt. Am 17. November 2026 hat der Nutzer Traum von Freiheit vom 22. November 2026 auf den 17. Januar 2027 verschoben; am 22. November erscheint nichts. Alle bisherigen Termine ab dem 17. Januar 2027 rücken dafür in unveränderter Reihenfolge um zwei Wochen nach hinten. Romeo und Julia folgt nach der letzten Aufführung am 29. Dezember 2026, 21:30 Uhr; dieser Termin wurde am 27. Oktober aus der laufenden Theater-Datenbank zurückgelesen.
 
 Die Freischaltung erfolgt im Server anhand seiner Uhr. Der Mac muss dafür nicht laufen. Neue Figuren eines Packs werden erst sichtbar, wenn das Datum erreicht ist und alle vorgesehenen Figuren ein tatsächlich ausgeliefertes Sprite haben. Ein fehlendes Bild verschiebt das betroffene Pack; es wird nicht durch eine Standardfigur ersetzt. Vor dem Termin sind auch Bildadressen und Kisteninhalte gesperrt. Bereits vorhandene reguläre Figuren bleiben verfügbar.
 
@@ -8,20 +8,20 @@ Die Freischaltung erfolgt im Server anhand seiner Uhr. Der Mac muss dafür nicht
 | --- | --- | --- |
 | 30.10.2026 | Creepshow zu Halloween, Bühne für alle einschließlich vorhandener Kronleuchter | Bestehende Bühne |
 | 08.11.2026 | Eine höllische Herausforderung, neues Skinpack und drei Set-Kisten | Elf Rollen und Willi fertig, anhand der Kostümfotos geprüft |
-| 22.11.2026 | Traum von Freiheit | Historische Aufnahmen vorhanden |
 | 29.11.2026 | Weihnachtsbühne für alle | Bühne, Hindernisse, Sammelobjekte und eigene Musik fertig |
 | 06.12.2026 | Goldfieber | Historische Aufnahmen vorhanden |
 | 20.12.2026 | Malleus Maleficarum | Historische Aufnahmen vorhanden |
 | 30.12.2026 | Romeo und Julia, Bühne nach der Aufführungsserie und neues Skinpack | Kostümfotos fehlen noch; Fotoalbum ist derzeit leer |
-| 17.01.2027 | Der Kristall der Träume | Historische Aufnahmen vorhanden |
-| 31.01.2027 | Dystopia | Historische Aufnahmen vorhanden |
-| 14.02.2027 | Bluttribut | Historische Aufnahmen vorhanden |
-| 28.02.2027 | Verrat im Kloster | Historische Aufnahmen vorhanden |
-| 14.03.2027 | Sagenhaft, Rollenpaket und Bühnenbild für alle | 13 Figuren nach den Kostümfotos fertig, mit Porträts und je acht Spielposen. Waldkulisse und Stückkiste mit Eichenblattmotiv werden mit dem Rollenpaket freigeschaltet. |
-| 28.03.2027 | Die Geschichte der Black Swan, fehlende Rollen | Quellen und Rollen einzeln prüfen |
-| 11.04.2027 | Anno 1146, fehlende Rollen | Ergänzungen zum bestehenden Set |
-| 25.04.2027 | Creepshow, fehlende Rollen | Ergänzungen zum bestehenden Set |
-| 09.05.2027 | Nexus, fehlende Rolle | Ergänzung zum bestehenden Set |
+| 17.01.2027 | Traum von Freiheit | Historische Aufnahmen vorhanden |
+| 31.01.2027 | Der Kristall der Träume | Historische Aufnahmen vorhanden |
+| 14.02.2027 | Dystopia | Historische Aufnahmen vorhanden |
+| 28.02.2027 | Bluttribut | Historische Aufnahmen vorhanden |
+| 14.03.2027 | Verrat im Kloster | Historische Aufnahmen vorhanden |
+| 28.03.2027 | Sagenhaft, Rollenpaket und Bühnenbild für alle | 13 Figuren nach den Kostümfotos fertig, mit Porträts und je acht Spielposen. Waldkulisse und Stückkiste mit Eichenblattmotiv werden mit dem Rollenpaket freigeschaltet. |
+| 11.04.2027 | Die Geschichte der Black Swan, fehlende Rollen | Quellen und Rollen einzeln prüfen |
+| 25.04.2027 | Anno 1146, fehlende Rollen | Ergänzungen zum bestehenden Set |
+| 09.05.2027 | Creepshow, fehlende Rollen | Ergänzungen zum bestehenden Set |
+| 23.05.2027 | Nexus, fehlende Rolle | Ergänzung zum bestehenden Set |
 
 Die späteren Packs sind auf Wunsch des Nutzers als Folge eingeplant. Sie sind erst nach Fotoabgleich, Grafikerstellung, Sichtprüfung, Tests und Bereitstellung fertig. Ein Kalendereintrag allein belegt keinen fertigen oder veröffentlichten Inhalt.
 
