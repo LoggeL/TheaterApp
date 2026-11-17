@@ -1,0 +1,1277 @@
+{
+ "date": "2026-11-17",
+ "tool": "Codex CLI imagegen skill, built-in image_gen (edit mode), one call per image; compositing in Python (OpenCV, Pillow)",
+ "method": "base-first: generated edit used only for clothing; identity region (base body pixels without base or new clothing) copied pixel-exact from the base sheet/portrait at native resolution; registration silhouette+template+ECC, new garments excluded, local head alignment with displacement falloff; inward feathering; wider band next to revealed regions (5 px sheet, 16 px portrait); non-garment alpha of the edit capped by base alpha",
+ "baseMasks": {
+  "carina--anno": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "elena": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "elena--anno": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "hendrik": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn item in a single flat pure magenta (#FF00FF), with no shading and no outline: the cap, the shirt, the trousers, the shoes, the harness straps and its metal ring. Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, mouth, ears, neck, skin, hair and hands. Keep the yellow stars unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas and arrangement; the magenta areas must follow the exact garment outlines. Transparent background, no labels.\n"
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn item in a single flat pure magenta (#FF00FF), with no shading and no outline: the cap, the shirt, the trousers, the harness straps and buckles. Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, mouth, teeth, ears, neck, skin, hair and hands.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact garment outlines. Transparent background, no labels.\n"
+   }
+  },
+  "jakob": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "julian": {
+   "sheet": {
+    "file": "prompt-mask-sheet-v2.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, the white gloves on both hands (paint the whole gloved hands magenta), belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait-v2.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, the white gloves on both hands (paint the whole gloved hands magenta), belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "lina--anno": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "logge": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "marcella": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "nela--anno": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "nele": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "niko": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "sophie": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "theo": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "theresa": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "till": {
+   "sheet": {
+    "file": "prompt-mask-sheet.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  },
+  "yunus": {
+   "sheet": {
+    "file": "prompt-mask-sheet-v2.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, the white gloves on both hands (paint the whole gloved hands magenta), belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "portrait": {
+    "file": "prompt-mask-portrait-v2.txt",
+    "text": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, the white gloves on both hands (paint the whole gloved hands magenta), belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   }
+  }
+ },
+ "skipped": {
+  "10": "Maren",
+  "23": "Lena",
+  "24": "Captain Kuschel"
+ },
+ "records": [
+  {
+   "day": 1,
+   "item": "character.yunus--explosion",
+   "reference": "character.yunus",
+   "image": "character-advent-01.webp",
+   "portrait": "character-advent-01-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Brille, Haare, Hände und Umriss aus der Basis. Zerrissenes Hemd und Gurtzeug; weiße Handschuhe der Basis entfernt (nackte Hände wie im freigegebenen Kostüm).",
+   "metrics": {
+    "slug": "yunus",
+    "base": "yunus",
+    "sheetIdentityPx": 8917,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 13801,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.94,
+    "headNccPortrait": 0.98,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 79930,
+      "psnrAll": 36.6,
+      "psnrIdentity": 34.9,
+      "identityPixels": 9086
+     },
+     "portrait": {
+      "bytes": 70586,
+      "psnrAll": 38.0,
+      "psnrIdentity": 40.5,
+      "identityPixels": 13970
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Die Flugpose berührt links den Rahmen.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Yunus as Dr. Adrian (a young man with glasses). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, glasses, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a comedic stage costume after a cartoon lab mishap: an off-white shirt with frayed short sleeves, a few small holes and greyish dusty edges; a ragged dark blue waistcoat with dark shoulder straps; dark trousers frayed at the legs as in Image 2; brown shoes; bare hands.\nRemove: the grey coat, the white gloves and the old shirt, trousers and shoes.\nKeep the hair and the glasses exactly as in Image 1.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Yunus as Dr. Adrian (a young man with glasses). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, glasses, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a comedic stage costume after a cartoon lab mishap: an off-white shirt with frayed short sleeves, a few small holes and greyish dusty edges; a ragged dark blue waistcoat with dark shoulder straps; dark trousers frayed at the legs as in Image 2; brown shoes; bare hands.\nRemove: the grey coat, the white gloves and the old shirt, trousers and shoes.\nKeep the hair and the glasses exactly as in Image 1.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/01-yunus/"
+  },
+  {
+   "day": 2,
+   "item": "character.nele--mumie",
+   "reference": "character.nele",
+   "image": "character-advent-02.webp",
+   "portrait": "character-advent-02-portrait.webp",
+   "verdict": "mit Einschränkung",
+   "notes": "Die Bandagen verdecken Haare und Unterkiefer; in den Sprites sind nur die Augenpartie und der Körperumriss aus der Basis prüfbar. Das Porträt zeigt das Basisgesicht in der Bandagenöffnung. Geringe Kopfübereinstimmung im Sheet ist durch das Kostüm bedingt.",
+   "metrics": {
+    "slug": "nele-mumie",
+    "base": "nele",
+    "sheetIdentityPx": 2256,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 4859,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.11,
+    "headNccPortrait": 0.95,
+    "lowPoses": [
+     "runA",
+     "passA",
+     "runB",
+     "passB",
+     "cheer",
+     "dangle",
+     "fly",
+     "crash"
+    ],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 105926,
+      "psnrAll": 38.8,
+      "psnrIdentity": 35.9,
+      "identityPixels": 2332
+     },
+     "portrait": {
+      "bytes": 61012,
+      "psnrAll": 33.7,
+      "psnrIdentity": 37.2,
+      "identityPixels": 5037
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Bandagenenden berühren in Lauf-, Jubel-, Hänge- und Flugpose den Rahmen; die Fußlinie im Laufzyklus springt um 7 px. Der Seilpunkt der Hängepose liegt jetzt auf der neu gezeichneten Öse.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Nele as Princess Iset (a girl with long brown curly hair). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: cream mummy bandage wraps over the whole body, arms, legs and feet, and wrapped around the head and the lower face as in Image 2 so that only the eye area stays free; loose bandage ends; a small gold necklace pendant.\nRemove: the fan, the black and gold top, the trousers and the boots.\nThe bandages may cover the hair and lower face as in Image 2; do not otherwise change the visible eyes and skin.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Nele as Princess Iset (a girl with long brown curly hair). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: cream mummy bandage wraps over the whole body, arms, legs and feet, and wrapped around the head and the lower face as in Image 2 so that only the eye area stays free; loose bandage ends; a small gold necklace pendant.\nRemove: the fan, the black and gold top, the trousers and the boots.\nThe bandages may cover the hair and lower face as in Image 2; do not otherwise change the visible eyes and skin.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/02-nele-mumie/"
+  },
+  {
+   "day": 3,
+   "item": "character.sophie--waisenhaus",
+   "reference": "character.sophie",
+   "image": "character-advent-03.webp",
+   "portrait": "character-advent-03-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Haare, Hände und Umriss aus der Basis. Die Kerze der Jubelpose stößt oben an den Zellenrand.",
+   "metrics": {
+    "slug": "sophie",
+    "base": "sophie",
+    "sheetIdentityPx": 23304,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 26967,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.94,
+    "headNccPortrait": 0.98,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 89816,
+      "psnrAll": 34.3,
+      "psnrIdentity": 35.5,
+      "identityPixels": 23954
+     },
+     "portrait": {
+      "bytes": 70040,
+      "psnrAll": 35.8,
+      "psnrIdentity": 37.7,
+      "identityPixels": 27302
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Die Fußlinie springt um 3 px.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Sophie as Mia (a girl with long brown hair). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a long cream orphanage dress with gathered high neckline, loose gathered sleeves, ruffled cuffs and stitched square ochre and tan patches; bare feet; a lit candle in a brass candlestick held in one hand (put it in the front hand, held as in Image 1); a small black hair bow.\nRemove: the yellow dress, the apron and the boots.\nKeep the hair exactly as in Image 1.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Sophie as Mia (a girl with long brown hair). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a long cream orphanage dress with gathered high neckline, loose gathered sleeves, ruffled cuffs and stitched square ochre and tan patches; bare feet; a lit candle in a brass candlestick held in one hand (put it in the front hand, held as in Image 1); a small black hair bow.\nRemove: the yellow dress, the apron and the boots.\nKeep the hair exactly as in Image 1.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/03-sophie/"
+  },
+  {
+   "day": 4,
+   "item": "character.elena--ritterin",
+   "reference": "character.elena--anno",
+   "image": "character-advent-04.webp",
+   "portrait": "character-advent-04-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Locken, Hände und Umriss aus der Basis; Schwert an der Hüfte.",
+   "metrics": {
+    "slug": "elena-ritterin",
+    "base": "elena--anno",
+    "sheetIdentityPx": 19245,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 48233,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.93,
+    "headNccPortrait": 0.98,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 100002,
+      "psnrAll": 38.5,
+      "psnrIdentity": 40.4,
+      "identityPixels": 19753
+     },
+     "portrait": {
+      "bytes": 70214,
+      "psnrAll": 36.5,
+      "psnrIdentity": 39.1,
+      "identityPixels": 49245
+     }
+    }
+   },
+   "atlasNotes": null,
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Elena as Johanna (a young woman with long brown curly hair). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: an ivory blouse with brown front lacing and full sleeves; a wide brown leather waist belt with a sheathed sword at the hip; narrow buckled leather thigh straps; fitted dark trousers; brown wrist bracers; strapped brown sandals.\nRemove: the red skirt, the boots and the red wrist ribbons.\nKeep the hair exactly as in Image 1.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Elena as Johanna (a young woman with long brown curly hair). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: an ivory blouse with brown front lacing and full sleeves; a wide brown leather waist belt with a sheathed sword at the hip; narrow buckled leather thigh straps; fitted dark trousers; brown wrist bracers; strapped brown sandals.\nRemove: the red skirt, the boots and the red wrist ribbons.\nKeep the hair exactly as in Image 1.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/04-elena-ritterin/"
+  },
+  {
+   "day": 5,
+   "item": "character.marcella--dienerin",
+   "reference": "character.marcella",
+   "image": "character-advent-05.webp",
+   "portrait": "character-advent-05-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Haare, Hände und Umriss aus der Basis.",
+   "metrics": {
+    "slug": "marcella",
+    "base": "marcella",
+    "sheetIdentityPx": 19403,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 31611,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.92,
+    "headNccPortrait": 0.98,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 90458,
+      "psnrAll": 36.6,
+      "psnrIdentity": 35.8,
+      "identityPixels": 19801
+     },
+     "portrait": {
+      "bytes": 70586,
+      "psnrAll": 39.3,
+      "psnrIdentity": 42.5,
+      "identityPixels": 31667
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Die Laufpose berührt links den Rahmen.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Marcella as Suzie (a girl with long brown hair). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a dark brown, nearly black long-sleeved maid dress; a cream ruffled apron with cream shoulder ruffles and layered skirt edging; cream scalloped collar and cuffs; dark tights; brown lace-up boots; no cap.\nRemove: the cream patched dress and the old shoes.\nKeep the hair exactly as in Image 1.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Marcella as Suzie (a girl with long brown hair). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a dark brown, nearly black long-sleeved maid dress; a cream ruffled apron with cream shoulder ruffles and layered skirt edging; cream scalloped collar and cuffs; dark tights; brown lace-up boots; no cap.\nRemove: the cream patched dress and the old shoes.\nKeep the hair exactly as in Image 1.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/05-marcella/"
+  },
+  {
+   "day": 6,
+   "item": "character.carina--anno-mathilde",
+   "reference": "character.carina--anno",
+   "image": "character-advent-06.webp",
+   "portrait": "character-advent-06-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Hände und Umriss aus der Basis. Wo die Kapuze der Basis entfernt wurde, ist das Haar teilweise neu gezeichnet.",
+   "metrics": {
+    "slug": "carina-mathilde",
+    "base": "carina--anno",
+    "sheetIdentityPx": 8677,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 11722,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.87,
+    "headNccPortrait": 0.97,
+    "lowPoses": [],
+    "localHeadAlign": [
+     "dangle"
+    ],
+    "delivered": {
+     "sheet": {
+      "bytes": 102406,
+      "psnrAll": 37.8,
+      "psnrIdentity": 37.8,
+      "identityPixels": 9255
+     },
+     "portrait": {
+      "bytes": 63016,
+      "psnrAll": 38.1,
+      "psnrIdentity": 43.1,
+      "identityPixels": 12743
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Hänge- und Laufpose berühren links den Rahmen. Die Öse wurde neu gezeichnet; die Seilpunkte in Pass-, Hänge- und Flugpose wurden auf sie gesetzt.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Carina as Maribel (a woman with long brown hair). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a burgundy long skirt; a brown laced bodice with light lacing; a cream blouse with voluminous sleeves; a brown belt with a leather pouch at the side; brown boots; head uncovered.\nRemove: the hooded cloak and the gold and black dress layers.\nRemove the hood. Only where the hood was, continue the long brown hair that is already visible, following the existing skull outline; do not make the head bigger.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Carina as Maribel (a woman with long brown hair). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a burgundy long skirt; a brown laced bodice with light lacing; a cream blouse with voluminous sleeves; a brown belt with a leather pouch at the side; brown boots; head uncovered.\nRemove: the hooded cloak and the gold and black dress layers.\nRemove the hood. Only where the hood was, continue the long brown hair that is already visible, following the existing skull outline; do not make the head bigger.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/06-carina-mathilde/"
+  },
+  {
+   "day": 7,
+   "item": "character.logge--creepshow",
+   "reference": "character.logge",
+   "image": "character-logge--creepshow.webp",
+   "portrait": "character-logge--creepshow-portrait.webp",
+   "verdict": "auffällig",
+   "notes": "Gesicht, Hände und Umriss aus der Basis, Zylinder lokal auf den Kopf ausgerichtet; Lauf-, Jubel-, Hänge- und Flugpose sowie das Porträt sind sauber. Sturzpose: Wo das Paket der Basis lag, ist ein Rest des neu gezeichneten Gesichts sichtbar (Mund/Kinn doppelt), die Schwindelsterne sind nur teilweise erhalten. Haar unter dem Zylinder teilweise neu.",
+   "metrics": {
+    "slug": "logge-diener",
+    "base": "logge",
+    "sheetIdentityPx": 4630,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 14464,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.08,
+    "headNccPortrait": 0.93,
+    "lowPoses": [
+     "crash"
+    ],
+    "localHeadAlign": [
+     "runA",
+     "passA",
+     "runB",
+     "passB",
+     "cheer",
+     "fly",
+     "portrait"
+    ],
+    "delivered": {
+     "sheet": {
+      "bytes": 78954,
+      "psnrAll": 40.8,
+      "psnrIdentity": 38.5,
+      "identityPixels": 4822
+     },
+     "portrait": {
+      "bytes": 61362,
+      "psnrAll": 38.4,
+      "psnrIdentity": 40.8,
+      "identityPixels": 14701
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Der Zylinder stößt in Lauf-, Pass- und Hängepose oben an den Rahmen und wird dort abgeschnitten; die Sturzpose berührt links den Rahmen.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet-v2.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Logge as the messenger (a young man). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a black tall top hat; a black formal tailcoat with gold buttons; a white shirt with white cuffs; a black bow tie; black gloves; black shoes.\nRemove: the messenger cap, the yellow and red shirt, the trousers with red stripe and the parcel (hands simply hold nothing).\nReplace the cap with the top hat, sitting on the same head; do not make the head bigger.\nThe parcel is removed, but nothing else moves: in every pose the arms, elbows, forearms and hands stay exactly where Image 1 has them, with the same gripping finger shapes, now empty; the head stays exactly in place and is not turned, tilted or shifted, including in the flying pose and in the lying (crash) pose, where the face keeps the same position and the chin rests where it rests in Image 1. In the cheering pose the raised hand that held the parcel stays at exactly the same height, now an empty hand.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait-v2.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Logge as the messenger (a young man). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a black tall top hat; a black formal tailcoat with gold buttons; a white shirt with white cuffs; a black bow tie; black gloves; black shoes.\nRemove: the messenger cap, the yellow and red shirt, the trousers with red stripe and the parcel (hands simply hold nothing).\nReplace the cap with the top hat, sitting on the same head; do not make the head bigger.\nBoth hands and forearms stay exactly where Image 1 has them, with the same finger shapes, simply empty where the parcel was; the area behind the former parcel becomes the new coat front.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and exactly the same crop as Image 1: the head stays at exactly the same place and size, the shoulders keep their width, and the figure is cut off by the lower image edge exactly where Image 1 cuts it; do not zoom out, do not shrink the figure and do not show more of the body than Image 1 shows. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "sheetPoses": {
+     "file": "prompt-sheet-p3.txt",
+     "poses": [
+      "cheer",
+      "fly",
+      "crash"
+     ],
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid on a 1536x1024 canvas. Only three slots in the lower row are filled: a cheering pose (lower left), a flying pose and a lying crash pose (lower right). The upper row and the second slot of the lower row are empty and must stay empty and transparent.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Logge as the messenger (a young man) in three poses. Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the three poses, fitted to the existing body: a black tall top hat; a black formal tailcoat with gold buttons; a white shirt with white cuffs; a black bow tie; black gloves; black shoes.\nRemove: the messenger cap, the yellow and red shirt, the trousers with red stripe and the parcel.\nReplace the cap with the top hat, sitting on the same head; do not make the head bigger.\nThe parcel is removed, but nothing else moves. Cheering pose: the face, chin and neck stay exactly where they are; both raised hands stay at exactly their height, as empty gloved fists. Flying pose: the head stays exactly in place, the face is fully visible and not overlapped by the coat or the arm; the outstretched hands stay where they are, now empty. Lying crash pose: the face lies at exactly the same place with the chin resting on the forearms exactly as in Image 1; draw the face only once; the forearms and hands stay where they are, the area where the parcel was becomes empty (transparent).\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them. Keep the dizzy stars of the crash pose.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same slot positions, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, a second face, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props, figures in the empty slots.\n"
+    }
+   },
+   "artifacts": "artifacts/advent-identity-v3/07-logge-diener/"
+  },
+  {
+   "day": 8,
+   "item": "character.nele--ballkleid",
+   "reference": "character.nele",
+   "image": "character-advent-08.webp",
+   "portrait": "character-advent-08-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Locken, Hände und Umriss aus der Basis; goldene Kopfmaske in allen Posen auf dem Kopf (Sheet neu generiert). Fächer der Basis entfernt.",
+   "metrics": {
+    "slug": "nele-ballkleid",
+    "base": "nele",
+    "sheetIdentityPx": 12774,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 20571,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.92,
+    "headNccPortrait": 0.89,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 80088,
+      "psnrAll": 35.4,
+      "psnrIdentity": 34.9,
+      "identityPixels": 13299
+     },
+     "portrait": {
+      "bytes": 67220,
+      "psnrAll": 33.3,
+      "psnrIdentity": 40.0,
+      "identityPixels": 21256
+     }
+    }
+   },
+   "atlasNotes": null,
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet-v2.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Nele as Princess Iset (a girl with long brown curly hair). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a black and gold Egyptian top; a wide gold waist belt with a black and gold geometric front panel; a dusty mauve draped long skirt; gold laced sandals; light forearm wraps; gold necklace, earrings and bracelets; a golden mask worn on top of the head with a black feather and jewel chains.\nRemove: the fan, the black and gold shoulder collar, the trousers and the boots.\nKeep the hair exactly as in Image 1; the golden head mask sits on top of the head in all 8 poses, including the cheering pose with both arms raised. The raised hands are empty fists exactly as in Image 1 and hold nothing; never draw the mask in a hand.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Nele as Princess Iset (a girl with long brown curly hair). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a black and gold Egyptian top; a wide gold waist belt with a black and gold geometric front panel; a dusty mauve draped long skirt; gold laced sandals; light forearm wraps; gold necklace, earrings and bracelets; a golden mask worn on top of the head with a black feather and jewel chains.\nRemove: the fan, the black and gold shoulder collar, the trousers and the boots.\nKeep the hair exactly as in Image 1; the golden head mask sits on top of it.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/08-nele-ballkleid/"
+  },
+  {
+   "day": 9,
+   "item": "character.hendrik--partygast",
+   "reference": "character.hendrik",
+   "image": "character-advent-09.webp",
+   "portrait": "character-advent-09-portrait.webp",
+   "verdict": "übernommen (Pilot)",
+   "notes": "Gesicht, Ohren, Hals, Hände und Umriss pixelgleich zu Karl. Der Haaransatz unter der entfernten Schiebermütze ist neu gezeichnet (kleine Stirnlocke). Keine Brille ergänzt.",
+   "metrics": {
+    "slug": "hendrik",
+    "base": "hendrik",
+    "sheetIdentityPx": 8569,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 14644,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.86,
+    "headNccPortrait": 0.93,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 82650,
+      "psnrAll": 41.1,
+      "psnrIdentity": 38.1,
+      "identityPixels": 8976
+     },
+     "portrait": {
+      "bytes": 51914,
+      "psnrAll": 39.5,
+      "psnrIdentity": 41.2,
+      "identityPixels": 14998
+     }
+    }
+   },
+   "atlasNotes": null,
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing game character Karl (a boy). This exact drawing must be kept: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin and hand shapes. Do not move, rescale, re-pose, re-draw or restyle the figures.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments from it (cut, colours, materials). Ignore its face, glasses, hair, body proportions and poses completely.\nPrimary request: change ONLY the clothing of all 8 figures in Image 1:\n- Replace the brown henley shirt with a very dark brown, nearly black long-sleeved button-up shirt with a red pointed collar, as in Image 2.\n- Replace the brown trousers with long dark trousers and the shoes with dark leather shoes, as in Image 2.\n- Keep the black harness straps and the small metal ring at the back exactly as they are.\n- Remove the flat cap. Only where the cap was, continue the short brown hair that is already visible at the temples and above the ears, following the existing skull outline; do not make the head bigger.\n- Keep the two little yellow dizzy stars of the last pose.\nConstraints: everything that is not clothing or the cap must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: glasses, bigger eyes, rounder face, new hairstyle volume, changed hands, changed poses.\n"
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing portrait of the character Karl (a boy). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, teeth, jaw, ears, neck, skin, hands and fingers. Do not move, rescale, re-pose, re-draw or restyle him.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments from it (cut, colours, materials). Ignore its face, glasses, hair, body proportions and pose completely.\nPrimary request: change ONLY the clothing in Image 1:\n- Replace the brown henley shirt with a very dark brown, nearly black long-sleeved button-up shirt with a red pointed collar, as in Image 2, fitted to the existing body.\n- Replace the brown trousers with dark trousers, as in Image 2.\n- Keep the black harness straps and buckles exactly as they are.\n- Remove the flat cap. Only where the cap was, continue the short brown hair that is already visible at the temples and above the ear, following the existing skull outline; do not make the head bigger.\nConstraints: everything that is not clothing or the cap must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels.\nAvoid: glasses, bigger eyes, rounder face, new hairstyle volume, changed hands, changed pose.\n"
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/09-hendrik/"
+  },
+  {
+   "day": 11,
+   "item": "character.nela--gauklerin",
+   "reference": "character.nela--anno",
+   "image": "character-advent-11.webp",
+   "portrait": "character-advent-11-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Haare, Hände und Umriss aus der Basis; Porträt mit festem Bildausschnitt neu generiert.",
+   "metrics": {
+    "slug": "nela-gauklerin",
+    "base": "nela--anno",
+    "sheetIdentityPx": 21224,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 56163,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.92,
+    "headNccPortrait": 0.96,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 76176,
+      "psnrAll": 35.6,
+      "psnrIdentity": 39.5,
+      "identityPixels": 21630
+     },
+     "portrait": {
+      "bytes": 69300,
+      "psnrAll": 36.3,
+      "psnrIdentity": 39.9,
+      "identityPixels": 57101
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Die Fußlinie springt um 3 px.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Nela as young Marie (a girl with long fair hair). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: an orange short puff-sleeve blouse; a dark brown sleeveless laced vest; orange and brown vertically striped wide knee breeches; bare lower legs and bare feet.\nRemove: the green dress and the old blouse and shoes.\nKeep the hair exactly as in Image 1.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait-v2.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Nela as young Marie (a girl with long fair hair). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: an orange short puff-sleeve blouse; a dark brown sleeveless laced vest; orange and brown vertically striped wide knee breeches; bare lower legs and bare feet.\nRemove: the green dress and the old blouse and shoes.\nKeep the hair exactly as in Image 1.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and exactly the same crop as Image 1: the head stays at the same place and size and the figure is cut off by the lower image edge exactly where Image 1 cuts it; do not zoom out and do not add legs or feet that Image 1 does not show. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/11-nela-gauklerin/"
+  },
+  {
+   "day": 12,
+   "item": "character.lina--gauklerin",
+   "reference": "character.lina--anno",
+   "image": "character-advent-12.webp",
+   "portrait": "character-advent-12-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Haare, Hände und Umriss aus der Basis. Das Buch der Basis ist in Sheet und Porträt entfernt (beides neu generiert).",
+   "metrics": {
+    "slug": "lina-gauklerin",
+    "base": "lina--anno",
+    "sheetIdentityPx": 16750,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 31283,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.89,
+    "headNccPortrait": 0.97,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 101618,
+      "psnrAll": 35.4,
+      "psnrIdentity": 39.7,
+      "identityPixels": 17172
+     },
+     "portrait": {
+      "bytes": 72076,
+      "psnrAll": 37.2,
+      "psnrIdentity": 43.0,
+      "identityPixels": 32161
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Die Fußlinie springt um 3 px.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet-v2.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Lina as young Emma (a girl with long light brown hair). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: an ochre short puff-sleeve blouse with ruffled sleeve hems and a waist frill; a dark brown laced fitted bodice; ochre and dark brown vertically striped balloon breeches ending near the knees; brown ankle boots.\nRemove: the green dress, the apron, the old shoes and the book. The book must be gone in every pose; the hands that held it stay exactly where they are with the same finger shapes, now empty, and the area behind the former book becomes the new costume.\nKeep the hair exactly as in Image 1.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait-v3.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Lina as young Emma (a girl with long light brown hair). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: an ochre short puff-sleeve blouse with ruffled sleeve hems and a waist frill; a dark brown laced fitted bodice; ochre and dark brown vertically striped balloon breeches ending near the knees; brown ankle boots.\nRemove: the green dress, the apron and the old shoes and the book. The book must be gone; the hand that held it stays exactly where it is with the same finger shape, now empty, resting against the new bodice, and the area behind the former book becomes the new costume.\nKeep the hair exactly as in Image 1.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and exactly the same crop as Image 1: the head stays at the same place and size and the figure is cut off by the lower image edge exactly where Image 1 cuts it; do not zoom out and do not add legs or feet that Image 1 does not show. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/12-lina-gauklerin/"
+  },
+  {
+   "day": 13,
+   "item": "character.theresa--falkenstein",
+   "reference": "character.theresa",
+   "image": "character-advent-13.webp",
+   "portrait": "character-advent-13-portrait.webp",
+   "verdict": "mit Einschränkung",
+   "notes": "Gesicht, Brille, Locken, Hände und Umriss aus der Basis. In der Sturzpose fehlen die Schwindelsterne der Basis (die Generierung hat sie nicht übernommen).",
+   "metrics": {
+    "slug": "theresa-falkenstein",
+    "base": "theresa",
+    "sheetIdentityPx": 20046,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 38317,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.93,
+    "headNccPortrait": 0.94,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 82310,
+      "psnrAll": 37.0,
+      "psnrIdentity": 36.3,
+      "identityPixels": 20590
+     },
+     "portrait": {
+      "bytes": 71890,
+      "psnrAll": 38.3,
+      "psnrIdentity": 41.6,
+      "identityPixels": 38677
+     }
+    }
+   },
+   "atlasNotes": null,
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Theresa as Clara (a girl with brown curly hair and glasses). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, glasses, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a cream blouse with gathered frilled sleeves and neckline lacing; a blue ankle-length skirt; dark low flat shoes.\nRemove: the patched cream dress (bare feet get the shoes).\nKeep the hair and the glasses exactly as in Image 1.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Theresa as Clara (a girl with brown curly hair and glasses). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, glasses, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a cream blouse with gathered frilled sleeves and neckline lacing; a blue ankle-length skirt; dark low flat shoes.\nRemove: the patched cream dress (bare feet get the shoes).\nKeep the hair and the glasses exactly as in Image 1.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/13-theresa-falkenstein/"
+  },
+  {
+   "day": 14,
+   "item": "character.jakob--partygast",
+   "reference": "character.jakob",
+   "image": "character-advent-14.webp",
+   "portrait": "character-advent-14-portrait.webp",
+   "verdict": "mit Einschränkung",
+   "notes": "Unterer Gesichtsbereich, Ohren, Hände und Umriss aus der Basis; die Augenmaske verdeckt die Augen. Das Haar unter der entfernten Schiebermütze ist neu gezeichnet.",
+   "metrics": {
+    "slug": "jakob",
+    "base": "jakob",
+    "sheetIdentityPx": 6123,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 11126,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.81,
+    "headNccPortrait": 0.84,
+    "lowPoses": [],
+    "localHeadAlign": [
+     "runA",
+     "passB",
+     "cheer",
+     "dangle",
+     "fly",
+     "portrait"
+    ],
+    "delivered": {
+     "sheet": {
+      "bytes": 93420,
+      "psnrAll": 37.3,
+      "psnrIdentity": 37.9,
+      "identityPixels": 6367
+     },
+     "portrait": {
+      "bytes": 71420,
+      "psnrAll": 33.4,
+      "psnrIdentity": 40.3,
+      "identityPixels": 11531
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Die Fußlinie springt um 4 px.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Jakob as Bruno (a boy). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: an ornate blue masquerade eye mask with gold outlines worn over the eyes; a magenta pink satin shirt with open folded collar; a dark waistcoat with gold vines and red floral brocade; long dark trousers; dark shoes.\nRemove: the flat cap, the brown jacket and the old trousers and shoes.\nRemove the flat cap. Only where the cap was, continue the hair that is already visible, following the existing skull outline; do not make the head bigger.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Jakob as Bruno (a boy). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: an ornate blue masquerade eye mask with gold outlines worn over the eyes; a magenta pink satin shirt with open folded collar; a dark waistcoat with gold vines and red floral brocade; long dark trousers; dark shoes.\nRemove: the flat cap, the brown jacket and the old trousers and shoes.\nRemove the flat cap. Only where the cap was, continue the hair that is already visible, following the existing skull outline; do not make the head bigger.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/14-jakob/"
+  },
+  {
+   "day": 15,
+   "item": "character.julian--partygast",
+   "reference": "character.julian",
+   "image": "character-advent-15.webp",
+   "portrait": "character-advent-15-portrait.webp",
+   "verdict": "mit Einschränkung",
+   "notes": "Gesicht, Haare und Umriss aus der Basis. Die Augenmaske des Kostüms erscheint nur im Porträt, nicht in den Sprites. Die weißen Handschuhe der Basis bleiben.",
+   "metrics": {
+    "slug": "julian",
+    "base": "julian",
+    "sheetIdentityPx": 5795,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 8961,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.81,
+    "headNccPortrait": 0.86,
+    "lowPoses": [],
+    "localHeadAlign": [
+     "passB",
+     "crash"
+    ],
+    "delivered": {
+     "sheet": {
+      "bytes": 97930,
+      "psnrAll": 36.7,
+      "psnrIdentity": 38.4,
+      "identityPixels": 5904
+     },
+     "portrait": {
+      "bytes": 68382,
+      "psnrAll": 33.2,
+      "psnrIdentity": 40.5,
+      "identityPixels": 8963
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Die Fußlinie springt um 5 px; die Laufpose berührt links den Rahmen.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Julian as the servant (a young man with dark curly hair). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a black tricorne hat with gold edge and a gold decorative cord; a silver and gold masquerade eye mask over the eyes; a white layered jabot; a red floral brocade waistcoat; a long black coat with gold trim and gold epaulettes; dark trousers; dark shoes.\nRemove: the old waistcoat, shirt and trousers.\nThe tricorne sits on the same head; do not make the head bigger.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Julian as the servant (a young man with dark curly hair). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a black tricorne hat with gold edge and a gold decorative cord; a silver and gold masquerade eye mask over the eyes; a white layered jabot; a red floral brocade waistcoat; a long black coat with gold trim and gold epaulettes; dark trousers; dark shoes.\nRemove: the old waistcoat, shirt and trousers.\nThe tricorne sits on the same head; do not make the head bigger.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/15-julian/"
+  },
+  {
+   "day": 16,
+   "item": "character.elena--strohkleid",
+   "reference": "character.elena--anno",
+   "image": "character-advent-16.webp",
+   "portrait": "character-advent-16-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Locken, Hände und Umriss aus der Basis; Holzschwert.",
+   "metrics": {
+    "slug": "elena-strohkleid",
+    "base": "elena--anno",
+    "sheetIdentityPx": 17984,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 40996,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.9,
+    "headNccPortrait": 0.97,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 93822,
+      "psnrAll": 36.2,
+      "psnrIdentity": 36.3,
+      "identityPixels": 18568
+     },
+     "portrait": {
+      "bytes": 68894,
+      "psnrAll": 35.4,
+      "psnrIdentity": 37.5,
+      "identityPixels": 41771
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Die Jubelpose berührt oben den Rahmen.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Elena as Johanna (a young woman with long brown curly hair). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a loose ivory straw dress with gathered puffed sleeves and straw ties and tassels; bare feet; a simple wooden sword held in the front hand.\nRemove: the red skirt, the blouse and the boots.\nKeep the hair exactly as in Image 1.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Elena as Johanna (a young woman with long brown curly hair). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a loose ivory straw dress with gathered puffed sleeves and straw ties and tassels; bare feet; a simple wooden sword held in the front hand.\nRemove: the red skirt, the blouse and the boots.\nKeep the hair exactly as in Image 1.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/16-elena-strohkleid/"
+  },
+  {
+   "day": 17,
+   "item": "character.theo--dorfbewohner",
+   "reference": "character.theo",
+   "image": "character-advent-17.webp",
+   "portrait": "character-advent-17-portrait.webp",
+   "verdict": "mit Einschränkung",
+   "notes": "Gesicht, Hände und Umriss aus der Basis. Die Kettenhaube der Basis wurde durch eine Kapuze ersetzt; Haar ist nicht sichtbar. Speer entfernt, die Hände bleiben in Griffhaltung.",
+   "metrics": {
+    "slug": "theo",
+    "base": "theo",
+    "sheetIdentityPx": 2060,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 4027,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.84,
+    "headNccPortrait": 0.87,
+    "lowPoses": [],
+    "localHeadAlign": [
+     "runA",
+     "passA",
+     "runB",
+     "cheer",
+     "dangle",
+     "fly",
+     "crash"
+    ],
+    "delivered": {
+     "sheet": {
+      "bytes": 50526,
+      "psnrAll": 36.0,
+      "psnrIdentity": 31.6,
+      "identityPixels": 2258
+     },
+     "portrait": {
+      "bytes": 67478,
+      "psnrAll": 37.7,
+      "psnrIdentity": 43.1,
+      "identityPixels": 4395
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Die Fußlinie springt um 4 px; die Laufpose berührt links den Rahmen.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Theo as the guard (a young man). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a blue cloth hood covering the head with a pointed shoulder edge; a loose cream shirt with brown lacing and rolled cuffs; a dark belt; dark knee breeches; tall brown leather boots.\nRemove: the chainmail coif, the guard tunic, the crossed straps and the spear (hands simply hold nothing).\nReplace the chainmail coif with the blue hood on the same head; do not make the head bigger.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Theo as the guard (a young man). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a blue cloth hood covering the head with a pointed shoulder edge; a loose cream shirt with brown lacing and rolled cuffs; a dark belt; dark knee breeches; tall brown leather boots.\nRemove: the chainmail coif, the guard tunic, the crossed straps and the spear (hands simply hold nothing).\nReplace the chainmail coif with the blue hood on the same head; do not make the head bigger.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/17-theo/"
+  },
+  {
+   "day": 18,
+   "item": "character.theresa--isets-ballkleid",
+   "reference": "character.theresa",
+   "image": "character-advent-18.webp",
+   "portrait": "character-advent-18-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Brille, Locken, Hände und Umriss aus der Basis; Kopfmaske auf dem Kopf.",
+   "metrics": {
+    "slug": "theresa-ballkleid",
+    "base": "theresa",
+    "sheetIdentityPx": 14611,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 29084,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.86,
+    "headNccPortrait": 0.87,
+    "lowPoses": [],
+    "localHeadAlign": [
+     "cheer",
+     "portrait"
+    ],
+    "delivered": {
+     "sheet": {
+      "bytes": 91280,
+      "psnrAll": 35.1,
+      "psnrIdentity": 36.0,
+      "identityPixels": 15158
+     },
+     "portrait": {
+      "bytes": 67320,
+      "psnrAll": 33.6,
+      "psnrIdentity": 38.2,
+      "identityPixels": 29410
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Die Feder der Kopfmaske stößt in Jubel-, Hänge- und Flugpose oben an den Rahmen; die Fußlinie springt um 3 px.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Theresa as Clara (a girl with brown curly hair and glasses). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, glasses, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a black sleeveless bodice; a broad gold waist sash; a draped taupe mauve long skirt with a black and gold geometric hanging centre panel; gold strapped sandals; cream forearm wraps; gold bracelets; a layered Egyptian necklace and earrings; a small forehead mask ornament with a black feather.\nRemove: the patched cream dress (bare feet get the sandals).\nKeep the hair and the glasses exactly as in Image 1.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Theresa as Clara (a girl with brown curly hair and glasses). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, glasses, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a black sleeveless bodice; a broad gold waist sash; a draped taupe mauve long skirt with a black and gold geometric hanging centre panel; gold strapped sandals; cream forearm wraps; gold bracelets; a layered Egyptian necklace and earrings; a small forehead mask ornament with a black feather.\nRemove: the patched cream dress (bare feet get the sandals).\nKeep the hair and the glasses exactly as in Image 1.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/18-theresa-ballkleid/"
+  },
+  {
+   "day": 19,
+   "item": "character.till--creepshow",
+   "reference": "character.till",
+   "image": "character-till--creepshow.webp",
+   "portrait": "character-till--creepshow-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Brille, Bart, Haare, Hände und Umriss aus der Basis. Zigarre entfernt.",
+   "metrics": {
+    "slug": "till",
+    "base": "till",
+    "sheetIdentityPx": 15118,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 24909,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.91,
+    "headNccPortrait": 0.96,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 79300,
+      "psnrAll": 36.3,
+      "psnrIdentity": 34.0,
+      "identityPixels": 15456
+     },
+     "portrait": {
+      "bytes": 68078,
+      "psnrAll": 37.4,
+      "psnrIdentity": 36.3,
+      "identityPixels": 25251
+     }
+    }
+   },
+   "atlasNotes": null,
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Till as Herr Schniebli (a man with glasses and a short beard). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, glasses, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a white long-sleeved shirt with open collar; a grey brown buttoned waistcoat with pockets; dark brown long trousers; dark shoes.\nRemove: the jacket, the yellow vest, the beige trousers and the cigar.\nKeep the hair, beard and glasses exactly as in Image 1.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Till as Herr Schniebli (a man with glasses and a short beard). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, glasses, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a white long-sleeved shirt with open collar; a grey brown buttoned waistcoat with pockets; dark brown long trousers; dark shoes.\nRemove: the jacket, the yellow vest, the beige trousers and the cigar.\nKeep the hair, beard and glasses exactly as in Image 1.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, glasses, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/19-till/"
+  },
+  {
+   "day": 20,
+   "item": "character.logge--partygast",
+   "reference": "character.logge",
+   "image": "character-advent-20.webp",
+   "portrait": "character-advent-20-portrait.webp",
+   "verdict": "mit Einschränkung",
+   "notes": "Nase, Mund, Kinn, Ohr und Umriss aus der Basis; die Augenmaske verdeckt die Augen. Das gesamte obere Haar unter der entfernten Kappe ist neu gezeichnet und nicht durch die Basis belegt. Porträt neu generiert.",
+   "metrics": {
+    "slug": "logge-partygast",
+    "base": "logge",
+    "sheetIdentityPx": 3079,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 7492,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.76,
+    "headNccPortrait": 0.78,
+    "lowPoses": [],
+    "localHeadAlign": [
+     "runA",
+     "passA",
+     "runB",
+     "cheer",
+     "dangle",
+     "fly",
+     "crash"
+    ],
+    "delivered": {
+     "sheet": {
+      "bytes": 84040,
+      "psnrAll": 39.2,
+      "psnrIdentity": 37.7,
+      "identityPixels": 3206
+     },
+     "portrait": {
+      "bytes": 69022,
+      "psnrAll": 34.4,
+      "psnrIdentity": 40.1,
+      "identityPixels": 7592
+     }
+    }
+   },
+   "atlasNotes": null,
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Logge as the messenger (a young man). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a long black coat with gold looped braid fastenings; a high dark red collar with red lining; dark trousers; black shoes; an ornate black and gold eye mask over the eyes; black gloves.\nRemove: the messenger cap, the yellow and red shirt, the trousers with red stripe and the parcel (hands simply hold nothing).\nRemove the cap. Only where the cap was, continue the hair that is already visible, following the existing skull outline; do not make the head bigger.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait-v2.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Logge as the messenger (a young man). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a long black coat with gold looped braid fastenings; a high dark red collar with red lining; dark trousers; black shoes; an ornate black and gold eye mask over the eyes; black gloves.\nRemove: the messenger cap, the yellow and red shirt, the trousers with red stripe and the parcel (hands simply hold nothing).\nRemove the cap. Only where the cap was, continue the hair that is already visible, following the existing skull outline; do not make the head bigger.\nBoth hands and forearms stay exactly where Image 1 has them, with the same finger shapes, simply empty where the parcel was; the area behind the former parcel becomes the new coat front.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and exactly the same crop as Image 1: the head stays at exactly the same place and size, the shoulders keep their width, and the figure is cut off by the lower image edge exactly where Image 1 cuts it; do not zoom out, do not shrink the figure and do not show more of the body than Image 1 shows. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/20-logge-partygast/"
+  },
+  {
+   "day": 21,
+   "item": "character.niko--butlerpraktikant",
+   "reference": "character.niko",
+   "image": "character-advent-21.webp",
+   "portrait": "character-advent-21-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Hände und Umriss aus der Basis; Porträt neu generiert (erste Fassung hatte einen verschobenen Kopf). Haar unter der entfernten Propellermütze neu gezeichnet; Rucksack entfernt.",
+   "metrics": {
+    "slug": "niko",
+    "base": "niko",
+    "sheetIdentityPx": 10148,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 11893,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.89,
+    "headNccPortrait": 0.94,
+    "lowPoses": [],
+    "localHeadAlign": [
+     "runA",
+     "passA",
+     "passB",
+     "fly"
+    ],
+    "delivered": {
+     "sheet": {
+      "bytes": 104416,
+      "psnrAll": 37.2,
+      "psnrIdentity": 39.0,
+      "identityPixels": 10498
+     },
+     "portrait": {
+      "bytes": 66526,
+      "psnrAll": 36.5,
+      "psnrIdentity": 40.6,
+      "identityPixels": 12343
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Der Mantelschoß berührt in der Flugpose links den Rahmen. Der Seilpunkt der Flugpose liegt jetzt auf der neu gezeichneten Öse.",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Niko as Emil (a boy). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: an oversized long black butler tailcoat with gold buttons, lapels and long tails, worn over the red hoodie (hood and cords visible); beige long trousers; dark closed shoes.\nRemove: the propeller cap, the backpack and the green shorts.\nRemove the propeller cap. Only where the cap was, continue the hair that is already visible, following the existing skull outline; do not make the head bigger.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait-v2.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Niko as Emil (a boy). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: an oversized long black butler tailcoat with gold buttons, lapels and long tails, worn over the red hoodie (hood and cords visible); beige long trousers; dark closed shoes.\nRemove: the propeller cap, the backpack and the green shorts.\nRemove the propeller cap. Only where the cap was, continue the hair that is already visible, following the existing skull outline; do not make the head bigger.\nBoth hands stay exactly where Image 1 has them, with the same open palms and finger shapes.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and exactly the same crop as Image 1: the head stays at exactly the same place and size, the shoulders keep their width, and the figure is cut off by the lower image edge exactly where Image 1 cuts it; do not zoom out, do not shrink the figure and do not show more of the body than Image 1 shows. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/21-niko/"
+  },
+  {
+   "day": 22,
+   "item": "character.elena--bademantel",
+   "reference": "character.elena",
+   "image": "character-advent-22.webp",
+   "portrait": "character-advent-22-portrait.webp",
+   "verdict": "übernommen",
+   "notes": "Gesicht, Locken, Federschmuck, Hände und Umriss aus der Basis.",
+   "metrics": {
+    "slug": "elena-bademantel",
+    "base": "elena",
+    "sheetIdentityPx": 20353,
+    "sheetIdentityExact": true,
+    "portraitIdentityPx": 33187,
+    "portraitIdentityExact": true,
+    "headNccMin": 0.77,
+    "headNccPortrait": 0.96,
+    "lowPoses": [],
+    "localHeadAlign": [],
+    "delivered": {
+     "sheet": {
+      "bytes": 92474,
+      "psnrAll": 36.7,
+      "psnrIdentity": 36.0,
+      "identityPixels": 21010
+     },
+     "portrait": {
+      "bytes": 65752,
+      "psnrAll": 37.0,
+      "psnrIdentity": 38.6,
+      "identityPixels": 33554
+     }
+    }
+   },
+   "atlasNotes": "Atlasprüfung: Die Fußlinie springt um 7 px (Hausschuhe statt Absatzschuhen).",
+   "prompts": {
+    "sheet": {
+     "file": "prompt-sheet.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Elena as Lucy (a woman with long dark curly hair). Keep this exact drawing: every figure stays at exactly the same position and size on the canvas, with the same pose, same limb positions, same silhouette of head, torso, arms, legs and hands, same face, eyes, nose, mouth, jaw, ears, skin, hair and hand shapes. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in all 8 poses, fitted to the existing body: a white plush bathrobe with wrap lapels and a tied waist belt; white slippers; a red feather in the hair.\nRemove: the red dress and the black heels.\nKeep the hair exactly as in Image 1.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas, same 4x2 arrangement, same figure scale. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "portrait": {
+     "file": "prompt-portrait.txt",
+     "text": "Use case: identity-preserve (clothing-only edit, precise-object-edit).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET. The existing character Elena as Lucy (a woman with long dark curly hair). Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair, hands and fingers. Do not move, rescale, re-pose, redraw or restyle.\n- Image 2 = COSTUME REFERENCE ONLY. Take only the garments and accessories from it (cut, colours, materials). Ignore its face, hair, body proportions and poses completely.\nPrimary request: change ONLY what the character wears in the portrait, fitted to the existing body: a white plush bathrobe with wrap lapels and a tied waist belt; white slippers; a red feather in the hair.\nRemove: the red dress and the black heels.\nKeep the hair exactly as in Image 1.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: everything that is not clothing must remain pixel-identical in place. Same canvas and crop. Transparent background, no shadow, no labels, no frames.\nAvoid: changed faces, bigger eyes, rounder face, bigger head, new hairstyle, changed hands, changed poses, additional props."
+    },
+    "maskSheet": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production 2D game sprite grid, 8 poses on a 1536x1024 canvas.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep every figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels.",
+    "maskPortrait": "Use case: precise-object-edit (segmentation by recolour).\nAsset type: technical mask for a production character portrait, 1024x1024.\nInput images: Image 1 = EDIT TARGET.\nPrimary request: in Image 1, paint every worn or held item in a single flat pure magenta (#FF00FF), with no shading and no outline: all headwear (caps, hats, hoods, coifs, head ornaments, feathers, masks worn on the face, bandages), all garments, collars, gloves, belts, bags, pouches, jewellery, socks, shoes, harness straps and their metal rings, and every held object or prop (fans, parcels, spears, swords, candles, cigars). Leave everything that is part of the body exactly as it is: face, eyes, eyebrows, nose, mouth, teeth, ears, neck, bare skin, hair, beard and hands. Leave dizzy stars or other effects unchanged.\nConstraints: keep the figure at exactly the same position, size and silhouette; same canvas; the magenta areas must follow the exact outlines of the items. Transparent background, no labels."
+   },
+   "artifacts": "artifacts/advent-identity-v3/22-elena-bademantel/"
+  }
+ ]
+}
