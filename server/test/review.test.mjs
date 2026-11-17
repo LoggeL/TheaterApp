@@ -40,4 +40,11 @@ test('review UID isolates reads, writes, media, accounts and script source from 
   assert.equal((await call('reviewer', '/admin/runner/catalog')).status, 403);
   assert.equal((await call('reviewer', '/admin/runner/skins/character-unique-beatrice.webp')).status, 403);
   assert.equal((await call('owner', '/admin/runner/catalog')).status, 200);
+  // Nor the Release-Zeitplan.
+  assert(real.capabilities.features.includes('runnerReleaseSchedule'));
+  assert(!demo.capabilities.features.includes('runnerReleaseSchedule'));
+  assert.equal((await call('reviewer', '/admin/runner/releases')).status, 403);
+  const put = await fetch(`http://127.0.0.1:${server.address().port}/api/mobile/v1/admin/runner/releases/traum-2026`, { method: 'PUT', headers: { Authorization: 'Bearer reviewer', 'Content-Type': 'application/json' }, body: JSON.stringify({ date: '2026-11-25' }) });
+  assert.equal(put.status, 403);
+  assert.equal((await call('owner', '/admin/runner/releases')).status, 200);
 });

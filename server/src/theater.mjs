@@ -12,6 +12,7 @@ import { buyItem, bundledCatalog, collectionBoard, ensembleSeen, galaSeen, openC
 import { bundledContentReleases, parseContentReleases, releasedCatalog, releaseIsActive } from './runner-content-releases.mjs';
 import { packGoalsView } from './runner-pack-goals.mjs';
 import { adminRunnerCatalog, adminRunnerSkin } from './runner-admin-catalog.mjs';
+import { adminReleaseSchedule, rescheduleRelease, withReleaseOverrides } from './runner-release-schedule.mjs';
 import { forgetMonthScores, periodBoard, rankedBoard, recordMonthRun } from './runner-monthly.mjs';
 import { forgetGala, galaView } from './runner-gala.mjs';
 import { checkGhost, forgetWeekly, recordWeeklyRun, startWeeklyRound, weeklyAnswer, weeklySeen, weeklyView } from './runner-weekly.mjs';
@@ -49,7 +50,7 @@ export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // An optional reason when an event is called off (`event.cancel`); shown in the app and in the push.
 export const cancelReasonMaxLength = 300;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink', 'runnerMonthlyGala', 'runnerGageCrates', 'eventCancel', 'runnerWeekly', 'runnerWeeklyRewards']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink', 'runnerMonthlyGala', 'runnerGageCrates', 'eventCancel', 'runnerWeekly', 'runnerWeeklyRewards', 'runnerReleaseSchedule']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -185,6 +186,12 @@ export class Theater {
     return this._releasedRunnerCatalog;
   }
   set runnerCatalog(value) { this._runnerCatalog = value; this._releasedRunnerCatalog = null; }
+  // The release plan: releases.json (or the plan of a test) with the admins' dates of the
+  // Release-Zeitplan on top (runner-release-schedule.mjs), kept until the next change there.
+  get runnerReleases() { return this._runnerReleases ??= withReleaseOverrides(this._plannedRunnerReleases, this.store); }
+  set runnerReleases(value) { this._plannedRunnerReleases = value; this.reloadRunnerReleases(); }
+  get plannedRunnerReleases() { return this._plannedRunnerReleases; }
+  reloadRunnerReleases() { this._runnerReleases = null; this._releasedRunnerCatalog = null; }
   // `runnerCatalog` (see runner-wardrobe.mjs `loadCatalog`) and `random` replace the bundled
   // wardrobe and the secure random numbers of crate openings in tests.
   constructor(store, { bootstrapEmail = '', pushEnabled = false, emailEnabled = false, clock = () => new Date(), runnerCatalog = null, runnerReleases = null, random = secureRandom, missionRules, attendanceRules } = {}) {
@@ -569,6 +576,9 @@ export class Theater {
   get runnerBaseCatalog() { return this._runnerCatalog; }
   runnerAdminCatalog(uid) { return adminRunnerCatalog(this, uid); }
   runnerAdminSkin(uid, name) { return adminRunnerSkin(this, uid, name); }
+  // The admins' Release-Zeitplan (runner-release-schedule.mjs): new dates without a deploy.
+  runnerReleaseSchedule(uid) { return adminReleaseSchedule(this, uid); }
+  runnerReleaseReschedule(uid, id, b) { return rescheduleRelease(this, uid, id, b); }
   /** Top list of active people with a score above zero; equal scores share a rank, the earlier best comes first. */
   runnerBoard(a) {
     return rankedBoard(this, a, this.store.all('runnerScores').map(x => ({ personId: x.personId, score: x.best, at: x.bestAt })));

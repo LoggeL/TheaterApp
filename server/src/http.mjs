@@ -250,6 +250,10 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       // The admins' Skin-Viewer (runner-admin-catalog.mjs). Unlike the members' pictures above, these
       // are never kept: no browser cache, and the service worker only stores the members' route.
       if (route === '/admin/runner/catalog' && req.method === 'GET') return json(res, 200, theater.runnerAdminCatalog(identity.uid));
+      // The admins' Release-Zeitplan (runner-release-schedule.mjs): the dates of releases.json, changeable.
+      if (route === '/admin/runner/releases' && req.method === 'GET') return json(res, 200, theater.runnerReleaseSchedule(identity.uid));
+      const adminRelease = route.match(/^\/admin\/runner\/releases\/([a-z0-9][a-z0-9-]*)$/);
+      if (adminRelease && req.method === 'PUT') return json(res, 200, theater.runnerReleaseReschedule(identity.uid, adminRelease[1], body));
       const adminSkin = route.match(/^\/admin\/runner\/skins\/([^/]+)$/);
       if (adminSkin && req.method === 'GET') {
         const file = theater.runnerAdminSkin(identity.uid, adminSkin[1]);

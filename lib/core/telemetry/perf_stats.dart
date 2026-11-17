@@ -367,6 +367,7 @@ const _idCollections = {
   'accounts',
   'website-profiles',
   'skins',
+  'releases',
 };
 
 final _idLike = RegExp(r'[0-9.%:@]');
