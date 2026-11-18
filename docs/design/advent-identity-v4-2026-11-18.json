@@ -1,0 +1,1555 @@
+{
+ "date": "2026-11-18",
+ "branch": "skins-feedback-v4",
+ "method": "v3 master as edit target, one targeted image_gen edit per point via Codex CLI imagegen; base identity re-inserted; see docs/skin-identity-2026-11-15.md (v4)",
+ "points": {
+  "1": {
+   "item": "character.elena--bademantel",
+   "fix": "- In every one of the 8 poses she holds one long red feather (a single red plume feather with a thin quill, about as long as her forearm) firmly in one hand, the quill inside her fist. It is the same feather with the same size and colour in all 8 poses.\n- Dangling pose (lower row, second): add the same red feather, held in one of her hands in front of her legs.\n- Keep the bathrobe, the slippers and the red feather in the hair exactly as they are.",
+   "options": {},
+   "selection": {},
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Elena as Lucy, a woman with long dark curly hair, in a white bathrobe with white slippers and a red feather in the hair. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below.\nCorrections:\n- In every one of the 8 poses she holds one long red feather (a single red plume feather with a thin quill, about as long as her forearm) firmly in one hand, the quill inside her fist. It is the same feather with the same size and colour in all 8 poses.\n- Dangling pose (lower row, second): add the same red feather, held in one of her hands in front of her legs.\n- Keep the bathrobe, the slippers and the red feather in the hair exactly as they are.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": null,
+   "harness": {
+    "runA": [
+     63,
+     72
+    ],
+    "passA": [
+     77,
+     63
+    ],
+    "runB": [
+     60,
+     67
+    ],
+    "passB": [
+     78,
+     60
+    ],
+    "cheer": [
+     56,
+     83
+    ],
+    "dangle": [
+     49,
+     52
+    ],
+    "fly": [
+     89,
+     46
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 121162,
+     "psnr": 40.39
+    },
+    "harness": {
+     "runA": [
+      63,
+      72
+     ],
+     "passA": [
+      77,
+      63
+     ],
+     "runB": [
+      60,
+      67
+     ],
+     "passB": [
+      78,
+      60
+     ],
+     "cheer": [
+      56,
+      83
+     ],
+     "dangle": [
+      49,
+      52
+     ],
+     "fly": [
+      89,
+      46
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 20573
+  },
+  "2": {
+   "item": "character.theresa--falkenstein",
+   "fix": "- Shoes: in all 8 poses she wears exactly the same pair of shoes: closed black leather Mary-Jane shoes with a thin strap over the instep and a very low heel. Same size, same shape and same colour in every pose; each shoe follows its foot naturally. In the dangling pose (lower row, second) both hanging feet wear these shoes, cleanly drawn, no melted or stretched shapes. In the flying and crash poses the feet also wear them.\n- Crash pose (lower right): add two small yellow cartoon dizzy stars with a thin curved orbit line circling just above her head.\n- Keep the blouse and the blue skirt exactly as they are.",
+   "options": {
+    "drop_lower": true,
+    "stars": true
+   },
+   "selection": {},
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Theresa as Clara, a girl with brown curly hair and glasses, in a cream blouse and a long blue skirt. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, glasses, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below.\nCorrections:\n- Shoes: in all 8 poses she wears exactly the same pair of shoes: closed black leather Mary-Jane shoes with a thin strap over the instep and a very low heel. Same size, same shape and same colour in every pose; each shoe follows its foot naturally. In the dangling pose (lower row, second) both hanging feet wear these shoes, cleanly drawn, no melted or stretched shapes. In the flying and crash poses the feet also wear them.\n- Crash pose (lower right): add two small yellow cartoon dizzy stars with a thin curved orbit line circling just above her head.\n- Keep the blouse and the blue skirt exactly as they are.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": null,
+   "harness": {
+    "runA": [
+     72,
+     57
+    ],
+    "passA": [
+     91,
+     61
+    ],
+    "runB": [
+     84,
+     61
+    ],
+    "passB": [
+     97,
+     58
+    ],
+    "cheer": [
+     44,
+     73
+    ],
+    "dangle": [
+     59,
+     31
+    ],
+    "fly": [
+     116,
+     42
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 111258,
+     "psnr": 40.44
+    },
+    "harness": {
+     "runA": [
+      72,
+      57
+     ],
+     "passA": [
+      91,
+      61
+     ],
+     "runB": [
+      84,
+      61
+     ],
+     "passB": [
+      97,
+      58
+     ],
+     "cheer": [
+      44,
+      73
+     ],
+     "dangle": [
+      59,
+      31
+     ],
+     "fly": [
+      116,
+      42
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 18146
+  },
+  "3": {
+   "item": "character.theresa--isets-ballkleid",
+   "fix": "- Sandals: in all 8 poses she wears exactly the same pair of gold strapped flat sandals (a sole, straps across the toes and around the ankle). Same size, same shape and same colour in every pose. The flying pose (lower row, third) and the crash pose also show both feet in these sandals; no bare feet anywhere.\n- The black feather of the golden head ornament is short and leans back: in every pose it stays completely inside the grey rectangle with a clear gap above it, especially in the cheering, dangling and flying poses.\n- Keep everything else of the costume exactly as it is.",
+   "options": {
+    "drop_lower": true,
+    "frames": true
+   },
+   "selection": {
+    "prescale": {
+     "dangle": [
+      0.9,
+      [
+       62,
+       164
+      ],
+      [
+       62,
+       162
+      ]
+     ]
+    },
+    "override": {
+     "dangle": [
+      "gen-sheet-b.png",
+      "mask-gen-sheet-b.png"
+     ]
+    }
+   },
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Theresa as Clara, a girl with brown curly hair and glasses, in a black and gold Egyptian top, a mauve draped skirt and a golden head mask with a black feather. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, glasses, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below. Each pose has a thin light grey rectangle around it: that rectangle is the hard border of the pose. Everything of the figure, including hats, feathers, props and loose cloth, must stay completely inside its own rectangle with a small gap to the line. Keep the rectangles unchanged.\nCorrections:\n- Sandals: in all 8 poses she wears exactly the same pair of gold strapped flat sandals (a sole, straps across the toes and around the ankle). Same size, same shape and same colour in every pose. The flying pose (lower row, third) and the crash pose also show both feet in these sandals; no bare feet anywhere.\n- The black feather of the golden head ornament is short and leans back: in every pose it stays completely inside the grey rectangle with a clear gap above it, especially in the cheering, dangling and flying poses.\n- Keep everything else of the costume exactly as it is.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": null,
+   "harness": {
+    "runA": [
+     72,
+     56
+    ],
+    "passA": [
+     91,
+     61
+    ],
+    "runB": [
+     84,
+     60
+    ],
+    "passB": [
+     97,
+     57
+    ],
+    "cheer": [
+     44,
+     73
+    ],
+    "dangle": [
+     59,
+     42
+    ],
+    "fly": [
+     116,
+     42
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 121904,
+     "psnr": 39.59
+    },
+    "harness": {
+     "runA": [
+      72,
+      56
+     ],
+     "passA": [
+      91,
+      61
+     ],
+     "runB": [
+      84,
+      60
+     ],
+     "passB": [
+      97,
+      57
+     ],
+     "cheer": [
+      44,
+      73
+     ],
+     "dangle": [
+      59,
+      42
+     ],
+     "fly": [
+      116,
+      42
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 13130
+  },
+  "4": {
+   "item": "character.sophie--waisenhaus",
+   "fix": "- Running frames (upper row): redraw both lower legs and bare feet as clean, simple child feet in the same cartoon style: in all four frames the feet have the same size, the same shape and the same simple toe drawing, the ankles connect smoothly to the shins, no warped, doubled or melted shapes. The supporting foot stands flat on one common ground line in every running frame; the lifted foot is relaxed with the toes pointing down and back.\n- Apply the same clean bare feet to the cheering, dangling, flying and crash poses.\n- Keep the dress, the candle and everything else exactly as it is.",
+   "options": {
+    "drop_lower": true
+   },
+   "selection": {},
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Sophie as Mia, a girl with long brown hair, in a long cream patched orphanage dress, barefoot. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below.\nCorrections:\n- Running frames (upper row): redraw both lower legs and bare feet as clean, simple child feet in the same cartoon style: in all four frames the feet have the same size, the same shape and the same simple toe drawing, the ankles connect smoothly to the shins, no warped, doubled or melted shapes. The supporting foot stands flat on one common ground line in every running frame; the lifted foot is relaxed with the toes pointing down and back.\n- Apply the same clean bare feet to the cheering, dangling, flying and crash poses.\n- Keep the dress, the candle and everything else exactly as it is.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": null,
+   "harness": {
+    "runA": [
+     76,
+     58
+    ],
+    "passA": [
+     76,
+     61
+    ],
+    "runB": [
+     76,
+     61
+    ],
+    "passB": [
+     75,
+     62
+    ],
+    "cheer": [
+     39,
+     87
+    ],
+    "dangle": [
+     43,
+     67
+    ],
+    "fly": [
+     89,
+     48
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 121314,
+     "psnr": 38.64
+    },
+    "harness": {
+     "runA": [
+      76,
+      58
+     ],
+     "passA": [
+      76,
+      61
+     ],
+     "runB": [
+      76,
+      61
+     ],
+     "passB": [
+      75,
+      62
+     ],
+     "cheer": [
+      39,
+      87
+     ],
+     "dangle": [
+      43,
+      67
+     ],
+     "fly": [
+      89,
+      48
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 20920
+  },
+  "5": {
+   "item": "character.yunus--explosion",
+   "fix": "- Add theatre make-up after an explosion: a few black soot smudges on his face (on one cheek, the forehead and the nose bridge; patchy and semi-transparent so the features stay recognisable) and a little soot on the hands.\n- Add a small dollop of white whipped cream with a soft swirl sitting in his hair on top of the head, in every pose at the same place.\n- Do not change the face shape, glasses, eyes, mouth or hairstyle; only add the soot and the cream on top.",
+   "options": {
+    "soot": true
+   },
+   "selection": {
+    "fit": {
+     "dangle": [
+      0.92,
+      0,
+      -3
+     ],
+     "fly": [
+      1,
+      4,
+      0
+     ]
+    }
+   },
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Yunus as Dr. Adrian, a young man with glasses, in a torn shirt and ragged waistcoat after a lab explosion. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, glasses, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below.\nCorrections:\n- Add theatre make-up after an explosion: a few black soot smudges on his face (on one cheek, the forehead and the nose bridge; patchy and semi-transparent so the features stay recognisable) and a little soot on the hands.\n- Add a small dollop of white whipped cream with a soft swirl sitting in his hair on top of the head, in every pose at the same place.\n- Do not change the face shape, glasses, eyes, mouth or hairstyle; only add the soot and the cream on top.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": "Use case: precise-object-edit (targeted correction of an existing character portrait).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET: Yunus as Dr. Adrian, a young man with glasses, in a torn shirt and ragged waistcoat after a lab explosion. Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, glasses, eyebrows, nose, mouth, jaw, ears, neck, skin, hair and hands, same drawing style.\nCorrections:\n- Add theatre make-up after an explosion: a few black soot smudges on his face (on one cheek, the forehead and the nose bridge; patchy and semi-transparent so the features stay recognisable).\n- Add a small dollop of white whipped cream with a soft swirl sitting in his hair on top of the head.\n- Do not change the face shape, glasses, eyes, mouth or hairstyle; only add the soot and the cream on top.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas and exactly the same crop as Image 1. Transparent background, no shadow, no labels.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, zooming out.",
+   "harness": {
+    "runA": [
+     86,
+     44
+    ],
+    "passA": [
+     92,
+     50
+    ],
+    "runB": [
+     86,
+     52
+    ],
+    "passB": [
+     93,
+     50
+    ],
+    "cheer": [
+     40,
+     59
+    ],
+    "dangle": [
+     47,
+     38
+    ],
+    "fly": [
+     110,
+     42
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 105478,
+     "psnr": 40.73
+    },
+    "portrait": {
+     "q": 100,
+     "bytes": 76892,
+     "psnr": 38.78
+    },
+    "harness": {
+     "runA": [
+      86,
+      44
+     ],
+     "passA": [
+      92,
+      50
+     ],
+     "runB": [
+      86,
+      52
+     ],
+     "passB": [
+      93,
+      50
+     ],
+     "cheer": [
+      40,
+      59
+     ],
+     "dangle": [
+      47,
+      38
+     ],
+     "fly": [
+      110,
+      42
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 7764
+  },
+  "6": {
+   "item": "character.nele--mumie",
+   "fix": "- Cheering pose (lower row, first) and dangling pose (lower row, second): redraw the head bandage so that the eye opening looks exactly like in the four running frames and the flying pose: one clean horizontal slit across the face that shows both eyes and the eyebrows on skin; bandage above the slit covers the forehead and hair, bandage below covers nose, mouth and chin. Same slit height and width as in the running frames.\n- Keep all other poses exactly as they are.",
+   "options": {
+    "frames": true
+   },
+   "selection": {
+    "sheet": "gen-sheet-b.png",
+    "mask": "mask-gen-sheet-b.png",
+    "opt": {
+     "agree": 70
+    },
+    "fit": {
+     "runA": [
+      0.93,
+      6,
+      -4
+     ],
+     "passA": [
+      0.93,
+      6,
+      -4
+     ],
+     "runB": [
+      0.93,
+      6,
+      -4
+     ],
+     "passB": [
+      0.93,
+      6,
+      -4
+     ],
+     "cheer": [
+      0.95,
+      -2,
+      -3
+     ],
+     "dangle": [
+      0.93,
+      0,
+      -4
+     ]
+    }
+   },
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Nele as Princess Iset, a girl, completely wrapped in cream mummy bandages with only an eye slit open. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below. Each pose has a thin light grey rectangle around it: that rectangle is the hard border of the pose. Everything of the figure, including hats, feathers, props and loose cloth, must stay completely inside its own rectangle with a small gap to the line. Keep the rectangles unchanged.\nCorrections:\n- The loose bandage ends that flutter away from the body are shorter: in every pose every bandage end stays completely inside its grey rectangle with a small gap to the line; nothing touches or crosses the rectangle.\n- Keep the head bandage with its clean horizontal eye slit exactly as it is in every pose, and keep the black harness straps clearly visible in every pose, as wide as in the running frames.\n- Keep everything else exactly as it is.\n\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": null,
+   "harness": {
+    "runA": [
+     96,
+     62
+    ],
+    "passA": [
+     94,
+     64
+    ],
+    "runB": [
+     86,
+     72
+    ],
+    "passB": [
+     97,
+     61
+    ],
+    "cheer": [
+     49,
+     76
+    ],
+    "dangle": [
+     54,
+     68
+    ],
+    "fly": [
+     106,
+     42
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 98106,
+     "psnr": 40.75
+    },
+    "harness": {
+     "runA": [
+      96,
+      62
+     ],
+     "passA": [
+      94,
+      64
+     ],
+     "runB": [
+      86,
+      72
+     ],
+     "passB": [
+      97,
+      61
+     ],
+     "cheer": [
+      49,
+      76
+     ],
+     "dangle": [
+      54,
+      68
+     ],
+     "fly": [
+      106,
+      42
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 2048
+  },
+  "7": {
+   "item": "character.hendrik--partygast",
+   "fix": "- No cap or hat of any kind: the head shows his short brown hair with visible strands.\n- Add a black masquerade eye mask over his eyes in all 8 poses (a simple black satin party mask with eye holes, thin ties behind the head), the same mask in every pose.\n- The shirt becomes a ruffled shirt: a very dark brown, nearly black shirt with a large, prominent shiny copper-red satin ruffle jabot at the collar that cascades in several layered frills down the chest, clearly visible in every pose. Keep the dark trousers and dark shoes.",
+   "options": {},
+   "selection": {
+    "sheet": "gen-sheet-c.png",
+    "mask": "mask-gen-sheet-c.png"
+   },
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Hendrik as Karl, a boy with short brown hair, as a guest at a masked party. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below.\nCorrections:\n- No cap or hat of any kind. The smooth rounded brown hair shape on his head still reads as a flat cap: redraw it as natural short brown boyish hair that is smaller and closer to the skull (do NOT keep that smooth rounded cap-like silhouette), short at the back and above the ear, a little longer on top with clearly separate textured strands and a slightly messy fringe falling on the forehead, drawn with the same dark outline and shading style as the rest of the figure. The same hairstyle in all 8 poses.\n- Add a black masquerade eye mask over his eyes in all 8 poses (a simple black satin party mask with eye holes, thin ties behind the head), the same mask in every pose.\n- The shirt becomes a ruffled shirt: a very dark brown, nearly black shirt with a large, prominent shiny copper-red satin ruffle jabot at the collar that cascades in several layered frills down the chest, clearly visible in every pose. Keep the dark trousers and dark shoes.\n- Keep every figure the same size and position as in Image 1; nothing may touch or leave its area.\n\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": "Use case: precise-object-edit (targeted correction of an existing character portrait).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET: Hendrik as Karl, a boy with short brown hair, as a guest at a masked party. Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair and hands, same drawing style.\nCorrections:\n- No cap or hat of any kind: the head shows his short brown hair with visible strands.\n- Add a black masquerade eye mask over his eyes (a simple black satin party mask with eye holes, thin ties behind the head); the eyes stay visible through the eye holes.\n- The shirt becomes a ruffled shirt: a very dark brown, nearly black shirt with a large, prominent shiny copper-red satin ruffle jabot at the collar that cascades in several layered frills down the chest.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas and exactly the same crop as Image 1. Transparent background, no shadow, no labels.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, zooming out.",
+   "harness": {
+    "runA": [
+     75,
+     75
+    ],
+    "passA": [
+     78,
+     74
+    ],
+    "runB": [
+     75,
+     84
+    ],
+    "passB": [
+     82,
+     74
+    ],
+    "cheer": [
+     49,
+     83
+    ],
+    "dangle": [
+     60,
+     50
+    ],
+    "fly": [
+     88,
+     69
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 104790,
+     "psnr": 40.07
+    },
+    "portrait": {
+     "q": 100,
+     "bytes": 59936,
+     "psnr": 38.0
+    },
+    "harness": {
+     "runA": [
+      75,
+      75
+     ],
+     "passA": [
+      78,
+      74
+     ],
+     "runB": [
+      75,
+      84
+     ],
+     "passB": [
+      82,
+      74
+     ],
+     "cheer": [
+      49,
+      83
+     ],
+     "dangle": [
+      60,
+      50
+     ],
+     "fly": [
+      88,
+      69
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 5887
+  },
+  "8": {
+   "item": "character.logge--partygast",
+   "fix": "- Gloves: both hands always wear the same smooth black gloves, in all 8 poses, with clearly shaped fingers (fists or relaxed hands), no skin visible on the hands, no melted or doubled fingers.\n- Running frames (upper row): redraw both arms so they swing naturally like a runner, as in Image 2: one arm forward and bent, the other arm back, alternating between the four frames; the coat sleeves follow the arms. The hands are empty.\n- Keep the coat, mask, trousers and shoes exactly as they are.",
+   "options": {
+    "head_only": true
+   },
+   "selection": {
+    "v3head": [
+     "runA",
+     "passA",
+     "runB",
+     "passB",
+     "cheer",
+     "dangle",
+     "fly",
+     "crash"
+    ]
+   },
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Logge as the messenger, a young man with blond hair, in a long black coat with gold braid and a black and gold eye mask. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below.\n- Image 2 = POSE REFERENCE ONLY for the arms in the four running frames (upper row): a different character running with naturally swinging arms. Copy only the arm and hand positions of its four running frames (one arm swings forward and bent with a loose fist, the other swings back, alternating between the frames). Ignore its face, hair, body, clothes and everything else.\nCorrections:\n- Gloves: both hands always wear the same smooth black gloves, in all 8 poses, with clearly shaped fingers (fists or relaxed hands), no skin visible on the hands, no melted or doubled fingers.\n- Running frames (upper row): redraw both arms so they swing naturally like a runner, as in Image 2: one arm forward and bent, the other arm back, alternating between the four frames; the coat sleeves follow the arms. The hands are empty.\n- Keep the coat, mask, trousers and shoes exactly as they are.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": null,
+   "harness": {
+    "runA": [
+     78,
+     66
+    ],
+    "passA": [
+     75,
+     63
+    ],
+    "runB": [
+     71,
+     67
+    ],
+    "passB": [
+     81,
+     70
+    ],
+    "cheer": [
+     59,
+     83
+    ],
+    "dangle": [
+     60,
+     50
+    ],
+    "fly": [
+     89,
+     75
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 92900,
+     "psnr": 40.91
+    },
+    "harness": {
+     "runA": [
+      78,
+      66
+     ],
+     "passA": [
+      75,
+      63
+     ],
+     "runB": [
+      71,
+      67
+     ],
+     "passB": [
+      81,
+      70
+     ],
+     "cheer": [
+      59,
+      83
+     ],
+     "dangle": [
+      60,
+      50
+     ],
+     "fly": [
+      89,
+      75
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 2252
+  },
+  "9": {
+   "item": "character.logge--creepshow",
+   "fix": "- Top hat: a lower black top hat with a short crown, sitting firmly on the head. In every pose the whole hat stays completely inside the grey rectangle with a clear gap above it; nothing of it is cut off.\n- Gloves: both hands always wear the same smooth black gloves, in all 8 poses, with clearly shaped fingers, no skin visible on the hands, no melted or doubled fingers.\n- Running frames (upper row): redraw both arms so they swing naturally like a runner, as in Image 2: one arm forward and bent, the other arm back, alternating between the four frames; the tailcoat sleeves follow the arms. The hands are empty.\n- Crash pose (lower right): exactly one face; one mouth and one chin resting on the forearms; keep the dizzy stars above the head.\n- Keep the tailcoat, shirt, bow tie, trousers and shoes exactly as they are.",
+   "options": {
+    "head_only": true,
+    "frames": true,
+    "stars": true
+   },
+   "selection": {
+    "sheet": "gen-sheet-b.png",
+    "mask": "mask-gen-sheet-b.png",
+    "genOnly": [
+     "crash",
+     "fly"
+    ],
+    "fit": {
+     "runA": [
+      0.9,
+      4
+     ],
+     "passA": [
+      0.9,
+      4
+     ],
+     "runB": [
+      0.9,
+      4
+     ],
+     "passB": [
+      0.9,
+      4
+     ],
+     "dangle": [
+      0.92,
+      9,
+      -4
+     ]
+    }
+   },
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Logge as the messenger, a young man with blond hair, as a butler in a black tailcoat, white shirt, bow tie and a black top hat. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below. Each pose has a thin light grey rectangle around it: that rectangle is the hard border of the pose. Everything of the figure, including hats, feathers, props and loose cloth, must stay completely inside its own rectangle with a small gap to the line. Keep the rectangles unchanged.\n- Image 2 = POSE REFERENCE ONLY for the arms in the four running frames (upper row): a different character running with naturally swinging arms. Copy only the arm and hand positions of its four running frames (one arm swings forward and bent with a loose fist, the other swings back, alternating between the frames). Ignore its face, hair, body, clothes and everything else.\nCorrections:\n- Top hat: keep it a classic black top hat (a cylinder crown with straight vertical sides, a flat top and a narrow brim, a thin dark band), NOT a bowler hat and not a rounded hat. Make the crown a bit lower than in Image 1, about as tall as the face, so that in every pose the whole top hat stays completely inside the grey rectangle with a clear gap above it; nothing of it is cut off. The same top hat in all 8 poses.\n- Gloves: both hands always wear the same smooth black gloves, in all 8 poses, with clearly shaped fingers, no skin visible on the hands, no melted or doubled fingers.\n- Running frames (upper row): redraw both arms so they swing naturally like a runner, as in Image 2: one arm forward and bent, the other arm back, alternating between the four frames; the tailcoat sleeves follow the arms. The hands are empty.\n- Crash pose (lower right): exactly one face; one mouth and one chin resting on the forearms; keep the dizzy stars above the head.\n- Keep the tailcoat, shirt, bow tie, trousers and shoes exactly as they are.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": null,
+   "harness": {
+    "runA": [
+     83,
+     78
+    ],
+    "passA": [
+     80,
+     78
+    ],
+    "runB": [
+     77,
+     78
+    ],
+    "passB": [
+     86,
+     75
+    ],
+    "cheer": [
+     59,
+     83
+    ],
+    "dangle": [
+     69,
+     55
+    ],
+    "fly": [
+     89,
+     75
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 80816,
+     "psnr": 42.34
+    },
+    "harness": {
+     "runA": [
+      83,
+      78
+     ],
+     "passA": [
+      80,
+      78
+     ],
+     "runB": [
+      77,
+      78
+     ],
+     "passB": [
+      86,
+      75
+     ],
+     "cheer": [
+      59,
+      83
+     ],
+     "dangle": [
+      69,
+      55
+     ],
+     "fly": [
+      89,
+      75
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 3581
+  },
+  "10": {
+   "item": "character.elena--ritterin",
+   "fix": "- Add a long deep red cloak in all 8 poses: a red woollen cape fastened at the front of the neck with a small round gold clasp, lying over both shoulders and hanging down her back to the calves; a red hood lies flat on her back (not on the head). While running and flying it flows backwards behind her; in the cheering and dangling poses it hangs down behind her. It stays behind the long curly hair, and the black harness straps and the metal ring stay visible on top of the cloak.\n- The cloak stays completely inside each grey rectangle.\n- Keep the blouse, belt, sword, trousers and sandals exactly as they are.",
+   "options": {
+    "frames": true
+   },
+   "selection": {},
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Elena as Johanna, a young woman with long brown curly hair, as a knight girl with blouse, leather belt, sword and dark trousers. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below. Each pose has a thin light grey rectangle around it: that rectangle is the hard border of the pose. Everything of the figure, including hats, feathers, props and loose cloth, must stay completely inside its own rectangle with a small gap to the line. Keep the rectangles unchanged.\nCorrections:\n- Add a long deep red cloak in all 8 poses: a red woollen cape fastened at the front of the neck with a small round gold clasp, lying over both shoulders and hanging down her back to the calves; a red hood lies flat on her back (not on the head). While running and flying it flows backwards behind her; in the cheering and dangling poses it hangs down behind her. It stays behind the long curly hair, and the black harness straps and the metal ring stay visible on top of the cloak.\n- The cloak stays completely inside each grey rectangle.\n- Keep the blouse, belt, sword, trousers and sandals exactly as they are.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": "Use case: precise-object-edit (targeted correction of an existing character portrait).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET: Elena as Johanna, a young woman with long brown curly hair, as a knight girl with blouse, leather belt, sword and dark trousers. Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair and hands, same drawing style.\nCorrections:\n- Add a long deep red cloak: a red woollen cape fastened at the front of the neck with a small round gold clasp, lying over both shoulders and falling down behind her back; a red hood lies flat at the back of the neck (not on the head). It stays behind the long curly hair; the harness straps stay visible on top of the cloak.\n- Keep the blouse, belt, trousers and everything else exactly as it is.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas and exactly the same crop as Image 1. Transparent background, no shadow, no labels.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, zooming out.",
+   "harness": {
+    "runA": [
+     79,
+     60
+    ],
+    "passA": [
+     82,
+     59
+    ],
+    "runB": [
+     85,
+     61
+    ],
+    "passB": [
+     78,
+     61
+    ],
+    "cheer": [
+     53,
+     91
+    ],
+    "dangle": [
+     59,
+     39
+    ],
+    "fly": [
+     108,
+     36
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 111070,
+     "psnr": 39.11
+    },
+    "portrait": {
+     "q": 92,
+     "bytes": 76136,
+     "psnr": 37.41
+    },
+    "harness": {
+     "runA": [
+      79,
+      60
+     ],
+     "passA": [
+      82,
+      59
+     ],
+     "runB": [
+      85,
+      61
+     ],
+     "passB": [
+      78,
+      61
+     ],
+     "cheer": [
+      53,
+      91
+     ],
+     "dangle": [
+      59,
+      39
+     ],
+     "fly": [
+      108,
+      36
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 17442
+  },
+  "11": {
+   "item": "character.elena--strohkleid",
+   "fix": "- Remove the wooden sword from every pose completely (both hands are empty fists, nothing in them).\n- Flying pose (lower row, third): the rear foot stays completely inside the grey rectangle; nothing is cut off.\n- Keep the dress, the bare feet and everything else exactly as it is.",
+   "options": {
+    "frames": true
+   },
+   "selection": {
+    "props": {
+     "sprite": "../props/gen-sword.png",
+     "length": 56,
+     "grip": 0.86,
+     "poses": {
+      "runA": {
+       "at": [
+        128,
+        98
+       ],
+       "angle": 25,
+       "hand": [
+        119,
+        89,
+        138,
+        107
+       ]
+      },
+      "passA": {
+       "at": [
+        124,
+        94
+       ],
+       "angle": 25,
+       "hand": [
+        115,
+        85,
+        134,
+        103
+       ]
+      },
+      "runB": {
+       "at": [
+        143,
+        80
+       ],
+       "angle": 25,
+       "hand": [
+        134,
+        71,
+        153,
+        89
+       ]
+      },
+      "passB": {
+       "at": [
+        118,
+        89
+       ],
+       "angle": 25,
+       "hand": [
+        109,
+        80,
+        128,
+        98
+       ]
+      },
+      "cheer": {
+       "at": [
+        80,
+        88
+       ],
+       "angle": 200
+      },
+      "dangle": {
+       "at": [
+        87,
+        100
+       ],
+       "angle": 20,
+       "hand": [
+        77,
+        90,
+        98,
+        111
+       ]
+      },
+      "fly": {
+       "at": [
+        184,
+        58
+       ],
+       "angle": 15,
+       "hand": [
+        174,
+        49,
+        196,
+        67
+       ]
+      },
+      "crash": {
+       "at": [
+        150,
+        77
+       ],
+       "angle": 268
+      }
+     },
+     "widen": 1.7,
+     "tint": [
+      127,
+      71,
+      40
+     ]
+    }
+   },
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Elena as Johanna, a young woman with long brown curly hair, in a loose ivory straw dress, barefoot. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below. Each pose has a thin light grey rectangle around it: that rectangle is the hard border of the pose. Everything of the figure, including hats, feathers, props and loose cloth, must stay completely inside its own rectangle with a small gap to the line. Keep the rectangles unchanged.\nCorrections:\n- Remove the wooden sword from every pose completely (both hands are empty fists, nothing in them).\n- Flying pose (lower row, third): the rear foot stays completely inside the grey rectangle; nothing is cut off.\n- Keep the dress, the bare feet and everything else exactly as it is.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": null,
+   "harness": {
+    "runA": [
+     79,
+     64
+    ],
+    "passA": [
+     82,
+     60
+    ],
+    "runB": [
+     85,
+     60
+    ],
+    "passB": [
+     78,
+     58
+    ],
+    "cheer": [
+     53,
+     91
+    ],
+    "dangle": [
+     59,
+     39
+    ],
+    "fly": [
+     108,
+     36
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 123472,
+     "psnr": 39.59
+    },
+    "harness": {
+     "runA": [
+      79,
+      64
+     ],
+     "passA": [
+      82,
+      60
+     ],
+     "runB": [
+      85,
+      60
+     ],
+     "passB": [
+      78,
+      58
+     ],
+     "cheer": [
+      53,
+      91
+     ],
+     "dangle": [
+      59,
+      39
+     ],
+     "fly": [
+      108,
+      36
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 18137
+  },
+  "12": {
+   "item": "character.carina--anno-mathilde",
+   "fix": "- Hair: remove every remaining trace of a yellow, golden or cream hood or headscarf around the head and face. Where such a yellow or orange strip or edge is visible at the hairline, along the face or at the top of the head, draw the same long straight brown hair instead, continuing the existing strands. The head stays uncovered in all 8 poses.\n- Keep the face, the clothes and everything else exactly as it is.",
+   "options": {
+    "hood": true
+   },
+   "selection": {},
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Carina as Maribel, a woman with long straight brown hair, in a cream blouse, a brown laced bodice and a burgundy skirt. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below.\nCorrections:\n- Hair: remove every remaining trace of a yellow, golden or cream hood or headscarf around the head and face. Where such a yellow or orange strip or edge is visible at the hairline, along the face or at the top of the head, draw the same long straight brown hair instead, continuing the existing strands. The head stays uncovered in all 8 poses.\n- Keep the face, the clothes and everything else exactly as it is.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": "Use case: precise-object-edit (targeted correction of an existing character portrait).\nAsset type: production character portrait, 1024x1024, transparent background.\nInput images:\n- Image 1 = EDIT TARGET: Carina as Maribel, a woman with long straight brown hair, in a cream blouse, a brown laced bodice and a burgundy skirt. Keep this exact drawing: same framing, crop, position and size, same pose, same face, eyes, eyebrows, nose, mouth, jaw, ears, neck, skin, hair and hands, same drawing style.\nCorrections:\n- Hair: remove every remaining trace of a yellow, golden or cream hood or headscarf around the head and face; where a yellow or orange edge shows at the hairline, draw the same long straight brown hair instead. The head stays uncovered.\n- Keep the face, the clothes and everything else exactly as it is.\nKeep any harness straps exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas and exactly the same crop as Image 1. Transparent background, no shadow, no labels.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, zooming out.",
+   "harness": {
+    "runA": [
+     80,
+     46
+    ],
+    "passA": [
+     97,
+     54
+    ],
+    "runB": [
+     62,
+     52
+    ],
+    "passB": [
+     92,
+     55
+    ],
+    "cheer": [
+     44,
+     45
+    ],
+    "dangle": [
+     58,
+     50
+    ],
+    "fly": [
+     111,
+     43
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 106716,
+     "psnr": 39.58
+    },
+    "portrait": {
+     "q": 100,
+     "bytes": 63126,
+     "psnr": 39.48
+    },
+    "harness": {
+     "runA": [
+      80,
+      46
+     ],
+     "passA": [
+      97,
+      54
+     ],
+     "runB": [
+      62,
+      52
+     ],
+     "passB": [
+      92,
+      55
+     ],
+     "cheer": [
+      44,
+      45
+     ],
+     "dangle": [
+      58,
+      50
+     ],
+     "fly": [
+      111,
+      43
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 7718
+  },
+  "13": {
+   "item": "character.nela--gauklerin",
+   "fix": "- Shoes: instead of bare feet she now wears the same pair of simple soft brown leather shoes (medieval ankle shoes with a turned-over cuff) in all 8 poses, with clean outlines and simple shading in the same cartoon style; the shins below the breeches are covered by plain light brown stockings. Same size and shape in every pose; the supporting foot stands flat on one common ground line in every running frame.\n- Keep everything else exactly as it is.",
+   "options": {
+    "drop_lower": true
+   },
+   "selection": {},
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Nela as young Marie, a girl with long fair braided hair, in an orange blouse, brown laced vest and orange-brown striped knee breeches. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below.\nCorrections:\n- Shoes: instead of bare feet she now wears the same pair of simple soft brown leather shoes (medieval ankle shoes with a turned-over cuff) in all 8 poses, with clean outlines and simple shading in the same cartoon style; the shins below the breeches are covered by plain light brown stockings. Same size and shape in every pose; the supporting foot stands flat on one common ground line in every running frame.\n- Keep everything else exactly as it is.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "portraitPrompt": null,
+   "harness": {
+    "runA": [
+     85,
+     65
+    ],
+    "passA": [
+     70,
+     62
+    ],
+    "runB": [
+     80,
+     65
+    ],
+    "passB": [
+     70,
+     62
+    ],
+    "cheer": [
+     50,
+     103
+    ],
+    "dangle": [
+     58,
+     44
+    ],
+    "fly": [
+     107,
+     48
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 101626,
+     "psnr": 38.9
+    },
+    "harness": {
+     "runA": [
+      85,
+      65
+     ],
+     "passA": [
+      70,
+      62
+     ],
+     "runB": [
+      80,
+      65
+     ],
+     "passB": [
+      70,
+      62
+     ],
+     "cheer": [
+      50,
+      103
+     ],
+     "dangle": [
+      58,
+      44
+     ],
+     "fly": [
+      107,
+      48
+     ]
+    }
+   },
+   "identityPixelsExactBeforeScaling": 21001
+  },
+  "14": {
+   "item": "character.theo--dorfbewohner",
+   "fix": null,
+   "options": {},
+   "selection": {
+    "scale": {
+     "runA": [
+      1.17,
+      [
+       0,
+       186
+      ],
+      [
+       1,
+       186
+      ]
+     ],
+     "passA": [
+      1.17,
+      [
+       0,
+       186
+      ],
+      [
+       1,
+       186
+      ]
+     ],
+     "runB": [
+      1.17,
+      [
+       0,
+       186
+      ],
+      [
+       1,
+       186
+      ]
+     ],
+     "passB": [
+      1.17,
+      [
+       0,
+       186
+      ],
+      [
+       1,
+       186
+      ]
+     ],
+     "cheer": [
+      1.17,
+      [
+       53,
+       186
+      ],
+      [
+       54,
+       186
+      ]
+     ],
+     "dangle": [
+      1.17,
+      [
+       49,
+       60
+      ],
+      [
+       57,
+       58
+      ]
+     ],
+     "fly": [
+      1.17,
+      [
+       76,
+       72
+      ],
+      [
+       90,
+       70
+      ]
+     ],
+     "crash": [
+      1.17,
+      [
+       17,
+       69
+      ],
+      [
+       12,
+       85
+      ]
+     ]
+    },
+    "footLine": true
+   },
+   "sheetPrompt": null,
+   "portraitPrompt": null,
+   "harness": {
+    "runA": [
+     84,
+     66
+    ],
+    "passA": [
+     68,
+     57
+    ],
+    "runB": [
+     84,
+     64
+    ],
+    "passB": [
+     69,
+     60
+    ],
+    "cheer": [
+     48,
+     97
+    ],
+    "dangle": [
+     57,
+     58
+    ],
+    "fly": [
+     90,
+     70
+    ]
+   },
+   "footGaps": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 89016,
+     "psnr": 40.19
+    },
+    "harness": {
+     "runA": [
+      84,
+      66
+     ],
+     "passA": [
+      68,
+      57
+     ],
+     "runB": [
+      84,
+      64
+     ],
+     "passB": [
+      69,
+      60
+     ],
+     "cheer": [
+      48,
+      97
+     ],
+     "dangle": [
+      57,
+      58
+     ],
+     "fly": [
+      90,
+      70
+     ]
+    }
+   }
+  },
+  "13b": {
+   "item": "character.nela--sagenhaft",
+   "note": "shoes only, composed inside the dilated shoe masks; rest of the atlas unchanged",
+   "sheetPrompt": "Use case: precise-object-edit (targeted correction of an existing game sprite grid).\nAsset type: production 2D game sprite grid, 8 poses of one character on a 1536x1024 canvas, 4 columns x 2 rows. Upper row, left to right: four running frames. Lower row, left to right: cheering with raised arms, dangling from a rope with legs hanging, flying horizontally, lying flat after a crash.\nInput images:\n- Image 1 = EDIT TARGET: Nela as young Marie, a girl with long light brown hair, in a dark red pinafore dress over a white blouse, black tights. Keep this exact drawing: every figure stays at exactly the same position and size, same pose (except where a correction below says otherwise), same face, eyes, nose, mouth, ears, hair, skin and body proportions, same drawing style, same costume except the corrections below.\nCorrections:\n- Shoes: redraw both shoes in all 8 poses as clean black leather Mary-Jane shoes with a thin strap and a small light highlight on the toe, clearly separated from the black tights by a crisp outline, with the same size and shape in every pose; the tights end inside the shoes. The supporting foot stands flat on one common ground line in every running frame.\n- Change nothing else: face, hair, dress, tights, arms and poses stay exactly as they are.\nKeep the black harness straps and the small metal ring at the upper back exactly where Image 1 has them.\nConstraints: change nothing else. Same canvas, same 4x2 arrangement, same figure scale, same outline style. Transparent background, no shadow, no labels, no extra figures.\nAvoid: changed faces, bigger eyes, bigger head, new hairstyle, anything crossing the edge of its pose area, costume details that differ between poses.",
+   "encode": {
+    "sheet": {
+     "q": 100,
+     "bytes": 83588,
+     "psnr": 42.55
+    },
+    "harness": {
+     "runA": [
+      83,
+      69
+     ],
+     "passA": [
+      83,
+      59
+     ],
+     "runB": [
+      83,
+      68
+     ],
+     "passB": [
+      80,
+      61
+     ],
+     "fly": [
+      125,
+      52
+     ],
+     "dangle": [
+      49,
+      46
+     ],
+     "cheer": [
+      49,
+      51
+     ]
+    }
+   }
+  }
+ }
+}
