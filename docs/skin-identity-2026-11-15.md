@@ -1,6 +1,8 @@
 # Adventskalender: Identität und Statur, 15. November 2026
 
-Aktueller Stand (17. November 2026): Nach Sebastians Rückmeldung vom 17. November wurden 21 Kalenderfiguren mit einem neuen, basisgestützten Verfahren (v3) neu aufgebaut. Gesicht, Haare, Hände und Körperumriss stammen dabei pixelweise aus der vorhandenen Figur; nur die Kleidung ist neu. Ergebnis und offene Punkte stehen im Abschnitt [Basisgestützte Neufassung (v3)](#basisgestützte-neufassung-v3). Diese Fassung liegt nur auf einem Arbeitszweig und ist weder veröffentlicht noch eingereicht.
+Aktueller Stand (18. November 2026): Sebastian hat v3 durchgesehen; die Gesichter stimmen. Seine 14 Punkte zur Kleidung, zu Requisiten und zum Atlas sind im Abschnitt [Korrekturen nach Sebastians Durchsicht (v4)](#korrekturen-nach-sebastians-durchsicht-v4) umgesetzt. Diese Fassung liegt nur auf dem Arbeitszweig `skins-feedback-v4` und ist weder veröffentlicht noch eingereicht.
+
+Stand 17. November 2026: Nach Sebastians Rückmeldung vom 17. November wurden 21 Kalenderfiguren mit einem neuen, basisgestützten Verfahren (v3) neu aufgebaut. Gesicht, Haare, Hände und Körperumriss stammen dabei pixelweise aus der vorhandenen Figur; nur die Kleidung ist neu. Ergebnis und offene Punkte stehen im Abschnitt [Basisgestützte Neufassung (v3)](#basisgestützte-neufassung-v3).
 
 Die folgenden Abschnitte bis „Erneute Identitätsprüfung“ beschreiben die beanstandete Fassung vom 15. November. Die veröffentlichte Fassung wurde vom Nutzer wegen weiterhin abweichender Gesichter und Körpermodelle beanstandet. Die frühere visuelle Abnahme war zu großzügig; die damaligen Prüfungen belegen keine erfolgreiche Übernahme des bestehenden Charaktermodells.
 
@@ -151,3 +153,68 @@ Die Fassung vom 15. November war ohne diese Warnungen. Die Hinweise sind nicht b
 Die Seilpunkte in `harness.jpg` wurden für alle 21 Figuren angesehen. Wo die Generierung die Öse neu gezeichnet hat und der Basispunkt dadurch neben der Figur lag, wurde der Punkt auf die neue Öse gesetzt (Nele als Mumie: Hängepose; Carina: Pass-, Hänge- und Flugpose; Niko: Flugpose).
 
 Nicht Teil dieser Fassung: Maren (Türchen 10), Lena (Türchen 23) und Captain Kuschel (Türchen 24) sind unverändert.
+
+## Korrekturen nach Sebastians Durchsicht (v4)
+
+Rückmeldung des Theaters (Sebastian, 18. November 2026): 14 Punkte zu einzelnen Figuren der v3-Fassung, dazu ein Punkt an der regulären Figur „Nela, Gauklerin“ (Sagenhaft). Diese Fassung liegt nur auf dem Arbeitszweig `skins-feedback-v4` und ist weder veröffentlicht noch eingereicht. Alle betroffenen Kalendereinträge bleiben deaktiviert.
+
+### Verfahren
+
+v4 baut auf dem v3-Verfahren auf (Identität pixelweise aus der Basis, nur Kleidung aus `image_gen`). Neu ist:
+
+1. Bearbeitungsziel ist der verlustfreie v3-Master, nicht mehr das Basis-Sheet. Jeder Punkt bekommt genau eine gezielte Änderungsanweisung; alles andere soll gleich bleiben. Danach wird wie in v3 maskiert und die Basisidentität wieder eingesetzt.
+2. Wo Kleidung oder Requisiten bisher am Zellenrand abgeschnitten wurden, enthält das Eingabebild dünne graue Rahmen um jede Zelle. Die Anweisung verlangt, dass alles innerhalb bleibt. Die Rahmen werden beim Zusammensetzen entfernt.
+3. Reicht das Ergebnis nach der Registrierung auf den Kopf trotzdem über die Zelle hinaus, wird die Pose auf einer erweiterten Fläche zusammengesetzt und danach gleichmäßig verkleinert. Im Laufzyklus gilt ein gemeinsamer Faktor für alle vier Bilder. Seilpunkte werden mit derselben Abbildung umgerechnet.
+4. Der Laufzyklus wird nach dem Zusammensetzen auf eine gemeinsame Fußlinie gesetzt (1 px Abstand zum Zellenboden). Die Seilpunkte wandern mit.
+5. Das Holzschwert von Johanna im Strohkleid ist ein einmal erzeugtes Requisit. Es wird in allen acht Posen in derselben Größe eingesetzt. Die Finger der Basis werden danach wieder darübergelegt, damit die Hand den Griff umschließt.
+
+Alle Bilder entstanden über Codex CLI mit dem imagegen-Skill (eingebautes `image_gen`). Es wurden keine Fotos von Personen an die Bildgenerierung gegeben; Kostüme aus den Referenzfotos sind nur im Text beschrieben.
+
+### Ergebnis je Punkt
+
+| Punkt | Figur | Stand | Umsetzung und Befund |
+| --- | --- | --- | --- |
+| 1 | Elena, Lucy im Bademantel | behoben | Die rote Feder liegt jetzt in allen acht Posen in der Hand, auch in der Hängepose, wo sie in v3 fehlte. Unklar ist, ob Sebastian die Schreibfeder des Porträts meint. Die Sprites zeigen wie bisher den roten Federwedel. |
+| 2 | Theresa, Clara (Echter Falkenstein) | behoben | Schwarze Spangenschuhe in allen Posen, Hängepose ohne Verformung. Die Schwindelsterne der Basis sind in der Sturzpose wieder da. |
+| 3 | Theresa, Clara in Isets Ballkleid | behoben | Goldene Sandalen in allen Posen einschließlich Flug-, Hänge- und Sturzpose. Die Feder bleibt in Jubel- und Flugpose innerhalb der Zelle. Für die Hängepose wurde die Basis vor der Bearbeitung auf 90 % verkleinert, weil schon ihr Haar oben anstößt. Die Figur ist dort entsprechend kleiner. |
+| 4 | Sophie, Mia im Waisenhauskleid | behoben | Beine und nackte Füße im Laufzyklus aus einer neuen Bearbeitung, ohne verformte Zehen; einheitliche Fußlinie. |
+| 5 | Yunus, Dr. Düsterwald (Explosion) | behoben, mit Einschränkung | Sahnehaube im Haar und Rußflecken im Gesicht als Schminke über dem unveränderten Basisgesicht (Abdunkeln der Basispixel, kein neues Gesicht), dazu Ruß an den Händen. Im Sheet sitzt der Ruß vor allem auf Wange und Kinn, im Porträt deutlicher. Hängepose auf 92 % verkleinert und Flugpose um 4 px versetzt, damit nichts mehr am Rand anstößt. |
+| 6 | Nele, Prinzessin Iset (Mumie) | behoben | Augenschlitz in Jubel- und Hängepose wie in Lauf- und Flugpose. Die Bandagenenden sind kürzer und bleiben in allen Posen in der Zelle. Basispixel, die die Bandage verdeckt, gelten nicht mehr als Identität, damit unter dem Kopfverband kein Haar durchscheint. Laufzyklus auf 93 %, Jubelpose auf 95 % und Hängepose auf 93 % verkleinert. |
+| 7 | Hendrik, Partygast | behoben | Keine Mütze. Kurzes, strähniges Haar statt der glatten, mützenartigen Form. Schwarze Augenmaske und ein deutlicher kupferroter Rüschenjabot in Sheet und Porträt. Das Haar ist neu gezeichnet, weil die Basis an dieser Stelle eine Schiebermütze trägt. |
+| 8 | Logge, Partygast | behoben | Arme schwingen im Laufzyklus gegengleich; schwarze Handschuhe in allen acht Posen, auch in Jubel- und Hängepose. Kopf mit Maske in allen Posen aus v3 übernommen, um Maskenartefakte zu vermeiden. |
+| 9 | Logge, Diener 3 | behoben, mit Einschränkung | Klassischer Zylinder, in allen Posen innerhalb der Zelle; schwarze Handschuhe in allen Posen; natürlicher Armschwung. Die Sturzpose zeigt nur noch ein Gesicht mit einem Mund. Dieses Gesicht stammt aus der Bearbeitung, ebenso in der Flugpose; der Hautton ist an die Basis angeglichen. Laufzyklus auf 90 % und Hängepose auf 92 % verkleinert. |
+| 10 | Elena, Johanna als Ritterin | behoben | Roter Umhang in allen acht Posen und im Porträt. |
+| 11 | Elena, Johanna im Strohkleid | behoben | Ein gleich großes Holzschwert in allen acht Posen: Im Laufzyklus und in Hänge- und Flugpose liegt es in der vorderen Hand, in der Jubelpose steckt es im Gürtel, in der Sturzpose liegt es am Boden. Nichts wird mehr abgeschnitten. Das Schwert ist ein einmal erzeugtes Requisit und nicht Teil der Bildbearbeitung. |
+| 12 | Carina, Mathilde | behoben | Der gelbe Rest der Kapuze im Haar ist in Sheet und Porträt entfernt. |
+| 13 | Nela, Gauklerin (Kalender) | behoben | Braune Lederschuhe mit hellen Strümpfen in allen Posen statt der verwaschenen Fußstruktur. |
+| 13b | Nela, Gauklerin (Sagenhaft, reguläre Figur) | behoben | Schwarze Spangenschuhe in allen Posen. Sonst ist die Figur unverändert; nur die Schuhe sind ausgetauscht. |
+| 14 | Theo, Dorfbewohner | behoben | Alle Posen auf 117 % vergrößert, damit Theo so groß ist wie die anderen Figuren. Fußlinie einheitlich, Seilpunkte mitgeführt. Die Sturzpose liegt jetzt am Boden. |
+
+Identität: Gesicht, Haare und Hände stammen weiterhin aus der Basis, außer bei Hendriks Haar (Punkt 7) und bei Logges Diener in Flug- und Sturzpose (Punkt 9). In Posen, die nachträglich verkleinert oder vergrößert wurden, sind die Identitätspixel nicht mehr pixelgleich, sondern skaliert. Das betrifft Theo, Nele als Mumie, Logge als Diener, Yunus in der Hängepose und Clara in Isets Ballkleid in der Hängepose. Im Atlas sind Figuren in verkleinerten Posen entsprechend kleiner als in den übrigen Posen.
+
+### Vergleichsbilder und Prüfung
+
+Für jeden Punkt liegt unter `artifacts/advent-identity-v4/p<Nr>-<Figur>/` Folgendes:
+
+- `compare-v3-v4.jpg`: v3 und v4 in allen acht Posen mit Zellrahmen sowie beide Porträts;
+- `sheet-run.jpg` und `sheet-special.jpg`: Basis, v3 und v4;
+- `portrait.jpg`;
+- `harness.jpg`: Seilpunkte;
+- `v4-sheet.png` und `v4-portrait.png`: verlustfreie Master.
+
+Für die reguläre Gauklerin liegt das unter `p13b-nela-sagenhaft/`. Prompts, Auswahl, Seilpunkte und Kompression je Punkt stehen in [der Begleitdatei](design/advent-identity-v4-2026-11-18.json).
+
+Prüfungen auf dem Arbeitszweig:
+
+- Die Seilpunkte wurden in `catalog.json` für alle 15 Figuren mitgeführt (Fußlinie, Skalierung, Versatz). Sie liegen in allen Posen auf der Figur.
+- `tool/optimize-sprites.py --write` hat die neuen Bilder nachoptimiert und die vier betroffenen Thumbnails neu erzeugt. `--check` besteht.
+- Die Atlasübersicht (`docs/runner-review.html`) meldet für die 15 bearbeiteten Figuren keine Warnungen mehr: keine Rahmenberührung, keine springende Fußlinie. Offen bleiben die Warnungen von fünf Kalenderfiguren außerhalb dieses Auftrags: Marcella, Lina, Jakob, Julian und Niko.
+- Alle 797 Servertests laufen ohne Fehler (796 bestanden, einer übersprungen), darunter die 45 Tests für Garderobenbilder, Thumbnails, Garderobe und Admin-Katalog.
+- 81 Flutter-Tests bestehen: Skin-Viewer, Adminszene, Garderobe und Begriffsprüfung des App-Bundles.
+
+Offene Punkte:
+
+- Punkt 1: Bitte mit Sebastian klären, ob „Feder in der Hand“ den roten Federwedel meint, wie jetzt umgesetzt, oder eine Schreibfeder.
+- Punkt 5: Der Ruß im Sheet ist auf Spielgröße eher dezent.
+- Punkt 9: Die Gesichter in Flug- und Sturzpose stammen aus der Bearbeitung, nicht aus der Basis.
+- Die verkleinerten Posen sind bis zu 10 % kleiner als die übrigen Posen derselben Figur.
