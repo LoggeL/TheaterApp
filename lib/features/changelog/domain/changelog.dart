@@ -27,6 +27,14 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.16.7',
+    date: '19. November 2026',
+    items: [
+      'Bei Abstimmungen mit Mehrfachauswahl kannst du mehrere Antworten ankreuzen. Ein zweiter Tipp nimmt das Häkchen zurück.',
+      'Für die Theaterleitung: Du kannst die Mehrfachauswahl auch bei laufenden Abstimmungen einschalten, Antworten ergänzen und Tippfehler korrigieren. Die Stimmen bleiben bei der jeweiligen Antwort.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.16.6',
     date: '18. November 2026',
     items: ['Kleine Verbesserungen und Feinschliff im Hintergrund.'],
