@@ -15,7 +15,7 @@ Vorlagen für den Pull-Deployer `tool/autodeploy.py`. Ablauf und Betrieb stehen 
    Nach einem nvm-Update nur den Symlink `node` neu setzen.
 
 2. Zugangsdaten als reine Schlüsseldateien mit Modus 600 ablegen:
-   - `~/.config/theater-autodeploy/github-token`: fine-grained PAT, nur `LoggeL/TheaterApp`, *Actions: Read-only*, mit Ablaufdatum. Nicht den breiten `gh`-Login von HomeBox wiederverwenden.
+   - Auf HomeBox stellt die vorhandene Dokploy-GitHub-App den GitHub-Zugang bereit (siehe unten). Für andere Installationen ist ein Fine-grained PAT für dieses Repository mit *Actions: Read-only* eine Alternative.
    - `~/.config/theater-autodeploy/dokploy-key`: Dokploy-API-Schlüssel.
 
    Auf GitHub vor dem Aktivieren des Timers (Schritt 6): ein Ruleset auf `main`, das Force-Push und Löschen verbietet und den Status-Check `verify` verlangt (Admin-Bypass nur, falls du direkt pushst). Fork-PR-Läufe nur nach Freigabe („all outside collaborators“). Push-Zugänge (Deploy-Keys, PATs, Agent-Tokens) so behandeln wie Zugänge zur Produktion.
@@ -23,7 +23,7 @@ Vorlagen für den Pull-Deployer `tool/autodeploy.py`. Ablauf und Betrieb stehen 
 3. `~/.config/theater-autodeploy/env` (Modus 600). systemd erweitert dort weder `~` noch `%h`, deshalb absolute Pfade:
 
    ```sh
-   GH_TOKEN_FILE=/home/logge/.config/theater-autodeploy/github-token
+   GH_TOKEN_FILE=/run/user/1000/theater-autodeploy/github-token
    DOKPLOY_API_KEY_FILE=/home/logge/.config/theater-autodeploy/dokploy-key
    THEATER_BACKUP_DIR=/home/logge/projects/theater-autodeploy/backups
    # Optional: erhält einen kurzen deutschen Statustext als letztes Argument.
@@ -60,3 +60,25 @@ Vorlagen für den Pull-Deployer `tool/autodeploy.py`. Ablauf und Betrieb stehen 
    cat ~/projects/theater-autodeploy/state/deployed.json
    systemctl --user enable --now theater-autodeploy.timer
    ```
+
+### GitHub-Zugang der HomeBox
+
+Die Dokploy-Installation „LoggeL Github“ stellt über den lokalen Dokploy-Dienst ein kurzlebiges Token für das öffentliche Repository `LoggeL/TheaterApp` aus. Der Helper fordert ausschließlich `metadata:read` an und prüft Repository und Berechtigungen vor dem Speichern. Damit lassen sich die öffentlichen CI-Metadaten und das Web-Artefakt direkt bei GitHub abrufen. Der App-Schlüssel bleibt auf der HomeBox. Vor jedem Dienstlauf prüft der Helper die Gültigkeit und erneuert das Token zehn Minuten vor Ablauf. Token und Ablaufzeit liegen im privaten Runtime-Verzeichnis des Nutzers.
+
+Zum Einrichten oder Aktualisieren im Release-Checkout als Nutzer `logge`:
+
+```sh
+install -Dm700 deploy/homebox/github-app-token.mjs ~/projects/theater-autodeploy/bin/github-app-token.mjs
+install -Dm600 deploy/homebox/github-app.conf ~/.config/systemd/user/theater-autodeploy.service.d/github-app.conf
+systemctl --user daemon-reload
+```
+
+In `~/.config/theater-autodeploy/env` muss `GH_TOKEN_FILE` auf `/run/user/<uid>/theater-autodeploy/github-token` zeigen (`id -u`). Für einen manuellen Probelauf vor Schritt 5:
+
+```sh
+install -d -m 700 "$XDG_RUNTIME_DIR/theater-autodeploy"
+set -a; . ~/.config/theater-autodeploy/env; set +a
+~/projects/theater-autodeploy/node/bin/node ~/projects/theater-autodeploy/bin/github-app-token.mjs
+```
+
+Wenn Dokploy auf eine andere GitHub-App oder Installation wechselt, die IDs im Helper prüfen und die installierte Kopie aktualisieren.
