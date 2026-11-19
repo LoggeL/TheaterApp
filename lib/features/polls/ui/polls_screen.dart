@@ -37,8 +37,7 @@ class PollsScreen extends StatelessWidget {
 
   /// Open polls the member still has to answer first, then by deadline.
   static int _byUrgency(AppController c, Poll a, Poll b) {
-    bool waiting(Poll p) =>
-        p.selectedOptionId == null && pollAddressesUser(c, p);
+    bool waiting(Poll p) => !p.hasVoted && pollAddressesUser(c, p);
     if (waiting(a) != waiting(b)) return waiting(a) ? -1 : 1;
     final x = a.closesAt, y = b.closesAt;
     if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
@@ -128,7 +127,7 @@ class _PollCard extends StatelessWidget {
     final theme = Theme.of(context), p = poll;
     final closed = p.isClosedAt(controller.now);
     final addressed = pollAddressesUser(controller, p);
-    final pill = p.selectedOptionId != null
+    final pill = p.hasVoted
         ? const StatePill(
             'Abgestimmt',
             icon: Icons.check,

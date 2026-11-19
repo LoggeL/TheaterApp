@@ -84,6 +84,60 @@ test('deadline closes exactly at the configured instant and expired descriptions
   assert.equal(Date.parse(store.get('polls', id).closesAt), Date.parse(body.closesAt));
 });
 
+test('edit a running poll by option id and enable multiple answers without moving old votes', t => {
+  const { store, theater, action, body, personId } = setup(t);
+  const id = action(body).id;
+  const [inside, outside] = store.get('polls', id).options;
+  store.put('pollVotes', `${id}:${personId}`, { pollId: id, personId, optionId: outside.id });
+  const edit = { ...body, id, version: 1, allowMultiple: true };
+  assert.throws(() => action({ ...edit, options: [inside, { label: 'Zelt' }] }), { status: 409 });
+  assert.throws(() => action({ ...edit, options: [outside, { id: outside.id, label: 'Kopie' }] }), { status: 400 });
+  assert.throws(() => action({ ...edit, options: [outside, { id: 'andere-umfrage', label: 'Zelt' }] }), { status: 400 });
+  action({ ...edit, options: [{ ...outside, label: 'Im Hof' }, { label: 'Im Zelt' }] });
+  assert.throws(() => action(edit), { code: 'version_conflict' });
+  const view = theater.snapshot('member').polls[0];
+  assert.equal(view.allowMultiple, true);
+  assert.deepEqual(view.choices, [outside.id]);
+  assert.deepEqual(view.options.map(o => [o.label, o.votes]), [['Im Hof', 1], ['Im Zelt', 0]]);
+  const vote = { action: 'poll.vote', pollId: id, optionId: view.options[1].id };
+  action({ ...vote, selected: true }, 'member');
+  const multiple = theater.snapshot('member').polls[0];
+  assert.deepEqual(multiple.choices, [outside.id, vote.optionId]);
+  assert.equal(multiple.totalVotes, 1);
+  assert.deepEqual(multiple.options.map(o => o.votes), [1, 1]);
+  const admin = theater.snapshot('owner').polls[0];
+  assert.equal(admin.eligibleVotes, 1);
+  assert.deepEqual(admin.choices, []);
+  assert(admin.options.every(o => !('voters' in o)));
+  assert.throws(() => action(vote, 'member'), { status: 409 });
+  assert.throws(() => action({ ...edit, version: 2, options: view.options, allowMultiple: false }), { status: 409 });
+  action({ ...vote, selected: false }, 'member');
+  action({ ...edit, version: 2, options: view.options, allowMultiple: false });
+  assert.deepEqual(theater.snapshot('member').polls[0].choices, [outside.id]);
+});
+
+test('named checkboxes are idempotent, can be withdrawn and honor the deadline', t => {
+  const { store, theater, action, body, personId, setClock } = setup(t);
+  const id = action({ ...body, allowMultiple: true, anonymous: false }).id;
+  const [a, b] = store.get('polls', id).options;
+  const select = (optionId, selected) => action({ action: 'poll.vote', pollId: id, optionId, selected }, 'member');
+  select(a.id, true);
+  select(b.id, true);
+  select(a.id, true);
+  const view = theater.snapshot('owner').polls[0];
+  assert.deepEqual(view.options.map(o => o.voters), [[{ personId, name: 'Mara Beispiel' }], [{ personId, name: 'Mara Beispiel' }]]);
+  assert.throws(() => select('foreign', true), { status: 400 });
+  assert.throws(() => select(a.id, 'false'), { status: 400 });
+  select(a.id, false);
+  select(a.id, false);
+  assert.deepEqual(theater.snapshot('member').polls[0].choices, [b.id]);
+  select(b.id, false);
+  assert.equal(store.get('pollVotes', `${id}:${personId}`), null);
+  assert.equal(theater.snapshot('owner').polls[0].eligibleVotes, 0);
+  setClock(body.closesAt);
+  assert.throws(() => select(a.id, true), { code: 'closed' });
+});
+
 test('admins see how many may vote on an anonymous poll, but never who voted', t => {
   const { store, theater, action, body } = setup(t);
   const id = action(body).id;

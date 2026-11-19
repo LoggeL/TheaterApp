@@ -49,7 +49,9 @@ class Poll {
     required this.title,
     this.description = '',
     this.options = const [],
-    this.selectedOptionId,
+    this.selectedOptionIds = const [],
+    this.allowMultiple = false,
+    this.participantCount,
     this.confirmedOptionId,
     this.closed = false,
     this.anonymous = true,
@@ -71,7 +73,11 @@ class Poll {
   final List<String> roleIds;
   final List<int> personIds;
   final List<String> productionIds;
-  final String? selectedOptionId, confirmedOptionId;
+  final List<String> selectedOptionIds;
+  final bool allowMultiple;
+  final String? confirmedOptionId;
+  bool get hasVoted => selectedOptionIds.isNotEmpty;
+  String? get selectedOptionId => selectedOptionIds.firstOrNull;
   final bool closed, anonymous;
   String get privacyLabel => anonymous ? 'Anonym' : 'Namentlich';
   final DateTime? closesAt;
@@ -91,9 +97,23 @@ class Poll {
   /// with `nudges`).
   final DateTime? lastRemindedAt;
   final int remindCount;
-  int get totalVotes => options.fold(0, (n, o) => n + o.votes);
-  String get voteCountLabel =>
-      totalVotes == 1 ? '1 Stimme' : '$totalVotes Stimmen';
+  final int? participantCount;
+  int get _selections => options.fold(0, (n, o) => n + o.votes);
+
+  /// Number of people who voted, each counted once.
+  int get totalVotes =>
+      allowMultiple ? participantCount ?? _selections : _selections;
+  bool get hasMultipleAnswersPerPerson =>
+      allowMultiple && _selections > totalVotes;
+  String get voteCountLabel {
+    if (allowMultiple) {
+      return totalVotes == 1
+          ? '1 Person hat abgestimmt'
+          : '$totalVotes Personen haben abgestimmt';
+    }
+    return totalVotes == 1 ? '1 Stimme' : '$totalVotes Stimmen';
+  }
+
   bool get isClosed => isClosedAt(DateTime.now());
 
   /// Whether voting has ended at [now], e.g. `controller.now`.
@@ -117,7 +137,11 @@ class Poll {
           ),
         )
         .toList(),
-    selectedOptionId: (json['choice'] ?? json['selectedOptionId']) as String?,
+    selectedOptionIds: json['choices'] is List
+        ? jsonList(json['choices']).whereType<String>().toList()
+        : [?(json['choice'] ?? json['selectedOptionId']) as String?],
+    allowMultiple: json['allowMultiple'] == true,
+    participantCount: json['totalVotes'] as int?,
     confirmedOptionId: json['confirmedOptionId'] as String?,
     closed: json['closed'] == true,
     anonymous: json['anonymous'] != false,
@@ -140,47 +164,65 @@ class Poll {
     lastRemindedAt: dateValue(json['lastRemindedAt']),
     remindCount: intValue(json['remindCount']),
   );
-  Poll withChoice(String optionId, {PollVoter? voter}) => Poll(
-    id: id,
-    title: title,
-    description: description,
-    options: options
-        .map(
-          (e) => PollOption(
-            id: e.id,
-            label: e.label,
-            time: e.time,
-            votes:
-                e.votes +
-                (e.id == optionId ? 1 : 0) -
-                (e.id == selectedOptionId ? 1 : 0),
-            voters: anonymous
-                ? const []
-                : [
-                    ...e.voters.where(
-                      (existing) =>
-                          voter == null || existing.personId != voter.personId,
-                    ),
-                    if (voter != null && e.id == optionId) voter,
-                  ],
-          ),
-        )
-        .toList(),
-    selectedOptionId: optionId,
-    confirmedOptionId: confirmedOptionId,
-    closed: closed,
-    anonymous: anonymous,
-    closesAt: closesAt,
-    version: version,
-    roleIds: roleIds,
-    personIds: personIds,
-    productionIds: productionIds,
-    addressedToMe: addressedToMe,
-    eligibleCount: eligibleCount,
-    eligibleVotes: eligibleVotes,
-    lastRemindedAt: lastRemindedAt,
-    remindCount: remindCount,
-  );
+  Poll withChoice(String optionId, {bool? selected, PollVoter? voter}) {
+    if ((selected != null && !allowMultiple) ||
+        (selected == null && selectedOptionIds.length > 1) ||
+        !options.any((o) => o.id == optionId)) {
+      return this;
+    }
+    final choices = selected == null
+        ? <String>{optionId}
+        : selectedOptionIds.toSet();
+    if (selected == true) choices.add(optionId);
+    if (selected == false) choices.remove(optionId);
+    final participationChange = (choices.isEmpty ? 0 : 1) - (hasVoted ? 1 : 0);
+    return Poll(
+      id: id,
+      title: title,
+      description: description,
+      options: options
+          .map(
+            (e) => PollOption(
+              id: e.id,
+              label: e.label,
+              time: e.time,
+              votes:
+                  e.votes +
+                  (choices.contains(e.id) ? 1 : 0) -
+                  (selectedOptionIds.contains(e.id) ? 1 : 0),
+              voters: anonymous
+                  ? const []
+                  : [
+                      ...e.voters.where(
+                        (existing) =>
+                            voter == null ||
+                            existing.personId != voter.personId,
+                      ),
+                      if (voter != null && choices.contains(e.id)) voter,
+                    ],
+            ),
+          )
+          .toList(),
+      selectedOptionIds: choices.toList(),
+      allowMultiple: allowMultiple,
+      participantCount: totalVotes + participationChange,
+      confirmedOptionId: confirmedOptionId,
+      closed: closed,
+      anonymous: anonymous,
+      closesAt: closesAt,
+      version: version,
+      roleIds: roleIds,
+      personIds: personIds,
+      productionIds: productionIds,
+      addressedToMe: addressedToMe,
+      eligibleCount: eligibleCount,
+      eligibleVotes: eligibleVotes == null || addressedToMe == false
+          ? eligibleVotes
+          : eligibleVotes! + participationChange,
+      lastRemindedAt: lastRemindedAt,
+      remindCount: remindCount,
+    );
+  }
 
   // Every field read in [Poll.fromJson] must survive [toJson]: queued votes
   // are projected through this round trip.
@@ -193,6 +235,9 @@ class Poll {
     'productionIds': productionIds,
     'options': options.map((e) => e.toJson(anonymous: anonymous)).toList(),
     'choice': selectedOptionId,
+    'choices': selectedOptionIds,
+    'allowMultiple': allowMultiple,
+    'totalVotes': totalVotes,
     'confirmedOptionId': confirmedOptionId,
     'closed': closed,
     'anonymous': anonymous,

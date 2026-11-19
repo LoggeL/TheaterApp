@@ -23,8 +23,10 @@ class PollEditorScreen extends StatefulWidget {
 class _PollEditorScreenState extends State<PollEditorScreen> {
   late final TextEditingController _title, _description;
   late final List<TextEditingController> _options;
+  final _originalOptions = <TextEditingController, PollOption>{};
   DateTime? _closes;
   late bool _anonymous;
+  late bool _allowMultiple;
   late Set<String> _roleIds;
   late Set<int> _personIds;
   late Set<String> _productionIds;
@@ -39,18 +41,21 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
       widget.controller.supports('pollPush') &&
       widget.controller.pushConfigured;
   bool get _fixed => (widget.poll?.totalVotes ?? 0) > 0;
+  bool get _supportsPollEdits => widget.controller.supports('pollMultiSelect');
   @override
   void initState() {
     super.initState();
     _title = TextEditingController(text: widget.poll?.title);
     _description = TextEditingController(text: widget.poll?.description);
-    _options =
-        widget.poll?.options
-            .map((o) => TextEditingController(text: o.label))
-            .toList() ??
-        [TextEditingController(), TextEditingController()];
+    for (final option in widget.poll?.options ?? const <PollOption>[]) {
+      _originalOptions[TextEditingController(text: option.label)] = option;
+    }
+    _options = widget.poll == null
+        ? [TextEditingController(), TextEditingController()]
+        : _originalOptions.keys.toList();
     _closes = widget.poll?.closesAt?.toLocal();
     _anonymous = widget.poll?.anonymous ?? true;
+    _allowMultiple = widget.poll?.allowMultiple ?? false;
     _roleIds = {...?widget.poll?.roleIds};
     _personIds = {...?widget.poll?.personIds};
     _productionIds = {...?widget.poll?.productionIds};
@@ -66,7 +71,11 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
     'roleIds': _roleIds.toList(),
     'personIds': _personIds.toList(),
     'productionIds': _productionIds.toList(),
-    'options': _options.map((o) => {'label': o.text}).toList(),
+    if (_supportsPollEdits) 'allowMultiple': _allowMultiple,
+    'options': [
+      for (final o in _options)
+        {'id': ?_originalOptions[o]?.id, 'label': o.text},
+    ],
     'closesAt': _closes?.toUtc().toIso8601String(),
   };
   bool get _dirty => jsonEncode(_payload()) != _initial;
@@ -219,15 +228,35 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
                 ),
               ],
               const SectionTitle('Antworten'),
+              if (_supportsPollEdits)
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Mehrere Antworten erlauben'),
+                  subtitle: widget.poll?.hasMultipleAnswersPerPerson == true
+                      ? const Text(
+                          'Es hat bereits jemand mehrere Antworten gewählt.',
+                        )
+                      : null,
+                  value: _allowMultiple,
+                  onChanged:
+                      _busy || widget.poll?.hasMultipleAnswersPerPerson == true
+                      ? null
+                      : (enabled) => setState(() => _allowMultiple = enabled),
+                ),
+              if (_fixed && _supportsPollEdits)
+                const Text(
+                  'Beim Umbenennen bleiben die Stimmen bei der Antwort. Entfernen kannst du Antworten ohne Stimmen.',
+                ),
               for (var i = 0; i < _options.length; i++)
                 Padding(
+                  key: ObjectKey(_options[i]),
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Row(
                     children: [
                       Expanded(
                         child: TextFormField(
                           controller: _options[i],
-                          enabled: !_fixed && !_busy,
+                          enabled: (_supportsPollEdits || !_fixed) && !_busy,
                           maxLength: 200,
                           decoration: InputDecoration(
                             labelText: 'Antwort ${i + 1}',
@@ -238,7 +267,9 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
                               : null,
                         ),
                       ),
-                      if (!_fixed && _options.length > 2)
+                      if ((_supportsPollEdits || !_fixed) &&
+                          _options.length > 2 &&
+                          (_originalOptions[_options[i]]?.votes ?? 0) == 0)
                         IconButton(
                           tooltip: 'Antwort entfernen',
                           onPressed: _busy
@@ -255,7 +286,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
                     ],
                   ),
                 ),
-              if (!_fixed && _options.length < 12)
+              if ((_supportsPollEdits || !_fixed) && _options.length < 12)
                 TextButton.icon(
                   onPressed: _busy
                       ? null
@@ -265,7 +296,7 @@ class _PollEditorScreenState extends State<PollEditorScreen> {
                   icon: const Icon(Icons.add),
                   label: const Text('Antwort hinzufügen'),
                 ),
-              if (_fixed)
+              if (_fixed && !_supportsPollEdits)
                 const Text(
                   'Die Antworten bleiben nach der ersten Stimme erhalten.',
                 ),

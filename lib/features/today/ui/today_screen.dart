@@ -412,7 +412,7 @@ class _TodayScreenState extends State<TodayScreen> {
         key: const ValueKey('today-poll-voted'),
         icon: Icons.how_to_vote_outlined,
         title: poll.title,
-        subtitle: 'Abstimmung · Du hast abgestimmt',
+        subtitle: 'Abstimmung · Auswahl ändern',
         onTap: () => openPage(
           context,
           PollDetailScreen(controller: controller, pollId: poll.id),
@@ -560,58 +560,61 @@ class _PollPreviewState extends State<_PollPreview> {
             const SizedBox(height: 16),
             Text(poll.title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            for (final option in poll.options.take(3))
-              Semantics(
-                button: true,
-                inMutuallyExclusiveGroup: true,
-                checked: option.id == poll.selectedOptionId,
-                enabled: _sending == null,
-                label:
-                    '${option.label}, '
-                    '${option.votes == 1 ? '1 Stimme' : '${option.votes} Stimmen'}',
-                excludeSemantics: true,
-                onTap: _sending != null ? null : () => _vote(option.id),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
+            if (poll.allowMultiple)
+              const Text('Du kannst mehrere Antworten wählen.')
+            else
+              for (final option in poll.options.take(3))
+                Semantics(
+                  button: true,
+                  inMutuallyExclusiveGroup: true,
+                  checked: option.id == poll.selectedOptionId,
+                  enabled: _sending == null,
+                  label:
+                      '${option.label}, '
+                      '${option.votes == 1 ? '1 Stimme' : '${option.votes} Stimmen'}',
+                  excludeSemantics: true,
                   onTap: _sending != null ? null : () => _vote(option.id),
-                  child: ConstrainedBox(
-                    // One tap votes: a full-size target avoids mis-taps.
-                    constraints: const BoxConstraints(minHeight: 48),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 9,
-                      ),
-                      child: Row(
-                        children: [
-                          if (_sending == option.id)
-                            const SizedBox.square(
-                              dimension: 20,
-                              child: Padding(
-                                padding: EdgeInsets.all(2),
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: _sending != null ? null : () => _vote(option.id),
+                    child: ConstrainedBox(
+                      // One tap votes: a full-size target avoids mis-taps.
+                      constraints: const BoxConstraints(minHeight: 48),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 9,
+                        ),
+                        child: Row(
+                          children: [
+                            if (_sending == option.id)
+                              const SizedBox.square(
+                                dimension: 20,
+                                child: Padding(
+                                  padding: EdgeInsets.all(2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 ),
+                              )
+                            else
+                              Icon(
+                                option.id == poll.selectedOptionId
+                                    ? Icons.radio_button_checked
+                                    : Icons.radio_button_off,
+                                size: 20,
                               ),
-                            )
-                          else
-                            Icon(
-                              option.id == poll.selectedOptionId
-                                  ? Icons.radio_button_checked
-                                  : Icons.radio_button_off,
-                              size: 20,
-                            ),
-                          const SizedBox(width: 10),
-                          Expanded(child: Text(option.label)),
-                          const SizedBox(width: 12),
-                          Text('${option.votes}'),
-                        ],
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(option.label)),
+                            const SizedBox(width: 12),
+                            Text('${option.votes}'),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            if (poll.options.length > 3)
+            if (!poll.allowMultiple && poll.options.length > 3)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text('+ ${poll.options.length - 3} weitere Antworten'),
@@ -627,9 +630,7 @@ class _PollPreviewState extends State<_PollPreview> {
               ),
               icon: const Icon(Icons.poll_outlined),
               label: Text(
-                poll.selectedOptionId == null
-                    ? 'Jetzt abstimmen'
-                    : 'Stimme ansehen',
+                !poll.hasVoted ? 'Jetzt abstimmen' : 'Stimme ansehen',
               ),
             ),
           ],

@@ -81,11 +81,7 @@ class TodayDigest {
       // mark those with `addressedToMe`).
       votedPoll: toVote.isEmpty
           ? controller.polls
-                .where(
-                  (p) =>
-                      !p.isClosedAt(controller.now) &&
-                      p.selectedOptionId != null,
-                )
+                .where((p) => !p.isClosedAt(controller.now) && p.hasVoted)
                 .firstOrNull
           : null,
       slotPools: slotPoolsToChoose(controller),

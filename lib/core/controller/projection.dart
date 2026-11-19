@@ -73,6 +73,7 @@ extension ProjectionController on AppController {
                   ...poll
                       .withChoice(
                         textValue(body['optionId']),
+                        selected: body['selected'] as bool?,
                         voter: _user?.personId == null
                             ? null
                             : PollVoter(

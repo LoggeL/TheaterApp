@@ -119,6 +119,94 @@ void main() {
     c.dispose();
   });
 
+  testWidgets(
+    'edit a voted answer and enable multiple answers from the poll detail',
+    (tester) async {
+      tester.view.physicalSize = const Size(650, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final server = TestServer();
+      final c = await open(
+        tester,
+        server,
+        features: [..._all, 'pollMultiSelect'],
+      );
+      await tester.tap(find.byTooltip('Abstimmung bearbeiten'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Mehrere Antworten erlauben'));
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Antwort 1'),
+        'Pizza Margherita',
+      );
+      await tester.tap(find.text('Antwort hinzufügen'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Antwort 3'),
+        'Suppe',
+      );
+      expect(find.byTooltip('Antwort entfernen'), findsOneWidget);
+      final save = find.widgetWithText(FilledButton, 'Speichern');
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      final saved = server.actionBodies.last;
+      expect(saved['id'], 'p');
+      expect(saved['allowMultiple'], true);
+      expect(saved['options'], [
+        {'id': 'a', 'label': 'Pizza Margherita'},
+        {'id': 'b', 'label': 'Pasta'},
+        {'label': 'Suppe'},
+      ]);
+      expect(find.byType(PollEditorScreen), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
+    },
+  );
+
+  testWidgets(
+    'offline checkboxes keep earlier choices and count each person once',
+    (tester) async {
+      final server = TestServer();
+      server.data['polls'] = [
+        {
+          ..._poll(eligibleVotes: 12),
+          'allowMultiple': true,
+          'totalVotes': 12,
+          'choices': ['a'],
+        },
+      ];
+      final c = server.controller();
+      await signIn(c);
+      server.offline = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PollDetailScreen(controller: c, pollId: 'p'),
+        ),
+      );
+      Future<void> tap(String label) async {
+        await tester.ensureVisible(find.text(label));
+        await tester.tap(find.text(label));
+        await tester.pumpAndSettle();
+      }
+
+      await tap('Pasta');
+      expect(find.byIcon(Icons.check_box), findsNWidgets(2));
+      expect(c.polls.single.selectedOptionIds, ['a', 'b']);
+      expect(c.polls.single.options.map((o) => o.votes), [8, 5]);
+      expect(c.polls.single.eligibleVotes, 12);
+      await tap('Pizza');
+      expect(c.polls.single.selectedOptionIds, ['b']);
+      await tap('Pasta');
+      expect(c.polls.single.hasVoted, isFalse);
+      expect(c.polls.single.totalVotes, 11);
+      expect(c.polls.single.eligibleVotes, 11);
+      expect(c.outbox.map((a) => a.payload['selected']), [true, false, false]);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
+    },
+  );
+
   testWidgets('votes from outside the audience do not hide open voters', (
     tester,
   ) async {

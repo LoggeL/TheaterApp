@@ -27,7 +27,7 @@ List<Poll> pollsToVote(AppController controller) => controller.polls
     .where(
       (p) =>
           !p.isClosedAt(controller.now) &&
-          p.selectedOptionId == null &&
+          !p.hasVoted &&
           pollAddressesUser(controller, p),
     )
     .toList();

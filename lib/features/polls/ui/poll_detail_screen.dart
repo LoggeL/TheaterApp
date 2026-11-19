@@ -30,11 +30,12 @@ class PollDetailScreen extends StatefulWidget {
 
 class _PollDetailScreenState extends State<PollDetailScreen> {
   bool _busy = false;
-  Future<void> _vote(String id) async {
+  Future<void> _vote(Poll poll, String id) async {
     setState(() => _busy = true);
     try {
-      final outcome = await widget.controller.vote(widget.pollId, id);
-      if (mounted) {
+      final outcome = await widget.controller.vote(poll.id, id);
+      // Checkboxes and the inline sync status give feedback on each tap.
+      if (mounted && !poll.allowMultiple) {
         showDone(
           context,
           outcomeText(
@@ -386,7 +387,9 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                     ..._participation(c, poll, closed),
                   if (canVote) ...[
                     Text(
-                      'Du kannst deine Stimme bis zum Ende ändern.',
+                      poll.allowMultiple
+                          ? 'Du kannst mehrere Antworten wählen. Tippe erneut auf eine gewählte Antwort, um sie zurückzunehmen.'
+                          : 'Du kannst deine Stimme bis zum Ende ändern.',
                       style: theme.textTheme.bodySmall,
                     ),
                   ] else if (!closed) ...[
@@ -405,7 +408,7 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                         option: option,
                         onTap: _busy || !canVote
                             ? null
-                            : () => _vote(option.id),
+                            : () => _vote(poll, option.id),
                       ),
                     ),
                   if (_busy) const LinearProgressIndicator(),
@@ -425,7 +428,7 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
   );
 }
 
-/// One answer with its share of the votes, announced as a radio button.
+/// One answer with the share of participants who selected it.
 class _OptionCard extends StatelessWidget {
   const _OptionCard({required this.poll, required this.option, this.onTap});
   final Poll poll;
@@ -433,10 +436,10 @@ class _OptionCard extends StatelessWidget {
   final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) {
-    final selected = option.id == poll.selectedOptionId;
+    final selected = poll.selectedOptionIds.contains(option.id);
     final votes = option.votes == 1 ? '1 Stimme' : '${option.votes} Stimmen';
     return Semantics(
-      inMutuallyExclusiveGroup: true,
+      inMutuallyExclusiveGroup: !poll.allowMultiple,
       checked: selected,
       enabled: onTap != null,
       button: true,
@@ -458,7 +461,11 @@ class _OptionCard extends StatelessWidget {
                 Row(
                   children: [
                     Icon(
-                      selected
+                      poll.allowMultiple
+                          ? (selected
+                                ? Icons.check_box
+                                : Icons.check_box_outline_blank)
+                          : selected
                           ? Icons.radio_button_checked
                           : Icons.radio_button_off,
                     ),

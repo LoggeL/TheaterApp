@@ -20,6 +20,8 @@ extension PollsController on AppController {
       'action': 'poll.vote',
       'pollId': pollId,
       'optionId': optionId,
+      if (poll.allowMultiple)
+        'selected': !poll.selectedOptionIds.contains(optionId),
     });
   }
 }

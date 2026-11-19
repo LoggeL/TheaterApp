@@ -32,6 +32,26 @@ const day = value => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin
 const date = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : fail(400, 'Ungültige Zeitangabe.');
 const id = () => randomUUID();
 const list = value => Array.isArray(value) ? value : [];
+// Rows written before multiple answers were supported have a single optionId.
+const ballotChoices = vote => vote?.optionIds ?? (vote?.optionId ? [vote.optionId] : []);
+
+function pollOptions(input, oldOptions, ballots) {
+  const rows = list(input);
+  const labels = rows.map(o => required(o?.label, 'Antwort', 200));
+  if (labels.length < 2 || labels.length > 12 || new Set(labels.map(x => x.toLocaleLowerCase('de'))).size !== labels.length) fail(400, 'Bitte 2 bis 12 unterschiedliche Antworten eingeben.');
+  // Older editors send only labels. With votes present they can still save other fields.
+  const legacy = rows.every(o => o.id == null);
+  if (legacy && ballots.length && JSON.stringify(labels) !== JSON.stringify(oldOptions.map(o => o.label))) fail(409, 'Bitte aktualisiere die App, um diese Antworten zu ändern.');
+  const options = rows.map((row, i) => {
+    if (row.id != null && !oldOptions.some(o => o.id === row.id)) fail(400, 'Unbekannte Antwort.');
+    const existingId = legacy ? oldOptions.find(o => o.label === labels[i])?.id : row.id;
+    return { id: existingId ?? id(), label: labels[i] };
+  });
+  const retained = new Set(options.map(o => o.id));
+  if (retained.size !== options.length) fail(400, 'Eine Antwort wurde doppelt angegeben.');
+  if (ballots.some(v => ballotChoices(v).some(choice => !retained.has(choice)))) fail(409, 'Antworten mit Stimmen können nicht entfernt werden.');
+  return options;
+}
 // Members can still confirm or report a late arrival, but no longer decline.
 const declineCutoffMs = 60 * 60 * 1000;
 // Changes are pushed only for events in the near future, like the events badge.
@@ -50,7 +70,7 @@ export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // An optional reason when an event is called off (`event.cancel`); shown in the app and in the push.
 export const cancelReasonMaxLength = 300;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink', 'runnerMonthlyGala', 'runnerGageCrates', 'eventCancel', 'runnerWeekly', 'runnerWeeklyRewards', 'runnerReleaseSchedule']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'pollMultiSelect', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink', 'runnerMonthlyGala', 'runnerGageCrates', 'eventCancel', 'runnerWeekly', 'runnerWeeklyRewards', 'runnerReleaseSchedule']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -359,8 +379,9 @@ export class Theater {
       const responses = votes.filter(v => v.pollId === p.id);
       const anonymous = p.anonymous !== false, eligible = nudges ? new Set(this.audienceIds(p)) : null;
       // Admins see how many can vote and how many of them did; who voted stays hidden for anonymous polls.
-      return { ...p, anonymous, closed: this.pollClosed(p), choice: own?.optionId ?? null, totalVotes: responses.length, addressedToMe: inAudience(member, p, this.store), ...(nudges ? { eligibleCount: eligible.size, eligibleVotes: responses.filter(v => eligible.has(v.personId)).length, ...this.reminded(nudges, 'poll', p.id) } : {}), options: p.options.map(o => {
-        const selected = responses.filter(v => v.optionId === o.id);
+      const choices = ballotChoices(own);
+      return { ...p, anonymous, allowMultiple: p.allowMultiple === true, closed: this.pollClosed(p), choices, choice: choices[0] ?? null, totalVotes: responses.length, addressedToMe: inAudience(member, p, this.store), ...(nudges ? { eligibleCount: eligible.size, eligibleVotes: responses.filter(v => eligible.has(v.personId)).length, ...this.reminded(nudges, 'poll', p.id) } : {}), options: p.options.map(o => {
+        const selected = responses.filter(v => ballotChoices(v).includes(o.id));
         return { id: o.id, label: o.label, votes: selected.length, ...(!anonymous ? { voters: selected.filter(v => this.store.get('members', v.personId)?.active !== false).map(v => ({ personId: v.personId, name: this.store.get('members', v.personId)?.name ?? 'Ehemaliges Mitglied' })).sort((a, b) => a.name.localeCompare(b.name, 'de')) } : {}) };
       }) };
     }).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
@@ -861,20 +882,20 @@ export class Theater {
         admin(); const pollId = b.id || id(), old = s.get('polls', pollId);
         if (b.id && (!old || old.deleted)) fail(404, 'Abstimmung nicht gefunden.');
         if (old && old.version !== b.version) fail(409, 'Die Abstimmung wurde inzwischen geändert.', 'version_conflict');
-        const labels = list(b.options).map(o => required(o.label, 'Antwort', 200));
-        if (labels.length < 2 || labels.length > 12 || new Set(labels.map(x => x.toLocaleLowerCase('de'))).size !== labels.length) fail(400, 'Bitte 2 bis 12 unterschiedliche Antworten eingeben.');
-        const hasVotes = old && s.all('pollVotes').some(v => v.pollId === pollId);
-        if (hasVotes && JSON.stringify(old.options.map(o => o.label)) !== JSON.stringify(labels)) fail(409, 'Nach der ersten Stimme können die Antworten nicht mehr geändert werden.');
+        const ballots = old ? s.all('pollVotes').filter(v => v.pollId === pollId) : [];
+        const options = pollOptions(b.options, old?.options ?? [], ballots);
+        if (b.allowMultiple !== undefined && typeof b.allowMultiple !== 'boolean') fail(400, 'Ungültige Einstellung für die Mehrfachauswahl.');
+        const allowMultiple = b.allowMultiple ?? old?.allowMultiple ?? false;
+        if (!allowMultiple && ballots.some(v => ballotChoices(v).length > 1)) fail(409, 'Es hat bereits jemand mehrere Antworten gewählt.');
         if (b.anonymous !== undefined && typeof b.anonymous !== 'boolean') fail(400, 'Bitte anonym oder namentlich auswählen.');
         const anonymous = b.anonymous ?? old?.anonymous ?? true;
-        if (hasVotes && anonymous !== (old.anonymous !== false)) fail(409, 'Nach der ersten Stimme bleibt die Abstimmung anonym oder namentlich.');
+        if (ballots.length && anonymous !== (old.anonymous !== false)) fail(409, 'Nach der ersten Stimme bleibt die Abstimmung anonym oder namentlich.');
         const closesAt = b.closesAt === undefined ? old?.closesAt ?? null : b.closesAt ? date(b.closesAt) : null;
         if (closesAt && Date.parse(closesAt) <= +this.clock() && Date.parse(closesAt) !== Date.parse(old?.closesAt)) fail(400, 'Das Abstimmungsende muss in der Zukunft liegen.');
-        const options = labels.map((label, i) => ({ id: old?.options[i]?.label === label ? old.options[i].id : id(), label }));
         const roleIds = b.roleIds === undefined ? list(old?.roleIds) : this.audience(b.roleIds);
         const personIds = b.personIds === undefined ? list(old?.personIds) : this.invitedPeople(b.personIds, old?.personIds);
         const productionIds = b.productionIds === undefined ? list(old?.productionIds) : this.productionAudience(b.productionIds);
-        const poll = s.put('polls', pollId, { id: pollId, title: required(b.title, 'Frage'), description: text(b.description, 3000), roleIds, personIds, productionIds, anonymous, options, closesAt, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 });
+        const poll = s.put('polls', pollId, { id: pollId, title: required(b.title, 'Frage'), description: text(b.description, 3000), roleIds, personIds, productionIds, anonymous, allowMultiple, options, closesAt, closed: old?.closed ?? false, createdAt: old?.createdAt ?? now(), version: (old?.version ?? 0) + 1 });
         // A push announces new polls only; `pollId` data opens the poll and has no email mirror.
         const push = b.push === true && !old;
         if (push) this.enqueuePush({ title: `Neue Abstimmung: ${poll.title}`, body: closesAt ? `Abstimmen bis ${berlinDateTime(closesAt)}` : 'Deine Stimme ist gefragt.', data: { pollId }, roleIds, personIds, productionIds });
@@ -885,7 +906,24 @@ export class Theater {
         if (!p || p.deleted || !this.canSee(a, p)) fail(404, 'Abstimmung nicht gefunden.');
         if (this.pollClosed(p)) fail(409, 'Die Abstimmung ist bereits beendet.', 'closed');
         if (!p.options.some(o => o.id === b.optionId)) fail(400, 'Diese Antwort gehört nicht zur Abstimmung.');
-        s.put('pollVotes', `${p.id}:${a.personId}`, { pollId: p.id, personId: a.personId, optionId: b.optionId, updatedAt: now() }); return {};
+        const key = `${p.id}:${a.personId}`;
+        let optionIds = [b.optionId];
+        if (p.allowMultiple && b.selected !== undefined) {
+          if (typeof b.selected !== 'boolean') fail(400, 'Ungültige Auswahl.');
+          // Set one checkbox explicitly so retries and edits to other choices on another device compose.
+          const choices = new Set(ballotChoices(s.get('pollVotes', key)));
+          if (b.selected) choices.add(b.optionId);
+          else choices.delete(b.optionId);
+          optionIds = [...choices];
+        } else if (b.selected !== undefined) {
+          fail(409, 'Bei dieser Abstimmung ist nur eine Antwort möglich.');
+        } else if (p.allowMultiple && ballotChoices(s.get('pollVotes', key)).length > 1) {
+          // A legacy radio-button client cannot see the whole ballot it would overwrite.
+          fail(409, 'Zum Ändern deiner Mehrfachauswahl brauchst du die aktuelle App.');
+        }
+        if (optionIds.length) s.put('pollVotes', key, { pollId: p.id, personId: a.personId, ...(p.allowMultiple ? { optionIds } : { optionId: b.optionId }), updatedAt: now() });
+        else s.delete('pollVotes', key);
+        return {};
       }
       case 'poll.close': {
         admin(); const p = s.get('polls', b.id);
@@ -1557,7 +1595,7 @@ export class Theater {
       s.delete('pollVotes', `${v.pollId}:${personId}`);
       const p = s.get('polls', v.pollId);
       // Anonymous results keep their counts; a named vote cannot exist without the name.
-      if (p && p.anonymous !== false) s.put('pollVotes', `${v.pollId}:former-${id()}`, { pollId: v.pollId, personId: null, optionId: v.optionId });
+      if (p && p.anonymous !== false) s.put('pollVotes', `${v.pollId}:former-${id()}`, { pollId: v.pollId, personId: null, optionIds: ballotChoices(v) });
     }
     for (const m of s.all('messages')) {
       const author = m.authorId === personId;

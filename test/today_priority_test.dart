@@ -348,6 +348,44 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets(
+    'Today opens the full multiple-choice poll and lets a voter return to it',
+    (tester) async {
+      addTearDown(tester.view.reset);
+      final server = TestServer()
+        ..data['polls'] = [
+          {..._poll(), 'allowMultiple': true, 'totalVotes': 3},
+        ];
+      final controller = server.controller();
+      await signIn(controller);
+      server.offline = true;
+      await _pump(tester, controller);
+      expect(find.text('Kleine Bühne'), findsNothing);
+      await tester.tap(find.text('Jetzt abstimmen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Großer Saal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Kleine Bühne'));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.check_box), findsNWidgets(2));
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      final changeVote = find.text('Abstimmung · Auswahl ändern');
+      await tester.scrollUntilVisible(
+        changeVote,
+        450,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(changeVote);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Großer Saal'));
+      await tester.pumpAndSettle();
+      expect(controller.polls.single.selectedOptionIds, ['b']);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+
   testWidgets('admins see new registrations among the open items', (
     tester,
   ) async {
