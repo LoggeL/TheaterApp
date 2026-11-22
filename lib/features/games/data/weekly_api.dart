@@ -347,11 +347,15 @@ Future<WeeklyStart> startWeeklyRound(
 class WeeklyRunResult {
   const WeeklyRunResult({
     this.improved = false,
+    this.ranked = true,
     this.best,
     this.rank,
     this.used,
     this.max,
   });
+
+  /// False for training and ranked attempts submitted after the week ended.
+  final bool ranked;
   final bool improved;
   final WeeklyBest? best;
   final int? rank, used, max;
@@ -360,6 +364,7 @@ class WeeklyRunResult {
     final attempts = json['attempts'];
     return WeeklyRunResult(
       improved: json['improved'] == true,
+      ranked: json['ranked'] != false,
       best: WeeklyBest.of(json['best']),
       rank: json['rank'] is num ? intValue(json['rank']) : null,
       used: switch (attempts) {

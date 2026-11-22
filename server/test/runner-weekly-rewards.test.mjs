@@ -16,7 +16,7 @@ const items = [
   { id: 'h3', kind: 'character', name: 'Hell 3', rarity: 'hell' },
 ];
 const names = { sam: 'Sam Beispiel', kim: 'Kim Muster', lou: 'Lou Probe', ria: 'Ria Rang', ole: 'Ole Ohne' };
-// Week 45 of 2026 closes half an hour after Sunday midnight in Berlin (23:00 UTC).
+// Week 45 of 2026 closes at Monday midnight in Berlin (Sunday 23:00 UTC).
 const afterW45 = '2026-11-09T08:00:00Z', afterW46 = '2026-11-16T08:00:00Z';
 
 function setup(t, { store = new Store(), begin = '2026-11-04T10:00:00Z', random = () => 0.5, shinyChance = { costume: 0.03, weekly: 0.15 } } = {}) {
@@ -287,6 +287,45 @@ test('deleting a person removes their Wochenkisten and trophies; the others keep
   assert.equal(s.crates('lou'), 1);
 });
 
+test('an early seen request cannot consume a future result', t => {
+  const s = setup(t);
+  s.play('sam', 60);
+  s.app.runnerWeeklySeen('sam', { week: '2026-W45' });
+  s.at('2026-11-08T23:00:00Z');
+  assert.equal(s.app.runnerWeeklyResults('sam').results.length, 1);
+});
+
+test('zero-point completed ranked runs participate, training and abandoned starts do not', t => {
+  const s = setup(t);
+  s.play('sam', 0);
+  s.play('kim', 0, false);
+  s.app.runnerStart('lou', { weekly: { week: '2026-W45', ranked: true } });
+  s.at('2026-11-08T23:00:00Z');
+  assert.deepEqual(s.app.runnerWeeklyResults('sam').results.map(x => [x.rank, x.score, x.crates]), [[1, 0, 1]]);
+  assert.deepEqual(s.app.runnerWeeklyResults('kim').results, []);
+  assert.deepEqual(s.app.runnerWeeklyResults('lou').results, []);
+});
+
+test('pending results retain every unseen participation, oldest first, even across empty weeks', t => {
+  const s = setup(t);
+  s.runs({ kim: 90, sam: 80 });
+  s.at('2026-11-12T12:00:00Z');
+  s.runs({ kim: 60 });
+  s.at('2026-11-23T00:00:00Z');
+  const results = () => s.app.runnerWeeklyResults('kim').results;
+  assert.deepEqual(results().map(x => [x.week, x.rank]), [['2026-W45', 1], ['2026-W46', 1]]);
+  assert.equal(s.app.runnerWeeklyResults('sam').results[0].week, '2026-W45');
+  assert.deepEqual(s.app.runnerWeeklyResults('ole').results, []);
+  assert.deepEqual(results(), results()); // Fetching does not acknowledge.
+  s.app.runnerWeeklySeen('kim', { week: '2026-W45' });
+  assert.deepEqual(results().map(x => x.week), ['2026-W46']);
+  s.app.runnerWeeklySeen('kim', { week: '2026-W45' });
+  assert.deepEqual(results().map(x => x.week), ['2026-W46']);
+  s.app.runnerWeeklySeen('kim', { week: '2026-W46' });
+  assert.deepEqual(results(), []);
+  assert.deepEqual(s.store.all('pushJobs'), []);
+});
+
 test('the routes give the weekly fields and open a Wochenkiste once per key', async t => {
   const s = setup(t);
   s.runs({ kim: 90, sam: 80 });
@@ -296,6 +335,11 @@ test('the routes give the weekly fields and open a Wochenkiste once per key', as
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}/api/mobile/v1`, headers = { authorization: 'Bearer kim', 'content-type': 'application/json' };
+  const unauthorized = await fetch(`${base}/games/runner/weekly/results`);
+  assert.equal(unauthorized.status, 401);
+  const inbox = await (await fetch(`${base}/games/runner/weekly/results`, { headers })).json();
+  assert.equal(inbox.results[0].week, '2026-W45');
+  assert.equal(inbox.nextCheckAt, '2026-11-15T23:00:00.000Z');
   const weekly = await (await fetch(`${base}/games/runner/weekly`, { headers })).json();
   assert.deepEqual(weekly.trophies, { gold: 1, silver: 0, bronze: 0 });
   assert.deepEqual(weekly.leaderboard[0].trophies, { gold: 1, silver: 0, bronze: 0 });

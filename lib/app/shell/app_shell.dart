@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/app_controller.dart';
@@ -5,6 +7,7 @@ import '../../core/device_services.dart';
 import '../../features/admin/ui/management_screen.dart';
 import '../../features/events/ui/schedule_screen.dart';
 import '../../features/games/games.dart';
+import '../../features/games/ui/weekly_result_popup.dart';
 import '../../features/me/ui/my_area_screen.dart';
 import '../../features/messages/ui/communication_screen.dart';
 import '../../features/scripts/ui/productions_screen.dart';
@@ -39,6 +42,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _tab = 0;
+  final _startupDialogs = Completer<void>();
 
   /// The Mitteilungen tab's segment (true: polls), set by links from Heute.
   final _showPolls = ValueNotifier<bool>(false);
@@ -53,10 +57,13 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted || !widget.promptForPush) return;
-      await widget.beforePushPrompt?.call();
-      if (mounted) {
-        requestPushOnOpen(context, widget.controller, widget.devices);
+      try {
+        await widget.beforePushPrompt?.call();
+        if (mounted && widget.promptForPush) {
+          await requestPushOnOpen(context, widget.controller, widget.devices);
+        }
+      } finally {
+        if (!_startupDialogs.isCompleted) _startupDialogs.complete();
       }
     });
   }
@@ -67,9 +74,13 @@ class _AppShellState extends State<AppShell> {
   // Covered by a page, the shell skips the controller's changes and catches
   // up with one rebuild when it is shown again.
   @override
-  Widget build(BuildContext context) => VisibleListenableBuilder(
-    listenable: widget.controller,
-    builder: (context, _) => _build(context),
+  Widget build(BuildContext context) => WeeklyResultHost(
+    controller: widget.controller,
+    beforeCheck: () => _startupDialogs.future,
+    child: VisibleListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) => _build(context),
+    ),
   );
 
   Widget _build(BuildContext context) {

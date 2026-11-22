@@ -363,6 +363,19 @@ void main() {
       expect(calls, contains('PUT weekly/seen'));
     });
 
+    testWidgets(
+      'new result inbox owns acknowledgement, not loading the weekly page',
+      (tester) async {
+        final calls = await open(
+          tester,
+          week: _week(lastWeek: _silver),
+          features: [..._features, 'runnerWeeklyResults'],
+        );
+        expect(find.byKey(const ValueKey('weekly-reward')), findsOneWidget);
+        expect(calls, isNot(contains('PUT weekly/seen')));
+      },
+    );
+
     testWidgets('the ranking shows everyone’s Pokale, the page the own', (
       tester,
     ) async {

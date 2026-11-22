@@ -382,6 +382,7 @@ void main() {
       final cached = WeeklyChallenge.fromCache(week.toCache());
       expect((cached.week, cached.seed, cached.cached), (_week, _seed, true));
       expect(cached.endsAt, DateTime.parse(_endsAt));
+      expect(WeeklyRunResult.fromJson({'ranked': false}).ranked, isFalse);
       final result = WeeklyRunResult.fromJson({
         'improved': true,
         'best': {'score': 150, 'meters': 130},

@@ -15,7 +15,7 @@ import { adminRunnerCatalog, adminRunnerSkin } from './runner-admin-catalog.mjs'
 import { adminReleaseSchedule, rescheduleRelease, withReleaseOverrides } from './runner-release-schedule.mjs';
 import { forgetMonthScores, periodBoard, rankedBoard, recordMonthRun } from './runner-monthly.mjs';
 import { forgetGala, galaView } from './runner-gala.mjs';
-import { checkGhost, forgetWeekly, recordWeeklyRun, startWeeklyRound, weeklyAnswer, weeklySeen, weeklyView } from './runner-weekly.mjs';
+import { checkGhost, forgetWeekly, recordWeeklyRun, startWeeklyRound, weeklyAnswer, weeklyResults, weeklySeen, weeklyView } from './runner-weekly.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { archiveForm, attachForm, checkFormSubmissionOpen, forgetFormGenerations, forgetFormSubmissions, formStatus, saveForm, submitForm, withdrawForm } from './forms.mjs';
 
@@ -70,7 +70,7 @@ export const plannedReminderMinLeadMs = 2 * 60 * 60 * 1000;
 // An optional reason when an event is called off (`event.cancel`); shown in the app and in the push.
 export const cancelReasonMaxLength = 300;
 // Additive API features this server supports; clients only offer what is listed here.
-export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'pollMultiSelect', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink', 'runnerMonthlyGala', 'runnerGageCrates', 'eventCancel', 'runnerWeekly', 'runnerWeeklyRewards', 'runnerReleaseSchedule']);
+export const apiFeatures = Object.freeze(['addressedToMe', 'absenceOutcome', 'eventDetailsV2', 'pollPush', 'pollRemind', 'pollDelete', 'pollMultiSelect', 'nudges', 'errorCodes', 'slotNotices', 'lateDeclines', 'seriesEdit', 'feedback', 'feedbackTickets', 'productionScopeEvents', 'stageRunner', 'ensembleProfiles', 'pushSettings', 'accountRole', 'calendarFeed', 'autoAccept', 'accountPermissions', 'seriesManage', 'runnerUnlocks', 'perfTelemetry', 'runnerDupes', 'runnerEnsemble', 'runnerDailyBonus', 'runnerMissions', 'runnerEventCrates', 'runnerRoleFigures', 'runnerUniqueFigures', 'runnerCratePoints', 'runnerCrateTargets', 'runnerPackGoals', 'runnerContentReleases', 'forms', 'runnerGiftFigure', 'runnerCollection', 'runnerMonthlyLeaderboard', 'runnerAdminCatalog', 'accountPasswordResetLink', 'runnerMonthlyGala', 'runnerGageCrates', 'eventCancel', 'runnerWeekly', 'runnerWeeklyRewards', 'runnerWeeklyResults', 'runnerReleaseSchedule']);
 // Rights an admin can give single member accounts on top of their role; admins have all of them.
 // `events` ("Termine verwalten") covers planning and running all events, series and Terminfinder.
 export const accountPermissions = Object.freeze(['events']);
@@ -585,6 +585,7 @@ export class Theater {
   runnerGala(uid) { return galaView(this, uid); }
   runnerGalaSeen(uid, b) { return galaSeen(this, uid, b); }
   // The Wochenprobe lives in runner-weekly.mjs.
+  runnerWeeklyResults(uid) { return weeklyResults(this, uid); }
   runnerWeekly(uid) { return weeklyView(this, uid); }
   runnerWeeklySeen(uid, b) { return weeklySeen(this, uid, b); }
   // Tagesmissionen live in runner-missions.mjs.

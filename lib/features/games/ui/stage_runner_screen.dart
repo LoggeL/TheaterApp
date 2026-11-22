@@ -1405,7 +1405,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
           style: theme.textTheme.titleSmall,
         ),
       ],
-      if (play.ranked && used > 0 && !_saving) ...[
+      if (play.ranked && r?.ranked != false && used > 0 && !_saving) ...[
         const SizedBox(height: 4),
         Text(
           used >= max
@@ -1415,6 +1415,13 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
               : 'Noch ${max - used} Versuche diese Woche',
           textAlign: TextAlign.center,
           style: theme.textTheme.bodySmall,
+        ),
+      ],
+      if (play.ranked && r?.ranked == false) ...[
+        const SizedBox(height: 8),
+        const Text(
+          'Die Woche ist bereits abgeschlossen. Dieser Lauf zählt als Training; dein Fortschritt bleibt erhalten.',
+          textAlign: TextAlign.center,
         ),
       ],
       if (!play.ranked) ...[

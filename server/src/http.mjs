@@ -237,6 +237,7 @@ export function createHttpServer({ theater: defaultTheater, verifyToken, deleteI
       if (route === '/games/runner/gala' && req.method === 'GET') return json(res, 200, theater.runnerGala(identity.uid));
       if (route === '/games/runner/gala/seen' && req.method === 'PUT') return json(res, 200, theater.runnerGalaSeen(identity.uid, body));
       // The Wochenprobe (runner-weekly.mjs).
+      if (route === '/games/runner/weekly/results' && req.method === 'GET') return json(res, 200, theater.runnerWeeklyResults(identity.uid));
       if (route === '/games/runner/weekly' && req.method === 'GET') return json(res, 200, theater.runnerWeekly(identity.uid));
       if (route === '/games/runner/weekly/seen' && req.method === 'PUT') return json(res, 200, theater.runnerWeeklySeen(identity.uid, body));
       if (route === '/games/runner/outfit' && req.method === 'PUT') return json(res, 200, theater.runnerOutfit(identity.uid, body));

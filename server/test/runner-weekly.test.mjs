@@ -157,7 +157,7 @@ test('parallel ranked starts never get beyond three', async t => {
   assert.equal(seen.status, 400);
 });
 
-test('only the current week starts; a run counts for the week it was started in', t => {
+test('only the current week starts; late results count as training, not for a closed week', t => {
   const { app, store, sam, kim, at, start, finish } = setup(t);
   assert.throws(() => start('sam', true, '2026-W44'), { status: 409, code: 'week_over' });
   assert.throws(() => start('sam', false, '2026-W46'), { status: 409, code: 'week_over' });
@@ -170,8 +170,12 @@ test('only the current week starts; a run counts for the week it was started in'
   const late = start('sam');
   const result = finish('sam', late, { seconds: 20 * 60 });
   assert.equal(result.weekly.week, '2026-W45');
-  assert.equal(result.weekly.rank, 1);
-  assert.equal(store.get(weekRunsKind, `2026-W45:${sam}`).best, result.score);
+  assert.equal(result.weekly.rank, null);
+  assert.equal(result.weekly.ranked, false);
+  assert.equal(result.weekly.improved, false);
+  assert.equal(store.get(weekRunsKind, `2026-W45:${sam}`).best, 0);
+  assert.equal(store.get('runnerProgress', sam).meters, result.score);
+  assert.deepEqual(app.runnerScore('sam', { roundId: late.roundId, score: result.score, meters: result.score, ghost: ghostOf(20 * 60) }).weekly, result.weekly);
   const now = app.runnerWeekly('sam');
   assert.equal(now.week, '2026-W46');
   assert.deepEqual(now.leaderboard, []);
@@ -181,6 +185,37 @@ test('only the current week starts; a run counts for the week it was started in'
   assert.equal(start('kim').weekly.week, '2026-W46');
   assert.equal(store.get(weekRunsKind, `2026-W46:${kim}`).used, 1);
 });
+
+for (const [begin, cutoff, week] of [
+  ['2026-03-25T10:00:00Z', '2026-03-29T22:00:00Z', '2026-W13'],
+  ['2026-10-21T10:00:00Z', '2026-10-25T23:00:00Z', '2026-W43'],
+]) for (const settleFirst of [false, true]) {
+  test(`midnight cutoff ${week}, worker before late score: ${settleFirst}`, t => {
+    const s = setup(t, begin);
+    s.play('sam', { seconds: 30 });
+    s.play('kim', { seconds: 40 });
+    s.at(new Date(Date.parse(cutoff) - 30000).toISOString());
+    const late = s.start('sam');
+    s.at(cutoff);
+    if (settleFirst) settleWeeks(s.app);
+    // Exactly at midnight; long enough to beat the paid winner, but too late to rank.
+    const meters = Math.floor(runnerMaxMeters(30));
+    const body = { roundId: late.roundId, score: meters + 100, meters, ghost: ghostOf(30) };
+    const result = s.app.runnerScore('sam', body);
+    assert.equal(result.weekly.ranked, false);
+    assert.equal(result.weekly.improved, false);
+    settleWeeks(s.app);
+    const awards = s.store.get(weekAwardsKind, week);
+    assert.deepEqual(awards.placements.map(x => [x.personId, x.rank, x.gage]), [[s.kim, 1, 100], [s.sam, 2, 50]]);
+    const gage = s.gage(s.sam), progress = s.store.get('runnerProgress', s.sam).meters;
+    s.app.runnerScore('sam', body);
+    settleWeeks(s.app);
+    assert.deepEqual(s.store.get(weekAwardsKind, week), awards);
+    assert.equal(s.gage(s.sam), gage);
+    assert.equal(s.store.get('runnerProgress', s.sam).meters, progress);
+    assert.equal(s.app.runnerWeeklyResults('sam').results[0].rank, 2);
+  });
+}
 
 test('the best ranked run counts, ties go to the earlier one; training and normal runs do not rank', t => {
   const { app, store, sam, kim, lou, play, tick } = setup(t);
@@ -304,12 +339,12 @@ test('after the week the places get their rewards exactly once, the banner shows
   play('admin', { ranked: false, seconds: 100 });
   const before = new Map([sam, kim, lou, extra].map(id => [id, gage(id)]));
   const gains = () => [kim, sam, lou, extra].map(id => gage(id) - before.get(id));
-  // The week ended, but results of runs still open may arrive for half an hour: not closed yet.
-  at('2026-11-08T23:10:00Z');
+  // Nothing is paid before midnight; at midnight the result is final, without grace.
+  at('2026-11-08T22:59:59.999Z');
   settleWeeks(app);
   assert.equal(app.runnerWeekly('kim').lastWeek, null);
   assert.equal(store.get(weekAwardsKind, '2026-W45'), null);
-  at(new Date(Date.parse('2026-11-08T23:00:00Z') + stageRunner.roundTtlMs).toISOString());
+  at('2026-11-08T23:00:00.000Z');
   const view = app.runnerWeekly('sam');
   assert.deepEqual(view.lastWeek, { week: '2026-W45', rank: 2, score: Math.floor(runnerMaxMeters(80)), gage: 50, trophy: 'silver', crates: 1 });
   assert.deepEqual(gains(), [100, 50, 25, 0]);
@@ -339,7 +374,7 @@ test('after the week the places get their rewards exactly once, the banner shows
   assert.equal(app.runnerWeekly('admin').lastWeek, null);
   assert.throws(() => app.runnerWeeklySeen('sam', { week: '2026-11' }), { status: 400 });
   assert.throws(() => app.runnerWeeklySeen('sam', {}), { status: 400 });
-  // A late result of a week already closed cannot come: the run would be older than `roundTtlMs`.
+  // Late results cannot alter a closed ranking, even while their round TTL is still valid.
   // The next week closes on its own, also when nobody played it.
   at('2026-11-23T08:00:00Z');
   app.runnerWeekly('kim');

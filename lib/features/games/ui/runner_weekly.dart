@@ -226,8 +226,10 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
       });
       widget.onLoaded?.call(week);
       unawaited(_cache.write(week));
-      // Shown once: the server leaves it out from now on.
-      if (week.lastWeek case final last?) {
+      // Legacy servers keep their banner-on-load acknowledgement. On new servers
+      // only the app-wide result popup may acknowledge an explicit dismissal.
+      if (week.lastWeek case final last?
+          when !controller.supports('runnerWeeklyResults')) {
         unawaited(
           markWeeklySeen(controller, last.week).catchError((Object e) {
             if (kDebugMode) debugPrint('Wochenprobe: nicht gesehen: $e');

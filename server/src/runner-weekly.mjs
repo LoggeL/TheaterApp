@@ -17,8 +17,8 @@ import { creditGage, figureViews, runnerFigure, shinyChanceOf } from './runner-w
 //   starts at the same moment never get beyond the limit. 409 `attempts_used` once they are used,
 //   409 `week_over` for any week but the current one.
 // - The run knows its mode from its start (`weekly` on the run, runner-rounds.mjs): a result cannot
-//   switch it. A run started in a week counts for that week, also when its result arrives after the
-//   week ended (`roundTtlMs` at most).
+//   switch it. The server must receive a ranked result BEFORE the week's end. A later submission
+//   (within roundTtlMs) counts only as training/progress, never changes the frozen ranking.
 // - Store kind `runnerWeekRuns`, id `${week}:${personId}`, `{ personId, week, used, attempts, best,
 //   meters, bestAt, ghost, ranked, training, rewardSeen? }`: `best` only rises with ranked runs,
 //   `bestAt` is when the server counted it. Equal scores: the earlier one ranks first.
@@ -37,12 +37,12 @@ import { creditGage, figureViews, runnerFigure, shinyChanceOf } from './runner-w
 //   default? }` (runner-wardrobe.mjs `figureViews`): `image` only when that picture is served to the
 //   one asking (an ensemble reward not revealed yet, a unique figure not unlocked: null, the app
 //   draws a silhouette). Older apps ignore it.
-// - Leaderboard and ghosts: active members with a ranked best above zero (as the other lists), by
+// - Leaderboard and ghosts: active members with a completed ranked run (including zero), by
 //   their current name. Weekly runs count for the progress like any other run (`recordRun`: crate
 //   points, Tagesbonus, Tagesmissionen, gage of duplicates), never for the all-time list
 //   (`runnerScores`), the Monatsrangliste or the Monatsgala.
-// - Rewards (`runnerWeeklyRewards`): a week is closed `roundTtlMs` after its end (results still on
-//   their way are in by then), lazily on the next GET /games/runner/weekly and with the job of the
+// - Rewards (`runnerWeeklyRewards`): a week closes at Monday 00:00 Europe/Berlin, with no grace,
+//   lazily on GET /games/runner/weekly[/results] and with the job of the
 //   push worker (`settleWeeks`). Store kind `runnerWeekAwards`, id = week, written once in one
 //   transaction with all its rewards (`{ week, closedAt, rules, players, placements }`, a placement
 //   `{ rank, personId, name, score, meters, gage, crates, trophy? }`): nothing is given twice, also
@@ -63,8 +63,10 @@ import { creditGage, figureViews, runnerFigure, shinyChanceOf } from './runner-w
 //   gage missing to the new amount (nobody gives any back: an old 5 for taking part stays), in one
 //   transaction that marks the record (`rules`, `toppedUpAt`, per placement `topUp`). The banner of
 //   such a week shows again with what it brings now.
-// - The app shows the latest closed week once (`lastWeek` `{ week, rank, score, gage, trophy,
-//   crates }`, until PUT /games/runner/weekly/seen). No push of any kind.
+// - Legacy clients show the latest closed week (`lastWeek`) until PUT /games/runner/weekly/seen.
+//   `runnerWeeklyResults` adds GET /games/runner/weekly/results: all own unseen results, oldest first,
+//   plus nextCheckAt (next Berlin Monday). New apps acknowledge only an explicit popup dismissal.
+//   Both use rewardSeen, preserving old acknowledgements. No push of any kind.
 // - Deleting a person (`forgetWeekly`) removes their records, ghosts, Wochenkisten and their entry of
 //   every closed week (their trophies with it); the others keep their rank.
 
@@ -119,8 +121,8 @@ export function weekBounds(week) {
   return berlinWeek(bounds.startsAt) === week ? bounds : null;
 }
 
-/** When the results of [week] are all in and it is closed. */
-const closesAt = week => Date.parse(weekBounds(week).endsAt) + stageRunner.roundTtlMs;
+/** Hard result deadline of [week], without a grace period. */
+const closesAt = week => Date.parse(weekBounds(week).endsAt);
 
 /** The record of [week] with its seed, made on the first request. */
 function weekOf(t, week) {
@@ -133,10 +135,10 @@ const emptyRecord = (week, personId) => ({ personId, week, used: 0, attempts: []
 const recordOf = (t, week, personId) => t.store.get(weekRunsKind, key(week, personId)) ?? emptyRecord(week, personId);
 const recordsOf = (t, week) => t.store.db.prepare('SELECT data FROM entities WHERE kind=? AND id LIKE ? ORDER BY id').all(weekRunsKind, `${week}:%`).map(r => JSON.parse(r.data));
 
-/** The ranked players of [week]: active members with a best above zero; earlier first on a tie. */
+/** Active completed ranked participants of [week]; earlier first on a tie. */
 function rankedWeek(t, week) {
   const members = new Map(t.store.all('members').filter(m => m.active === true).map(m => [m.id, m]));
-  return recordsOf(t, week).filter(x => x.best > 0 && members.has(x.personId))
+  return recordsOf(t, week).filter(x => (x.best > 0 || x.ranked > 0) && members.has(x.personId))
     .sort((x, y) => y.best - x.best || String(x.bestAt).localeCompare(String(y.bestAt)) || x.personId - y.personId)
     .map((x, i) => ({ ...x, rank: i + 1, name: members.get(x.personId).name }));
 }
@@ -270,12 +272,31 @@ export function weeklyView(t, uid) {
   return t.store.transaction(() => view(t, t.account(uid).personId, t.clock()));
 }
 
+/** Lightweight app-wide inbox. No ghosts/course creation, and no implicit acknowledgement. */
+export function weeklyResults(t, uid) {
+  return t.store.transaction(() => {
+    const personId = t.account(uid).personId, now = t.clock();
+    for (const week of oldWeeks(t)) topUpWeek(t, week, now);
+    for (const week of dueWeeks(t, now)) closeWeek(t, week, now);
+    const results = t.store.all(weekAwardsKind).sort((a, b) => a.week.localeCompare(b.week)).flatMap(awards => {
+      const mine = awards.placements.find(x => x.personId === personId);
+      if (!mine || t.store.get(weekRunsKind, key(awards.week, personId))?.rewardSeen) return [];
+      return [{ week: awards.week, rank: mine.rank, score: mine.score, gage: mine.gage, trophy: mine.trophy ?? null, crates: mine.crates ?? 0 }];
+    });
+    return { results, nextCheckAt: weekBounds(berlinWeek(now)).endsAt };
+  });
+}
+
 /** PUT /games/runner/weekly/seen `{ week }`: the banner of that week's result was shown. */
 export function weeklySeen(t, uid, b) {
   if (!weekBounds(b?.week)) fail(400, 'Bitte eine Woche als JJJJ-Www angeben.');
   return t.store.transaction(() => {
-    const personId = t.account(uid).personId, id = key(b.week, personId), record = t.store.get(weekRunsKind, id);
-    if (record && !record.rewardSeen) t.store.put(weekRunsKind, id, { ...record, rewardSeen: true });
+    const personId = t.account(uid).personId;
+    // Settle/top up before acknowledgement, and never pre-acknowledge an open week.
+    view(t, personId, t.clock());
+    const id = key(b.week, personId), record = recordOf(t, b.week, personId);
+    const mine = t.store.get(weekAwardsKind, b.week)?.placements.some(x => x.personId === personId);
+    if (mine && !record.rewardSeen) t.store.put(weekRunsKind, id, { ...record, rewardSeen: true });
     return view(t, personId, t.clock());
   });
 }
@@ -327,12 +348,15 @@ export function weeklyAnswer(t, personId, { week, ranked, improved }) {
  * in the figure it was run in ([character] as the app says, see `runnerFigure`).
  */
 export function recordWeeklyRun(t, personId, weekly, { score, meters, ghost, at, character }) {
-  const record = recordOf(t, weekly.week, personId), improved = weekly.ranked && score > record.best;
+  // Receipt time is the cutoff, regardless of whether a worker already settled.
+  // Progress still counts normally, but a late result can never change a paid rank.
+  const ranked = weekly.ranked && +new Date(at) < closesAt(weekly.week) && !t.store.get(weekAwardsKind, weekly.week);
+  const record = recordOf(t, weekly.week, personId), improved = ranked && score > record.best;
   t.store.put(weekRunsKind, key(weekly.week, personId), {
-    ...record, ...(weekly.ranked ? { ranked: record.ranked + 1 } : { training: record.training + 1 }),
+    ...record, ...(ranked ? { ranked: record.ranked + 1, ...(!record.bestAt ? { bestAt: at } : {}) } : { training: record.training + 1 }),
     ...(improved ? { best: score, meters, bestAt: at, ghost: ghost && { ...ghost, character: runnerFigure(t, personId, character) } } : {}),
   });
-  return { week: weekly.week, ranked: weekly.ranked, improved };
+  return { week: weekly.week, ranked, improved };
 }
 
 /**
