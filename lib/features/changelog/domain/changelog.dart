@@ -27,6 +27,14 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.16.8',
+    date: '23. November 2026',
+    items: [
+      'Dein Ergebnis der Wochenprobe erscheint jetzt beim Öffnen der App. Noch ungelesene Ergebnisse werden nacheinander angezeigt.',
+      'Die Wochenprobe endet pünktlich um Mitternacht. Später beendete Läufe zählen als Training, nicht mehr für die Wochenwertung.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.16.7',
     date: '19. November 2026',
     items: [
