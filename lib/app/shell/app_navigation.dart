@@ -95,9 +95,16 @@ List<NavigationDestination> appNavigationDestinations(
   ].join(' · ');
 
   final unread = unreadMessageCount(controller);
+  final forms = openForms(controller).toList();
+  // Avoid double-counting messages that are both unread and carry an open form.
+  final extraForms = forms
+      .where((m) => !messageUnreadFor(controller.user, m))
+      .length;
   final polls = pollsToVote(controller).length;
   final messageText = [
     if (unread > 0) '$unread ungelesen',
+    if (forms.isNotEmpty)
+      _count(forms.length, '1 Formular offen', 'Formulare offen'),
     if (polls > 0) _count(polls, '1 Abstimmung offen', 'Abstimmungen offen'),
   ].join(' · ');
 
@@ -122,7 +129,7 @@ List<NavigationDestination> appNavigationDestinations(
       Icons.mail,
       label: 'Post',
       name: 'Mitteilungen',
-      count: unread + polls,
+      count: unread + extraForms + polls,
       status: messageText,
     ),
     _destination(

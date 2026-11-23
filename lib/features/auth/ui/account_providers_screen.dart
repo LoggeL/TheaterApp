@@ -16,6 +16,43 @@ class AccountProvidersScreen extends StatefulWidget {
 class _AccountProvidersScreenState extends State<AccountProvidersScreen> {
   bool _busy = false;
   String? _error;
+  int? _passkeyCount;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPasskeyCount();
+  }
+
+  Future<void> _loadPasskeyCount() async {
+    if (widget.controller.identity is! PasskeyIdentity ||
+        widget.controller.isDemo ||
+        !widget.controller.hasAccess) {
+      return;
+    }
+    try {
+      final keys = await widget.controller.listPasskeys();
+      if (mounted) setState(() => _passkeyCount = keys.length);
+    } catch (_) {
+      // Keep default description when offline or unsupported.
+    }
+  }
+
+  String get _passkeysSubtitle => switch (_passkeyCount) {
+    null => 'Mit Fingerabdruck, Gesicht oder Gerätesperre anmelden',
+    0 => 'Noch kein Passkey eingerichtet',
+    1 => '1 Passkey eingerichtet',
+    final count => '$count Passkeys eingerichtet',
+  };
+
+  Future<void> _openPasskeys() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PasskeysScreen(controller: widget.controller),
+      ),
+    );
+    if (mounted) await _loadPasskeyCount();
+  }
 
   /// Runs [action], reloads the identity and confirms with [done].
   Future<void> _run(Future<void> Function() action, String done) async {
@@ -87,18 +124,9 @@ class _AccountProvidersScreenState extends State<AccountProvidersScreen> {
               child: ListTile(
                 leading: const Icon(Icons.key_outlined),
                 title: const Text('Passkeys'),
-                subtitle: const Text(
-                  'Mit Fingerabdruck, Gesicht oder Gerätesperre anmelden',
-                ),
+                subtitle: Text(_passkeysSubtitle),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: _busy
-                    ? null
-                    : () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) =>
-                              PasskeysScreen(controller: widget.controller),
-                        ),
-                      ),
+                onTap: _busy ? null : _openPasskeys,
               ),
             ),
             const SizedBox(height: 12),

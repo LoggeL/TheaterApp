@@ -55,8 +55,10 @@ class MessagesScreen extends StatefulWidget {
   State<MessagesScreen> createState() => _MessagesScreenState();
 }
 
+enum _MessageFilter { all, unread, openForms }
+
 class _MessagesScreenState extends State<MessagesScreen> {
-  bool _unreadOnly = false;
+  _MessageFilter _filter = _MessageFilter.all;
 
   Future<void> _readAll() async {
     try {
@@ -73,7 +75,12 @@ class _MessagesScreenState extends State<MessagesScreen> {
       final c = widget.controller, admin = c.user?.isAdmin == true;
       final all = c.messages;
       final unread = unreadMessageCount(c);
-      final shown = _unreadOnly ? unreadMessages(c).toList() : all;
+      final forms = openFormCount(c);
+      final shown = switch (_filter) {
+        _MessageFilter.all => all,
+        _MessageFilter.unread => unreadMessages(c).toList(),
+        _MessageFilter.openForms => openForms(c).toList(),
+      };
       final today = DateUtils.dateOnly(c.now.toLocal());
       String section(JsonMap m) {
         final date = dateValue(m['createdAt'])?.toLocal();
@@ -149,11 +156,15 @@ class _MessagesScreenState extends State<MessagesScreen> {
                   if (widget.embedded)
                     PageHeader(
                       'Mitteilungen.',
-                      subtitle: unread == 0
-                          ? 'Nachrichten der Theaterleitung'
-                          : unread == 1
-                          ? '1 ungelesene Mitteilung'
-                          : '$unread ungelesene Mitteilungen',
+                      subtitle: unread > 0
+                          ? (unread == 1
+                                ? '1 ungelesene Mitteilung'
+                                : '$unread ungelesene Mitteilungen')
+                          : forms > 0
+                          ? (forms == 1
+                                ? '1 offenes Formular'
+                                : '$forms offene Formulare')
+                          : 'Nachrichten der Theaterleitung',
                       trailing: unread > 0 ? readAll : null,
                     ),
                   if (widget.switcher != null) ...[
@@ -163,23 +174,30 @@ class _MessagesScreenState extends State<MessagesScreen> {
                   if (all.isNotEmpty) ...[
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: OneLineSegmentedButton<bool>(
+                      child: OneLineSegmentedButton<_MessageFilter>(
                         segments: [
                           const ButtonSegment(
-                            value: false,
+                            value: _MessageFilter.all,
                             label: Text('Alle'),
                           ),
                           ButtonSegment(
-                            value: true,
+                            value: _MessageFilter.unread,
                             label: Text(
                               unread == 0 ? 'Ungelesen' : 'Ungelesen · $unread',
                             ),
                           ),
+                          ButtonSegment(
+                            value: _MessageFilter.openForms,
+                            tooltip: 'Offene Formulare',
+                            label: Text(
+                              forms == 0 ? 'Formulare' : 'Formulare · $forms',
+                            ),
+                          ),
                         ],
-                        selected: {_unreadOnly},
+                        selected: {_filter},
                         showSelectedIcon: false,
                         onSelectionChanged: (s) =>
-                            setState(() => _unreadOnly = s.single),
+                            setState(() => _filter = s.single),
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -193,11 +211,17 @@ class _MessagesScreenState extends State<MessagesScreen> {
                           : 'Nachrichten der Theaterleitung findest du hier.',
                     )
                   else if (shown.isEmpty)
-                    const EmptyState(
-                      icon: Icons.mark_email_read_outlined,
-                      title: 'Alles gelesen',
-                      message: 'Du bist auf dem neuesten Stand.',
-                    ),
+                    _filter == _MessageFilter.openForms
+                        ? const EmptyState(
+                            icon: Icons.description_outlined,
+                            title: 'Keine offenen Formulare',
+                            message: 'Du hast alle Formulare abgegeben.',
+                          )
+                        : const EmptyState(
+                            icon: Icons.mark_email_read_outlined,
+                            title: 'Alles gelesen',
+                            message: 'Du bist auf dem neuesten Stand.',
+                          ),
                   ...children,
                 ],
               ),

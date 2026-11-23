@@ -360,6 +360,14 @@ void main() {
         find.descendant(of: banner, matching: find.byIcon(Icons.emoji_events)),
       );
       expect(cup.color, WeeklyTrophy.silver.color);
+      expect(
+        find.byKey(const ValueKey('weekly-reward-open-crate')),
+        findsOneWidget,
+      );
+      // Not marked seen automatically on load — only when closed or opened.
+      expect(calls, isNot(contains('PUT weekly/seen')));
+      await tester.tap(find.byTooltip('Schließen'));
+      await tester.pumpAndSettle();
       expect(calls, contains('PUT weekly/seen'));
     });
 

@@ -30,8 +30,14 @@ class PollDetailScreen extends StatefulWidget {
 
 class _PollDetailScreenState extends State<PollDetailScreen> {
   bool _busy = false;
+  final Set<String> _busyOptions = {};
+
+  bool get _anyBusy => _busy || _busyOptions.isNotEmpty;
+
   Future<void> _vote(Poll poll, String id) async {
-    setState(() => _busy = true);
+    if (_busy || _busyOptions.contains(id)) return;
+    if (!poll.allowMultiple && _busyOptions.isNotEmpty) return;
+    setState(() => _busyOptions.add(id));
     try {
       final outcome = await widget.controller.vote(poll.id, id);
       // Checkboxes and the inline sync status give feedback on each tap.
@@ -48,7 +54,7 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _busyOptions.remove(id));
     }
   }
 
@@ -296,7 +302,7 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
               ),
               PopupMenuButton<String>(
                 tooltip: 'Weitere Aktionen',
-                enabled: !_busy,
+                enabled: !_anyBusy,
                 onSelected: (value) => switch (value) {
                   'delete' => _delete(poll),
                   _ => _setClosed(poll, value == 'close'),
@@ -406,12 +412,17 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
                       child: _OptionCard(
                         poll: poll,
                         option: option,
-                        onTap: _busy || !canVote
+                        busy: _busyOptions.contains(option.id),
+                        onTap:
+                            _busy ||
+                                !canVote ||
+                                _busyOptions.contains(option.id) ||
+                                (!poll.allowMultiple && _busyOptions.isNotEmpty)
                             ? null
                             : () => _vote(poll, option.id),
                       ),
                     ),
-                  if (_busy) const LinearProgressIndicator(),
+                  if (_anyBusy) const LinearProgressIndicator(),
                   if (c.outbox.any(
                     (action) =>
                         !action.failed &&
@@ -430,9 +441,15 @@ class _PollDetailScreenState extends State<PollDetailScreen> {
 
 /// One answer with the share of participants who selected it.
 class _OptionCard extends StatelessWidget {
-  const _OptionCard({required this.poll, required this.option, this.onTap});
+  const _OptionCard({
+    required this.poll,
+    required this.option,
+    this.busy = false,
+    this.onTap,
+  });
   final Poll poll;
   final PollOption option;
+  final bool busy;
   final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) {
@@ -471,6 +488,13 @@ class _OptionCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 12),
                     Expanded(child: Text(option.label)),
+                    if (busy) ...[
+                      const SizedBox(width: 8),
+                      const SizedBox.square(
+                        dimension: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ],
                     const SizedBox(width: 12),
                     Text(votes),
                   ],

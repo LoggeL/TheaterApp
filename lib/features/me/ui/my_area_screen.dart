@@ -141,7 +141,7 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
           builder: (dialog) => TextButton(
             onPressed: () {
               Navigator.pop(dialog);
-              openChangelog(context);
+              openChangelog(context, controller: controller);
             },
             child: const Text('Was ist neu?'),
           ),
@@ -184,7 +184,7 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
           _ProfileCard(controller: controller),
           const SizedBox(height: 28),
           ListenableBuilder(
-            listenable: _installation,
+            listenable: Listenable.merge([_installation, controller]),
             builder: (context, _) => ResponsiveGroups(
               children: [
                 TileGroup(
@@ -322,7 +322,26 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
                       icon: Icons.history,
                       title: 'Changelog',
                       subtitle: 'Alle Versionen und was neu ist',
-                      onTap: () => openChangelog(context),
+                      trailing: hasUnseenChangelog(controller)
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const StatePill(
+                                  'Neu',
+                                  key: ValueKey('changelog-new-badge'),
+                                ),
+                                const SizedBox(width: 6),
+                                Icon(
+                                  Icons.chevron_right,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ],
+                            )
+                          : null,
+                      onTap: () =>
+                          openChangelog(context, controller: controller),
                     ),
                     GroupTile(
                       icon: Icons.info_outline,
@@ -344,10 +363,11 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
           const SizedBox(height: 28),
           LogoutButton(controller: controller),
           const SizedBox(height: 25),
-          const Center(
+          Center(
             child: VersionLink(
+              controller: controller,
               label: '${Brand.name} · $appVersionLabel\n${Brand.subtitle}',
-              style: TextStyle(fontSize: 12, height: 1.6),
+              style: const TextStyle(fontSize: 12, height: 1.6),
             ),
           ),
         ],

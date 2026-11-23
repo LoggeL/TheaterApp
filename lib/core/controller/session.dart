@@ -1,7 +1,57 @@
 part of '../app_controller.dart';
 
+class _LastSignIn {
+  const _LastSignIn({this.email = '', this.provider = ''});
+  final String email;
+  final String provider;
+}
+
+final _lastSignIns = Expando<_LastSignIn>('lastSignIn');
+
 /// Sign-in, registration, account access, password change and logout.
 extension SessionController on AppController {
+  /// Last email address used to sign in on this device, if remembered.
+  String get lastSignInEmail => _lastSignIns[this]?.email ?? '';
+
+  /// Last sign-in provider used on this device (e.g. `password`, `google.com`,
+  /// `custom` for passkey), if remembered.
+  String get lastSignInProvider => _lastSignIns[this]?.provider ?? '';
+
+  /// Checks whether passkey sign-in is available on this device and server.
+  /// Returns `null` when the check failed due to a transient error so the
+  /// sign-in screen can retry later.
+  Future<bool?> checkPasskeysAvailable() async {
+    if (_identity is! PasskeyIdentity || _isDemo || _apiBaseUrl.isEmpty) {
+      return false;
+    }
+    try {
+      final config = await _api.request(_apiBaseUrl, 'GET', '/config');
+      return await _passkeyDevice.supported(jsonMap(config['passkeys']));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _rememberSignIn({String? email, String? provider}) async {
+    final current = _lastSignIns[this];
+    final nextEmail = (email ?? current?.email ?? '').trim();
+    final nextProvider = (provider ?? current?.provider ?? '').trim();
+    if (nextEmail.isEmpty && nextProvider.isEmpty) return;
+    if (current != null &&
+        current.email == nextEmail &&
+        current.provider == nextProvider) {
+      return;
+    }
+    _lastSignIns[this] = _LastSignIn(email: nextEmail, provider: nextProvider);
+    if (!_storeReady) return;
+    await _write(
+      () => _store.write('_device', 'last_sign_in', {
+        if (nextEmail.isNotEmpty) 'email': nextEmail,
+        if (nextProvider.isNotEmpty) 'provider': nextProvider,
+      }),
+    );
+  }
+
   Future<T> _withIdentityTransition<T>(Future<T> Function() operation) {
     final previous = _identityTransition;
     final finished = Completer<void>();
@@ -22,19 +72,32 @@ extension SessionController on AppController {
     // Firebase restores its sign-in while the local store opens.
     final identityStart = _identity == null ? null : _startIdentity();
     String? cachedUid;
+    var deferFirebaseSync = false;
+    var deferLegacySync = false;
     try {
       await _store.initialize();
       _storeReady = true;
       final settings = await _store.read('_device', 'settings');
       if (!_current(generation)) return;
       if (_apiBaseUrl.isEmpty) _apiBaseUrl = textValue(settings?['baseUrl']);
+      final lastSignIn = await _store.read('_device', 'last_sign_in');
+      if (!_current(generation)) return;
+      if (lastSignIn != null) {
+        _lastSignIns[this] = _LastSignIn(
+          email: textValue(lastSignIn['email']),
+          provider: textValue(lastSignIn['provider']),
+        );
+      }
       await _loadBotCheck();
       if (_identity != null) {
         cachedUid = await _restoreCached(generation);
         if (cachedUid == null) {
           await identityStart;
           if (!_current(generation)) return;
-          await _restoreIdentity(generation);
+          deferFirebaseSync = await _restoreIdentity(
+            generation,
+            deferNetwork: true,
+          );
         }
       } else {
         final saved = await _credentials.read();
@@ -55,13 +118,19 @@ extension SessionController on AppController {
             _account = _accountKey(_apiBaseUrl, _user!.id);
             await _hydrate(generation);
             if (!_current(generation)) return;
-            _isOffline = true;
+            if (!_user!.mustChangePassword && _baseSnapshot.isNotEmpty) {
+              deferLegacySync = true;
+            } else {
+              _isOffline = true;
+            }
           }
         }
       }
     } catch (_) {
       if (_current(generation)) {
         cachedUid = null;
+        deferFirebaseSync = false;
+        deferLegacySync = false;
         _dropStartSession();
       }
     } finally {
@@ -74,6 +143,12 @@ extension SessionController on AppController {
     if (cachedUid != null) {
       _firstSyncPending.value = true;
       _startSync = _verifyCachedStart(generation, cachedUid, identityStart!);
+    } else if (deferFirebaseSync) {
+      _firstSyncPending.value = true;
+      _startSync = _syncFirebaseStart(generation);
+    } else if (deferLegacySync) {
+      _firstSyncPending.value = true;
+      _startSync = _syncLegacyStart(generation);
     } else if (_identity == null && _user != null) {
       await refresh();
     }
@@ -99,9 +174,12 @@ extension SessionController on AppController {
   }
 
   /// Members signed in before the bot check existed are never asked.
-  Future<void> _restoreIdentity(int generation) async {
+  Future<bool> _restoreIdentity(
+    int generation, {
+    bool deferNetwork = false,
+  }) async {
     if (_identity!.uid != null && !_botCheckPassed) await _rememberBotCheck();
-    await _restoreFirebase(generation);
+    return _restoreFirebase(generation, deferNetwork: deferNetwork);
   }
 
   /// Cache-first start: shows the stored data of the last approved Firebase
@@ -196,6 +274,50 @@ extension SessionController on AppController {
     }
   }
 
+  /// Background half of a Firebase start whose local data was already hydrated
+  /// after identity restoration (avoiding a 20s splash block when offline).
+  Future<void> _syncFirebaseStart(int generation) async {
+    final uid = _identity?.uid;
+    try {
+      await Future<void>.value();
+      if (!_current(generation) || _identity == null || uid == null) return;
+      await refreshAccess(refreshData: false);
+      if (!_current(generation) || !hasAccess) return;
+      _startSync = null;
+      await refresh(silent: true, accessChecked: true);
+    } catch (error) {
+      if (!_current(generation)) return;
+      if (error is ApiException && error.isUnauthorized ||
+          error is! ApiException && _identity?.uid != uid) {
+        await _expire(generation, error);
+        return;
+      }
+      _isOffline = error is ApiException && error.retryable;
+      _error = _message(error);
+      _notify();
+    } finally {
+      if (_current(generation)) {
+        _startSync = null;
+        _firstSyncPending.value = false;
+      }
+    }
+  }
+
+  /// Background half of a legacy session start once local data is hydrated.
+  Future<void> _syncLegacyStart(int generation) async {
+    try {
+      await Future<void>.value();
+      if (!_current(generation) || _user == null) return;
+      _startSync = null;
+      await refresh(silent: true);
+    } finally {
+      if (_current(generation)) {
+        _startSync = null;
+        _firstSyncPending.value = false;
+      }
+    }
+  }
+
   /// [_hydrate] for a sign-in that does not continue a stored session. The
   /// server keeps one row per device token and another account of this
   /// device may hold it by now, so the next push restore registers again.
@@ -251,7 +373,12 @@ extension SessionController on AppController {
         await _write(
           () => _store.write('_device', 'settings', {'baseUrl': origin}),
         );
-        await _adoptFirebase(botCheckProof: proof, botTrap: trap);
+        await _rememberSignIn(email: email, provider: 'password');
+        await _adoptFirebase(
+          botCheckProof: proof,
+          botTrap: trap,
+          signInProvider: 'password',
+        );
       });
       return;
     }
@@ -295,6 +422,10 @@ extension SessionController on AppController {
         });
         await _store.write('_device', 'settings', {'baseUrl': origin});
       });
+      await _rememberSignIn(
+        email: user.email.isNotEmpty ? user.email : email,
+        provider: 'password',
+      );
       if (!_current(generation)) return;
       await _hydrateSignIn(generation);
       if (!_current(generation)) return;
@@ -344,13 +475,16 @@ extension SessionController on AppController {
     await _persistCore(generation);
   }
 
-  Future<void> _restoreFirebase(int generation) async {
+  Future<bool> _restoreFirebase(
+    int generation, {
+    bool deferNetwork = false,
+  }) async {
     final uid = _identity!.uid;
     final saved = await _credentials.read();
-    if (!_current(generation)) return;
+    if (!_current(generation)) return false;
     if (uid == null) {
       await _credentials.clear();
-      return;
+      return false;
     }
     _token = 'firebase:$uid';
     _account = _accountKey(_apiBaseUrl, uid);
@@ -361,27 +495,41 @@ extension SessionController on AppController {
       _storedUser = _user!.toJson();
       if (_user!.isApproved) await _hydrate(generation);
     }
+    if (!_current(generation)) return false;
+    final features = jsonList(
+      jsonMap(_baseSnapshot['capabilities'])['features'],
+    );
+    if (deferNetwork &&
+        _user != null &&
+        _user!.isApproved &&
+        !_user!.mustChangePassword &&
+        _baseSnapshot.isNotEmpty &&
+        !features.contains('noCacheFirstStart')) {
+      return true;
+    }
     try {
       await refreshAccess(refreshData: false);
       if (_current(generation) && hasAccess) {
         await refresh(accessChecked: true);
       }
     } on ApiException catch (e) {
-      if (!_current(generation)) return;
+      if (!_current(generation)) return false;
       if (!e.retryable) rethrow;
       _isOffline = true;
       _error = e.message;
     }
+    return false;
   }
 
   Future<void> _adoptFirebase({
     String? registrationName,
     String? botCheckProof,
     BotTrapReport? botTrap,
+    String? signInProvider,
   }) async {
     if (!_storeReady) await _ensureStore();
     final previousAccount = _account;
-    ++_generation;
+    final generation = ++_generation;
     _resetMemory();
     _token = 'firebase:${_identity!.uid}';
     _account = _accountKey(_apiBaseUrl, _identity.uid!);
@@ -393,6 +541,15 @@ extension SessionController on AppController {
       botCheckProof: botCheckProof,
       botTrap: botTrap,
     );
+    if (_current(generation)) {
+      final email = _user?.email.isNotEmpty == true
+          ? _user!.email
+          : (_identity.email ?? '');
+      await _rememberSignIn(
+        email: email,
+        provider: signInProvider ?? 'custom',
+      );
+    }
     if (botCheckProof != null) _consumeBotProof();
     if (!_botCheckPassed) await _rememberBotCheck();
   }
@@ -418,10 +575,12 @@ extension SessionController on AppController {
       await _identity.initialize();
       final proof = await _freshBotProof();
       await _identity.register(name, email, password);
+      await _rememberSignIn(email: email, provider: 'password');
       await _adoptFirebase(
         registrationName: name.trim(),
         botCheckProof: proof,
         botTrap: trap,
+        signInProvider: 'password',
       );
     });
   }
@@ -431,7 +590,7 @@ extension SessionController on AppController {
       await _identity!.initialize();
       final proof = await _freshBotProof();
       await _identity.social(provider);
-      await _adoptFirebase(botCheckProof: proof);
+      await _adoptFirebase(botCheckProof: proof, signInProvider: provider);
     });
   }
 
@@ -533,6 +692,11 @@ extension SessionController on AppController {
     if (!_current(generation)) return;
     _accessCheckedAt = _clock();
     await _storeFirebaseUser(generation, next);
+    if (_current(generation) &&
+        lastSignInEmail.isEmpty &&
+        next.email.isNotEmpty) {
+      await _rememberSignIn(email: next.email);
+    }
     if (!_current(generation)) return;
     _error = null;
     _isOffline = false;

@@ -75,19 +75,84 @@ void main() {
       tester.getTopLeft(tile).dy,
       lessThan(tester.getTopLeft(find.text('Über die App')).dy),
     );
+    expect(find.byKey(const ValueKey('changelog-new-badge')), findsOneWidget);
     await tester.tap(tile);
     await tester.pumpAndSettle();
 
     expect(find.byType(ChangelogScreen), findsOneWidget);
-    // Not only the newest version: scrolling down reaches every entry.
-    for (final entry in changelog) {
+    expect(controller.preferences[seenChangelogVersionKey], appVersion);
+    // The newest 5 versions are shown at once; older versions expand on tap.
+    for (final entry in changelog.take(5)) {
       final version = find.text('Version ${entry.version}');
       await tester.scrollUntilVisible(version, 200);
       expect(version, findsOneWidget, reason: entry.version);
     }
+    if (changelog.length > 5) {
+      expect(find.text('Version ${changelog[5].version}'), findsNothing);
+      final showOlder = find.byKey(const ValueKey('changelog-show-older'));
+      await tester.scrollUntilVisible(showOlder, 200);
+      await tester.tap(showOlder);
+      await tester.pumpAndSettle();
+      for (final entry in changelog.skip(5)) {
+        final version = find.text('Version ${entry.version}');
+        await tester.scrollUntilVisible(version, 200);
+        expect(version, findsOneWidget, reason: entry.version);
+      }
+    }
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('changelog-new-badge')), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
+  });
+
+  testWidgets('non-admins hide leadership-only items until Alle zeigen', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(600, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    const entries = [
+      ChangelogEntry(
+        version: '0.16.2',
+        date: '10. November 2026',
+        items: ['Für die Theaterleitung: Nur Admin-Änderung.'],
+      ),
+      ChangelogEntry(
+        version: '0.16.0',
+        date: '8. November 2026',
+        items: [
+          'Für alle Mitglieder sichtbar.',
+          'Für die Theaterleitung: Zweiter Admin-Hinweis.',
+        ],
+      ),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StageTheme.build(Brightness.light),
+        home: const ChangelogScreen(entries: entries, isAdmin: false),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Für alle Mitglieder sichtbar.'), findsOneWidget);
+    expect(find.textContaining('Für die Theaterleitung:'), findsNothing);
+    expect(find.text('Version 0.16.2'), findsNothing);
+    final toggle = find.byKey(const ValueKey('changelog-show-all'));
+    expect(toggle, findsOneWidget);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(find.text('Version 0.16.2'), findsOneWidget);
+    expect(
+      find.text('Für die Theaterleitung: Nur Admin-Änderung.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Für die Theaterleitung: Zweiter Admin-Hinweis.'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('tapping the version in Mein Bereich opens Was ist neu', (

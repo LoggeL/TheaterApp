@@ -114,6 +114,10 @@ class StageRunnerScreen extends StatefulWidget {
   @visibleForTesting
   final ValueChanged<StageRunner>? onRun;
 
+  /// Step duration for the 3-2-1 countdown when resuming from pause.
+  @visibleForTesting
+  static Duration resumeCountdownStep = const Duration(milliseconds: 500);
+
   @override
   State<StageRunnerScreen> createState() => _StageRunnerScreenState();
 }
@@ -136,10 +140,15 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   late final RunnerSound _sound = widget.sound ?? RunnerSound();
   late final RunnerMotionPreferences _motion =
       widget.motionPreferences ?? RunnerMotionPreferences();
-  bool _systemReducedMotion = false, _settingsOpen = false;
+  bool _systemReducedMotion = false,
+      _settingsOpen = false,
+      _overlayActive = false,
+      _newsChecked = false;
 
   late final RunnerMenuPreferences _menu =
       widget.menuPreferences ?? RunnerMenuPreferences();
+  late final RunnerScoreOutbox _outbox = runnerScoreOutbox(controller);
+  RoundResult? _seenOutboxResult;
 
   bool get _sceneryMotion =>
       _motion.ready && _motion.sceneryMotion && !_systemReducedMotion;
@@ -150,10 +159,11 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   RunnerProgress? _progress;
 
   /// The day's Tagesmissionen (`runnerMissions`), the watch of the current
-  /// run and its banner when the run makes one.
+  /// run, its live progress pill and its banner when the run makes one.
   DailyMissions? _missions;
   MissionWatch? _watch;
   final _missionBanner = ValueNotifier<DailyMission?>(null);
+  final _liveMission = ValueNotifier<String?>(null);
   double _bannerUntil = 0;
   bool get _missionsOn => missionsAvailable(controller);
 
@@ -170,7 +180,11 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   /// when its numbers change.
   final _frame = ValueNotifier<int>(0);
   final _hud = ValueNotifier<(int, int)>((0, 0));
-  int _pointers = 0;
+  final _activePointers = <int>{};
+  final _resumeIgnoredKeys = <LogicalKeyboardKey>{};
+  final _playFocus = FocusNode(debugLabel: 'runner-stage');
+  final _startFocus = FocusNode(debugLabel: 'runner-start');
+  bool _didAutoFocusStart = false;
 
   /// Increases with every run, so late server replies of an earlier run are
   /// ignored.
@@ -178,7 +192,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   Future<String?>? _start;
   Leaderboard? _board;
   String? _boardError, _saveError;
-  bool _loadingBoard = false, _saving = false, _improved = false;
+  bool _loadingBoard = false,
+      _saving = false,
+      _improved = false,
+      _unrankedOffline = false;
 
   /// The collection ranking; [_collectionMissing] once the server answered
   /// that it does not know it (404): the menu then leaves it out.
@@ -215,10 +232,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   /// the next visit).
   Future<bool>? _news;
 
-  /// The stage's size in this run, and whether the run waits for a tap
-  /// after the size changed (see [_resized]).
+  /// The stage's size in this run, whether the run waits in pause, and the
+  /// remaining 3-2-1 countdown steps before flying on.
   Size? _stageSize;
   bool _paused = false;
+  int _resumeCountdown = 0;
+  Timer? _countdownTimer;
 
   AppController get controller => widget.controller;
   bool get _ranked => leaderboardAvailable(controller);
@@ -237,9 +256,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   void initState() {
     super.initState();
     _ticker = createTicker(_tick);
+    _outbox.addListener(_outboxChanged);
     _lifecycle = AppLifecycleListener(
       // Control Center, a call or another app in front: the run waits for a
-      // tap, as after a new size, instead of flying on unsteered (a ranked
+      // resume, as after a new size, instead of flying on unsteered (a ranked
       // attempt of the Wochenprobe has no second try).
       onInactive: _pauseRun,
       onHide: () {
@@ -247,18 +267,19 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         if (_sound case final RunnerMusic music) music.pauseMusic();
       },
       onShow: () {
-        if (_paused) return;
+        if (_ranked && _outbox.waiting > 0) {
+          unawaited(_retryOutbox(silent: true));
+        }
+        if (_paused || _resumeCountdown > 0) return;
         if (_sound case final RunnerMusic music) music.resumeMusic();
       },
     );
     if (_ranked) {
-      _loadBoard();
-      if (_monthShown) unawaited(_loadMonthly());
-      // Results that found no connection earlier in this session.
-      unawaited(runnerScoreOutbox(controller).retry());
+      unawaited(_initRanked());
+    } else if (_weeklyShown) {
+      unawaited(_loadWeekly());
     }
     if (_collectionShown) _loadCollection();
-    if (_weeklyShown) unawaited(_loadWeekly());
     _menu.addListener(_menuChanged);
     if (_art == null) {
       RunnerArt.load().then((art) {
@@ -281,34 +302,138 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     });
   }
 
+  /// Sends waiting offline scores before loading the boards so newly delivered
+  /// scores show up right away; without any waiting, loads immediately.
+  Future<void> _initRanked() async {
+    if (_outbox.waiting > 0) {
+      await _retryOutbox(silent: true);
+    }
+    if (!mounted) return;
+    unawaited(_loadBoard());
+    if (_monthShown) unawaited(_loadMonthly());
+    if (_weeklyShown) unawaited(_loadWeekly());
+  }
+
+  void _outboxChanged() {
+    if (!mounted) return;
+    final latest = _outbox.lastResult;
+    final applyResult = latest != null && !identical(latest, _seenOutboxResult);
+    if (applyResult) _seenOutboxResult = latest;
+    setState(() {
+      if (applyResult && _phase != _Phase.playing) {
+        _board = latest.leaderboard;
+        _boardError = null;
+        if (latest.progress case final p?) _progress = p;
+        if (latest.progress?.missions case final m?) _missions = m;
+        if (latest.weekly case final w? when _weeklyPlay != null) {
+          _weeklyResult = w;
+        }
+      }
+      if (_outbox.waiting == 0 && _queued) {
+        _queued = false;
+        _saveError = null;
+      }
+    });
+  }
+
+  Future<void> _retryOutbox({bool silent = false}) async {
+    if (_outbox.waiting == 0) return;
+    final sent = await _outbox.retry();
+    if (!mounted) return;
+    if (sent > 0) {
+      final latest = _outbox.lastResult;
+      if (latest != null) _seenOutboxResult = latest;
+      setState(() {
+        if (latest != null) {
+          _board = latest.leaderboard;
+          _boardError = null;
+          if (latest.progress case final p?) _progress = p;
+          if (latest.progress?.missions case final m?) _missions = m;
+          if (latest.weekly case final w? when _weeklyPlay != null) {
+            _weeklyResult = w;
+          }
+        }
+        if (_outbox.waiting == 0) {
+          _queued = false;
+          _saveError = null;
+        }
+      });
+      if (_monthShown) unawaited(_loadMonthly());
+      if (_weeklyShown) unawaited(_loadWeekly());
+      if (_dressable) unawaited(_refreshWardrobe());
+      if (!silent) {
+        showDone(
+          context,
+          sent == 1
+              ? '1 gespeicherter Lauf wurde nachgetragen.'
+              : '$sent gespeicherte Läufe wurden nachgetragen.',
+        );
+      }
+    } else if (!silent) {
+      showProblem(
+        context,
+        'Gerade keine Verbindung. Die gespeicherten Läufe bleiben in der Warteschlange.',
+      );
+    }
+  }
+
   /// Shows the newest entry of "Neu im Bühnenlauf" not seen on this device,
   /// once the menu is free: not during a run, nor over another dialog or
   /// page. It counts as seen as soon as it shows.
   Future<bool> _offerNews() async {
-    await _menu.loaded;
-    if (!mounted ||
-        !_menu.newsKnown ||
-        _phase != _Phase.intro ||
-        _settingsOpen ||
-        ModalRoute.of(context)?.isCurrent == false) {
-      return false;
-    }
-    final pending = pendingRunnerNews(
-      widget.news,
-      _menu.newsSeen,
-      (news) => news.offered?.call(controller) ?? true,
-    );
-    if (pending == null) return false;
-    _menu.markNewsSeen(pending.seen);
-    final action = await showRunnerNews(context, pending.news);
-    if (!mounted || _phase != _Phase.intro) return false;
-    switch (action) {
-      case RunnerNewsAction.weekly:
-        unawaited(_openWeekly());
-        return true;
-      case null:
+    try {
+      await _menu.loaded;
+      if (!mounted ||
+          !_menu.newsKnown ||
+          _phase != _Phase.intro ||
+          _settingsOpen ||
+          ModalRoute.of(context)?.isCurrent == false) {
         return false;
+      }
+      final pending = pendingRunnerNews(
+        widget.news,
+        _menu.newsSeen,
+        (news) => news.offered?.call(controller) ?? true,
+      );
+      if (pending == null) return false;
+      _menu.markNewsSeen(pending.seen);
+      setState(() => _overlayActive = true);
+      final RunnerNewsAction? action;
+      try {
+        action = await showRunnerNews(context, pending.news);
+      } finally {
+        if (mounted) setState(() => _overlayActive = false);
+      }
+      if (!mounted || _phase != _Phase.intro) return false;
+      switch (action) {
+        case RunnerNewsAction.weekly:
+          unawaited(_openWeekly());
+          return true;
+        case null:
+          return false;
+      }
+    } finally {
+      if (mounted) {
+        if (!_newsChecked) setState(() => _newsChecked = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) => _maybeFocusStart());
+      }
     }
+  }
+
+  void _maybeFocusStart() {
+    if (_didAutoFocusStart ||
+        !mounted ||
+        !_newsChecked ||
+        _phase != _Phase.intro ||
+        _overlayActive ||
+        _settingsOpen ||
+        !_motion.ready ||
+        !_startFocus.canRequestFocus ||
+        ModalRoute.of(context)?.isCurrent == false) {
+      return;
+    }
+    _didAutoFocusStart = true;
+    _startFocus.requestFocus();
   }
 
   @override
@@ -337,6 +462,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   void _motionChanged() {
     if (!mounted) return;
     setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeFocusStart());
     // The painter is kept across builds; a paused stage needs a repaint too.
     _frame.value++;
   }
@@ -345,10 +471,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     if (_settingsOpen) return;
     _settingsOpen = true;
     if (_phase == _Phase.playing && !_paused) {
-      setState(() => _paused = true);
-      _pointers = 0;
-      _ticker.stop();
-      if (_sound case final RunnerMusic music) music.pauseMusic();
+      _pauseRun();
+    }
+    if (_sound case final RunnerMusicPreview preview) {
+      preview.refreshOtherMusic();
     }
     String? saveError;
     var saveRequest = 0;
@@ -356,15 +482,23 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     final volumes = _sound is RunnerVolumes ? _sound as RunnerVolumes : null;
     // More than the scenery's motion: a section each.
     final sections = ghosts || volumes != null;
-    // Turning a volume in the pause of a run lets the run's sound be heard
-    // while the dialog is open (the music at its new volume, the effects'
-    // preview; in browsers both wait in the one held audio context). It
-    // holds again once the dialog closes, until the tap that runs on.
-    var heard = false;
-    void hear() {
-      if (heard || _phase != _Phase.playing || !_paused) return;
-      heard = true;
-      if (_sound case final RunnerMusic music) music.resumeMusic();
+    // Turning the music slider lets the music be heard right away: in a paused
+    // run it resumes the run's music while the dialog is open; in the menu it
+    // starts a short preview. Adjusting only effects does not resume music.
+    var musicHeard = false;
+    var previewedMusic = false;
+    void hearMusic() {
+      if (_phase == _Phase.playing && _paused) {
+        if (musicHeard) return;
+        musicHeard = true;
+        if (_sound case final RunnerMusic music) music.resumeMusic();
+      } else if (_phase != _Phase.playing) {
+        if (previewedMusic) return;
+        previewedMusic = true;
+        if (_sound case final RunnerMusicPreview preview) {
+          preview.startMusicPreview();
+        }
+      }
     }
 
     try {
@@ -396,7 +530,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                           key: const ValueKey('runner-volumes'),
                           sound: _sound,
                           volumes: volumes,
-                          onAdjust: hear,
+                          onMusicAdjust: hearMusic,
                         ),
                         const Divider(height: 32),
                       ],
@@ -479,10 +613,18 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     } finally {
       _settingsOpen = false;
     }
-    if (heard && mounted && _phase == _Phase.playing && _paused) {
+    if (previewedMusic) {
+      if (_sound case final RunnerMusicPreview preview) {
+        preview.stopMusicPreview();
+      }
+    }
+    if (musicHeard && mounted && _phase == _Phase.playing && _paused) {
       if (_sound case final RunnerMusic music) music.pauseMusic();
     }
-    // An interrupted run stays paused until the player taps the stage.
+    if (mounted && _phase == _Phase.playing) {
+      _playFocus.requestFocus();
+    }
+    // An interrupted run stays paused until the player resumes it.
   }
 
   /// Only the worn costume is loaded; without it the default one plays.
@@ -496,18 +638,42 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       // Not over the news; after it, unless that led elsewhere.
       if (await (_news ?? Future.value(false))) return;
       if (mounted && _phase == _Phase.intro) {
-        await celebrateGala(
-          context,
-          controller: controller,
-          wardrobe: w,
-          sound: _sound,
-          onChanged: (next) {
-            if (mounted) setState(() => _wardrobe = next);
-          },
-        );
+        setState(() => _overlayActive = true);
+        try {
+          await celebrateGala(
+            context,
+            controller: controller,
+            wardrobe: w,
+            sound: _sound,
+            onChanged: (next) {
+              if (mounted) setState(() => _wardrobe = next);
+            },
+          );
+        } finally {
+          if (mounted) setState(() => _overlayActive = false);
+        }
       }
     } catch (e) {
       if (kDebugMode) debugPrint('Bühnenlauf: Garderobe nicht geladen: $e');
+    }
+  }
+
+  /// Refreshes the wardrobe after a run or outbox sync so freshly earned
+  /// crates and progress are already present when opening the wardrobe.
+  Future<void> _refreshWardrobe() async {
+    if (!_dressable) return;
+    try {
+      final w = await loadWardrobe(controller);
+      if (!mounted) return;
+      final worn = _wardrobe;
+      setState(() => _wardrobe = w);
+      if (worn == null || outfitOf(w) != outfitOf(worn)) {
+        unawaited(_dress());
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Bühnenlauf: Garderobe nicht aktualisiert: $e');
+      }
     }
   }
 
@@ -574,7 +740,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     if (_sound case final RunnerMusic music) music.useTune(tune);
   }
 
-  Future<void> _openWardrobe() async {
+  Future<void> _openWardrobe({int initialTab = 0}) async {
     var changed = false;
     final worn = _wardrobe;
     await openWardrobe(
@@ -583,6 +749,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       wardrobe: worn,
       dressed: worn != null && outfitOf(worn) == _outfit ? _art : null,
       sound: _sound,
+      initialTab: initialTab,
       onChanged: (w) {
         if (!mounted) return;
         changed = true;
@@ -606,6 +773,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   @override
   void dispose() {
+    _countdownTimer?.cancel();
+    _outbox.removeListener(_outboxChanged);
     // Left during a run: the rest of the app gets the usual bar back. Only
     // Android has that bar; in browsers the call would only drop the
     // page's theme colour.
@@ -638,9 +807,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _sound.stopMusic();
     if (widget.sound == null) _sound.dispose();
     _ticker.dispose();
+    _playFocus.dispose();
+    _startFocus.dispose();
     _frame.dispose();
     _hud.dispose();
     _missionBanner.dispose();
+    _liveMission.dispose();
     super.dispose();
   }
 
@@ -718,17 +890,17 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       controller,
       initial: _weekly,
       preferences: _menu,
-      // The page shows last week's reward (once): the entry stops pointing
-      // to it, also when the page is left for a run.
+      // Keep lastWeek intact until the weekly screen itself marks it seen
+      // (explicit close or opening the weekly crate).
       onLoaded: (week) {
-        if (mounted) setState(() => _weekly = week.withoutLastWeek());
+        if (mounted) setState(() => _weekly = week);
       },
     );
     if (!mounted) return;
     if (play != null) {
       _play(play);
     } else if (_phase != _Phase.playing) {
-      // A reward seen there leaves the entry.
+      // A reward dismissed or claimed there updates the menu entry.
       unawaited(_loadWeekly());
     }
   }
@@ -790,6 +962,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _progress = null;
     _watch = _missionsOn ? MissionWatch(_missions) : null;
     _missionBanner.value = null;
+    _liveMission.value = _computeLiveMission(game);
     game.onPickup = (kind, x, y) {
       perf.pickup();
       fx.pickup(kind, x - game.distance, y);
@@ -801,9 +974,14 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     perf.start();
     widget.onRun?.call(_game);
     _hud.value = (0, 0);
-    _pointers = 0;
+    _activePointers.clear();
+    _resumeIgnoredKeys.clear();
     _heldOver.clear();
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    _resumeCountdown = 0;
     _saveError = null;
+    _unrankedOffline = false;
     _improved = false;
     _saving = false;
     _queued = false;
@@ -826,7 +1004,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       (id) => id,
       onError: (Object e) {
         if (mounted && run == _run) {
-          setState(() => _saveError = userMessage(e));
+          setState(() {
+            _saveError = userMessage(e);
+            _unrankedOffline = true;
+          });
         }
         return null;
       },
@@ -844,17 +1025,62 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     LogicalKeyboardKey.keyW,
   };
 
+  /// Compact live progress text for the most relevant open mission during a
+  /// run, or null when no live-tracked mission is open.
+  String? _computeLiveMission(StageRunner game) {
+    final list = _missions?.missions;
+    if (!_missionsOn || list == null || list.isEmpty) return null;
+    final names = _pickupNames;
+    DailyMission? best;
+    double bestRatio = -1;
+    int? bestLive;
+    for (final m in list) {
+      if (m.done || m.reachedBy(game)) continue;
+      final live = m.live(game);
+      if (live == null) continue;
+      // Active noPickup mission gets top priority while no pickup was taken.
+      if (m.type == 'noPickup' && game.collected == 0) {
+        return 'Ohne Requisite: $live/${m.target} m';
+      }
+      if (m.type == 'noPickup' && game.collected > 0) continue;
+      final ratio = m.target > 0 ? live / m.target : 0.0;
+      if (best == null || ratio > bestRatio) {
+        best = m;
+        bestRatio = ratio;
+        bestLive = live;
+      }
+    }
+    if (best == null || bestLive == null) return null;
+    return switch (best.type) {
+      'ground' => 'Boden: $bestLive/${best.target} m',
+      'ceiling' => 'Oben: $bestLive/${best.target} m',
+      'collect' || 'pass' =>
+        '${best.unitFor(names)}: $bestLive/${best.target}'.trim(),
+      'points' || 'debut' => 'Mission: $bestLive/${best.target} Pkt.',
+      'runs' =>
+        best.min > 0
+            ? 'Mission: ${game.meters}/${best.min} m'
+            : 'Mission: $bestLive/${best.target}',
+      _ => 'Mission: $bestLive/${best.target} m',
+    };
+  }
+
   void _tick(Duration elapsed) {
     final dt = (elapsed - _lastFrame).inMicroseconds / 1e6;
     _lastFrame = elapsed;
     _perf?.step(dt);
     final keys = HardwareKeyboard.instance.logicalKeysPressed;
+    _resumeIgnoredKeys.removeWhere((k) => !keys.contains(k));
     _game
-      ..holding = _pointers > 0 || keys.any(_holdKeys.contains)
+      ..holding =
+          _activePointers.isNotEmpty ||
+          keys.any(
+            (k) => _holdKeys.contains(k) && !_resumeIgnoredKeys.contains(k),
+          )
       ..update(dt);
     _recorder?.record(_game);
     _fx.update(dt, _game);
-    _trail.update(dt, _game, _art?.effect);
+    _trail.update(dt, _game, _systemReducedMotion ? null : _art?.effect);
     _perf?.observe();
     if (_watch?.check(_game) case final made?) {
       _missionBanner.value = made;
@@ -862,6 +1088,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     } else if (_missionBanner.value != null && _game.time > _bannerUntil) {
       _missionBanner.value = null;
     }
+    final liveText = _computeLiveMission(_game);
+    if (liveText != _liveMission.value) _liveMission.value = liveText;
     _frame.value++;
     final hud = (_game.score, _game.meters);
     if (hud != _hud.value) _hud.value = hud;
@@ -921,15 +1149,59 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   final _heldOver = <LogicalKeyboardKey>{};
 
   KeyEventResult _menuKey(FocusNode node, KeyEvent event) {
-    if (_heldOver.isEmpty) return KeyEventResult.ignored;
-    if (event is KeyRepeatEvent) {
-      return _heldOver.contains(event.logicalKey)
-          ? KeyEventResult.handled
-          : KeyEventResult.ignored;
+    if (_heldOver.isNotEmpty) {
+      if (event is KeyRepeatEvent) {
+        return _heldOver.contains(event.logicalKey)
+            ? KeyEventResult.handled
+            : KeyEventResult.ignored;
+      }
+      // Let go, or pressed afresh (its release went elsewhere): from now on
+      // the key acts as usual.
+      _heldOver.remove(event.logicalKey);
+      if (event is KeyUpEvent) return KeyEventResult.ignored;
     }
-    // Let go, or pressed afresh (its release went elsewhere): from now on
-    // the key acts as usual.
-    _heldOver.remove(event.logicalKey);
+    if (event is! KeyDownEvent ||
+        _overlayActive ||
+        _settingsOpen ||
+        ModalRoute.of(context)?.isCurrent == false) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.keyR) {
+      return _triggerMenuPrimaryRun();
+    }
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
+      final primary = FocusManager.instance.primaryFocus;
+      // Only handle Enter here when focus is not on another specific button
+      // or control (otherwise let that control handle Enter itself).
+      if (primary == null ||
+          primary == node ||
+          primary == FocusScope.of(context)) {
+        return _triggerMenuPrimaryRun();
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _triggerMenuPrimaryRun() {
+    if (_phase == _Phase.intro) {
+      if (!_motion.ready) return KeyEventResult.ignored;
+      _play();
+      return KeyEventResult.handled;
+    }
+    if (_phase == _Phase.finished) {
+      final weekly = _weeklyPlay;
+      if (weekly == null) {
+        if (!_motion.ready) return KeyEventResult.ignored;
+        _play();
+        return KeyEventResult.handled;
+      }
+      if (!weekly.ranked) {
+        _trainAgain();
+        return KeyEventResult.handled;
+      }
+    }
     return KeyEventResult.ignored;
   }
 
@@ -996,12 +1268,13 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         _boardError = null;
       });
       // The run may have moved the own place in this month's list, or in
-      // this week's.
+      // this week's, and may have earned crates/progress for the wardrobe.
       if (weekly != null) {
         unawaited(_loadWeekly());
       } else if (monthlyBoardAvailable(controller)) {
         unawaited(_loadMonthly());
       }
+      if (_dressable) unawaited(_refreshWardrobe());
     } catch (e) {
       if (kDebugMode) debugPrint('Bühnenlauf: Ergebnis nicht gesendet: $e');
       if (mounted && run == _run) {
@@ -1016,86 +1289,157 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   }
 
   KeyEventResult _key(FocusNode node, KeyEvent event) {
-    if (!_holdKeys.contains(event.logicalKey)) return KeyEventResult.ignored;
-    if (event is KeyDownEvent) _resume();
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.keyP) {
+      if (_game.over || _settingsOpen) return KeyEventResult.ignored;
+      if (event is KeyDownEvent) {
+        if (_paused) {
+          _startResumeCountdown();
+        } else {
+          _pauseRun();
+        }
+      }
+      return KeyEventResult.handled;
+    }
+    if (!_holdKeys.contains(key)) return KeyEventResult.ignored;
+    if (event is KeyDownEvent) {
+      if (_paused) {
+        _resumeIgnoredKeys.add(key);
+        _startResumeCountdown();
+      } else if (_resumeCountdown > 0) {
+        _resumeIgnoredKeys.add(key);
+      } else {
+        _resumeIgnoredKeys.remove(key);
+      }
+    } else if (event is KeyUpEvent) {
+      _resumeIgnoredKeys.remove(key);
+    }
     return KeyEventResult.handled;
+  }
+
+  /// Pauses an active run and asks before abandoning it (mobile back swipe,
+  /// AppBar back button, or desktop NavigationRail switch).
+  Future<bool> _confirmLeaveRun(BuildContext context) async {
+    if (_phase != _Phase.playing || _game.over) return true;
+    _pauseRun();
+    final ranked = _weeklyPlay?.ranked == true;
+    return confirmDestructive(
+      context,
+      title: ranked ? 'Wertungslauf abbrechen?' : 'Lauf abbrechen?',
+      message: ranked
+          ? 'Dieser Versuch der Wochenprobe wurde beim Start gezählt und geht beim Abbruch verloren.'
+          : 'Dein aktueller Lauf wird abgebrochen und nicht gewertet.',
+      confirmLabel: 'Abbrechen',
+      cancelLabel: 'Weiterspielen',
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final phone = runnerCoversRail(MediaQuery.sizeOf(context));
+    final playing = _phase == _Phase.playing;
     final scaffold = Scaffold(
-      appBar: AppBar(
-        title: const Text('Bühnenlauf'),
-        actions: [
-          IconButton(
-            key: const ValueKey('runner-settings'),
-            tooltip: 'Spieleinstellungen',
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: _showSettings,
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: ExcludeFocus(
+          excluding: playing,
+          child: AppBar(
+            title: const Text('Bühnenlauf'),
+            actions: [
+              if (playing && !_game.over)
+                IconButton(
+                  key: const ValueKey('runner-pause-button'),
+                  tooltip: _paused ? 'Fortsetzen' : 'Pause',
+                  icon: Icon(_paused ? Icons.play_arrow : Icons.pause),
+                  onPressed: () {
+                    if (_paused) {
+                      _startResumeCountdown();
+                    } else {
+                      _pauseRun();
+                    }
+                    _playFocus.requestFocus();
+                  },
+                ),
+              IconButton(
+                key: const ValueKey('runner-settings'),
+                tooltip: 'Spieleinstellungen',
+                icon: const Icon(Icons.settings_outlined),
+                onPressed: _showSettings,
+              ),
+              ValueListenableBuilder(
+                valueListenable: _sound.enabled,
+                builder: (context, on, _) => IconButton(
+                  key: const ValueKey('runner-sound'),
+                  tooltip: on ? 'Ton aus' : 'Ton an',
+                  isSelected: on,
+                  icon: const Icon(Icons.volume_off_outlined),
+                  selectedIcon: const Icon(Icons.volume_up_outlined),
+                  onPressed: () {
+                    _sound.setEnabled(!on);
+                    if (playing) _playFocus.requestFocus();
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
           ),
-          ValueListenableBuilder(
-            valueListenable: _sound.enabled,
-            builder: (context, on, _) => IconButton(
-              key: const ValueKey('runner-sound'),
-              tooltip: on ? 'Ton aus' : 'Ton an',
-              isSelected: on,
-              icon: const Icon(Icons.volume_off_outlined),
-              selectedIcon: const Icon(Icons.volume_up_outlined),
-              onPressed: () => _sound.setEnabled(!on),
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
+        ),
       ),
       body: AnnotatedRegion(
-        value: _phase == _Phase.playing ? runnerBarsPlaying : runnerBarsDefault,
-        child: switch (_phase) {
-          _Phase.playing => Focus(
-            autofocus: true,
-            onKeyEvent: _key,
-            child: _stage(context),
-          ),
-          // Its own key: not the stage's focus node kept for the menu.
-          _ => Focus(
-            key: const ValueKey('runner-menu-keys'),
-            canRequestFocus: false,
-            skipTraversal: true,
-            onKeyEvent: _menuKey,
-            child: _menuBody(context),
-          ),
-        },
+        value: playing ? runnerBarsPlaying : runnerBarsDefault,
+        child: playing ? _stage(context) : _menuBody(context),
       ),
+    );
+    final guarded = DiscardGuard(
+      dirty: playing && !_game.over,
+      confirm: _confirmLeaveRun,
+      child: playing
+          ? Focus(
+              key: const ValueKey('runner-play-keys'),
+              focusNode: _playFocus,
+              autofocus: true,
+              onKeyEvent: _key,
+              child: scaffold,
+            )
+          // Its own key: not the stage's focus node kept for the menu.
+          : Focus(
+              key: const ValueKey('runner-menu-keys'),
+              skipTraversal: true,
+              onKeyEvent: _menuKey,
+              child: scaffold,
+            ),
     );
     // On phones the game covers the section rail the route frame would
     // show beside it once the phone is turned (see [runnerCoversRail]).
     final controller = AppNavigationScope.controllerOf(context);
     final selection = AppNavigationScope.maybeOf(context);
-    if (controller == null || selection == null) return scaffold;
+    if (controller == null || selection == null) return guarded;
     return DesktopRouteFrame(
       controller: controller,
       selectedIndex: selection.value,
       enabled: !phone,
-      child: scaffold,
+      child: guarded,
     );
   }
 
   /// The menu before and after a run: the countdown to a content drop less
   /// than a day away, the hero (or the last run's result), then the own
-  /// standing, the Ensemble-Strecke, the rankings and the Tagesmissionen.
+  /// standing, the Ensemble-Strecke, the Tagesmissionen and the rankings.
   /// Wide enough, the hero stays on the left and the rest scrolls beside it.
   Widget _menuBody(BuildContext context) {
     final lead = _phase == _Phase.intro ? _hero(context) : _result(context);
     // The drop countdown comes first: above the hero on phones, on top of
     // the column beside it on wide screens.
     final drop = _nextDropCard();
+    final outboxBanner = _phase == _Phase.intro ? _outboxBanner(context) : null;
     final rest = [
+      ?outboxBanner,
       if (_weeklyShown) _weeklyCard(),
       ?_stand(context),
       ?_ensembleStrip(),
-      _ranking(context),
       if (_missionsOn && (_phase == _Phase.intro || _missions != null))
         _missionsCard(),
+      _ranking(context),
       if (_phase == _Phase.intro) _rules(context),
     ];
     List<Widget> spaced(List<Widget> items) => [
@@ -1141,9 +1485,47 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     );
   }
 
+  /// Banner for scores waiting in the offline outbox, with manual retry.
+  Widget? _outboxBanner(BuildContext context) {
+    final waiting = _outbox.waiting;
+    if (!_ranked || waiting == 0) return null;
+    final theme = Theme.of(context);
+    final busy = _outbox.retrying;
+    return Card(
+      key: const ValueKey('runner-outbox-banner'),
+      color: StageTheme.orange.withValues(alpha: StageTheme.tintAlpha),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        child: Row(
+          children: [
+            const Icon(Icons.cloud_upload_outlined, color: StageTheme.orange),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                waiting == 1
+                    ? '1 Lauf wartet auf Verbindung.'
+                    : '$waiting Läufe warten auf Verbindung.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.tonal(
+              key: const ValueKey('runner-outbox-retry'),
+              onPressed: busy ? null : () => _retryOutbox(),
+              child: Text(busy ? 'Sende …' : 'Jetzt senden'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// The worn figure and the big start.
   Widget _hero(BuildContext context) {
     final name = _wardrobe?.wornCharacterName() ?? 'Engel Logge';
+    final crates = _wardrobe?.progress.waiting ?? 0;
     return RunnerHero(
       figure: _art == null
           ? const Icon(Icons.theater_comedy, size: 56, color: StageTheme.orange)
@@ -1154,11 +1536,18 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       story:
           '$name hängt zum ersten Mal am Flugseil – und die Technik hat die Bühne nicht aufgeräumt.',
       onStart: _motion.ready ? _play : null,
+      startFocusNode: _startFocus,
+      autofocusStart:
+          _phase == _Phase.intro &&
+          _newsChecked &&
+          !_overlayActive &&
+          !_settingsOpen &&
+          _motion.ready,
       note: _bonusOpen ? _dailyBonusHint(context, onDark: true) : null,
       wardrobe: _dressable
           ? WardrobeButton(
-              crates: _wardrobe?.progress.waiting ?? 0,
-              onPressed: _openWardrobe,
+              crates: crates,
+              onPressed: () => _openWardrobe(initialTab: crates > 0 ? 1 : 0),
             )
           : null,
     );
@@ -1193,9 +1582,11 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       collectible: w?.collectible,
       collectionRank: _collectionShown ? _collection?.own?.rank : null,
       monthRank: _monthShown ? _monthly?.own?.rank : null,
+      monthShown: _monthShown,
       nextCrate: next,
       nextCrateFraction: next == null || p!.complete ? null : p.fraction,
-      onWardrobe: _dressable ? _openWardrobe : null,
+      onWardrobe: _dressable ? () => _openWardrobe(initialTab: 0) : null,
+      onCrates: _dressable ? () => _openWardrobe(initialTab: 1) : null,
     );
   }
 
@@ -1204,7 +1595,11 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   Widget? _nextDropCard() {
     final drop = _wardrobe?.nextDrop;
     if (drop == null || !_dressable) return null;
-    return NextDropCard(drop: drop, onDue: _reloadWardrobe);
+    return NextDropCard(
+      drop: drop,
+      onDue: _reloadWardrobe,
+      onTap: drop.ready ? () => _openWardrobe(initialTab: 0) : null,
+    );
   }
 
   /// The way into the Wochenprobe.
@@ -1299,14 +1694,22 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   }
 
   /// The day's missions; loads them on first sight.
-  Widget _missionsCard() => DailyMissionsCard(
-    controller: controller,
-    missions: _missions,
-    collectibleNames: _pickupNames,
-    onChanged: (m) {
-      if (mounted) setState(() => _missions = m);
-    },
-  );
+  Widget _missionsCard() {
+    final crates =
+        _progress?.missionCrates ?? _wardrobe?.progress.missionCrates ?? 0;
+    return DailyMissionsCard(
+      controller: controller,
+      missions: _missions,
+      collectibleNames: _pickupNames,
+      crates: crates,
+      onOpenCrate: _dressable && crates > 0
+          ? () => _openWardrobe(initialTab: 1)
+          : null,
+      onChanged: (m) {
+        if (mounted) setState(() => _missions = m);
+      },
+    );
+  }
 
   /// A quiet note while today's first run still counts twice for the crates.
   Widget _dailyBonusHint(BuildContext context, {bool onDark = false}) {
@@ -1438,6 +1841,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   Widget _result(BuildContext context) {
     final theme = Theme.of(context);
     final weekly = _weeklyPlay;
+    final narrow = MediaQuery.sizeOf(context).width < _twoColumns;
+    final waitingCrates = _progress?.waiting ?? _wardrobe?.progress.waiting ?? 0;
+    final earnedCrate =
+        (_progress?.newCrates ?? 0) > 0 ||
+        (_progress?.missions?.justCompletedAll ?? false);
+    final outboxWaiting = _ranked ? _outbox.waiting : 0;
     final status = !_ranked
         ? null
         : weekly != null
@@ -1461,6 +1870,71 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         : _improved
         ? 'Neuer persönlicher Bestwert!'
         : null;
+    final actions = Wrap(
+      key: const ValueKey('runner-result-actions'),
+      spacing: 12,
+      runSpacing: 12,
+      alignment: WrapAlignment.center,
+      children: [
+        if (weekly == null)
+          FilledButton.icon(
+            autofocus: true,
+            onPressed: _play,
+            icon: const Icon(Icons.replay),
+            label: const Text('Nochmal'),
+          )
+        else ...[
+          if (!weekly.ranked)
+            FilledButton.icon(
+              key: const ValueKey('runner-train-again'),
+              autofocus: true,
+              onPressed: _trainAgain,
+              icon: const Icon(Icons.replay),
+              label: const Text('Nochmal trainieren'),
+            ),
+          (weekly.ranked ? FilledButton.icon : OutlinedButton.icon)(
+            key: const ValueKey('runner-to-weekly'),
+            autofocus: weekly.ranked,
+            onPressed: _openWeekly,
+            icon: const Icon(Icons.event_repeat),
+            label: const Text('Zur Wochenprobe'),
+          ),
+          if (weekly.ranked)
+            OutlinedButton.icon(
+              key: const ValueKey('runner-weekly-train'),
+              onPressed: _trainAgain,
+              icon: const Icon(Icons.fitness_center),
+              label: const Text('Training'),
+            ),
+          OutlinedButton(
+            key: const ValueKey('runner-free-run'),
+            onPressed: _motion.ready ? _play : null,
+            child: const Text('Freier Lauf'),
+          ),
+        ],
+        if (_dressable && earnedCrate)
+          FilledButton.tonalIcon(
+            key: const ValueKey('runner-result-open-crate'),
+            onPressed: () => _openWardrobe(initialTab: 1),
+            icon: const Icon(Icons.inventory_2_outlined),
+            label: Text(
+              waitingCrates > 1
+                  ? 'Kisten öffnen ($waitingCrates)'
+                  : 'Kiste öffnen',
+            ),
+          ),
+        if (_dressable)
+          WardrobeButton(
+            crates: waitingCrates,
+            onPressed: () =>
+                _openWardrobe(initialTab: waitingCrates > 0 ? 1 : 0),
+          ),
+        OutlinedButton(
+          onPressed: () => Navigator.maybePop(context),
+          child: const Text('Zurück in die App'),
+        ),
+      ],
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -1530,6 +2004,26 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                 ),
               ),
             ],
+            if (outboxWaiting > 0 && !_saving) ...[
+              const SizedBox(height: 8),
+              if (!_queued || outboxWaiting > 1)
+                Text(
+                  outboxWaiting == 1
+                      ? '1 Lauf wartet auf Verbindung.'
+                      : '$outboxWaiting Läufe warten auf Verbindung.',
+                  key: const ValueKey('runner-outbox-count'),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall,
+                ),
+              const SizedBox(height: 6),
+              OutlinedButton.icon(
+                key: const ValueKey('runner-outbox-retry'),
+                onPressed: _outbox.retrying ? null : () => _retryOutbox(),
+                icon: const Icon(Icons.cloud_upload_outlined, size: 18),
+                label: Text(_outbox.retrying ? 'Sende …' : 'Jetzt senden'),
+              ),
+            ],
+            if (narrow) ...[const SizedBox(height: 16), actions],
             if (_progress case final p?) _crateProgress(context, p),
             if (_progress?.missions case final m? when _missionsOn)
               MissionRunNote(m, names: _pickupNames),
@@ -1538,53 +2032,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
               const SizedBox(height: 12),
               _dailyBonusHint(context),
             ],
-            const SizedBox(height: 20),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              alignment: WrapAlignment.center,
-              children: [
-                if (weekly == null)
-                  FilledButton.icon(
-                    autofocus: true,
-                    onPressed: _play,
-                    icon: const Icon(Icons.replay),
-                    label: const Text('Nochmal'),
-                  )
-                else ...[
-                  if (!weekly.ranked)
-                    FilledButton.icon(
-                      key: const ValueKey('runner-train-again'),
-                      autofocus: true,
-                      onPressed: _trainAgain,
-                      icon: const Icon(Icons.replay),
-                      label: const Text('Nochmal trainieren'),
-                    ),
-                  (weekly.ranked ? FilledButton.icon : OutlinedButton.icon)(
-                    key: const ValueKey('runner-to-weekly'),
-                    autofocus: weekly.ranked,
-                    onPressed: _openWeekly,
-                    icon: const Icon(Icons.event_repeat),
-                    label: const Text('Zur Wochenprobe'),
-                  ),
-                  OutlinedButton(
-                    key: const ValueKey('runner-free-run'),
-                    onPressed: _motion.ready ? _play : null,
-                    child: const Text('Freier Lauf'),
-                  ),
-                ],
-                if (_dressable)
-                  WardrobeButton(
-                    crates:
-                        _progress?.waiting ?? _wardrobe?.progress.waiting ?? 0,
-                    onPressed: _openWardrobe,
-                  ),
-                OutlinedButton(
-                  onPressed: () => Navigator.maybePop(context),
-                  child: const Text('Zurück in die App'),
-                ),
-              ],
-            ),
+            if (!narrow) ...[const SizedBox(height: 20), actions],
           ],
         ),
       ),
@@ -1636,6 +2084,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       () => _trail,
       pixelRatio: ratio,
       sceneryMotion: () => _sceneryMotion,
+      reducedMotion: () => _systemReducedMotion,
       ghosts: () => _ghosts,
       ghostSkins: () => _ghostSkins,
     );
@@ -1680,14 +2129,20 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     );
     final scaler = MediaQuery.textScalerOf(context);
     final weekly = _weeklyPlay;
+    final missionRowTop = scaler.scale(weekly != null ? 58 : 38);
     return Listener(
       behavior: HitTestBehavior.opaque,
-      onPointerDown: (_) {
-        _pointers++;
-        _resume();
+      onPointerDown: (event) {
+        if (_paused || _resumeCountdown > 0) return;
+        _activePointers.add(event.pointer);
+        if (kIsWeb) {
+          if (_sound case final RunnerMusic music) {
+            music.resumeMusic();
+          }
+        }
       },
-      onPointerUp: (_) => _pointers = max(0, _pointers - 1),
-      onPointerCancel: (_) => _pointers = max(0, _pointers - 1),
+      onPointerUp: (event) => _activePointers.remove(event.pointer),
+      onPointerCancel: (event) => _activePointers.remove(event.pointer),
       // Only the picture is built by its size. The numbers live outside the
       // LayoutBuilder: a rebuild inside it (each new number) would lay out
       // the builder again, and with it the page, which then repaints whole.
@@ -1699,10 +2154,14 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                 final size = constraints.biggest;
                 _resized(size, stageLayout(size, ratio).view);
                 return RepaintBoundary(
-                  child: CustomPaint(
-                    key: const ValueKey('runner-stage'),
-                    size: Size.infinite,
-                    painter: _stagePainter(ratio),
+                  child: Semantics(
+                    label: 'Bühnenlauf-Spielfläche',
+                    hint: 'Gedrückt halten zum Steigen',
+                    child: CustomPaint(
+                      key: const ValueKey('runner-stage'),
+                      size: Size.infinite,
+                      painter: _stagePainter(ratio),
+                    ),
                   ),
                 );
               },
@@ -1716,43 +2175,19 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
               delegate: _HudLayout(pad, ratio, scaler.scale(36)),
               child: RepaintBoundary(
                 key: const ValueKey('runner-hud'),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    ValueListenableBuilder(
-                      valueListenable: _hud,
-                      builder: (context, hud, _) => Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              hud.$1 == 1 ? '1 Punkt' : '${hud.$1} Punkte',
-                              style: number,
-                            ),
-                          ),
-                          Text('${hud.$2} m', style: number),
-                        ],
+                child: ValueListenableBuilder(
+                  valueListenable: _hud,
+                  builder: (context, hud, _) => Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          hud.$1 == 1 ? '1 Punkt' : '${hud.$1} Punkte',
+                          style: number,
+                        ),
                       ),
-                    ),
-                    // A made mission, briefly, between points and metres.
-                    ValueListenableBuilder(
-                      valueListenable: _missionBanner,
-                      builder: (context, made, _) => AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 250),
-                        child: made == null
-                            ? const SizedBox.shrink()
-                            : FractionallySizedBox(
-                                key: ValueKey(made.slot),
-                                widthFactor: .6,
-                                child: Center(
-                                  child: MissionBanner(
-                                    made,
-                                    names: _pickupNames,
-                                  ),
-                                ),
-                              ),
-                      ),
-                    ),
-                  ],
+                      Text('${hud.$2} m', style: number),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1785,6 +2220,126 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                 ),
               ),
             ),
+          // Mission completion banner or compact live mission pill below the
+          // numbers (and below the weekly line when active), never colliding
+          // with score/metres.
+          if (_missionsOn)
+            Positioned.fill(
+              child: CustomSingleChildLayout(
+                delegate: _HudLayout(
+                  pad,
+                  ratio,
+                  scaler.scale(30),
+                  below: missionRowTop,
+                ),
+                child: RepaintBoundary(
+                  child: ValueListenableBuilder(
+                    valueListenable: _missionBanner,
+                    builder: (context, made, _) => AnimatedSwitcher(
+                      duration: _systemReducedMotion
+                          ? Duration.zero
+                          : const Duration(milliseconds: 250),
+                      child: made != null
+                          ? Align(
+                              key: ValueKey('banner-${made.slot}'),
+                              alignment: AlignmentDirectional.centerStart,
+                              child: MissionBanner(made, names: _pickupNames),
+                            )
+                          : ValueListenableBuilder(
+                              key: const ValueKey('live-slot'),
+                              valueListenable: _liveMission,
+                              builder: (context, live, _) => live == null
+                                  ? const SizedBox.shrink()
+                                  : Align(
+                                      alignment:
+                                          AlignmentDirectional.centerStart,
+                                      child: DecoratedBox(
+                                        key: const ValueKey(
+                                          'runner-mission-live',
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xB3151A17),
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 3,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.flag_outlined,
+                                                size: 14,
+                                                color: StageTheme.orange,
+                                              ),
+                                              const SizedBox(width: 5),
+                                              Flexible(
+                                                child: Text(
+                                                  live,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: theme
+                                                      .textTheme
+                                                      .labelMedium
+                                                      ?.copyWith(
+                                                        color: const Color(
+                                                          0xFFFFF1D6,
+                                                        ),
+                                                        shadows: shadow,
+                                                      ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (_unrankedOffline && weekly?.ranked != true)
+            Positioned.fill(
+              child: CustomSingleChildLayout(
+                delegate: _HudLayout(
+                  pad,
+                  ratio,
+                  scaler.scale(24),
+                  below: missionRowTop + (_missionsOn ? scaler.scale(32) : 0),
+                ),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: DecoratedBox(
+                    key: const ValueKey('runner-offline-warning'),
+                    decoration: BoxDecoration(
+                      color: const Color(0xCC5E1714),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        'Offline · zählt nicht für die Bestenliste',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: const Color(0xFFFFF1D6),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             left: pad.left + 20,
             right: pad.right + 20,
@@ -1804,27 +2359,21 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
           // new size caused (see [_resized]) shows in the very same frame.
           Positioned.fill(
             child: LayoutBuilder(
-              builder: (context, _) => !_paused
-                  ? const SizedBox.shrink()
-                  : ColoredBox(
-                      key: const ValueKey('runner-paused'),
-                      color: const Color(0x99000000),
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('Pause', style: number),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Tippen zum Weiterlaufen',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: const Color(0xFFFFF1D6),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+              builder: (context, constraints) {
+                if (_paused) {
+                  return _pauseOverlay(
+                    context,
+                    theme,
+                    number,
+                    shadow,
+                    constraints,
+                  );
+                }
+                if (_resumeCountdown > 0) {
+                  return _countdownOverlay(context, theme, shadow);
+                }
+                return const SizedBox.shrink();
+              },
             ),
           ),
         ],
@@ -1832,9 +2381,266 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     );
   }
 
+  Widget _pauseOverlay(
+    BuildContext context,
+    ThemeData theme,
+    TextStyle? number,
+    List<Shadow> shadow,
+    BoxConstraints constraints,
+  ) {
+    final openMissions = _missionsOn
+        ? [
+            for (final m in _missions?.missions ?? const <DailyMission>[])
+              if (!m.done) m,
+          ]
+        : const <DailyMission>[];
+    final canRestart = _weeklyPlay?.ranked != true;
+    final hasWeeklyGhosts = _weeklyPlay != null;
+    final hasSecondary = hasWeeklyGhosts || openMissions.isNotEmpty;
+    final wide = hasSecondary && constraints.maxWidth >= 560;
+    final primary = <Widget>[
+      Text('Pause', textAlign: TextAlign.center, style: number),
+      const SizedBox(height: 12),
+      FilledButton.icon(
+        key: const ValueKey('runner-resume'),
+        style: FilledButton.styleFrom(
+          backgroundColor: StageTheme.orange,
+          foregroundColor: Colors.white,
+          minimumSize: const Size.fromHeight(48),
+        ),
+        onPressed: _startResumeCountdown,
+        icon: const Icon(Icons.play_arrow),
+        label: Semantics(
+          label: 'Lauf fortsetzen',
+          excludeSemantics: true,
+          child: const Text('Weiter'),
+        ),
+      ),
+      const SizedBox(height: 10),
+      Text(
+        'Tippen, Leertaste oder Esc zum Weiterlaufen · Esc/P für Pause',
+        textAlign: TextAlign.center,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: const Color(0xCCFFF1D6),
+          shadows: shadow,
+        ),
+      ),
+      if (canRestart) ...[
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          key: const ValueKey('runner-pause-restart'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFFFFF1D6),
+            side: const BorderSide(color: Color(0x66FFF1D6)),
+          ),
+          onPressed: _restartFromPause,
+          icon: const Icon(Icons.replay, size: 18),
+          label: const Text('Neu starten'),
+        ),
+      ],
+    ];
+    final secondary = <Widget>[
+      if (hasWeeklyGhosts) ...[
+        Text(
+          'Geister',
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: const Color(0xCCFFF1D6),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Theme(
+          data: StageTheme.build(Brightness.dark),
+          child: SegmentedButton<GhostMode>(
+            key: const ValueKey('runner-pause-ghosts'),
+            showSelectedIcon: false,
+            segments: [
+              for (final m in GhostMode.values)
+                ButtonSegment(
+                  value: m,
+                  label: Text(m.label, key: ValueKey('pause-ghosts-${m.name}')),
+                ),
+            ],
+            selected: {_menu.ghostMode},
+            onSelectionChanged: (chosen) => _menu.setGhostMode(chosen.first),
+          ),
+        ),
+      ],
+      if (hasWeeklyGhosts && openMissions.isNotEmpty)
+        const SizedBox(height: 14),
+      if (openMissions.isNotEmpty)
+        Column(
+          key: const ValueKey('runner-pause-missions'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Offene Tagesmissionen',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: const Color(0xCCFFF1D6),
+              ),
+            ),
+            const SizedBox(height: 6),
+            for (final m in openMissions) _pauseMissionRow(theme, m),
+          ],
+        ),
+    ];
+    return GestureDetector(
+      key: const ValueKey('runner-paused'),
+      behavior: HitTestBehavior.opaque,
+      onTap: _startResumeCountdown,
+      child: ColoredBox(
+        color: const Color(0x66000000),
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: wide ? 640 : 360),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: const Color(0xD9151A17),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: _gold.withValues(alpha: .45),
+                    width: 1.2,
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                  child: wide
+                      ? Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: primary,
+                              ),
+                            ),
+                            const SizedBox(width: 20),
+                            Expanded(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: secondary,
+                              ),
+                            ),
+                          ],
+                        )
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            ...primary,
+                            if (hasSecondary) ...[
+                              const SizedBox(height: 14),
+                              ...secondary,
+                            ],
+                          ],
+                        ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _pauseMissionRow(ThemeData theme, DailyMission m) {
+    final made = m.reachedBy(_game);
+    final live = m.live(_game);
+    final unit = m.unitFor(_pickupNames);
+    final progress = made
+        ? 'Geschafft!'
+        : m.type == 'noPickup' && _game.collected > 0
+        ? 'Requisite gesammelt'
+        : live != null
+        ? '$live/${m.target}${unit.isEmpty ? '' : ' $unit'}'
+        : '${m.progress}/${m.target}${unit.isEmpty ? '' : ' $unit'}';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            made ? Icons.check_circle : Icons.flag_outlined,
+            size: 16,
+            color: made ? StageTheme.green : StageTheme.orange,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              m.textFor(_pickupNames),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: const Color(0xFFFFF1D6),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            progress,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: made ? StageTheme.green : const Color(0xFFFFD58A),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _countdownOverlay(
+    BuildContext context,
+    ThemeData theme,
+    List<Shadow> shadow,
+  ) {
+    final step = _resumeCountdown;
+    return ColoredBox(
+      key: const ValueKey('runner-countdown'),
+      color: const Color(0x26000000),
+      child: Center(
+        child: Semantics(
+          liveRegion: true,
+          label: 'Weiter in $step',
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$step',
+                style: theme.textTheme.displayLarge?.copyWith(
+                  color: const Color(0xFFFFE7A3),
+                  fontWeight: FontWeight.w900,
+                  shadows: shadow,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Gleich geht’s weiter …',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFFFFF1D6),
+                  shadows: shadow,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _restartFromPause() {
+    final weekly = _weeklyPlay;
+    if (weekly != null && weekly.ranked) return;
+    if (weekly != null) {
+      _trainAgain();
+    } else {
+      _play();
+    }
+  }
+
   /// The stage got its size: the course is laid out to the picture's right
   /// edge at once. When the size changes during a run (a turned phone, a
-  /// resized window), the run pauses until the next tap. The game counts in
+  /// resized window), the run pauses until resumed. The game counts in
   /// stage heights, so the new size only scales the picture; nothing jumps.
   void _resized(Size size, double view) {
     _game.view = view;
@@ -1848,30 +2654,79 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       return;
     }
     // Called while building: the pause shows in this very build.
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    _resumeCountdown = 0;
     _paused = true;
-    _pointers = 0;
+    _activePointers.clear();
     _ticker.stop();
     if (_sound case final RunnerMusic music) music.pauseMusic();
   }
 
-  /// Pauses a run in play until the next tap ([_resume]), with its music;
-  /// whether it did.
+  /// Pauses a run in play (or cancels an active resume countdown), with its
+  /// music; returns whether it transitioned into pause.
   bool _pauseRun() {
     if (_phase != _Phase.playing || _game.over || _paused) return false;
-    setState(() => _paused = true);
-    _pointers = 0;
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    setState(() {
+      _paused = true;
+      _resumeCountdown = 0;
+    });
+    _activePointers.clear();
     _ticker.stop();
     if (_sound case final RunnerMusic music) music.pauseMusic();
     return true;
   }
 
-  /// Runs on after a pause, from the first fresh frame.
-  void _resume() {
-    if (!_paused || _settingsOpen) return;
-    setState(() => _paused = false);
+  /// Starts the 3-2-1 countdown from pause without triggering lift on resume.
+  void _startResumeCountdown() {
+    if (!_paused || _settingsOpen || _phase != _Phase.playing || _game.over) {
+      return;
+    }
+    _countdownTimer?.cancel();
+    _activePointers.clear();
+    _resumeIgnoredKeys.addAll(
+      HardwareKeyboard.instance.logicalKeysPressed.where(_holdKeys.contains),
+    );
+    final step = StageRunnerScreen.resumeCountdownStep;
+    if (step <= Duration.zero) {
+      setState(() {
+        _paused = false;
+        _resumeCountdown = 0;
+      });
+      _finishResume();
+      return;
+    }
+    setState(() {
+      _paused = false;
+      _resumeCountdown = 3;
+    });
+    _countdownTimer = Timer.periodic(step, (timer) {
+      if (!mounted || _phase != _Phase.playing || _game.over || _paused) {
+        timer.cancel();
+        if (identical(_countdownTimer, timer)) _countdownTimer = null;
+        return;
+      }
+      if (_resumeCountdown > 1) {
+        setState(() => _resumeCountdown--);
+      } else {
+        timer.cancel();
+        if (identical(_countdownTimer, timer)) _countdownTimer = null;
+        _finishResume();
+      }
+    });
+  }
+
+  /// Runs on after the resume countdown, from the first fresh frame.
+  void _finishResume() {
+    if (!mounted || _phase != _Phase.playing || _game.over) return;
+    if (_resumeCountdown != 0) setState(() => _resumeCountdown = 0);
+    _activePointers.clear();
     _lastFrame = Duration.zero;
     _ticker.start();
     if (_sound case final RunnerMusic music) music.resumeMusic();
+    _playFocus.requestFocus();
   }
 }
 
@@ -2042,6 +2897,25 @@ class RunnerGlyphs {
     );
   }
 
+  /// Short label above a highlighted ghost crash marker (top 3 or own run).
+  TextPainter crashTag(String text, double size, int rank, bool me) {
+    _bound();
+    final color = rank >= 1 && rank <= 3
+        ? _ghostTagColors[rank - 1]
+        : me
+        ? const Color(0xF0FF8A5C)
+        : _ghostTagColors[3];
+    return _cache[('crashTag', text, size, rank, me)] ??= _layout(
+      text,
+      TextStyle(
+        fontFamily: _font,
+        color: color,
+        fontSize: size,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+  }
+
   static const _ghostTagColors = [
     Color(0xE6F2C45A),
     Color(0xE6D5DCE2),
@@ -2133,6 +3007,7 @@ StageRunnerPainter stagePainterFor(
   RunnerTrail? trail,
   double pixelRatio = 1,
   bool sceneryMotion = true,
+  bool reducedMotion = false,
   RunnerGhosts? ghosts,
   GhostSkins? ghostSkins,
 }) {
@@ -2145,6 +3020,7 @@ StageRunnerPainter stagePainterFor(
     () => t,
     pixelRatio: pixelRatio,
     sceneryMotion: () => sceneryMotion,
+    reducedMotion: () => reducedMotion,
     ghosts: ghosts == null ? null : () => ghosts,
     ghostSkins: ghostSkins == null ? null : () => ghostSkins,
   );
@@ -2181,6 +3057,7 @@ class StageRunnerPainter extends CustomPainter {
     this.trail, {
     this.pixelRatio = 1,
     required this.sceneryMotion,
+    required this.reducedMotion,
     this.ghosts,
     this.ghostSkins,
   }) : super(repaint: repaint);
@@ -2195,6 +3072,10 @@ class StageRunnerPainter extends CustomPainter {
   /// Only decorative movement; the course and the player's hitboxes keep
   /// moving at the same speed in either setting.
   final bool Function() sceneryMotion;
+
+  /// System "Bewegung reduzieren": additionally quiets pickup bobbing,
+  /// trail/shine flashes, particle bursts and crash bounce/rotation.
+  final bool Function() reducedMotion;
 
   /// The trail of the worn effect.
   final RunnerTrail Function() trail;
@@ -2259,6 +3140,21 @@ class StageRunnerPainter extends CustomPainter {
   static final _ghostSkinPaint = Paint()..filterQuality = FilterQuality.medium;
   static final _ghostMark = _stroke(const Color(0x40DCE6F0), 1.5)
     ..strokeCap = StrokeCap.round;
+  static final _ghostMedalMarks = [
+    _stroke(const Color(0xCCF2C45A), 2.2)..strokeCap = StrokeCap.round,
+    _stroke(const Color(0xCCD5DCE2), 2.2)..strokeCap = StrokeCap.round,
+    _stroke(const Color(0xCCD9A06A), 2.2)..strokeCap = StrokeCap.round,
+  ];
+  static final _ghostOwnMark = _stroke(const Color(0xDDE96131), 2.4)
+    ..strokeCap = StrokeCap.round;
+  static final _sandbagShadowPaint = _fill(const Color(0x8007090A));
+  static final _sandbagWarnShadowPaint = _fill(const Color(0x66E96131));
+  static final _sandbagWarnRopePaint = _stroke(const Color(0xFFE96131), 2.2)
+    ..strokeCap = StrokeCap.round;
+  static final _sandbagWarnFill = _fill(const Color(0xFFE96131));
+  static final _drumDustPaint = _fill(const Color(0x55D9CBB0));
+  static final _drumStreakPaint = _stroke(const Color(0x66FFF1D6), 1.5)
+    ..strokeCap = StrokeCap.round;
   static final _ghostTagLayer = Paint();
   static final _tagOpacities = [
     for (var i = 0; i <= _ghostSteps; i++)
@@ -2281,6 +3177,7 @@ class StageRunnerPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final g = game(), f = fx(), a = art();
     final movingScenery = sceneryMotion();
+    final reduced = reducedMotion();
     // One stage height in pixels; the playing field is [view] heights wide
     // and starts [top] pixels down (see [stageLayout]).
     final (:s, :top, view: _) = stageLayout(size, pixelRatio);
@@ -2332,23 +3229,27 @@ class StageRunnerPainter extends CustomPainter {
         o.bottom * s,
       );
       if (rect.right < -s * .1 || rect.left > w + s * .1) continue;
+      if (o.kind == ObstacleKind.sandbag) {
+        _sandbagShadow(canvas, g, o, rect, s, floorY);
+      }
       if (a == null) {
-        _plainObstacle(canvas, o.kind, rect, s, floorY);
+        _plainObstacle(canvas, o, rect, s, floorY);
       } else {
         _obstacle(canvas, a, o, rect, s, floorY);
       }
     }
 
-    _pickups(canvas, g, a, s, w, course);
-    trail().paint(canvas, s, a?.effect);
+    _pickups(canvas, g, a, s, w, course, reduced);
+    if (!reduced) trail().paint(canvas, s, a?.effect);
     if (a == null) {
       _plainRunner(canvas, g, s);
     } else {
-      _runner(canvas, g, f, a, s);
+      _runner(canvas, g, f, a, s, reduced);
     }
-    _particles(canvas, f, s);
+    _particles(canvas, f, s, reduced);
     _audience(canvas, s, w, sceneryScroll);
     _bannerAndValance(canvas, f, s, w, sceneryScroll, movingScenery);
+    _sandbagWarnings(canvas, g, s, w, course, reduced);
     canvas
       ..restore()
       ..restore();
@@ -2572,6 +3473,7 @@ class StageRunnerPainter extends CustomPainter {
         );
         _sprite(canvas, a, sprite, bag);
       case ObstacleKind.drum:
+        if (o.falling) _drumTrail(canvas, rect, s);
         // The spokes turn with the way it rolled.
         final r = rect.width * .56;
         final center = Offset(rect.center.dx, rect.bottom - r);
@@ -2652,16 +3554,123 @@ class StageRunnerPainter extends CustomPainter {
           rect.width,
           height,
         );
-        for (final x in [.28, .72]) {
-          final dx = frame.left + frame.width * x;
-          canvas.drawLine(
-            Offset(dx, 0),
-            Offset(dx, frame.top + height * .02),
-            _ropePaint,
-          );
+        // Heavy fly lines all the way up to the loft, like [_plainObstacle],
+        // so the solid hitbox column above the painted frame is unmistakable.
+        final inset = rect.width * .18;
+        for (final x in [frame.left + inset, frame.right - inset]) {
+          final top = Offset(x, 0), bottom = Offset(x, frame.top + height * .04);
+          canvas
+            ..drawLine(top, bottom, _flyLineEdge)
+            ..drawLine(top, bottom, _flyLinePaint);
         }
         _sprite(canvas, a, sprite, frame);
     }
+  }
+
+  /// Whether a waiting sandbag is close enough to telegraph its drop.
+  static bool _sandbagTelegraphing(StageRunner g, Obstacle o) =>
+      !o.falling &&
+      o.bottom <= StageRunner.ceiling + .01 &&
+      o.left - g.runnerWorldX < g.speed * 1.4 &&
+      o.left > g.runnerWorldX - StageRunner.hitHalfWidth;
+
+  /// Floor target shadow under an impending or falling sandbag.
+  void _sandbagShadow(
+    Canvas canvas,
+    StageRunner g,
+    Obstacle o,
+    Rect rect,
+    double s,
+    double floorY,
+  ) {
+    final waiting = _sandbagTelegraphing(g, o);
+    final falling = o.falling && o.bottom < StageRunner.floor - .01;
+    if (!waiting && !falling) return;
+    final progress = falling
+        ? ((o.bottom - StageRunner.ceiling) /
+                  (StageRunner.floor - StageRunner.ceiling))
+              .clamp(0.0, 1.0)
+        : 0.35;
+    final width = rect.width * (.7 + .65 * progress);
+    final height = s * (.014 + .014 * progress);
+    final oval = Rect.fromCenter(
+      center: Offset(rect.center.dx, floorY + s * .006),
+      width: width,
+      height: height,
+    );
+    canvas.drawOval(
+      oval,
+      waiting ? _sandbagWarnShadowPaint : _sandbagShadowPaint,
+    );
+  }
+
+  /// Wobbling warning rope and marker below the opaque valance just before a
+  /// sandbag drops (drawn after [_bannerAndValance] so the valance never hides
+  /// it).
+  void _sandbagWarnings(
+    Canvas canvas,
+    StageRunner g,
+    double s,
+    double w,
+    double course,
+    bool reduced,
+  ) {
+    for (final o in g.obstacles) {
+      if (o.kind != ObstacleKind.sandbag || !_sandbagTelegraphing(g, o)) {
+        continue;
+      }
+      final cx = (o.left + o.width / 2) * s - course;
+      if (cx < -s * .1 || cx > w + s * .1) continue;
+      final wobble = reduced ? 0.0 : sin(g.time * 42 + o.left * 17) * s * .006;
+      final startY = s * StageRunner.ceiling * .9;
+      final endY = s * (StageRunner.ceiling + .055);
+      canvas.drawLine(
+        Offset(cx, startY),
+        Offset(cx + wobble, endY),
+        _sandbagWarnRopePaint,
+      );
+      // Small downward pointer at the rope end below the valance.
+      final tipX = cx + wobble;
+      final r = s * .014;
+      _path
+        ..reset()
+        ..moveTo(tipX - r, endY - r * .3)
+        ..lineTo(tipX + r, endY - r * .3)
+        ..lineTo(tipX, endY + r * 1.1)
+        ..close();
+      canvas.drawPath(_path, _sandbagWarnFill);
+    }
+  }
+
+  /// Subtle dust puffs and speed streaks trailing right of a rolling drum.
+  void _drumTrail(Canvas canvas, Rect rect, double s) {
+    final baseY = rect.bottom - s * .012;
+    final baseX = rect.right;
+    canvas.drawCircle(
+      Offset(baseX + s * .022, baseY - s * .004),
+      s * .012,
+      _drumDustPaint,
+    );
+    canvas.drawCircle(
+      Offset(baseX + s * .048, baseY - s * .009),
+      s * .009,
+      _drumDustPaint,
+    );
+    canvas.drawCircle(
+      Offset(baseX + s * .072, baseY - s * .005),
+      s * .006,
+      _drumDustPaint,
+    );
+    canvas.drawLine(
+      Offset(baseX + s * .01, rect.center.dy),
+      Offset(baseX + s * .06, rect.center.dy),
+      _drumStreakPaint,
+    );
+    canvas.drawLine(
+      Offset(baseX + s * .018, rect.center.dy + s * .024),
+      Offset(baseX + s * .055, rect.center.dy + s * .024),
+      _drumStreakPaint,
+    );
   }
 
   /// A stage light hanging with its lens at [bottom], with its beam down to
@@ -2907,14 +3916,17 @@ class StageRunnerPainter extends CustomPainter {
     double s,
     double w,
     double course,
+    bool reduced,
   ) {
     final glyph = s * .075, height = s * .085;
     for (final p in g.pickups) {
       if (p.taken) continue;
       final x = p.x * s - course;
       if (x < -glyph || x > w + glyph) continue;
-      // A gentle bob; the hitbox stays where it is.
-      final y = p.y * s + sin(g.time * 4 + p.x * 7) * s * .008;
+      // A gentle bob unless system reduced motion is on; hitbox stays fixed.
+      final y = reduced
+          ? p.y * s
+          : p.y * s + sin(g.time * 4 + p.x * 7) * s * .008;
       if (a == null) {
         _paintCentered(canvas, _glyphs.icon(p.kind, glyph), Offset(x, y));
         continue;
@@ -2942,6 +3954,7 @@ class StageRunnerPainter extends CustomPainter {
     RunnerFx f,
     RunnerArt a,
     double s,
+    bool reduced,
   ) {
     final onFloor =
         g.y >= StageRunner.floor - StageRunner.runnerHeight / 2 - .001;
@@ -2950,14 +3963,15 @@ class StageRunnerPainter extends CustomPainter {
     var angle = 0.0, wireTop = 0.0;
     if (g.over) {
       sprite = RunnerSprite.crash;
-      // Drops to the floor with a little bounce; the wire snaps upwards.
+      // Drops to the floor with a little bounce (calm without bounce/rotation
+      // under system reduced motion); the wire snaps upwards.
       final t = (g.sinceOver / .35).clamp(0, 1).toDouble();
-      final bounce = (1 - t) * sin(t * pi) * .06;
+      final bounce = reduced ? 0.0 : (1 - t) * sin(t * pi) * .06;
       feet =
           feet +
           (StageRunner.floor + .01 - feet) * Curves.easeIn.transform(t) -
           bounce;
-      angle = (1 - t) * .5;
+      angle = reduced ? 0.0 : (1 - t) * .5;
       wireTop =
           (g.y - StageRunner.runnerHeight / 2) * Curves.easeOut.transform(t);
     } else if (f.cheer > 0) {
@@ -2966,7 +3980,7 @@ class StageRunnerPainter extends CustomPainter {
       sprite = RunnerSprite.stride(g.distance);
     } else {
       sprite = g.vy < -.05 ? RunnerSprite.fly : RunnerSprite.dangle;
-      angle = (g.vy * .12).clamp(-.2, .2).toDouble();
+      angle = reduced ? 0.0 : (g.vy * .12).clamp(-.2, .2).toDouble();
     }
     final scale = RunnerSprite.stagePerPixel * s;
     final width = sprite.width * scale, height = sprite.height * scale;
@@ -2988,7 +4002,7 @@ class StageRunnerPainter extends CustomPainter {
         _ropePaint,
       );
     }
-    final shine = a.effect?.shine ?? false;
+    final shine = !reduced && (a.effect?.shine ?? false);
     if (angle == 0) {
       _figure(canvas, a, sprite, dst, shine);
     } else {
@@ -3021,20 +4035,22 @@ class StageRunnerPainter extends CustomPainter {
     paintSheen(canvas, image, sprite.rect, dst, time);
   }
 
-  void _particles(Canvas canvas, RunnerFx f, double s) {
-    for (var i = 0; i < RunnerFx.maxParticles; i++) {
-      final life = f.life[i];
-      if (life <= 0) continue;
-      canvas.drawCircle(
-        Offset(f.px[i] * s, f.py[i] * s),
-        f.size[i] * s * min(1, life * 3),
-        _particlePaints[f.tint[i]],
-      );
+  void _particles(Canvas canvas, RunnerFx f, double s, bool reduced) {
+    if (!reduced) {
+      for (var i = 0; i < RunnerFx.maxParticles; i++) {
+        final life = f.life[i];
+        if (life <= 0) continue;
+        canvas.drawCircle(
+          Offset(f.px[i] * s, f.py[i] * s),
+          f.size[i] * s * min(1, life * 3),
+          _particlePaints[f.tint[i]],
+        );
+      }
     }
     final size = s * .045;
     for (final p in f.popups) {
       if (!p.alive) continue;
-      final at = Offset(p.x * s, (p.y - p.age * .12) * s);
+      final at = Offset(p.x * s, (p.y - (reduced ? 0 : p.age * .12)) * s);
       _paintCentered(
         canvas,
         _glyphs.label(p.text, size, shadow: true),
@@ -3271,12 +4287,12 @@ class StageRunnerPainter extends CustomPainter {
 
   void _plainObstacle(
     Canvas canvas,
-    ObstacleKind kind,
+    Obstacle o,
     Rect rect,
     double s,
     double floorY,
   ) {
-    switch (kind) {
+    switch (o.kind) {
       case ObstacleKind.crate:
         canvas.drawRect(rect, _woodPaint);
         canvas.drawRect(rect.deflate(1), _woodLine);
@@ -3319,6 +4335,7 @@ class StageRunnerPainter extends CustomPainter {
         );
         _paintCentered(canvas, _glyphs.kg(rect.width), rect.center);
       case ObstacleKind.drum:
+        if (o.falling) _drumTrail(canvas, rect, s);
         canvas
           ..drawCircle(rect.center, rect.width / 2, _woodPaint)
           ..drawCircle(rect.center, rect.width / 2 - 1, _woodLine)
@@ -3411,17 +4428,26 @@ class StageRunnerPainter extends CustomPainter {
       final x = ghost.endX * s - course;
       if (x < -mark || x > w + mark) continue;
       final y = ghost.endY * s;
+      final highlight = ghost.highlightCrash;
+      final m = highlight ? mark * 1.25 : mark;
+      final paint = ghost.top
+          ? _ghostMedalMarks[ghost.rank - 1]
+          : ghost.me
+          ? _ghostOwnMark
+          : _ghostMark;
       canvas
-        ..drawLine(
-          Offset(x - mark, y - mark),
-          Offset(x + mark, y + mark),
-          _ghostMark,
-        )
-        ..drawLine(
-          Offset(x - mark, y + mark),
-          Offset(x + mark, y - mark),
-          _ghostMark,
+        ..drawLine(Offset(x - m, y - m), Offset(x + m, y + m), paint)
+        ..drawLine(Offset(x - m, y + m), Offset(x + m, y - m), paint);
+      if (highlight) {
+        final label = _glyphs.crashTag(
+          ghost.crashTag,
+          s * .026,
+          ghost.rank,
+          ghost.me,
         );
+        final top = max(s * StageRunner.ceiling, y - m - label.height - s * .006);
+        label.paint(canvas, Offset(x - label.width / 2, top));
+      }
     }
     final cx = StageRunner.runnerX * s;
     // The best last, on top.
@@ -3554,7 +4580,9 @@ class StageRunnerPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(StageRunnerPainter old) =>
-      old.pixelRatio != pixelRatio || old.sceneryMotion() != sceneryMotion();
+      old.pixelRatio != pixelRatio ||
+      old.sceneryMotion() != sceneryMotion() ||
+      old.reducedMotion() != reducedMotion();
 }
 
 /// Small recorded strips preserve the vector edges at every pixel ratio.

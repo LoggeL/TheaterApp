@@ -449,6 +449,42 @@ test('one free reroll a day, once per key, never onto a done mission or a type o
   assert.equal(app.runnerMissions('sam').rerollAvailable, true);
 });
 
+test('rerolling into an already-met dailyDistance completes immediately and credits points and crate once', t => {
+  const { app, store, sam, play, give } = setup(t);
+  // Play enough today so todayMeters >= cold-start dailyDistance target (300 m).
+  play(400);
+  // With stats: false only basic types apply; excluding distance/runs/points leaves only dailyDistance for easy.
+  give(
+    sam,
+    [
+      { type: 'distance', target: 5000, done: false, progress: 0 },
+      { type: 'runs', target: 2, min: 60, done: true, progress: 2 },
+      { type: 'points', target: 100, done: true, progress: 100 },
+    ],
+    { stats: false, todayMeters: 400 },
+  );
+  const pointsBefore = store.get('runnerProgress', sam)?.missionPoints ?? 0;
+  const cratesBefore = store.get('runnerProgress', sam)?.missionCrates ?? 0;
+  const view = app.runnerMissionReroll('sam', 'reroll-daily-done', { slot: 'easy' });
+  const easy = view.missions[0];
+  assert.equal(easy.type, 'dailyDistance');
+  assert.equal(easy.done, true);
+  assert.equal(easy.justDone, true);
+  assert.deepEqual(view.completed, ['easy']);
+  assert.equal(view.allDone, true);
+  assert.equal(view.crate.earned, true);
+  assert.equal(store.get('runnerProgress', sam).missionPoints, pointsBefore + missionRules.slots.easy.reward);
+  assert.equal(store.get('runnerProgress', sam).missionCrates, cratesBefore + 1);
+  // Repeating the same idempotency key does not credit a second time.
+  assert.deepEqual(app.runnerMissionReroll('sam', 'reroll-daily-done', { slot: 'easy' }), view);
+  assert.equal(store.get('runnerProgress', sam).missionPoints, pointsBefore + missionRules.slots.easy.reward);
+  assert.equal(store.get('runnerProgress', sam).missionCrates, cratesBefore + 1);
+  // A subsequent run does not credit points or crate again either.
+  const after = play(100);
+  assert.equal(after.missionBonus, 0);
+  assert.equal(store.get('runnerProgress', sam).missionCrates, cratesBefore + 1);
+});
+
 test('older apps only get missions the server can check without statistics', t => {
   const { app, store, sam, play } = setup(t);
   // Enough history for every type (a record of the earlier version, with its window).

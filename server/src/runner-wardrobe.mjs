@@ -757,6 +757,7 @@ export function statsView(t, p) {
   return {
     rounds, best: score?.best ?? 0, meters: p.meters, creditedMeters: p.creditedMeters ?? 0, bonusMeters: p.bonusMeters ?? 0, missionMeters: p.missionMeters ?? 0, deaths, unknown: p.deaths?.unknown ?? 0, untracked: Math.max(0, rounds - counted),
     points: p.points ?? 0, bonusPoints: p.bonusPoints ?? 0, missionPoints: p.missionPoints ?? 0, basePoints: p.basePoints ?? 0, crateMeters: p.crateMetersBefore?.meters ?? 0,
+    duplicates: p.duplicates ?? 0,
   };
 }
 
@@ -828,6 +829,7 @@ function view(t, p, roles = false, unique = false) {
     // variants: both stay empty for apps that know them.
     shiny: list(p.shiny).filter(id => owned.has(id)), variants: [], selectedVariants: {},
     gage: { balance: p.gage ?? 0, earned: p.gageEarned ?? 0 }, trades: tradeOptions(c, owned, open),
+    dupeCounts: Object.fromEntries(Object.entries(p.dupeCounts ?? {}).filter(([id, n]) => owned.has(id) && Number.isInteger(n) && n > 0)),
     ...(ensemble ? { ensemble } : {}),
     // Added with `runnerEventCrates`: the Termin-Kisten waiting, the earliest event first.
     eventCrates: waitingEventCrates(t, p.personId).map(crateView),
@@ -941,8 +943,10 @@ function once(t, uid, prefix, requestId, action, fn, catalogNow) {
  */
 function duplicate(p, draw, shiny) {
   const { item, tier } = draw, shinyOwned = list(p.shiny).includes(item.id);
-  if (shiny && !shinyOwned) return { next: { ...p, shiny: [...list(p.shiny), item.id] }, outcome: { type: 'shine' } };
-  return { next: { ...p, gage: (p.gage ?? 0) + tier.gage, gageEarned: (p.gageEarned ?? 0) + tier.gage }, outcome: { type: 'gage', gage: tier.gage } };
+  const dupeCounts = { ...p.dupeCounts, [item.id]: (p.dupeCounts?.[item.id] ?? 0) + 1 };
+  const tracked = { ...p, duplicates: (p.duplicates ?? 0) + 1, dupeCounts };
+  if (shiny && !shinyOwned) return { next: { ...tracked, shiny: [...list(p.shiny), item.id] }, outcome: { type: 'shine' } };
+  return { next: { ...tracked, gage: (p.gage ?? 0) + tier.gage, gageEarned: (p.gageEarned ?? 0) + tier.gage }, outcome: { type: 'gage', gage: tier.gage } };
 }
 
 /**

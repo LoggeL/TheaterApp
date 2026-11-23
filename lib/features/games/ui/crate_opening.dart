@@ -5,18 +5,24 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:intl/intl.dart' show NumberFormat;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/app_controller.dart';
 import '../../../core/telemetry/perf_telemetry.dart';
 import '../../../shared/feedback.dart';
+import '../data/missions_api.dart' show missionsAvailable;
 import '../data/wardrobe_api.dart';
 import '../domain/crate_reel.dart';
 import 'crate_animation.dart';
+import 'crate_choice.dart' show chooseCrateTarget;
 import 'event_crates_card.dart';
 import 'stage_runner_art.dart';
 import 'stage_runner_look.dart';
 import 'stage_runner_sound.dart';
 import 'wardrobe_cards.dart';
+
+final _crateNumber = NumberFormat.decimalPattern('de');
 
 /// Opens a costume crate with the reel animation; returns the wardrobe as
 /// it is afterwards (null if nothing changed).
@@ -157,28 +163,51 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   final _pictures = <String, ui.Image>{};
   late Wardrobe _wardrobe = widget.wardrobe;
 
+  /// The crate source currently opening; may advance to another waiting
+  /// category once this one runs out.
+  late bool _ensemble = widget.ensemble;
+  late bool _mission = widget.mission;
+  late bool _event = widget.event;
+  late bool _gala = widget.gala;
+  late bool _weekly = widget.weekly;
+  late bool _gage = widget.gage;
+
   /// The Termin-Kiste to open; after the first one "Nächste Kiste" takes the
   /// earliest waiting.
   late EventCrate? _eventCrate = widget.eventCrate;
 
+  /// The Set-Kiste's pack goal, if opening from one.
+  late PackGoal? _packGoal = widget.packGoal;
+
   /// The target of the crate opening now; "Nächste Kiste" may choose another.
   late CrateTarget? _target = _own ? widget.target : null;
+
+  /// True after chaining from another category into own crates with target
+  /// selection, so subsequent own crates can repeat or re-pick a target even
+  /// when the original caller omitted [widget.chooseTarget].
+  bool _chainedTargetChoice = false;
+
+  /// Remembered on this device: skip unboxing & reel and show the reveal at
+  /// once.
+  static const _fastOpenKey = 'stageRunner.fastCrateOpen';
+  bool _fastOpen = false;
+  bool _fastOpenTouched = false;
 
   /// The crate with a look of its own: it opens its own way before the reel.
   /// A Set-Kiste borrows the look of its play's crate (a set named like the
   /// play, e.g. „Eine höllische Herausforderung“), if that has one.
   CrateTarget? get _look =>
       _target ??
-      (widget.gala
+      (_gala
           ? _wardrobe.gala.crate
-          : widget.weekly
+          : _weekly
           ? _wardrobe.weekly.crate
-          : widget.packGoal != null
+          : _packGoal != null
           ? _wardrobe.crateTargets
                 .where(
                   (t) =>
                       t.kind == CrateTargetKind.play &&
-                      (t.play ?? t.name) == widget.packGoal!.name &&
+                      (t.play ?? t.name) == _packGoal!.name &&
                       t.image != null,
                 )
                 .firstOrNull
@@ -192,12 +221,12 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   CrateOpening? _pending;
 
   bool get _own =>
-      !widget.ensemble &&
-      !widget.mission &&
-      !widget.event &&
-      !widget.gala &&
-      !widget.weekly &&
-      widget.packGoal == null;
+      !_ensemble &&
+      !_mission &&
+      !_event &&
+      !_gala &&
+      !_weekly &&
+      _packGoal == null;
   bool _changed = false, _wearing = false;
   String? _error;
   int _card = 0;
@@ -207,7 +236,36 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   @override
   void initState() {
     super.initState();
+    unawaited(_loadFastOpen());
     _start();
+  }
+
+  Future<void> _loadFastOpen() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final fast = prefs.getBool(_fastOpenKey);
+      if (!mounted || _fastOpenTouched || fast != true) return;
+      setState(() => _fastOpen = true);
+      if (_phase == _Phase.unboxing && _pending != null) {
+        _revealInstant(_pending!);
+      } else if (_phase == _Phase.spinning && _reel != null) {
+        _skipTo = _reel!.duration;
+      }
+    } catch (_) {
+      // Storage may be unavailable; defaults to animated opening.
+    }
+  }
+
+  void _toggleFastOpen() {
+    _fastOpenTouched = true;
+    final next = !_fastOpen;
+    setState(() => _fastOpen = next);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setBool(_fastOpenKey, next))
+          .catchError((Object _) => false),
+    );
+    if (next) _skip();
   }
 
   @override
@@ -240,21 +298,25 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                 widget.controller,
                 key: _openingKey,
                 dupes: dupesAvailable(widget.controller),
-                ensemble: widget.ensemble,
-                mission: widget.mission,
-                event: widget.event,
-                gala: widget.gala,
-                weekly: widget.weekly,
-                gage: widget.gage,
+                ensemble: _ensemble,
+                mission: _mission,
+                event: _event,
+                gala: _gala,
+                weekly: _weekly,
+                gage: _gage,
                 eventId: _eventCrate?.eventId,
                 target: _target?.id,
-                packId: widget.packGoal?.releaseId,
+                packId: _packGoal?.releaseId,
               ))();
       await _loadReel(opening);
       if (!mounted) return;
       _wardrobe = opening.wardrobe;
       _changed = true;
       _eventCrate = null;
+      if (_fastOpen) {
+        _revealInstant(opening);
+        return;
+      }
       if (_look != null) {
         // The crate opens its own way first, then the reel runs.
         widget.sound.play(RunnerSfx.whoosh);
@@ -339,17 +401,285 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
       ..start();
   }
 
-  /// "Nächste Kiste": with a choice the target is asked again.
-  Future<void> _next() async {
-    final choose = widget.chooseTarget;
-    if (_own && _target != null && choose != null) {
-      final next = await choose(_wardrobe);
-      if (next == null || !mounted) return;
-      _target = next;
+  /// Jumps directly to the revealed item (skipping both unboxing and reel).
+  void _revealInstant(CrateOpening opening) {
+    if (!mounted || _phase == _Phase.revealed) return;
+    _pending = null;
+    final reel = CrateReel(
+      winner: opening.winnerIndex,
+      duration: 6.4,
+      random: widget.random,
+    );
+    _ticker.stop();
+    _result = opening;
+    _reel = reel;
+    _card = opening.winnerIndex;
+    _skipTo = reel.duration;
+    _position.value = reel.stop;
+    _reveal();
+  }
+
+  bool get _hasTargetChoice =>
+      widget.chooseTarget != null || _chainedTargetChoice;
+
+  Future<CrateTarget?> _chooseTarget(Wardrobe w) => widget.chooseTarget != null
+      ? widget.chooseTarget!(w)
+      : chooseCrateTarget(
+          context,
+          controller: widget.controller,
+          wardrobe: w,
+          art: widget.art,
+        );
+
+  /// "Nächste Kiste": with a choice the target is asked again unless
+  /// [sameTarget] repeats the current target directly.
+  Future<void> _next({bool sameTarget = false}) async {
+    if (_own && _target != null) {
+      if (sameTarget) {
+        _target = _wardrobe.crateTarget(_target!.id) ?? _target;
+      } else if (_hasTargetChoice) {
+        final next = await _chooseTarget(_wardrobe);
+        if (next == null || !mounted) return;
+        _target = next;
+      }
     }
     _openingKey = crateKey();
     await _start();
   }
+
+  void _resetSource() {
+    _ensemble = false;
+    _mission = false;
+    _event = false;
+    _gala = false;
+    _weekly = false;
+    _gage = false;
+    _eventCrate = null;
+    _packGoal = null;
+    _target = null;
+    _chainedTargetChoice = false;
+  }
+
+  /// Next waiting crate from another category once the current one is empty.
+  ({String label, IconData icon, Future<void> Function() open})?
+  _nextCategory() {
+    final w = _wardrobe;
+    final p = w.progress;
+    final c = widget.controller;
+    String withCount(String name, int n) =>
+        n > 1 ? 'Nächste: $name ($n)' : 'Nächste: $name';
+    if (!_own && p.crates > 0 && (p.dupes || !p.complete)) {
+      return (
+        label: withCount('Kostümkiste', p.crates),
+        icon: Icons.inventory_2_outlined,
+        open: () async {
+          CrateTarget? chosen;
+          var usedChoice = false;
+          if (crateTargetsAvailable(c) && w.crateTargets.isNotEmpty) {
+            chosen = await _chooseTarget(w);
+            if (chosen == null || !mounted) return;
+            usedChoice = true;
+          }
+          _resetSource();
+          _target = chosen;
+          _chainedTargetChoice = usedChoice;
+          _openingKey = crateKey();
+          await _start();
+        },
+      );
+    }
+    if (!_mission && missionsAvailable(c) && p.missionCrates > 0) {
+      return (
+        label: withCount('Missionskiste', p.missionCrates),
+        icon: Icons.flag_outlined,
+        open: () async {
+          _resetSource();
+          _mission = true;
+          _openingKey = crateKey();
+          await _start();
+        },
+      );
+    }
+    final ensembleLeft = w.ensemble?.crates ?? 0;
+    if (!_ensemble && ensembleAvailable(c) && ensembleLeft > 0) {
+      return (
+        label: withCount('Ensemble-Kiste', ensembleLeft),
+        icon: Icons.groups_outlined,
+        open: () async {
+          _resetSource();
+          _ensemble = true;
+          _openingKey = crateKey();
+          await _start();
+        },
+      );
+    }
+    if (!_event && eventCratesAvailable(c) && w.eventCrates.isNotEmpty) {
+      final first = w.eventCrates.first;
+      return (
+        label: withCount('Termin-Kiste', w.eventCrates.length),
+        icon: Icons.event_available,
+        open: () async {
+          _resetSource();
+          _event = true;
+          _eventCrate = first;
+          _openingKey = crateKey();
+          await _start();
+        },
+      );
+    }
+    if (!_gala && monthlyGalaAvailable(c) && w.gala.crates > 0) {
+      return (
+        label: withCount('Gala-Kiste', w.gala.crates),
+        icon: Icons.theater_comedy_outlined,
+        open: () async {
+          _resetSource();
+          _gala = true;
+          _openingKey = crateKey();
+          await _start();
+        },
+      );
+    }
+    if (!_weekly && weeklyRewardsAvailable(c) && w.weekly.crates > 0) {
+      return (
+        label: withCount('Wochenkiste', w.weekly.crates),
+        icon: Icons.emoji_events_outlined,
+        open: () async {
+          _resetSource();
+          _weekly = true;
+          _openingKey = crateKey();
+          await _start();
+        },
+      );
+    }
+    if (packGoalsAvailable(c)) {
+      final other = w.packGoals
+          .where((g) => g.crates > 0 && g.releaseId != _packGoal?.releaseId)
+          .firstOrNull;
+      if (other != null) {
+        return (
+          label: withCount('Set-Kiste · ${other.name}', other.crates),
+          icon: Icons.collections_outlined,
+          open: () async {
+            _resetSource();
+            _packGoal = other;
+            _openingKey = crateKey();
+            await _start();
+          },
+        );
+      }
+    }
+    return null;
+  }
+
+  /// Contextual progress pills shown below the outcome in [_revealView].
+  List<({IconData icon, String text, bool highlight})> _revealContext(
+    CrateOpening result,
+  ) {
+    final chips = <({IconData icon, String text, bool highlight})>[];
+    final outcome = result.outcome;
+    final w = _wardrobe;
+    if (outcome.type == 'gage') {
+      chips.add((
+        icon: Icons.payments_outlined,
+        text: 'Kontostand: ${_crateNumber.format(w.gage)} Gage',
+        highlight: false,
+      ));
+      final offers = <({int price, String label})>[
+        if (gageCratesAvailable(widget.controller))
+          if (w.catalog.dupes.crateGage case final price?)
+            (price: price, label: 'Kostümkiste'),
+        for (final t in w.trades)
+          (
+            price: t.cost,
+            label:
+                'Tauschvertrag (${w.catalog.rarities.where((r) => r.id == t.to).firstOrNull?.name ?? t.to})',
+          ),
+      ]..sort((a, b) => a.price.compareTo(b.price));
+      if (offers.isNotEmpty) {
+        final affordable = offers.where((o) => o.price <= w.gage).toList();
+        if (affordable.isNotEmpty) {
+          chips.add((
+            icon: Icons.check_circle_outline,
+            text: 'Reicht für ${affordable.last.label}',
+            highlight: true,
+          ));
+        } else {
+          final next = offers.first;
+          chips.add((
+            icon: Icons.savings_outlined,
+            text:
+                'Noch ${_crateNumber.format(next.price - w.gage)} Gage bis ${next.label}',
+            highlight: false,
+          ));
+        }
+      }
+      return chips;
+    }
+    if (outcome.type == 'new' ||
+        outcome.type == 'shine' ||
+        outcome.type == 'variant') {
+      if (_target case final target?) {
+        final updated = w.crateTarget(target.id);
+        if (updated != null && updated.total > 0) {
+          chips.add((
+            icon: updated.complete
+                ? Icons.check_circle_outline
+                : Icons.inventory_2_outlined,
+            text: updated.complete
+                ? '${updated.title}: ${updated.owned}/${updated.total} · komplett!'
+                : '${updated.title}: ${updated.owned}/${updated.total}',
+            highlight: updated.complete,
+          ));
+        }
+      }
+      if (w.collectible > 0 && _target?.isRandom != true) {
+        chips.add((
+          icon: Icons.style_outlined,
+          text: 'Sammlung: ${w.collected}/${w.collectible}',
+          highlight: w.collected >= w.collectible,
+        ));
+      }
+      final item = result.item;
+      final uniques = w.uniqueFigures?.plays;
+      if (uniques != null && uniques.isNotEmpty) {
+        final isTech =
+            item.kind == WardrobeKind.character &&
+            (item.role?.isFunction ?? false);
+        final play = item.role?.play;
+        final match = uniques.where((u) {
+          if (isTech) return u.allTechnicians;
+          if (play == null) return false;
+          return !u.allTechnicians &&
+              !u.itemSet &&
+              (u.play == play || u.parts.any((part) => part.play == play));
+        }).firstOrNull;
+        if (match != null && match.total > 0) {
+          final missing = max(0, match.total - match.have);
+          chips.add((
+            icon: Icons.auto_awesome,
+            text: match.unlocked
+                ? 'Unique freigeschaltet: ${match.name}!'
+                : missing == 1
+                ? 'Noch 1 Figur bis Unique (${match.production})'
+                : 'Unique (${match.production}): ${match.have}/${match.total}',
+            highlight: match.unlocked || missing == 1,
+          ));
+        }
+      }
+    }
+    return chips;
+  }
+
+  Widget _fastOpenToggle() => TextButton.icon(
+    key: const ValueKey('crate-fast-open'),
+    onPressed: _toggleFastOpen,
+    style: TextButton.styleFrom(
+      foregroundColor: _fastOpen ? const Color(0xFFFFD86B) : Colors.white60,
+      visualDensity: VisualDensity.compact,
+    ),
+    icon: Icon(_fastOpen ? Icons.bolt : Icons.bolt_outlined, size: 18),
+    label: Text(_fastOpen ? 'Schnell öffnen: An' : 'Schnell öffnen'),
+  );
 
   void _tick(Duration elapsed) {
     final reel = _reel;
@@ -394,8 +724,13 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   }
 
   void _skip() {
-    if (_phase == _Phase.unboxing && _pending != null) _spin(_pending!);
-    if (_phase == _Phase.spinning) _skipTo = _reel!.duration;
+    if (_phase == _Phase.unboxing && _pending != null) {
+      _revealInstant(_pending!);
+      return;
+    }
+    if (_phase == _Phase.spinning && _reel != null) {
+      _skipTo = _reel!.duration;
+    }
   }
 
   Future<void> _wear(WardrobeItem item, [WardrobeVariant? role]) async {
@@ -443,21 +778,23 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         _ShakingCrate(vsync: this),
         const SizedBox(height: 24),
         Text(
-          widget.packGoal != null
+          _packGoal != null
               ? 'Die Set-Kiste geht auf …'
-              : widget.gala
+              : _gala
               ? 'Die Gala-Kiste geht auf …'
-              : widget.weekly
+              : _weekly
               ? 'Die Wochenkiste geht auf …'
-              : widget.event
+              : _event
               ? 'Die Termin-Kiste geht auf …'
-              : widget.mission
+              : _mission
               ? 'Die Missionskiste geht auf …'
-              : widget.ensemble
+              : _ensemble
               ? 'Die Ensemble-Kiste geht auf …'
               : 'Die Kostümkiste geht auf …',
           style: const TextStyle(color: Colors.white70, fontSize: 16),
         ),
+        const SizedBox(height: 16),
+        _fastOpenToggle(),
       ],
     ),
   );
@@ -468,30 +805,52 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
     final target = _look!;
     final quick = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     final size = min(220.0, MediaQuery.sizeOf(context).shortestSide * .5);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CrateUnboxing(
-            key: ValueKey('crate-unboxing-${target.id}'),
-            target: target,
-            controller: widget.controller,
-            art: widget.art,
-            opening: opening,
-            quick: quick,
-            size: size,
-            onOpened: () {
-              if (_pending case final pending?) _spin(pending);
-            },
+    return Stack(
+      children: [
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CrateUnboxing(
+                key: ValueKey('crate-unboxing-${target.id}'),
+                target: target,
+                controller: widget.controller,
+                art: widget.art,
+                opening: opening,
+                quick: quick,
+                size: size,
+                onOpened: () {
+                  if (_pending case final pending?) _spin(pending);
+                },
+              ),
+              Text(
+                _packGoal != null
+                    ? 'Die Set-Kiste geht auf …'
+                    : '${_crateName(target)} geht auf …',
+                style: const TextStyle(color: Colors.white70, fontSize: 16),
+              ),
+            ],
           ),
-          Text(
-            widget.packGoal != null
-                ? 'Die Set-Kiste geht auf …'
-                : '${_crateName(target)} geht auf …',
-            style: const TextStyle(color: Colors.white70, fontSize: 16),
+        ),
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 16,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (opening)
+                const Text(
+                  'Antippen zum Überspringen',
+                  key: ValueKey('crate-skip-hint'),
+                  style: TextStyle(color: Colors.white38),
+                ),
+              const SizedBox(height: 4),
+              _fastOpenToggle(),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -547,17 +906,17 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                 Text(
                   revealed
                       ? 'Aus der Kiste:'
-                      : widget.packGoal != null
-                      ? 'Set-Kiste · ${result.outcome.packName ?? widget.packGoal!.name}'
-                      : widget.gala
+                      : _packGoal != null
+                      ? 'Set-Kiste · ${result.outcome.packName ?? _packGoal!.name}'
+                      : _gala
                       ? 'Gala-Kiste'
-                      : widget.weekly
+                      : _weekly
                       ? 'Wochenkiste'
-                      : widget.event
+                      : _event
                       ? eventCrateTitle(result.outcome.event ?? _eventCrate)
-                      : widget.mission
+                      : _mission
                       ? 'Missionskiste'
-                      : widget.ensemble
+                      : _ensemble
                       ? 'Ensemble-Kiste'
                       : _target?.title ?? 'Kostümkiste',
                   style: const TextStyle(
@@ -587,11 +946,19 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                 ),
                 const Spacer(),
                 if (!revealed)
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 24),
-                    child: Text(
-                      'Antippen zum Überspringen',
-                      style: TextStyle(color: Colors.white38),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Antippen zum Überspringen',
+                          key: ValueKey('crate-skip-hint'),
+                          style: TextStyle(color: Colors.white38),
+                        ),
+                        const SizedBox(height: 4),
+                        _fastOpenToggle(),
+                      ],
                     ),
                   ),
               ],
@@ -618,31 +985,41 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         _wardrobe.worn(item.kind)?.id == item.id &&
         (role == null || _wardrobe.variantOf(item)?.id == role.id);
     final p = _wardrobe.progress;
-    final left = widget.gage
+    final left = _gage
         ? 0
-        : widget.packGoal != null
-        ? _wardrobe.packGoal(widget.packGoal!.releaseId)?.crates ?? 0
-        : widget.gala
+        : _packGoal != null
+        ? _wardrobe.packGoal(_packGoal!.releaseId)?.crates ?? 0
+        : _gala
         ? _wardrobe.gala.crates
-        : widget.weekly
+        : _weekly
         ? _wardrobe.weekly.crates
-        : widget.event
+        : _event
         ? _wardrobe.eventCrates.length
-        : widget.mission
+        : _mission
         ? p.missionCrates
-        : widget.ensemble
+        : _ensemble
         ? _wardrobe.ensemble?.crates ?? 0
         : p.crates;
     final more =
         left > 0 &&
-        (widget.packGoal != null ||
-            widget.ensemble ||
-            widget.mission ||
-            widget.event ||
-            widget.gala ||
-            widget.weekly ||
+        (_packGoal != null ||
+            _ensemble ||
+            _mission ||
+            _event ||
+            _gala ||
+            _weekly ||
             p.dupes ||
             !p.complete);
+    final currentTarget = _own && _target != null
+        ? _wardrobe.crateTarget(_target!.id) ?? _target
+        : null;
+    final canRepeatTarget =
+        more &&
+        currentTarget != null &&
+        currentTarget.available &&
+        _hasTargetChoice;
+    final nextCategory = !_gage && !more ? _nextCategory() : null;
+    final contextChips = _revealContext(result);
     final line = outcome.type == 'new' && outcome.shiny
         ? 'Neu – und gleich in Glanz!'
         : outcome.line;
@@ -810,6 +1187,58 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                   ),
                 ),
               ],
+              if (contextChips.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Wrap(
+                  key: const ValueKey('crate-context'),
+                  spacing: 8,
+                  runSpacing: 6,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    for (final chip in contextChips)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: chip.highlight
+                              ? const Color(0x33FFD86B)
+                              : Colors.white.withValues(alpha: .1),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: chip.highlight
+                                ? const Color(0x99FFD86B)
+                                : Colors.white24,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              chip.icon,
+                              size: 14,
+                              color: chip.highlight
+                                  ? const Color(0xFFFFD86B)
+                                  : Colors.white70,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              chip.text,
+                              style: TextStyle(
+                                color: chip.highlight
+                                    ? const Color(0xFFFFE7A3)
+                                    : Colors.white70,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ],
               if (item.rarityReason case final reason?) ...[
                 const SizedBox(height: 6),
                 Text(
@@ -830,11 +1259,35 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                       icon: const Icon(Icons.checkroom),
                       label: Text(role == null ? 'Anlegen' : 'Rolle anlegen'),
                     ),
-                  if (more)
+                  if (canRepeatTarget)
                     FilledButton.tonalIcon(
-                      onPressed: _next,
-                      icon: const Icon(Icons.inventory_2_outlined),
-                      label: Text('Nächste Kiste ($left)'),
+                      key: const ValueKey('crate-next-same'),
+                      onPressed: () => _next(sameTarget: true),
+                      icon: const Icon(Icons.replay),
+                      label: const Text('Gleiche Kiste nochmal'),
+                    ),
+                  if (more)
+                    Tooltip(
+                      message: canRepeatTarget
+                          ? 'Anderes Ziel wählen'
+                          : 'Nächste Kiste öffnen',
+                      child: FilledButton.tonalIcon(
+                        key: const ValueKey('crate-next-choose'),
+                        onPressed: _next,
+                        icon: Icon(
+                          canRepeatTarget
+                              ? Icons.tune
+                              : Icons.inventory_2_outlined,
+                        ),
+                        label: Text('Nächste Kiste ($left)'),
+                      ),
+                    )
+                  else if (nextCategory != null)
+                    FilledButton.tonalIcon(
+                      key: const ValueKey('crate-next-category'),
+                      onPressed: nextCategory.open,
+                      icon: Icon(nextCategory.icon),
+                      label: Text(nextCategory.label),
                     ),
                   OutlinedButton(
                     onPressed: _close,
@@ -845,6 +1298,8 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
+              _fastOpenToggle(),
             ],
           ),
         ),

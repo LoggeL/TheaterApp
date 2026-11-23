@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -6,8 +8,28 @@ import '../../../core/app_controller.dart';
 import '../../../shared/feedback.dart';
 import '../data/missions_api.dart';
 import '../data/runner_menu_preferences.dart';
+import 'runner_menu.dart' show berlinWallClock;
 
 final _number = NumberFormat.decimalPattern('de');
+
+/// How long until the next midnight in Europe/Berlin (when the day's missions
+/// reset): e.g. "noch 4 Std. 12 Min." or "noch 18 Min.".
+String missionResetCountdown(DateTime now) {
+  final wall = berlinWallClock(now);
+  final nextDay = DateTime.utc(wall.year, wall.month, wall.day + 1);
+  // DST switches in Europe/Berlin happen at 01:00 UTC, never around midnight.
+  final probe = nextDay.subtract(const Duration(hours: 2));
+  final offset = berlinWallClock(probe).difference(probe);
+  final midnightUtc = nextDay.subtract(offset);
+  final left = midnightUtc.difference(now.toUtc());
+  if (left <= Duration.zero) return 'gleich neu';
+  final hours = left.inHours;
+  final minutes = left.inMinutes % 60;
+  if (hours > 0) {
+    return minutes > 0 ? 'noch $hours Std. $minutes Min.' : 'noch $hours Std.';
+  }
+  return 'noch ${minutes < 1 ? 1 : minutes} Min.';
+}
 
 /// "120/300 m", "3/3 Läufe", "4/25 Bonbons" ([names]: the worn backdrop's
 /// `collectibleNames`).
@@ -59,7 +81,9 @@ class DailyMissionsCard extends StatefulWidget {
 class _DailyMissionsCardState extends State<DailyMissionsCard> {
   DailyMissions? _loaded;
   bool _busy = false;
+  bool _loading = false;
   String? _error;
+  Timer? _clock;
 
   DailyMissions? get _missions => widget.missions ?? _loaded;
 
@@ -71,6 +95,9 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
     super.initState();
     _preferences.addListener(_preferencesChanged);
     if (widget.missions == null) _load();
+    _clock = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   void _preferencesChanged() {
@@ -79,12 +106,17 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
 
   @override
   void dispose() {
+    _clock?.cancel();
     _preferences.removeListener(_preferencesChanged);
     if (widget.preferences == null) _preferences.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final m = await loadMissions(widget.controller);
       if (!mounted) return;
@@ -95,10 +127,41 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
       widget.onChanged?.call(m);
     } catch (e) {
       if (mounted) setState(() => _error = userMessage(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _reroll(DailyMission m) async {
+    final text = m.textFor(widget.collectibleNames);
+    final hasProgress = m.progress > 0;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const ValueKey('mission-reroll-confirm'),
+        title: const Text('Mission neu würfeln?'),
+        content: Text(
+          hasProgress
+              ? 'Du kannst nur einmal am Tag neu würfeln. Dein bisheriger Fortschritt '
+                    '(${missionProgressText(m, widget.collectibleNames)}) bei „$text“ '
+                    'geht dabei verloren.'
+              : 'Du kannst nur einmal am Tag neu würfeln. „$text“ wird durch eine '
+                    'andere Mission ersetzt.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton(
+            key: const ValueKey('mission-reroll-confirm-ok'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Neu würfeln'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
     setState(() => _busy = true);
     try {
       final next = await rerollMission(widget.controller, m.slot);
@@ -134,9 +197,18 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
                 const Icon(Icons.flag_outlined, color: StageTheme.orange),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    'Tagesmissionen',
-                    style: theme.textTheme.titleMedium,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Tagesmissionen', style: theme.textTheme.titleMedium),
+                      Text(
+                        'Reset: ${missionResetCountdown(widget.controller.now)}',
+                        key: const ValueKey('missions-reset'),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.hintColor,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 if (m != null)
@@ -166,7 +238,7 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
               ],
             ),
             const SizedBox(height: 8),
-            if (m == null && _error == null)
+            if (m == null && (_loading || _error == null))
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Center(child: CircularProgressIndicator()),
@@ -196,11 +268,22 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
             if (_error case final error?)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  error,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.error,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      error,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
+                    ),
+                    if (m == null)
+                      TextButton(
+                        key: const ValueKey('missions-retry'),
+                        onPressed: _loading ? null : _load,
+                        child: const Text('Erneut laden'),
+                      ),
+                  ],
                 ),
               ),
             if (m != null) ...[
@@ -333,6 +416,19 @@ class _MissionRow extends StatelessWidget {
                 Text(
                   '${missionProgressText(m, names)} · ${missionRewardText(m)}',
                   style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  m.perRun
+                      ? !m.done && m.progress > 0
+                            ? 'In einem Lauf · Bester: ${_number.format(m.progress)} ${m.unitFor(names)}'
+                                  .trim()
+                            : 'In einem Lauf'
+                      : 'Heute gesamt',
+                  key: ValueKey('mission-scope-${m.slot}'),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),

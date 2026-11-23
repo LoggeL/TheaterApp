@@ -48,29 +48,26 @@ extension SettingsController on AppController {
     await _persist(generation, 'preferences', () => _preferences);
   }
 
-  Future<void> saveReminders(Map<String, bool> value) =>
+  Future<ActionOutcome> saveReminders(Map<String, bool> value) =>
       _saveReminders(value, _customReminderMinutes);
-  Future<void> saveCustomReminder(int? minutes) =>
+  Future<ActionOutcome> saveCustomReminder(int? minutes) =>
       _saveReminders(_reminders, minutes);
-  Future<void> _saveReminders(Map<String, bool> value, int? customMinutes) =>
-      _enqueue({
-        'action': 'settings.reminders',
-        'value': {
-          for (final key in [
-            'dayBefore',
-            'twoHours',
-            'changes',
-            'emailEnabled',
-          ])
-            key: value[key] ?? false,
-          // Older servers would store the unknown key; newer ones keep it
-          // when an older app leaves it out.
-          if (supports('lateDeclines'))
-            'lateDeclines': value['lateDeclines'] ?? true,
-          if (supports('pushSettings'))
-            for (final key in [...memberPushKeys, ...adminPushKeys])
-              key: value[key] ?? true,
-          'customMinutes': customMinutes,
-        },
-      });
+  Future<ActionOutcome> _saveReminders(
+    Map<String, bool> value,
+    int? customMinutes,
+  ) => performAction({
+    'action': 'settings.reminders',
+    'value': {
+      for (final key in ['dayBefore', 'twoHours', 'changes', 'emailEnabled'])
+        key: value[key] ?? false,
+      // Older servers would store the unknown key; newer ones keep it
+      // when an older app leaves it out.
+      if (supports('lateDeclines'))
+        'lateDeclines': value['lateDeclines'] ?? true,
+      if (supports('pushSettings'))
+        for (final key in [...memberPushKeys, ...adminPushKeys])
+          key: value[key] ?? true,
+      'customMinutes': customMinutes,
+    },
+  });
 }

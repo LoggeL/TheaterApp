@@ -27,6 +27,16 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.17.0',
+    date: '23. November 2026',
+    items: [
+      'Bühnenlauf: Pause-Knopf mit kurzem Countdown beim Weiterlaufen, Schutz vor versehentlichem Abbruch und bessere Vorwarnung vor herabfallenden Hindernissen.',
+      'Bühnenlauf: Kisten schneller öffnen, Tagesmissionen im Spiel und im Menü besser im Blick behalten sowie Suche, Filter, Sortierung und Schnell-Anlegen in der Garderobe.',
+      'Theater-App: Mehrfachauswahl-Abstimmungen direkt auf „Heute“ ausfüllen, offene Formulare auf der Startseite und im Postfach schneller finden, automatische Mikrofon-Hinweise im Drehbuch klar sehen und schneller aus dem Zwischenspeicher starten.',
+      'Für die Theaterleitung: Anwesenheitsliste mit festem Speichern-Balken, Statusfiltern und Rollensuche sowie Suche in den Rückmeldungen und Statusübersicht im Skin-Plan.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.16.8',
     date: '23. November 2026',
     items: [

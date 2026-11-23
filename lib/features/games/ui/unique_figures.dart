@@ -152,6 +152,8 @@ class _UniqueCelebrationState extends State<UniqueCelebration>
                             ),
                             Text(
                               switch (progressOf(item)) {
+                                final p? when p.itemSet =>
+                                  'Alle ${p.total} ${p.itemNoun!.many} gesammelt',
                                 final p? when p.allTechnicians =>
                                   'Alle ${p.total} Techniker gesammelt',
                                 final p? =>

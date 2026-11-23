@@ -141,13 +141,18 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     expect(game.distance, pausedAt);
     expect(sound.playing, isFalse);
-    await tester.tap(find.byKey(const ValueKey('runner-stage')));
+    await tester.tap(find.byKey(const ValueKey('runner-resume')));
     await tester.pump();
+    expect(find.byKey(const ValueKey('runner-paused')), findsNothing);
+    expect(find.byKey(const ValueKey('runner-countdown')), findsOneWidget);
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(StageRunnerScreen.resumeCountdownStep);
+    }
+    expect(find.byKey(const ValueKey('runner-countdown')), findsNothing);
     await tester.pump(const Duration(milliseconds: 32));
     expect(game.distance, greaterThan(pausedAt));
     expect(sound.playing, isTrue);
     expect(runs, 1);
-    expect(find.byKey(const ValueKey('runner-paused')), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 

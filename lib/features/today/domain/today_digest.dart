@@ -1,7 +1,7 @@
 import '../../../core/app_controller.dart';
 import '../../../core/models.dart';
 import '../../events/domain/event_selectors.dart';
-import '../../messages/domain/message_selectors.dart';
+import '../../messages/domain/message_selectors.dart' as messages;
 import '../../polls/domain/poll_selectors.dart' as polls;
 import '../../slots/domain/slot_pool.dart';
 
@@ -16,6 +16,7 @@ class TodayDigest {
     required this.moreOpenResponses,
     required this.laterEvents,
     required this.unread,
+    this.openForms = const [],
     required this.pollsToVote,
     required this.votedPoll,
     required this.slotPools,
@@ -74,7 +75,8 @@ class TodayDigest {
           .where((e) => e != next && !shownIds.contains(e.id))
           .take(maxLaterEvents)
           .toList(),
-      unread: unreadMessages(controller).toList(),
+      unread: messages.unreadMessages(controller).toList(),
+      openForms: messages.openForms(controller).toList(),
       pollsToVote: toVote,
       // Only a poll the member actually voted in counts as done; admins
       // also receive polls they were never asked to vote in (newer servers
@@ -197,6 +199,7 @@ class TodayDigest {
   final List<TheaterEvent> laterEvents;
 
   final List<JsonMap> unread;
+  final List<JsonMap> openForms;
   final List<Poll> pollsToVote;
 
   /// An open poll the person already voted in, while none waits for a vote.
@@ -220,6 +223,7 @@ class TodayDigest {
       openResponses.isNotEmpty ||
       moreOpenResponses > 0 ||
       unread.isNotEmpty ||
+      openForms.isNotEmpty ||
       pollsToVote.isNotEmpty ||
       slotPools.isNotEmpty ||
       registrations > 0;

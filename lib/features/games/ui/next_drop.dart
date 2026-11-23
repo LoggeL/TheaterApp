@@ -199,40 +199,59 @@ const _tabular = [FontFeature.tabularFigures()];
 /// The card at the top of the game menu while a drop is less than a day
 /// away.
 class NextDropCard extends StatelessWidget {
-  const NextDropCard({super.key, required this.drop, this.onDue, this.clock});
+  const NextDropCard({
+    super.key,
+    required this.drop,
+    this.onDue,
+    this.clock,
+    this.onTap,
+  });
 
   final NextDrop drop;
   final DropDue? onDue;
   final Duration Function()? clock;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
-      key: const ValueKey('runner-next-drop'),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
-        child: Row(
-          children: [
-            const Icon(Icons.checkroom, color: StageTheme.orange),
-            const SizedBox(width: 14),
-            Expanded(
-              child: NextDropTicker(
-                drop: drop,
-                onDue: onDue,
-                clock: clock,
-                builder: (context, text, _) => Text(
-                  text,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    fontFeatures: _tabular,
-                  ),
+    final body = Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
+      child: Row(
+        children: [
+          const Icon(Icons.checkroom, color: StageTheme.orange),
+          const SizedBox(width: 14),
+          Expanded(
+            child: NextDropTicker(
+              drop: drop,
+              onDue: onDue,
+              clock: clock,
+              builder: (context, text, _) => Text(
+                text,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: _tabular,
                 ),
               ),
             ),
+          ),
+          if (onTap != null) ...[
+            const SizedBox(width: 8),
+            Icon(Icons.chevron_right, color: theme.hintColor),
           ],
-        ),
+        ],
       ),
+    );
+    return Card(
+      key: const ValueKey('runner-next-drop'),
+      clipBehavior: onTap == null ? null : Clip.antiAlias,
+      child: onTap == null
+          ? body
+          : InkWell(
+              key: const ValueKey('runner-next-drop-tap'),
+              onTap: onTap,
+              child: body,
+            ),
     );
   }
 }

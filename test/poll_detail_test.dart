@@ -1,11 +1,15 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:theater_app/core/app_controller.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:theater_app/core/models.dart';
 import 'package:theater_app/features/polls/polls.dart';
 
-import 'app_controller_test.dart' show TestServer, signIn;
+import 'app_controller_test.dart' show TestServer, jsonResponse, signIn;
 
 JsonMap _poll({bool closed = false, int? eligibleVotes}) => {
   'id': 'p',
@@ -202,6 +206,78 @@ void main() {
       expect(c.polls.single.totalVotes, 11);
       expect(c.polls.single.eligibleVotes, 11);
       expect(c.outbox.map((a) => a.payload['selected']), [true, false, false]);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
+    },
+  );
+
+  testWidgets(
+    'multiple-choice keeps other options tappable while one vote is in flight',
+    (tester) async {
+      final server = TestServer();
+      server.data['polls'] = [
+        {..._poll(), 'allowMultiple': true, 'totalVotes': 12},
+      ];
+      final firstVote = Completer<http.Response>();
+      final voted = <String>[];
+      server.override = (request) {
+        final path = request.url.path.replaceFirst(RegExp(r'/$'), '');
+        if (path.endsWith('/actions')) {
+          final body = jsonMap(jsonDecode(request.body));
+          if (body['action'] == 'poll.vote') {
+            final optionId = textValue(body['optionId']);
+            voted.add(optionId);
+            final poll = (server.data['polls'] as List).first as Map<String, dynamic>;
+            final choices = jsonList(poll['choices']).map(textValue).toSet();
+            if (body['selected'] == true) {
+              choices.add(optionId);
+            } else {
+              choices.remove(optionId);
+            }
+            poll['choices'] = choices.toList();
+            if (voted.length == 1) return firstVote.future;
+            return Future.value(jsonResponse({'ok': true}));
+          }
+        }
+        return null;
+      };
+      final c = server.controller();
+      await signIn(c);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PollDetailScreen(controller: c, pollId: 'p'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Pizza'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Pizza'));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      final pizzaInk = tester.widget<InkWell>(
+        find.ancestor(of: find.text('Pizza'), matching: find.byType(InkWell)),
+      );
+      final pastaInk = tester.widget<InkWell>(
+        find.ancestor(of: find.text('Pasta'), matching: find.byType(InkWell)),
+      );
+      expect(pizzaInk.onTap, isNull);
+      expect(pastaInk.onTap, isNotNull);
+      expect(c.polls.single.selectedOptionIds, ['a']);
+
+      // Second option can be ticked before the first request returns.
+      await tester.ensureVisible(find.text('Pasta'));
+      await tester.pump();
+      await tester.tap(find.text('Pasta'));
+      await tester.pump();
+      expect(c.polls.single.selectedOptionIds, ['a', 'b']);
+
+      firstVote.complete(jsonResponse({'ok': true}));
+      await tester.pumpAndSettle();
+
+      expect(voted, ['a', 'b']);
+      expect(c.polls.single.selectedOptionIds, ['a', 'b']);
+      expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       c.dispose();
     },

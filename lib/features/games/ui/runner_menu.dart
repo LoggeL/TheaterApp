@@ -26,6 +26,8 @@ class RunnerHero extends StatelessWidget {
     required this.figure,
     required this.name,
     required this.onStart,
+    this.autofocusStart = false,
+    this.startFocusNode,
     this.story,
     this.note,
     this.wardrobe,
@@ -38,6 +40,13 @@ class RunnerHero extends StatelessWidget {
 
   /// Null while the game is not ready yet.
   final VoidCallback? onStart;
+
+  /// Focuses "Vorhang auf" for desktop keyboard start when no overlay is open.
+  final bool autofocusStart;
+
+  /// Optional focus node for the start button so the screen can focus it
+  /// once initial overlays (e.g. news dialog) have been checked.
+  final FocusNode? startFocusNode;
 
   /// A short line under the start, e.g. the open Tagesbonus.
   final Widget? note;
@@ -106,6 +115,8 @@ class RunnerHero extends StatelessWidget {
                 const SizedBox(height: 16),
                 FilledButton.icon(
                   key: const ValueKey('runner-start'),
+                  focusNode: startFocusNode,
+                  autofocus: autofocusStart,
                   style: FilledButton.styleFrom(
                     backgroundColor: StageTheme.orange,
                     foregroundColor: Colors.white,
@@ -139,6 +150,7 @@ class _Stat extends StatelessWidget {
     required this.value,
     required this.label,
     this.detail,
+    this.secondaryDetail,
     this.highlight = false,
     this.onTap,
     super.key,
@@ -148,6 +160,9 @@ class _Stat extends StatelessWidget {
 
   /// A second, stronger line, e.g. the place in the ranking.
   final String? detail;
+
+  /// Additional subtle context below [detail], e.g. all-time rank beside month.
+  final String? secondaryDetail;
   final bool highlight;
   final VoidCallback? onTap;
 
@@ -190,6 +205,15 @@ class _Stat extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+              if (secondaryDetail != null)
+                Text(
+                  secondaryDetail!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.hintColor,
+                  ),
+                ),
             ],
           ),
         ),
@@ -214,9 +238,11 @@ class RunnerStandCard extends StatelessWidget {
     this.collectible,
     this.collectionRank,
     this.monthRank,
+    this.monthShown = false,
     this.nextCrate,
     this.nextCrateFraction,
     this.onWardrobe,
+    this.onCrates,
   });
 
   /// Best points of a run, and its place among [players].
@@ -225,6 +251,9 @@ class RunnerStandCard extends StatelessWidget {
 
   /// The place in this month's ranking; shown instead of [rank] when known.
   final int? monthRank;
+
+  /// Whether the monthly ranking is active (labels an all-time fallback).
+  final bool monthShown;
   final int? gage, crates;
   final int? collected, collectible;
 
@@ -236,6 +265,9 @@ class RunnerStandCard extends StatelessWidget {
   final double? nextCrateFraction;
   final VoidCallback? onWardrobe;
 
+  /// Direct jump to the wardrobe's crates/gage tab; falls back to [onWardrobe].
+  final VoidCallback? onCrates;
+
   /// Whether there is anything to show at all.
   static bool has({int? best, int? crates, int? collectible}) =>
       best != null || crates != null || (collectible ?? 0) > 0;
@@ -243,6 +275,7 @@ class RunnerStandCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cratesTarget = onCrates ?? onWardrobe;
     final stats = <Widget>[
       if (best != null)
         _Stat(
@@ -257,6 +290,11 @@ class RunnerStandCard extends StatelessWidget {
               : players > 0
               ? 'Platz $rank von $players'
               : 'Platz $rank',
+          secondaryDetail: monthRank != null && rank != null
+              ? 'Allzeit #$rank'
+              : monthRank == null && rank != null && monthShown
+              ? 'Allzeit'
+              : null,
         ),
       if (gage != null)
         _Stat(
@@ -264,7 +302,7 @@ class RunnerStandCard extends StatelessWidget {
           icon: Icons.payments_outlined,
           value: _number.format(gage),
           label: 'Gage',
-          onTap: onWardrobe,
+          onTap: cratesTarget,
         ),
       if (crates != null)
         _Stat(
@@ -274,7 +312,7 @@ class RunnerStandCard extends StatelessWidget {
           label: crates == 1 ? 'Kiste' : 'Kisten',
           detail: crates! > 0 ? 'bereit' : null,
           highlight: crates! > 0,
-          onTap: onWardrobe,
+          onTap: cratesTarget,
         ),
     ];
     final total = collectible ?? 0;

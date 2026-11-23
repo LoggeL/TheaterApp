@@ -18,7 +18,7 @@ class PasskeysScreen extends StatefulWidget {
 class _PasskeysScreenState extends State<PasskeysScreen> {
   List<Map<String, dynamic>> _keys = [];
   bool _loading = true, _busy = false, _available = false;
-  String? _error;
+  String? _error, _pendingName;
 
   @override
   void initState() {
@@ -54,17 +54,34 @@ class _PasskeysScreenState extends State<PasskeysScreen> {
       ) ==
       true;
 
+  bool _needsRecentLogin(Object error) =>
+      error is ApiException && error.code == 'recent_login_required';
+
   Future<void> _run(
     Future<List<Map<String, dynamic>>> Function() action,
-    String done,
-  ) async {
+    String done, {
+    VoidCallback? onSuccess,
+  }) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final keys = await action();
+      List<Map<String, dynamic>> keys;
+      try {
+        keys = await action();
+      } catch (e) {
+        if (!_needsRecentLogin(e) || !mounted) rethrow;
+        setState(() => _busy = false);
+        if (!await _confirmIdentity() || !mounted) return;
+        setState(() {
+          _busy = true;
+          _error = null;
+        });
+        keys = await action();
+      }
       if (mounted) {
+        onSuccess?.call();
         setState(() => _keys = keys);
         showDone(context, done);
       }
@@ -80,13 +97,14 @@ class _PasskeysScreenState extends State<PasskeysScreen> {
   Future<void> _add() async {
     final name = await showDialog<String>(
       context: context,
-      builder: (_) => const _PasskeyNameDialog(),
+      builder: (_) => _PasskeyNameDialog(initialName: _pendingName),
     );
     if (name == null || !mounted) return;
-    if (!await _confirmIdentity() || !mounted) return;
+    _pendingName = name;
     await _run(
       () => widget.controller.addPasskey(name),
       'Passkey hinzugefügt. Du kannst dich jetzt damit anmelden.',
+      onSuccess: () => _pendingName = null,
     );
   }
 
@@ -99,7 +117,6 @@ class _PasskeysScreenState extends State<PasskeysScreen> {
       confirmLabel: 'Entfernen',
     );
     if (!confirmed || !mounted) return;
-    if (!await _confirmIdentity() || !mounted) return;
     await _run(
       () => widget.controller.removePasskey(key['id'] as String),
       'Passkey entfernt.',
@@ -109,6 +126,15 @@ class _PasskeysScreenState extends State<PasskeysScreen> {
   String _date(Object? value) {
     final date = DateTime.tryParse(value?.toString() ?? '');
     return date == null ? '' : DateFormat('dd.MM.yyyy').format(date.toLocal());
+  }
+
+  String _subtitle(Map<String, dynamic> key) {
+    final dateLine = key['lastUsedAt'] == null
+        ? 'Hinzugefügt am ${_date(key['createdAt'])}'
+        : 'Zuletzt verwendet am ${_date(key['lastUsedAt'])}';
+    final backedUp = key['backedUp'];
+    if (backedUp is! bool) return dateLine;
+    return '$dateLine · ${backedUp ? 'Synchronisiert' : 'Gerätegebunden'}';
   }
 
   @override
@@ -145,11 +171,7 @@ class _PasskeysScreenState extends State<PasskeysScreen> {
               child: ListTile(
                 leading: const Icon(Icons.key_outlined),
                 title: Text(key['name'] as String),
-                subtitle: Text(
-                  key['lastUsedAt'] == null
-                      ? 'Hinzugefügt am ${_date(key['createdAt'])}'
-                      : 'Zuletzt verwendet am ${_date(key['lastUsedAt'])}',
-                ),
+                subtitle: Text(_subtitle(key)),
                 trailing: IconButton(
                   tooltip: '${key['name']} entfernen',
                   onPressed: _busy ? null : () => _remove(key),
@@ -188,13 +210,16 @@ class _PasskeysScreenState extends State<PasskeysScreen> {
 }
 
 class _PasskeyNameDialog extends StatefulWidget {
-  const _PasskeyNameDialog();
+  const _PasskeyNameDialog({this.initialName});
+  final String? initialName;
   @override
   State<_PasskeyNameDialog> createState() => _PasskeyNameDialogState();
 }
 
 class _PasskeyNameDialogState extends State<_PasskeyNameDialog> {
-  final _name = TextEditingController(text: 'Mein Passkey');
+  late final _name = TextEditingController(
+    text: widget.initialName ?? 'Mein Passkey',
+  );
   final _form = GlobalKey<FormState>();
   @override
   void dispose() {
@@ -248,7 +273,7 @@ class _ConfirmIdentityDialog extends StatefulWidget {
 
 class _ConfirmIdentityDialogState extends State<_ConfirmIdentityDialog> {
   final _password = TextEditingController();
-  bool _busy = false;
+  bool _busy = false, _hidden = true;
   String? _error;
   @override
   void dispose() {
@@ -294,11 +319,22 @@ class _ConfirmIdentityDialogState extends State<_ConfirmIdentityDialog> {
           if (providers.contains('password')) ...[
             TextField(
               controller: _password,
-              obscureText: true,
+              obscureText: _hidden,
               enabled: !_busy,
               autofillHints: const [AutofillHints.password],
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Aktuelles Passwort',
+                suffixIcon: IconButton(
+                  tooltip: _hidden ? 'Passwort anzeigen' : 'Passwort verbergen',
+                  onPressed: _busy
+                      ? null
+                      : () => setState(() => _hidden = !_hidden),
+                  icon: Icon(
+                    _hidden
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                ),
               ),
               onSubmitted: (_) => _confirm(),
             ),

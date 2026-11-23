@@ -23,16 +23,41 @@ class FeedbackAdminScreen extends StatefulWidget {
 
 class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
   // The last loaded list stays visible while a reload runs.
+  final _search = TextEditingController();
   List<FeedbackTicket>? _entries;
   Object? _loadError;
   bool _loading = true;
   FeedbackStatus? _status = FeedbackStatus.open;
   String? _category;
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _fetch();
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  bool _matchesSearch(FeedbackTicket entry, String query) {
+    if (query.isEmpty) return true;
+    if (entry.message.toLowerCase().contains(query)) return true;
+    if (entry.authorName.toLowerCase().contains(query)) return true;
+    if (entry.appVersion.toLowerCase().contains(query)) return true;
+    return entry.messages.any(
+      (m) =>
+          m.text.toLowerCase().contains(query) ||
+          m.authorName.toLowerCase().contains(query),
+    );
+  }
+
+  void _clearSearch() {
+    _search.clear();
+    setState(() => _query = '');
   }
 
   Future<void> _load() {
@@ -74,9 +99,12 @@ class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
   @override
   Widget build(BuildContext context) {
     final entries = _entries;
+    final query = _query.trim().toLowerCase();
     final ofKind = [
       for (final e in entries ?? const <FeedbackTicket>[])
-        if (_category == null || e.category == _category) e,
+        if ((_category == null || e.category == _category) &&
+            _matchesSearch(e, query))
+          e,
     ];
     int count(FeedbackStatus status) =>
         ofKind.where((e) => e.status == status).length;
@@ -114,6 +142,24 @@ class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
             child: Center(child: CircularProgressIndicator()),
           )
         else ...[
+          TextField(
+            key: const ValueKey('feedback-admin-search'),
+            controller: _search,
+            decoration: InputDecoration(
+              labelText: 'Suchen',
+              hintText: 'Nach Text oder Person suchen',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _query.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Suche leeren',
+                      onPressed: _clearSearch,
+                      icon: const Icon(Icons.close),
+                    ),
+            ),
+            onChanged: (value) => setState(() => _query = value),
+          ),
+          const SizedBox(height: 12),
           if (fresh > 0)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
@@ -169,18 +215,30 @@ class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
           const SizedBox(height: 16),
           if (shown.isEmpty)
             EmptyState(
-              icon: Icons.feedback_outlined,
+              icon: query.isNotEmpty
+                  ? Icons.search_off_outlined
+                  : Icons.feedback_outlined,
               title: entries.isEmpty
                   ? 'Noch kein Feedback'
+                  : query.isNotEmpty
+                  ? 'Keine Treffer'
                   : _status == FeedbackStatus.open
                   ? 'Alles beantwortet'
                   : 'Nichts in dieser Ansicht',
               message: entries.isEmpty
                   ? 'Was Mitglieder unter „Mein Bereich“ › „Feedback geben“ '
                         'senden, erscheint hier.'
+                  : query.isNotEmpty
+                  ? 'Kein Feedback passt zu „${_query.trim()}“.'
                   : _status == FeedbackStatus.open
                   ? 'Kein Feedback wartet auf eine Antwort.'
                   : 'Wähle oben eine andere Ansicht.',
+              action: entries.isNotEmpty && query.isNotEmpty
+                  ? OutlinedButton(
+                      onPressed: _clearSearch,
+                      child: const Text('Suche zurücksetzen'),
+                    )
+                  : null,
             ),
           for (final entry in shown)
             _FeedbackCard(

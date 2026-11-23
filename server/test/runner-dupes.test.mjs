@@ -245,3 +245,34 @@ test('the HTTP API opens with duplicates, trades and buys once per key', async t
   assert.equal((await call('POST', '/games/runner/buy', { itemId: 'g1' }, 'b1')).body.code, 'already_owned');
   assert.equal((await call('POST', '/games/runner/buy', { itemId: 'g1' })).status, 400);
 });
+
+test('stats.duplicates and dupeCounts track both gage payouts and shine upgrades', t => {
+  const { app, dice, open, patch, view } = setup(t);
+  assert.equal(view().stats.duplicates, 0);
+  assert.deepEqual(view().dupeCounts, {});
+  // Two new items in hell: still zero duplicates.
+  assert.equal(open(0.1, 0, 0.5).outcome.type, 'new');
+  assert.equal(open(0.1, 0, 0.5).outcome.type, 'new');
+  assert.equal(view().stats.duplicates, 0);
+  assert.deepEqual(view().dupeCounts, {});
+  // First duplicate of h1 pays gage.
+  const firstDupe = open(0.1, 0, 0.5);
+  assert.deepEqual([firstDupe.item.id, firstDupe.outcome.type], ['h1', 'gage']);
+  assert.equal(view().stats.duplicates, 1);
+  assert.deepEqual(view().dupeCounts, { h1: 1 });
+  // Second duplicate of h2 upgrades to shine: still counts as a duplicate.
+  const shineDupe = open(0.1, 0.9, 0.01);
+  assert.deepEqual([shineDupe.item.id, shineDupe.outcome.type], ['h2', 'shine']);
+  assert.equal(view().stats.duplicates, 2);
+  assert.deepEqual(view().dupeCounts, { h1: 1, h2: 1 });
+  // Another duplicate of h1 (idempotent retry must not double-count).
+  dice.push(0.1, 0, 0.5);
+  const third = app.runnerOpenCrate('sam', 'dup-retry', { dupes: true });
+  assert.equal(third.item.id, 'h1');
+  assert.deepEqual(app.runnerOpenCrate('sam', 'dup-retry', { dupes: true }), third);
+  assert.equal(view().stats.duplicates, 3);
+  assert.deepEqual(view().dupeCounts, { h1: 2, h2: 1 });
+  // Stale entries not owned anymore are filtered out of view().dupeCounts.
+  patch(p => ({ dupeCounts: { ...p.dupeCounts, ghost: 4 } }));
+  assert.deepEqual(view().dupeCounts, { h1: 2, h2: 1 });
+});

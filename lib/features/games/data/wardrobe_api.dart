@@ -419,6 +419,30 @@ Color? _colorOrNull(Object? value) {
 double _double(Object? value, [double fallback = 0]) =>
     value is num ? value.toDouble() : double.tryParse('$value') ?? fallback;
 
+/// Unlock requirement of a locked rarity (`requires` in catalog.json).
+class WardrobeRequirement {
+  const WardrobeRequirement({required this.rarity, this.kind, this.count});
+  final String rarity;
+  final WardrobeKind? kind;
+
+  /// Required item count; null means all items of [rarity] (and [kind]).
+  final int? count;
+
+  static WardrobeRequirement? fromJson(Object? value) {
+    if (value is! Map) return null;
+    final json = jsonMap(value);
+    final rarity = textValue(json['rarity']);
+    if (rarity.isEmpty) return null;
+    return WardrobeRequirement(
+      rarity: rarity,
+      kind: WardrobeKind.parse(json['kind']),
+      count: json['count'] is num && intValue(json['count']) > 0
+          ? intValue(json['count'])
+          : null,
+    );
+  }
+}
+
 /// A rarity of the catalog, from common to rare in catalog order.
 class WardrobeRarity {
   const WardrobeRarity({
@@ -429,6 +453,7 @@ class WardrobeRarity {
     this.rank = 0,
     this.style,
     this.hint,
+    this.requires,
     this.gage = 0,
     this.buyable = true,
   });
@@ -450,6 +475,9 @@ class WardrobeRarity {
   /// What unlocks the rarity while it is locked, e.g. "Sammle alle
   /// hellblauen Figuren".
   final String? hint;
+
+  /// Structured unlock requirement, if declared by the server.
+  final WardrobeRequirement? requires;
 
   bool get antique => style == 'antique';
 
@@ -949,6 +977,7 @@ class WardrobeCatalog {
           rank: i,
           style: jsonMap(r)['style'] as String?,
           hint: jsonMap(r)['hint'] as String?,
+          requires: WardrobeRequirement.fromJson(jsonMap(r)['requires']),
           gage: intValue(jsonMap(r)['gage']),
           buyable: jsonMap(r)['buyable'] != false,
         ),
@@ -1311,6 +1340,7 @@ class EnsembleMilestone {
     this.ready = false,
     this.reached = false,
     this.hidden = false,
+    this.reachedAt,
   });
   final num km;
 
@@ -1334,6 +1364,9 @@ class EnsembleMilestone {
   /// or until its scheduled release. No name, picture or kind is revealed.
   final bool hidden;
 
+  /// When this milestone was reached (local time), if sent by the server.
+  final DateTime? reachedAt;
+
   int get meters => (km * 1000).round();
 
   factory EnsembleMilestone.fromJson(JsonMap json) {
@@ -1351,6 +1384,9 @@ class EnsembleMilestone {
       ready: !hidden && reward?['ready'] == true,
       reached: reached,
       hidden: hidden,
+      reachedAt: !hidden && reached
+          ? DateTime.tryParse(textValue(json['reachedAt']))?.toLocal()
+          : null,
     );
   }
 }
@@ -1539,8 +1575,11 @@ class UniqueFigurePart {
   final int? year;
   final int have, total;
 
+  /// "Creepshow 2026".
+  String get production => [play, ?year?.toString()].join(' ');
+
   /// "Creepshow 2026: 15/28".
-  String get line => '${[play, ?year?.toString()].join(' ')}: $have/$total';
+  String get line => '$production: $have/$total';
 
   static UniqueFigurePart? fromJson(JsonMap json) {
     final play = textValue(json['play']).trim();
@@ -1571,6 +1610,7 @@ class UniqueFigureProgress {
     this.parts = const [],
     this.allTechnicians = false,
     this.itemNoun,
+    this.unlockedAt,
   });
   final String play, name;
   final int? year;
@@ -1588,11 +1628,45 @@ class UniqueFigureProgress {
   bool get itemSet => itemNoun != null;
   final String? itemId;
 
+  /// When this unique figure was unlocked (local time), if sent by the server.
+  final DateTime? unlockedAt;
+
   /// Per play of a figure across plays; empty for a single play.
   final List<UniqueFigurePart> parts;
 
   /// Whether it needs the role figures of several plays.
   bool get several => parts.length > 1;
+
+  /// Whether this unique figure requires roles from [playName] (optionally
+  /// matching [playYear]), including multi-play uniques via [parts].
+  bool involvesPlay(String playName, [int? playYear]) {
+    if (allTechnicians || itemSet) return false;
+    if (several) {
+      return parts.any(
+        (p) =>
+            p.play == playName &&
+            (p.year == null || playYear == null || p.year == playYear),
+      );
+    }
+    return play == playName &&
+        (year == null || playYear == null || year == playYear);
+  }
+
+  /// Whether this unique figure belongs to the play filter value [filter]
+  /// (e.g. "Creepshow 2026" or "Nexus 2024"), including multi-play uniques.
+  bool matchesProduction(String filter) {
+    if (allTechnicians || itemSet) return false;
+    if (several) {
+      return parts.any(
+        (p) =>
+            p.production == filter ||
+            (p.year == null &&
+                (filter == p.play || filter.startsWith('${p.play} '))),
+      );
+    }
+    return production == filter ||
+        (year == null && (filter == play || filter.startsWith('$play ')));
+  }
 
   /// "Creepshow 2026", or "Creepshow und Nexus" across plays.
   String get production =>
@@ -1620,6 +1694,9 @@ class UniqueFigureProgress {
       name: unlocked ? textValue(json['name'], '???') : '???',
       allTechnicians: json['allTechnicians'] == true,
       itemNoun: _itemNoun(json['itemNoun']),
+      unlockedAt: unlocked
+          ? DateTime.tryParse(textValue(json['unlockedAt']))?.toLocal()
+          : null,
       parts: [
         for (final p in jsonList(json['plays']))
           if (p is Map) ?UniqueFigurePart.fromJson(jsonMap(p)),
@@ -1842,6 +1919,28 @@ class Wardrobe {
       return null;
     }
     return catalog.rarityOf(item).hint ?? 'Noch gesperrt';
+  }
+
+  /// Unlock progress `(have, need)` towards [rarity]'s `requires` while it is
+  /// still locked; null if already open or without a structured requirement.
+  (int have, int need)? lockProgress(WardrobeRarity rarity) {
+    final req = rarity.requires;
+    if (req == null || !lockedRarities.contains(rarity.id)) return null;
+    final candidates = [
+      for (final i in catalog.items)
+        if (!i.isDefault &&
+            !i.reward &&
+            !i.unique &&
+            i.rarities.contains(req.rarity) &&
+            (req.kind == null || i.kind == req.kind))
+          i,
+    ];
+    if (candidates.isEmpty) return null;
+    final need = req.count == null
+        ? candidates.length
+        : min(req.count!, candidates.length);
+    final have = candidates.where(owns).length.clamp(0, need);
+    return (have, need);
   }
 
   /// The worn item of [kind]; the default if the server named none.

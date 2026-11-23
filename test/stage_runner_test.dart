@@ -3526,10 +3526,16 @@ void main() {
       expect((game.distance - distance).abs(), lessThan(.02));
       expect((game.y - y).abs(), lessThan(.02));
 
-      // A tap runs on from where it stood, at the usual pace.
+      // A tap runs on from where it stood after the 3-2-1 countdown, at the
+      // usual pace.
       await tester.tapAt(const Offset(400, 200));
       await tester.pump();
       expect(find.byKey(const ValueKey('runner-paused')), findsNothing);
+      expect(find.byKey(const ValueKey('runner-countdown')), findsOneWidget);
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(StageRunnerScreen.resumeCountdownStep);
+      }
+      expect(find.byKey(const ValueKey('runner-countdown')), findsNothing);
       final before = game.distance;
       for (var i = 0; i < 30; i++) {
         await tester.pump(const Duration(milliseconds: 16));

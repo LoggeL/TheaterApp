@@ -491,13 +491,21 @@ export function rerollMission(t, uid, requestId, b) {
     if (old.done) fail(409, 'Diese Mission ist schon geschafft.', 'mission_done');
     const fresh = chooseMission(b.slot, context(t, rec, rec.stats !== false), new Set(rec.missions.map(m => m.type)), new Set(list(rec.previousTypes)), seeded(a.personId, rec.day, b.slot, 'reroll'));
     if (!fresh) fail(409, 'Für diese Mission gibt es gerade keine andere.', 'nothing_to_reroll');
-    // A new mission starts at zero; the day's distance counts all of today (and is rewarded, if
-    // already reached, with the next run, which is what credits missions).
+    // A new mission starts at zero; the day's distance counts all of today and completes at once
+    // when today's runs have already reached the target.
+    const at = t.clock();
     const mission = { ...fresh, rerolled: true, progress: fresh.type === 'dailyDistance' ? rec.todayMeters ?? 0 : 0 };
-    const result = missionsView(t, t.store.put('runnerMissions', a.personId, { ...rec, rerolled: true, missions: rec.missions.map(m => m.slot === b.slot ? mission : m) }));
-    t.store.db.prepare('INSERT INTO requests VALUES(?,?,?,?,?)').run(uid, key, 'runner.mission.reroll', JSON.stringify(result), t.clock().toISOString());
+    const candidates = rec.missions.map(m => m.slot === b.slot ? mission : m);
+    const settled = completeMissions(rec, candidates, at, 'reroll');
+    const saved = t.store.put('runnerMissions', a.personId, { ...rec, rerolled: true, missions: settled.missions, crate: rec.crate || !!settled.crate });
+    if (settled.rewardPoints || settled.crate) {
+      const p = runnerProgress(t, a.personId);
+      t.store.put('runnerProgress', a.personId, { ...p, missionPoints: (p.missionPoints ?? 0) + settled.rewardPoints, missionCrates: (p.missionCrates ?? 0) + settled.crate });
+    }
+    const result = missionsView(t, saved, settled.completed);
+    t.store.db.prepare('INSERT INTO requests VALUES(?,?,?,?,?)').run(uid, key, 'runner.mission.reroll', JSON.stringify(result), at.toISOString());
     t.store.audit(uid, 'runner.mission.reroll', `${b.slot} ${old.type}->${fresh.type}`);
-    logMissionReroll(t, rec, old, mission, context(t, rec, rec.stats !== false));
+    logMissionReroll(t, rec, old, settled.missions.find(m => m.slot === b.slot) ?? mission, context(t, rec, rec.stats !== false));
     return result;
   });
 }

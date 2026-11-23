@@ -620,7 +620,7 @@ void main() {
       expect(find.text('Versuch 2 von 3'), findsOneWidget);
     });
 
-    testWidgets('last week’s reward shows once', (tester) async {
+    testWidgets('last week’s reward shows until dismissed', (tester) async {
       final weekly = _Weekly(
         used: 0,
         lastWeek: {'week': '2026-W36', 'rank': 2, 'score': 640, 'gage': 40},
@@ -628,12 +628,14 @@ void main() {
       final controller = await _controller(weekly);
       await _openWeekly(tester, controller);
       expect(find.text('Letzte Woche: Platz 2 · +40 Gage'), findsOneWidget);
+      // Not marked seen merely by opening the page.
+      expect(weekly.bodies['PUT weekly/seen'], isNull);
+      // Closed, it marks seen and stays away; the server leaves it out from now on.
+      await tester.tap(find.byTooltip('Schließen'));
+      await tester.pumpAndSettle();
       expect(weekly.bodies['PUT weekly/seen'], [
         {'week': '2026-W36'},
       ]);
-      // Closed, it stays away; the server leaves it out from now on.
-      await tester.tap(find.byTooltip('Schließen'));
-      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('weekly-reward')), findsNothing);
       await tester.pageBack();
       await tester.pumpAndSettle();
@@ -830,7 +832,7 @@ void main() {
       expect(game.time, time);
       expect(find.byKey(const ValueKey('runner-paused')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('runner-paused')));
-      for (var i = 0; i < 5; i++) {
+      for (var i = 0; i < 40 && game.time == time; i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
       expect(find.byKey(const ValueKey('runner-paused')), findsNothing);
@@ -986,8 +988,8 @@ void main() {
       });
     });
 
-    testWidgets('the menu stops pointing to last week’s reward once the '
-        'page showed it', (tester) async {
+    testWidgets('the menu keeps pointing to last week’s reward until it is '
+        'dismissed explicitly', (tester) async {
       final weekly = _Weekly(
         used: 0,
         lastWeek: {'week': '2026-W36', 'rank': 2, 'score': 640, 'gage': 40},
@@ -997,10 +999,20 @@ void main() {
       const hint = 'Deine Belohnung von letzter Woche wartet';
       expect(find.text(hint), findsOneWidget);
       await train(tester);
-      // The result cannot be saved, so the week is not loaded again.
+      // Opening the page and jumping into training does not mark it seen.
       await untilCurtain(tester);
       expect(weekly.bodies['POST scores'], hasLength(1));
+      expect(weekly.calls, isNot(contains('PUT weekly/seen')));
       expect(find.byKey(const ValueKey('runner-weekly')), findsOneWidget);
+      expect(find.text(hint), findsOneWidget);
+
+      // Dismissing the banner explicitly clears the hint in the menu.
+      await _tapKey(tester, 'runner-weekly');
+      await tester.tap(find.byTooltip('Schließen'));
+      await tester.pumpAndSettle();
+      expect(weekly.calls, contains('PUT weekly/seen'));
+      await tester.pageBack();
+      await tester.pumpAndSettle();
       expect(find.text(hint), findsNothing);
     });
   });

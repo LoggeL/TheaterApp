@@ -16,6 +16,8 @@ import '../data/wardrobe_api.dart' show weeklyRewardsAvailable;
 import '../data/weekly_api.dart';
 import '../domain/runner_ghost.dart';
 import 'runner_menu.dart';
+import 'stage_runner_sound.dart';
+import 'wardrobe_screen.dart' show openWardrobe;
 
 final _number = NumberFormat.decimalPattern('de');
 
@@ -120,6 +122,7 @@ Future<WeeklyPlay?> openRunnerWeekly(
   AppController controller, {
   WeeklyChallenge? initial,
   RunnerMenuPreferences? preferences,
+  RunnerSound? sound,
   ValueChanged<WeeklyChallenge>? onLoaded,
 }) => openPage<WeeklyPlay>(
   context,
@@ -127,6 +130,7 @@ Future<WeeklyPlay?> openRunnerWeekly(
     controller: controller,
     initial: initial,
     preferences: preferences,
+    sound: sound,
     onLoaded: onLoaded,
   ),
 );
@@ -140,6 +144,7 @@ class RunnerWeeklyScreen extends StatefulWidget {
     required this.controller,
     this.initial,
     this.preferences,
+    this.sound,
     this.cache,
     this.onLoaded,
   });
@@ -148,6 +153,7 @@ class RunnerWeeklyScreen extends StatefulWidget {
   /// What the menu knew already; shown until the fresh one arrives.
   final WeeklyChallenge? initial;
   final RunnerMenuPreferences? preferences;
+  final RunnerSound? sound;
 
   /// Where the course is kept for training offline; on this device by
   /// default.
@@ -156,6 +162,9 @@ class RunnerWeeklyScreen extends StatefulWidget {
 
   /// Told about every freshly loaded week.
   final ValueChanged<WeeklyChallenge>? onLoaded;
+
+  /// Rows shown before "Alle anzeigen".
+  static const shortList = 10;
 
   @override
   State<RunnerWeeklyScreen> createState() => _RunnerWeeklyScreenState();
@@ -168,6 +177,9 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
   WeeklyChallenge? _week;
   String? _error, _startError;
   bool _loading = false, _starting = false;
+  bool _allRanking = false;
+  final _ownRankKey = GlobalKey();
+  final _seenWeeks = <String>{};
 
   /// Last week's reward, kept for this visit once the server shows it.
   WeeklyLastWeek? _reward;
@@ -226,16 +238,6 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
       });
       widget.onLoaded?.call(week);
       unawaited(_cache.write(week));
-      // Legacy servers keep their banner-on-load acknowledgement. On new servers
-      // only the app-wide result popup may acknowledge an explicit dismissal.
-      if (week.lastWeek case final last?
-          when !controller.supports('runnerWeeklyResults')) {
-        unawaited(
-          markWeeklySeen(controller, last.week).catchError((Object e) {
-            if (kDebugMode) debugPrint('Wochenprobe: nicht gesehen: $e');
-          }),
-        );
-      }
     } catch (e) {
       final cached = _week == null || _week!.cached
           ? await _cache.read()
@@ -367,6 +369,59 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
     );
   }
 
+  void _markRewardSeen(WeeklyLastWeek reward) {
+    final updated = _week?.withoutLastWeek();
+    setState(() {
+      _rewardClosed = true;
+      if (updated != null) _week = updated;
+    });
+    if (updated != null) widget.onLoaded?.call(updated);
+    if (_seenWeeks.add(reward.week)) {
+      unawaited(
+        markWeeklySeen(controller, reward.week).catchError((Object e) {
+          if (kDebugMode) debugPrint('Wochenprobe: nicht gesehen: $e');
+        }),
+      );
+    }
+  }
+
+  Future<void> _openWeeklyCrate(WeeklyLastWeek reward) async {
+    _markRewardSeen(reward);
+    final ownSound = widget.sound == null ? RunnerSound() : null;
+    try {
+      await openWardrobe(
+        context,
+        controller,
+        sound: widget.sound ?? ownSound!,
+        initialTab: 1,
+      );
+    } finally {
+      ownSound?.dispose();
+    }
+  }
+
+  void _jumpToOwnRank(bool currentlyInShown) {
+    void scroll() {
+      final ctx = _ownRankKey.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOut,
+        alignment: 0.5,
+      );
+    }
+
+    if (!currentlyInShown && !_allRanking) {
+      setState(() => _allRanking = true);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) scroll();
+      });
+    } else {
+      scroll();
+    }
+  }
+
   Widget _rewardBanner(BuildContext context, WeeklyLastWeek reward) {
     final theme = Theme.of(context);
     final trophy = reward.trophy;
@@ -375,35 +430,57 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
       color: StageTheme.orange.withValues(alpha: StageTheme.tintAlpha),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 4, 10),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            trophy != null
-                ? Icon(Icons.emoji_events, color: trophy.color)
-                : reward.crates > 0
-                ? const Icon(
-                    Icons.inventory_2_outlined,
-                    color: StageTheme.orange,
-                  )
-                : const Icon(Icons.payments_outlined, color: StageTheme.orange),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                weeklyRewardText(
-                  reward.rank,
-                  reward.gage,
-                  trophy: trophy,
-                  crates: reward.crates,
+            Row(
+              children: [
+                trophy != null
+                    ? Icon(Icons.emoji_events, color: trophy.color)
+                    : reward.crates > 0
+                    ? const Icon(
+                        Icons.inventory_2_outlined,
+                        color: StageTheme.orange,
+                      )
+                    : const Icon(
+                        Icons.payments_outlined,
+                        color: StageTheme.orange,
+                      ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    weeklyRewardText(
+                      reward.rank,
+                      reward.gage,
+                      trophy: trophy,
+                      crates: reward.crates,
+                    ),
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
+                IconButton(
+                  tooltip: 'Schließen',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => _markRewardSeen(reward),
+                ),
+              ],
+            ),
+            if (reward.crates > 0 && _rewards)
+              Padding(
+                padding: const EdgeInsets.only(top: 8, right: 12, bottom: 2),
+                child: FilledButton.tonalIcon(
+                  key: const ValueKey('weekly-reward-open-crate'),
+                  onPressed: () => _openWeeklyCrate(reward),
+                  icon: const Icon(Icons.inventory_2_outlined),
+                  label: Text(
+                    reward.crates == 1
+                        ? 'Wochenkiste öffnen'
+                        : '${reward.crates} Wochenkisten öffnen',
+                  ),
                 ),
               ),
-            ),
-            IconButton(
-              tooltip: 'Schließen',
-              icon: const Icon(Icons.close),
-              onPressed: () => setState(() => _rewardClosed = true),
-            ),
           ],
         ),
       ),
@@ -579,6 +656,28 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
   Widget _ranking(BuildContext context, WeeklyChallenge week) {
     final theme = Theme.of(context);
     final rows = week.leaderboard;
+    final shown = _allRanking || rows.length <= RunnerWeeklyScreen.shortList
+        ? rows
+        : rows.take(RunnerWeeklyScreen.shortList).toList();
+    final mine = rows.where((e) => e.me).firstOrNull;
+    final mineInShown = mine != null && shown.contains(mine);
+    final more = rows.any((e) => !shown.contains(e) && !e.me);
+    final above = mine == null || mine.rank <= 1
+        ? null
+        : rows.where((e) => e.rank < mine.rank).lastOrNull;
+    Widget rankRow(WeeklyEntry e, {bool attachKey = false}) {
+      final row = RunnerRankRow(
+        rank: e.rank,
+        name: e.name,
+        own: e.me,
+        trailing: _number.format(e.score),
+        mask: e.trophies.isEmpty
+            ? null
+            : WeeklyTrophyBadges(trophies: e.trophies),
+      );
+      return attachKey ? KeyedSubtree(key: _ownRankKey, child: row) : row;
+    }
+
     return Card(
       key: const ValueKey('weekly-ranking'),
       child: Padding(
@@ -599,6 +698,15 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
                     style: theme.textTheme.titleMedium,
                   ),
                 ),
+                if (!week.cached &&
+                    mine != null &&
+                    rows.length > RunnerWeeklyScreen.shortList)
+                  TextButton.icon(
+                    key: const ValueKey('weekly-jump-own'),
+                    onPressed: () => _jumpToOwnRank(mineInShown),
+                    icon: const Icon(Icons.my_location, size: 16),
+                    label: const Text('Zu meinem Rang'),
+                  ),
               ],
             ),
             const SizedBox(height: 10),
@@ -615,17 +723,45 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
                 'Diese Woche hat noch niemand gewertet. Lauf als Erste oder '
                 'Erster!',
               )
-            else
-              for (final e in rows)
-                RunnerRankRow(
-                  rank: e.rank,
-                  name: e.name,
-                  own: e.me,
-                  trailing: _number.format(e.score),
-                  mask: e.trophies.isEmpty
-                      ? null
-                      : WeeklyTrophyBadges(trophies: e.trophies),
+            else ...[
+              for (final e in shown) rankRow(e, attachKey: e.me),
+              if (mine != null && !mineInShown) ...[
+                const Divider(height: 12),
+                rankRow(mine, attachKey: !more),
+              ],
+              if (above != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Builder(
+                    builder: (context) {
+                      final gap = above.score - mine!.score + 1;
+                      return Text(
+                        gap == 1
+                            ? 'Noch 1 Punkt bis Platz ${above.rank}'
+                            : 'Noch ${_number.format(gap)} Punkte bis Platz ${above.rank}',
+                        key: const ValueKey('weekly-rank-gap'),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      );
+                    },
+                  ),
                 ),
+              if (more ||
+                  (_allRanking && rows.length > RunnerWeeklyScreen.shortList))
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton(
+                    key: const ValueKey('weekly-ranking-all'),
+                    onPressed: () => setState(() => _allRanking = !_allRanking),
+                    child: Text(
+                      _allRanking
+                          ? 'Weniger anzeigen'
+                          : 'Alle ${rows.length} anzeigen',
+                    ),
+                  ),
+                ),
+            ],
             if (week.cached)
               Align(
                 alignment: AlignmentDirectional.centerStart,

@@ -70,6 +70,8 @@ class _Harness {
   late AppController controller;
   bool enabled = true;
   bool rejectLogin = false;
+  bool requireRecentLogin = false;
+  String lastRequestedName = 'Mein Passkey';
   Future<void> init() async {
     await store.write('_device', 'settings', {
       'baseUrl': 'https://theater.example.invalid',
@@ -121,21 +123,44 @@ class _Harness {
             case '/passkeys':
               payload = {'passkeys': keys};
             case '/passkeys/options':
-              payload = {
-                'challengeId': 'register-challenge',
-                'options': {'challenge': 'create'},
-              };
+              if (requireRecentLogin && identity.confirmations.isEmpty) {
+                status = 401;
+                payload = {
+                  'error':
+                      'Bitte bestätige deine Anmeldung erneut, um Passkeys zu verwalten.',
+                  'code': 'recent_login_required',
+                };
+              } else {
+                final body = jsonMap(jsonDecode(request.body));
+                lastRequestedName = textValue(body['name']).isEmpty
+                    ? 'Mein Passkey'
+                    : textValue(body['name']);
+                payload = {
+                  'challengeId': 'register-challenge',
+                  'options': {'challenge': 'create'},
+                };
+              }
             case '/passkeys/verify':
               keys.add({
                 'id': 'key-id',
-                'name': 'Mein Passkey',
+                'name': lastRequestedName,
                 'createdAt': '2026-11-08T10:00:00Z',
                 'lastUsedAt': null,
+                'backedUp': true,
               });
               payload = {'passkeys': keys};
             case '/passkeys/key-id':
-              keys.clear();
-              payload = {'passkeys': keys};
+              if (requireRecentLogin && identity.confirmations.isEmpty) {
+                status = 401;
+                payload = {
+                  'error':
+                      'Bitte bestätige deine Anmeldung erneut, um Passkeys zu verwalten.',
+                  'code': 'recent_login_required',
+                };
+              } else {
+                keys.clear();
+                payload = {'passkeys': keys};
+              }
           }
           return http.Response(
             jsonEncode(payload),
@@ -287,7 +312,7 @@ void main() {
   );
 
   testWidgets(
-    'adding a passkey confirms the existing account before opening the device prompt',
+    'adding a passkey skips re-auth within the recent-login window',
     (tester) async {
       await tester.runAsync(h.controller.loginWithPasskey);
       tester.view.physicalSize = const Size(600, 1400);
@@ -303,20 +328,62 @@ void main() {
       await tester.tap(find.text('Passkey hinzufügen'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Weiter'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
       await tester.pumpAndSettle();
+      expect(find.text('Anmeldung bestätigen'), findsNothing);
+      expect(h.identity.confirmations, isEmpty);
+      expect(h.device.registrations, hasLength(1));
+      expect(find.text('Mein Passkey'), findsOneWidget);
+      expect(find.textContaining('Synchronisiert'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'adding a passkey requests identity confirmation on 401 recent_login_required and keeps the name',
+    (tester) async {
+      h.requireRecentLogin = true;
+      await tester.runAsync(h.controller.loginWithPasskey);
+      tester.view.physicalSize = const Size(600, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StageTheme.build(Brightness.light),
+          home: PasskeysScreen(controller: h.controller),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Passkey hinzufügen'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).first, 'Diensthandy');
+      await tester.tap(find.text('Weiter'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Anmeldung bestätigen'), findsOneWidget);
       expect(h.device.registrations, isEmpty);
       await tester.enterText(find.byType(TextField).last, 'existing password');
-      await tester.runAsync(() async {
-        await tester.tap(find.text('Bestätigen'));
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-      });
+      await tester.tap(find.text('Bestätigen'));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 20)),
       );
       await tester.pumpAndSettle();
       expect(h.identity.confirmations, ['existing password']);
-      expect(find.text('Mein Passkey'), findsOneWidget);
+      expect(find.text('Diensthandy'), findsOneWidget);
       expect(h.device.registrations, hasLength(1));
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());

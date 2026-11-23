@@ -34,3 +34,17 @@ Iterable<JsonMap> unreadMessages(AppController controller) =>
 
 int unreadMessageCount(AppController controller) =>
     unreadMessages(controller).length;
+
+/// Whether [message] carries an open form addressed to [user] that they have
+/// not submitted yet.
+bool messageHasOpenFormFor(AppUser? user, JsonMap message) =>
+    jsonMap(message['form']).isNotEmpty &&
+    message['formClosed'] != true &&
+    textValue(message['myFormSubmittedAt']).isEmpty &&
+    messageAddressedTo(user, message);
+
+/// Messages with an open form waiting for the member's submission.
+Iterable<JsonMap> openForms(AppController controller) => controller.messages
+    .where((m) => messageHasOpenFormFor(controller.user, m));
+
+int openFormCount(AppController controller) => openForms(controller).length;

@@ -7,6 +7,25 @@ import '../domain/cue_category.dart';
 import '../domain/reader_entries.dart';
 import '../domain/script_document.dart';
 
+/// Formats the header printed above [cue] in the exported script PDF,
+/// including auto-mic EIN/AUS markers and assigned microphone channels.
+String scriptPdfCueHeader(ScriptCue cue) {
+  final base = cue.role.isEmpty ? cueCategoryInfo(cue.kind).label : cue.role;
+  final micType = cue.micCueType.trim().toUpperCase();
+  final rawMic = cue.microphone.trim();
+  final micLabel = rawMic.isEmpty
+      ? ''
+      : rawMic.toLowerCase().startsWith('mikro')
+      ? rawMic
+      : 'Mikro $rawMic';
+  return [
+    base,
+    if (micType.isNotEmpty) micType,
+    if (micLabel.isNotEmpty) micLabel,
+    if (cue.isAutoMic) 'AUTO',
+  ].join(' · ');
+}
+
 /// Builds a printable A4 script from [entries] and hands it to the system
 /// print or share dialog. [footer] names the selected roles; [isOwn] marks
 /// the cues printed in bold.
@@ -71,9 +90,7 @@ Future<void> exportScriptPdf({
             pw.Padding(
               padding: const pw.EdgeInsets.only(top: 10, bottom: 3),
               child: pw.Text(
-                entry.cue!.role.isEmpty
-                    ? cueCategoryInfo(entry.cue!.kind).label
-                    : entry.cue!.role,
+                scriptPdfCueHeader(entry.cue!),
                 style: pw.TextStyle(
                   fontSize: 9,
                   fontWeight: pw.FontWeight.bold,

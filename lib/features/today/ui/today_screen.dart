@@ -16,6 +16,7 @@ import '../../events/domain/event_types.dart';
 import '../../events/ui/event_card.dart';
 import '../../events/ui/event_style.dart';
 import '../../events/ui/rsvp/rsvp_status_badge.dart';
+import '../../forms/ui/form_response_screen.dart';
 import '../../messages/ui/message_detail_screen.dart';
 import '../../messages/ui/messages_screen.dart';
 import '../../polls/ui/poll_detail_screen.dart';
@@ -60,6 +61,10 @@ class _TodayScreenState extends State<TodayScreen> {
   /// The next event answered from its large card. It keeps the top slot
   /// while it collapses, instead of jumping below the open items.
   String? _answeredOnTop;
+
+  /// A multiple-choice poll voted in inline from its preview. Keeping it on
+  /// top lets the person tick further checkboxes before it settles below.
+  String? _answeredPollOnTop;
 
   AppController get controller => widget.controller;
 
@@ -115,12 +120,25 @@ class _TodayScreenState extends State<TodayScreen> {
         ),
       ),
     );
-    final pending = _pending(context, digest);
+    final pinnedPoll = _answeredPollOnTop == null
+        ? null
+        : controller.polls
+              .where(
+                (p) =>
+                    p.id == _answeredPollOnTop &&
+                    p.allowMultiple &&
+                    !p.isClosedAt(now),
+              )
+              .firstOrNull;
+    final pending = _pending(context, digest, pinnedPoll);
     final install = [
       if (!controller.isDemo) const PwaInstallCard(homeHint: true),
     ];
     final events = _later(digest);
-    final rest = [..._script(context, digest), ..._done(context, digest)];
+    final rest = [
+      ..._script(context, digest),
+      ..._done(context, digest, pinnedPoll),
+    ];
     final header = [
       Text(
         'Hallo, ${controller.user?.firstName ?? 'Ensemble'}.',
@@ -216,13 +234,20 @@ class _TodayScreenState extends State<TodayScreen> {
 
   /// Everything still waiting for the person, most urgent first; one quiet
   /// line when nothing is left.
-  List<Widget> _pending(BuildContext context, TodayDigest digest) {
+  List<Widget> _pending(
+    BuildContext context,
+    TodayDigest digest,
+    Poll? pinnedPoll,
+  ) {
     final unread = digest.unread;
-    final poll = digest.pollsToVote.firstOrNull;
-    final morePolls = digest.pollsToVote.length - 1;
+    final openForms = digest.openForms;
+    final poll = pinnedPoll ?? digest.pollsToVote.firstOrNull;
+    final morePolls = pinnedPoll != null
+        ? digest.pollsToVote.where((p) => p.id != pinnedPoll.id).length
+        : digest.pollsToVote.length - 1;
     final open = digest.openResponses;
     final registrations = digest.registrations;
-    if (!digest.hasPending) {
+    if (!digest.hasPending && pinnedPoll == null) {
       return [
         Padding(
           padding: const EdgeInsets.only(top: 24),
@@ -302,6 +327,12 @@ class _TodayScreenState extends State<TodayScreen> {
           key: ValueKey('today-poll-${poll.id}'),
           poll: poll,
           controller: controller,
+          onMultiVote: () => setState(() => _answeredPollOnTop = poll.id),
+          onClosedDetail: () {
+            if (mounted && _answeredPollOnTop == poll.id) {
+              setState(() => _answeredPollOnTop = null);
+            }
+          },
         ),
         if (morePolls > 0)
           _MoreLink(
@@ -309,6 +340,53 @@ class _TodayScreenState extends State<TodayScreen> {
                 ? '+ 1 weitere Abstimmung'
                 : '+ $morePolls weitere Abstimmungen',
             onPressed: () => _allPolls(context),
+          ),
+      ],
+      if (openForms.isNotEmpty) ...[
+        SectionTitle(
+          'Offene Formulare',
+          trailing: TextButton(
+            onPressed: () => _allMessages(context),
+            child: const Text('Alle ansehen'),
+          ),
+        ),
+        for (final (i, m) in openForms.take(3).indexed) ...[
+          if (i > 0) const SizedBox(height: 10),
+          _CompactTile(
+            key: ValueKey('today-form-${m['id']}'),
+            icon: Icons.description_outlined,
+            title: textValue(
+              jsonMap(m['form'])['title'],
+              textValue(m['title']),
+            ),
+            subtitle:
+                textValue(m['title']).isNotEmpty &&
+                    textValue(m['title']) !=
+                        textValue(jsonMap(m['form'])['title'])
+                ? '${textValue(m['title'])} · Formular ausfüllen'
+                : 'Formular ausfüllen',
+            highlight: true,
+            onTap: () async {
+              await openPage(
+                context,
+                FormResponseScreen(
+                  controller: controller,
+                  messageId: textValue(m['id']),
+                ),
+              );
+              if (context.mounted) {
+                await refreshWithFeedback(context, controller);
+              }
+            },
+          ),
+        ],
+        if (openForms.length > 3)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(
+              '+ ${openForms.length - 3} weitere offene Formulare',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ),
       ],
       if (digest.slotPools.isNotEmpty) ...[
@@ -403,9 +481,13 @@ class _TodayScreenState extends State<TodayScreen> {
   }
 
   /// Already handled things, collapsed to one row each.
-  List<Widget> _done(BuildContext context, TodayDigest digest) {
+  List<Widget> _done(
+    BuildContext context,
+    TodayDigest digest,
+    Poll? pinnedPoll,
+  ) {
     final poll = digest.votedPoll;
-    if (poll == null) return const [];
+    if (poll == null || poll.id == pinnedPoll?.id) return const [];
     return [
       const SectionTitle('Erledigt'),
       _CompactTile(
@@ -496,35 +578,49 @@ class _OpenResponseRow extends StatelessWidget {
 
 /// An open poll the person can vote in right here.
 class _PollPreview extends StatefulWidget {
-  const _PollPreview({super.key, required this.poll, required this.controller});
+  const _PollPreview({
+    super.key,
+    required this.poll,
+    required this.controller,
+    this.onMultiVote,
+    this.onClosedDetail,
+  });
   final Poll poll;
   final AppController controller;
+  final VoidCallback? onMultiVote;
+  final VoidCallback? onClosedDetail;
   @override
   State<_PollPreview> createState() => _PollPreviewState();
 }
 
 class _PollPreviewState extends State<_PollPreview> {
-  /// The option whose vote is being sent.
-  String? _sending;
+  /// Options whose votes are currently being sent.
+  final Set<String> _sending = {};
 
   Future<void> _vote(String optionId) async {
-    // A cast vote moves the poll out of the open items, so the confirmation
-    // goes through the captured messenger.
+    final poll = widget.poll;
+    if (_sending.contains(optionId)) return;
+    if (!poll.allowMultiple && _sending.isNotEmpty) return;
+    // A cast single-choice vote moves the poll out of the open items, so the
+    // confirmation goes through the captured messenger.
     final messenger = ScaffoldMessenger.of(context);
-    setState(() => _sending = optionId);
+    if (poll.allowMultiple) widget.onMultiVote?.call();
+    setState(() => _sending.add(optionId));
     try {
-      final outcome = await widget.controller.vote(widget.poll.id, optionId);
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            outcomeText(
-              outcome,
-              done: 'Stimme gespeichert',
-              queued: 'Stimme vorgemerkt – wird bei Verbindung gesendet',
+      final outcome = await widget.controller.vote(poll.id, optionId);
+      if (!poll.allowMultiple) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              outcomeText(
+                outcome,
+                done: 'Stimme gespeichert',
+                queued: 'Stimme vorgemerkt – wird bei Verbindung gesendet',
+              ),
             ),
           ),
-        ),
-      );
+        );
+      }
     } catch (e) {
       if (mounted) {
         showProblem(context, e);
@@ -532,13 +628,21 @@ class _PollPreviewState extends State<_PollPreview> {
         messenger.showSnackBar(SnackBar(content: Text(userMessage(e))));
       }
     } finally {
-      if (mounted) setState(() => _sending = null);
+      if (mounted) setState(() => _sending.remove(optionId));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final poll = widget.poll;
+    final queued =
+        poll.allowMultiple &&
+        widget.controller.outbox.any(
+          (action) =>
+              !action.failed &&
+              action.payload['action'] == 'poll.vote' &&
+              action.payload['pollId'] == poll.id,
+        );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -561,73 +665,111 @@ class _PollPreviewState extends State<_PollPreview> {
             Text(poll.title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             if (poll.allowMultiple)
-              const Text('Du kannst mehrere Antworten wählen.')
-            else
-              for (final option in poll.options.take(3))
-                Semantics(
-                  button: true,
-                  inMutuallyExclusiveGroup: true,
-                  checked: option.id == poll.selectedOptionId,
-                  enabled: _sending == null,
-                  label:
-                      '${option.label}, '
-                      '${option.votes == 1 ? '1 Stimme' : '${option.votes} Stimmen'}',
-                  excludeSemantics: true,
-                  onTap: _sending != null ? null : () => _vote(option.id),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: _sending != null ? null : () => _vote(option.id),
-                    child: ConstrainedBox(
-                      // One tap votes: a full-size target avoids mis-taps.
-                      constraints: const BoxConstraints(minHeight: 48),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 4,
-                          vertical: 9,
-                        ),
-                        child: Row(
-                          children: [
-                            if (_sending == option.id)
-                              const SizedBox.square(
-                                dimension: 20,
-                                child: Padding(
-                                  padding: EdgeInsets.all(2),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  'Du kannst mehrere Antworten wählen.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            for (final option in poll.options.take(3))
+              Builder(
+                builder: (context) {
+                  final selected = poll.selectedOptionIds.contains(option.id);
+                  final busy = _sending.contains(option.id);
+                  final disabled = poll.allowMultiple
+                      ? busy
+                      : _sending.isNotEmpty;
+                  return Semantics(
+                    button: true,
+                    inMutuallyExclusiveGroup: !poll.allowMultiple,
+                    checked: selected,
+                    enabled: !disabled,
+                    label:
+                        '${option.label}, '
+                        '${option.votes == 1 ? '1 Stimme' : '${option.votes} Stimmen'}',
+                    excludeSemantics: true,
+                    onTap: disabled ? null : () => _vote(option.id),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: disabled ? null : () => _vote(option.id),
+                      child: ConstrainedBox(
+                        // One tap votes: a full-size target avoids mis-taps.
+                        constraints: const BoxConstraints(minHeight: 48),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 9,
+                          ),
+                          child: Row(
+                            children: [
+                              if (!poll.allowMultiple && busy)
+                                const SizedBox.square(
+                                  dimension: 20,
+                                  child: Padding(
+                                    padding: EdgeInsets.all(2),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                )
+                              else
+                                Icon(
+                                  poll.allowMultiple
+                                      ? (selected
+                                            ? Icons.check_box
+                                            : Icons.check_box_outline_blank)
+                                      : selected
+                                      ? Icons.radio_button_checked
+                                      : Icons.radio_button_off,
+                                  size: 20,
+                                ),
+                              const SizedBox(width: 10),
+                              Expanded(child: Text(option.label)),
+                              if (poll.allowMultiple && busy) ...[
+                                const SizedBox(width: 8),
+                                const SizedBox.square(
+                                  dimension: 14,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
                                   ),
                                 ),
-                              )
-                            else
-                              Icon(
-                                option.id == poll.selectedOptionId
-                                    ? Icons.radio_button_checked
-                                    : Icons.radio_button_off,
-                                size: 20,
-                              ),
-                            const SizedBox(width: 10),
-                            Expanded(child: Text(option.label)),
-                            const SizedBox(width: 12),
-                            Text('${option.votes}'),
-                          ],
+                              ],
+                              const SizedBox(width: 12),
+                              Text('${option.votes}'),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ),
-            if (!poll.allowMultiple && poll.options.length > 3)
+                  );
+                },
+              ),
+            if (poll.options.length > 3)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text('+ ${poll.options.length - 3} weitere Antworten'),
               ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: () => openPage(
-                context,
-                PollDetailScreen(
-                  controller: widget.controller,
-                  pollId: poll.id,
+            if (queued)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'Deine Auswahl wird synchronisiert, sobald eine Verbindung besteht.',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () async {
+                await openPage(
+                  context,
+                  PollDetailScreen(
+                    controller: widget.controller,
+                    pollId: poll.id,
+                  ),
+                );
+                widget.onClosedDetail?.call();
+              },
               icon: const Icon(Icons.poll_outlined),
               label: Text(
                 !poll.hasVoted ? 'Jetzt abstimmen' : 'Stimme ansehen',

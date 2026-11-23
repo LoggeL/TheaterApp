@@ -117,6 +117,32 @@ class CrateChoiceSheet extends StatelessWidget {
   }
 }
 
+/// The catalog's collectible items belonging to [target], for showing how
+/// many shiny versions are owned once the pool is complete.
+List<WardrobeItem> crateTargetItems(Wardrobe wardrobe, CrateTarget target) {
+  final collectible = wardrobe.catalog.collectible;
+  bool isTech(WardrobeItem item) =>
+      item.kind == WardrobeKind.character &&
+      ((item.role?.isFunction ?? false) || item.rarities.contains('gruen'));
+  return switch (target.kind) {
+    CrateTargetKind.random ||
+    CrateTargetKind.gala ||
+    CrateTargetKind.weekly => collectible.toList(),
+    CrateTargetKind.tech => [
+      for (final i in collectible)
+        if (isTech(i)) i,
+    ],
+    CrateTargetKind.play => [
+      for (final i in collectible)
+        if (i.kind == WardrobeKind.character &&
+            !isTech(i) &&
+            i.role?.play == (target.play ?? target.name) &&
+            (target.year == null || i.role?.year == target.year))
+          i,
+    ],
+  };
+}
+
 /// One target: its crate, name, what it holds and how far its set is.
 class CrateTargetCard extends StatelessWidget {
   const CrateTargetCard({
@@ -148,6 +174,14 @@ class CrateTargetCard extends StatelessWidget {
     final t = target;
     final accent = CrateMotion.of(t.animation).accent;
     final rarities = {for (final r in wardrobe.catalog.rarities) r.id: r};
+    final visibleOdds = [
+      for (final (id, chance) in t.odds)
+        if (chance > 0) (rarities[id], chance),
+    ];
+    final poolItems = t.complete && t.available
+        ? crateTargetItems(wardrobe, t)
+        : const <WardrobeItem>[];
+    final shinyOwned = poolItems.where(wardrobe.isShiny).length;
     return Opacity(
       opacity: t.available ? 1 : .55,
       child: Card(
@@ -216,29 +250,69 @@ class CrateTargetCard extends StatelessWidget {
                   style: theme.textTheme.bodySmall,
                 ),
                 const SizedBox(height: 6),
-                if (t.odds.isNotEmpty)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(3),
-                    child: SizedBox(
-                      height: 5,
-                      // Stretched: a ColoredBox without a child is
-                      // only as high as it must be, i.e. not at all.
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (final (id, chance) in t.odds)
-                            Expanded(
-                              flex: max(1, (chance * 1000).round()),
-                              child: ColoredBox(
-                                color:
-                                    rarities[id]?.color ??
-                                    WardrobeRarity.unknown.color,
+                if (t.odds.isNotEmpty) ...[
+                  Tooltip(
+                    message: [
+                      for (final (rarity, chance) in visibleOdds)
+                        if (rarity != null && rarity.name.isNotEmpty)
+                          '${rarity.name}: ${crateChanceText(chance)}',
+                    ].join(' · '),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: SizedBox(
+                        height: 5,
+                        // Stretched: a ColoredBox without a child is
+                        // only as high as it must be, i.e. not at all.
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (final (id, chance) in t.odds)
+                              Expanded(
+                                flex: max(1, (chance * 1000).round()),
+                                child: ColoredBox(
+                                  color:
+                                      rarities[id]?.color ??
+                                      WardrobeRarity.unknown.color,
+                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
+                  if (visibleOdds.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Wrap(
+                      key: ValueKey('crate-target-odds-${t.id}'),
+                      spacing: 6,
+                      runSpacing: 2,
+                      children: [
+                        for (final (rarity, chance) in visibleOdds)
+                          if (rarity != null && rarity.name.isNotEmpty)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 7,
+                                  height: 7,
+                                  decoration: BoxDecoration(
+                                    color: rarity.color,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  '${rarity.name} ${crateChanceText(chance)}',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                      ],
+                    ),
+                  ],
+                ],
                 const SizedBox(height: 6),
                 Text(
                   t.available
@@ -249,11 +323,26 @@ class CrateTargetCard extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                if (t.complete && t.available)
+                if (t.complete && t.available) ...[
                   Text(
                     'Bringt jetzt Glanz oder Gage.',
                     style: theme.textTheme.bodySmall,
                   ),
+                  if (poolItems.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        shinyOwned >= poolItems.length
+                            ? 'Glanz: $shinyOwned/${poolItems.length} komplett (nur noch Gage)'
+                            : 'Glanz: $shinyOwned/${poolItems.length}',
+                        key: ValueKey('crate-target-shiny-${t.id}'),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
               ],
             ),
           ),

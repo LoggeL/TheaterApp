@@ -22,6 +22,17 @@ import 'app_navigation.dart';
 import 'app_section.dart';
 import 'status_banners.dart';
 
+/// The Mitteilungen tab's selected segment (`true`: polls), shared per
+/// controller between [AppShell] and [DeepLinkRouter].
+final _pollsSegmentByController = Expando<ValueNotifier<bool>>(
+  'communicationPollsSegment',
+);
+
+/// Returns the notifier controlling whether the Mitteilungen tab shows
+/// polls (`true`) or messages (`false`) for [controller].
+ValueNotifier<bool> communicationPollsSegment(AppController controller) =>
+    _pollsSegmentByController[controller] ??= ValueNotifier<bool>(false);
+
 class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
@@ -44,14 +55,10 @@ class _AppShellState extends State<AppShell> {
   int _tab = 0;
   final _startupDialogs = Completer<void>();
 
-  /// The Mitteilungen tab's segment (true: polls), set by links from Heute.
-  final _showPolls = ValueNotifier<bool>(false);
-
-  @override
-  void dispose() {
-    _showPolls.dispose();
-    super.dispose();
-  }
+  /// The Mitteilungen tab's segment (true: polls), set by links from Heute
+  /// or by deep links.
+  ValueNotifier<bool> get _showPolls =>
+      communicationPollsSegment(widget.controller);
 
   @override
   void initState() {

@@ -25,6 +25,7 @@ class RunnerVolumeSettings extends StatefulWidget {
     required this.sound,
     required this.volumes,
     this.onAdjust,
+    this.onMusicAdjust,
   });
 
   /// Tells whether sound is on.
@@ -32,8 +33,12 @@ class RunnerVolumeSettings extends StatefulWidget {
   final RunnerVolumes volumes;
 
   /// Called before either volume changes, e.g. to let a paused run be
-  /// heard.
+  /// heard. When [onMusicAdjust] is set, [onAdjust] only runs for effects.
   final VoidCallback? onAdjust;
+
+  /// Called before the music volume changes, e.g. to preview music without
+  /// resuming it when only effects are adjusted.
+  final VoidCallback? onMusicAdjust;
 
   /// The effect a change of "Effekte" plays: a short pickup.
   @visibleForTesting
@@ -83,14 +88,24 @@ class _RunnerVolumeSettingsState extends State<RunnerVolumeSettings> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text('Ton', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 8),
+        ValueListenableBuilder(
+          valueListenable: widget.sound.enabled,
+          builder: (context, on, _) => SwitchListTile(
+            key: const ValueKey('runner-volume-enabled'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Ton aktiv'),
+            value: on,
+            onChanged: widget.sound.setEnabled,
+          ),
+        ),
+        const SizedBox(height: 4),
         _VolumeSlider(
           id: 'music',
           label: 'Musik',
           icon: Icons.music_note_outlined,
           share: widget.volumes.musicVolume,
           onChanged: (share) {
-            widget.onAdjust?.call();
+            (widget.onMusicAdjust ?? widget.onAdjust)?.call();
             widget.volumes.setMusicVolume(share);
           },
         ),
@@ -105,6 +120,25 @@ class _RunnerVolumeSettingsState extends State<RunnerVolumeSettings> {
             _preview();
           },
         ),
+        if (widget.volumes case final RunnerMusicPreview preview)
+          ValueListenableBuilder(
+            valueListenable: preview.otherMusicActive,
+            builder: (context, other, _) => ValueListenableBuilder(
+              valueListenable: widget.sound.enabled,
+              builder: (context, on, _) => other && on
+                  ? Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        'Andere Musik läuft – die Spielmusik pausiert automatisch.',
+                        key: const ValueKey('runner-volume-other-music'),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ),
         ValueListenableBuilder(
           valueListenable: widget.sound.enabled,
           builder: (context, on, _) => Text(

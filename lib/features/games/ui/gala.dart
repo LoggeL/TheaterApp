@@ -384,7 +384,11 @@ class _GalaCelebrationState extends State<GalaCelebration>
                         key: const ValueKey('gala-celebration-open'),
                         onPressed: () => Navigator.pop(context, true),
                         icon: const Icon(Icons.auto_awesome),
-                        label: const Text('Kiste öffnen'),
+                        label: Text(
+                          crates == 1
+                              ? 'Kiste öffnen'
+                              : '$crates Kisten öffnen',
+                        ),
                       ),
                     TextButton(
                       key: const ValueKey('gala-celebration-close'),
@@ -516,7 +520,13 @@ Future<void> celebrateGala(
   if (month == null || !monthlyGalaAvailable(controller)) return;
   final gala = await loadGala(controller);
   if (gala == null || gala.month != month || !context.mounted) return;
-  sound.play(RunnerSfx.jackpot);
+  final own = gala.own;
+  if (own != null &&
+      (own.trophy != null || own.prize == 'climber' || own.crates > 0)) {
+    sound.play(RunnerSfx.jackpot);
+  } else if (own != null) {
+    sound.play(RunnerSfx.reveal);
+  }
   final open = await showDialog<bool>(
     context: context,
     builder: (context) => GalaCelebration(

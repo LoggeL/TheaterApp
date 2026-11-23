@@ -12,7 +12,8 @@ import 'stage_runner_look.dart';
 import 'wardrobe_cards.dart';
 
 /// Opens the page of the owned figure [item]; [onWear] wears it (the page
-/// closes first, as the details did before).
+/// closes first, as the details did before). [onMissingTap] handles tapping
+/// a missing role of the same person.
 Future<void> openFigureDetail(
   BuildContext context, {
   required Wardrobe wardrobe,
@@ -22,6 +23,7 @@ Future<void> openFigureDetail(
   bool busy = false,
   bool dupes = false,
   ValueChanged<WardrobeItem>? onWear,
+  ValueChanged<WardrobeItem>? onMissingTap,
 }) => openPage<void>(
   context,
   FigureDetailPage(
@@ -32,6 +34,7 @@ Future<void> openFigureDetail(
     busy: busy,
     dupes: dupes,
     onWear: onWear,
+    onMissingTap: onMissingTap,
   ),
 );
 
@@ -337,6 +340,7 @@ class FigureDetailPage extends StatefulWidget {
     this.busy = false,
     this.dupes = false,
     this.onWear,
+    this.onMissingTap,
   });
   final Wardrobe wardrobe;
   final WardrobeItem item;
@@ -344,6 +348,7 @@ class FigureDetailPage extends StatefulWidget {
   final RunnerArt? art;
   final bool busy, dupes;
   final ValueChanged<WardrobeItem>? onWear;
+  final ValueChanged<WardrobeItem>? onMissingTap;
 
   @override
   State<FigureDetailPage> createState() => _FigureDetailPageState();
@@ -572,7 +577,9 @@ class _FigureDetailPageState extends State<FigureDetailPage> {
       if (item.unique)
         _note(
           context,
-          unique?.allTechnicians == true
+          unique?.itemSet == true
+              ? 'Freigeschaltet: alle ${unique!.itemNoun!.many} gesammelt.'
+              : unique?.allTechnicians == true
               ? 'Freigeschaltet: alle Techniker gesammelt.'
               : 'Freigeschaltet: alle Rollen aus ${unique?.play ?? item.role?.play ?? 'dem Stück'} gesammelt.',
         ),
@@ -808,7 +815,12 @@ class _FigureDetailPageState extends State<FigureDetailPage> {
                 art: _base,
                 worn: w.worn(other.kind)?.id == other.id,
                 small: true,
-                onTap: w.owns(other) ? () => _show(other) : null,
+                showPrice: widget.dupes,
+                onTap: w.owns(other)
+                    ? () => _show(other)
+                    : widget.onMissingTap == null
+                    ? null
+                    : () => widget.onMissingTap!(other),
               ),
             );
           },

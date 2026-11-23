@@ -17,7 +17,8 @@ class FirebaseWelcomeScreen extends StatefulWidget {
   State<FirebaseWelcomeScreen> createState() => _FirebaseWelcomeScreenState();
 }
 
-class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
+class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen>
+    with WidgetsBindingObserver {
   final _form = GlobalKey<FormState>();
   final _name = TextEditingController(),
       _email = TextEditingController(),
@@ -25,18 +26,46 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
   // Times the form from its first showing, also across the mode switch.
   late final _trap = BotTrap(() => widget.controller.now);
   bool _register = false, _hidden = true, _busy = false;
-  bool _passkeysAvailable = false;
+  bool _passkeysAvailable = false,
+      _passkeyCheckFailed = false,
+      _checkingPasskeys = false;
+  String _lastProvider = '';
   String? _error;
+
   @override
   void initState() {
     super.initState();
-    widget.controller.passkeysAvailable().then((available) {
-      if (mounted) setState(() => _passkeysAvailable = available);
+    WidgetsBinding.instance.addObserver(this);
+    final lastEmail = widget.controller.lastSignInEmail;
+    if (lastEmail.isNotEmpty) _email.text = lastEmail;
+    _lastProvider = widget.controller.lastSignInProvider;
+    _checkPasskeys();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        !_passkeysAvailable &&
+        _passkeyCheckFailed) {
+      _checkPasskeys();
+    }
+  }
+
+  Future<void> _checkPasskeys() async {
+    if (_checkingPasskeys) return;
+    setState(() => _checkingPasskeys = true);
+    final available = await widget.controller.checkPasskeysAvailable();
+    if (!mounted) return;
+    setState(() {
+      _checkingPasskeys = false;
+      _passkeysAvailable = available == true;
+      _passkeyCheckFailed = available == null;
     });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _trap.dispose();
     _name.dispose();
     _email.dispose();
@@ -186,6 +215,34 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
+              if (!_register &&
+                  _lastProvider.isNotEmpty &&
+                  providerNames.containsKey(_lastProvider))
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Row(
+                    key: const ValueKey('last-sign-in-hint'),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        providerIcon(_lastProvider),
+                        size: 18,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Zuletzt angemeldet mit ${providerNames[_lastProvider]}',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(context).colorScheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 28),
               if (!_register && _passkeysAvailable)
                 Padding(
@@ -196,6 +253,25 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                         : () => _run(widget.controller.loginWithPasskey),
                     icon: const Icon(Icons.key_outlined),
                     label: const Text('Mit Passkey anmelden'),
+                  ),
+                )
+              else if (!_register && _passkeyCheckFailed)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      key: const ValueKey('retry-passkey-check'),
+                      onPressed: _busy || _checkingPasskeys
+                          ? null
+                          : _checkPasskeys,
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: Text(
+                        _checkingPasskeys
+                            ? 'Passkey-Anmeldung wird geprüft …'
+                            : 'Passkey-Anmeldung erneut prüfen',
+                      ),
+                    ),
                   ),
                 ),
               if (providers.contains('google.com')) _provider('google.com'),
@@ -240,7 +316,7 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
                   child: const Text('Weitere Anmeldearten'),
                 ),
               if (providers.any((p) => p != 'password') ||
-                  (!_register && _passkeysAvailable))
+                  (!_register && (_passkeysAvailable || _passkeyCheckFailed)))
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 16),
                   child: Row(
@@ -368,11 +444,18 @@ class _FirebaseWelcomeScreenState extends State<FirebaseWelcomeScreen> {
               TextButton(
                 onPressed: _busy
                     ? null
-                    : () => setState(() {
-                        _register = !_register;
-                        _error = null;
-                        widget.controller.clearError();
-                      }),
+                    : () {
+                        setState(() {
+                          _register = !_register;
+                          _error = null;
+                          widget.controller.clearError();
+                        });
+                        if (!_register &&
+                            !_passkeysAvailable &&
+                            _passkeyCheckFailed) {
+                          _checkPasskeys();
+                        }
+                      },
                 child: Text(
                   _register
                       ? 'Schon registriert? Anmelden'

@@ -30,6 +30,7 @@ import 'wardrobe_cards.dart';
 import 'wardrobe_overview.dart';
 
 /// Opens the wardrobe; [onChanged] gets every new state of it.
+/// [initialTab]: 0 Sammlung, 1 Kisten, 2 Statistik.
 Future<void> openWardrobe(
   BuildContext context,
   AppController controller, {
@@ -37,6 +38,7 @@ Future<void> openWardrobe(
   RunnerArt? dressed,
   required RunnerSound sound,
   ValueChanged<Wardrobe>? onChanged,
+  int initialTab = 0,
 }) => openPage<void>(
   context,
   WardrobeScreen(
@@ -45,6 +47,7 @@ Future<void> openWardrobe(
     dressed: dressed,
     sound: sound,
     onChanged: onChanged,
+    initialTab: initialTab,
   ),
 );
 
@@ -191,6 +194,20 @@ class _AfterEntranceState extends State<_AfterEntrance> {
   Widget build(BuildContext context) => widget.child;
 }
 
+enum _OwnershipFilter { all, owned, missing, buyable }
+
+enum _ShineFilter { all, shiny, plain }
+
+enum _WardrobeSort {
+  rarity('Seltenheit'),
+  ownedFirst('Besessen zuerst'),
+  playYear('Stück & Jahr'),
+  alpha('Name A–Z');
+
+  const _WardrobeSort(this.label);
+  final String label;
+}
+
 /// "Garderobe" of the stage runner: costume crates to open, the collection
 /// by kind with what is worn, and the statistics of the own runs.
 class WardrobeScreen extends StatefulWidget {
@@ -201,12 +218,13 @@ class WardrobeScreen extends StatefulWidget {
     this.initial,
     this.dressed,
     this.onChanged,
+    this.initialTab = 0,
   });
   final AppController controller;
   final RunnerSound sound;
 
-  /// What is known already (the game's wardrobe): the page is there at once
-  /// and the refresh waits until it has come in.
+  /// What is known already (the game's wardrobe): on the default tab the page
+  /// is there at once and the refresh waits until it has come in.
   final Wardrobe? initial;
 
   /// The art in the costume of [initial], if the game has it.
@@ -214,6 +232,9 @@ class WardrobeScreen extends StatefulWidget {
 
   /// Told about every new state, e.g. so the game wears the new costume.
   final ValueChanged<Wardrobe>? onChanged;
+
+  /// The tab shown first: 0 Sammlung, 1 Kisten, 2 Statistik.
+  final int initialTab;
 
   @override
   State<WardrobeScreen> createState() => _WardrobeScreenState();
@@ -234,6 +255,19 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       _celebrating = false,
       _celebratingUnique = false;
   WardrobeKind _selectedKind = WardrobeKind.character;
+  TabController? _tabs;
+
+  /// Items newly obtained (or upgraded to shine) during this wardrobe session.
+  final Set<String> _newIds = <String>{};
+  final TextEditingController _search = TextEditingController();
+  String _query = '';
+  String? _rarityFilter;
+  _OwnershipFilter _ownership = _OwnershipFilter.all;
+  _ShineFilter _shine = _ShineFilter.all;
+  bool _newOnly = false;
+  _WardrobeSort _sort = _WardrobeSort.rarity;
+
+  bool get _waitForEntrance => widget.initial != null && widget.initialTab == 0;
 
   AppController get controller => widget.controller;
   bool get _dupes => dupesAvailable(controller);
@@ -265,7 +299,13 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.initial == null) _start();
+    if (!_waitForEntrance) _start();
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
   }
 
   void _start() {
@@ -290,7 +330,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     try {
       final w = await loadWardrobe(controller);
       if (!mounted) return false;
-      _update(w);
+      _update(w, recordNew: _wardrobe != null);
       _celebrate(w);
       return true;
     } catch (e) {
@@ -313,10 +353,35 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     }
   }
 
-  void _update(Wardrobe w) {
+  void _update(Wardrobe w, {bool recordNew = false}) {
+    final prev = _wardrobe;
+    if (recordNew && prev != null) {
+      for (final id in w.owned) {
+        if (!prev.owned.contains(id) && w.catalog.item(id) != null) {
+          _newIds.add(id);
+        }
+      }
+      for (final id in w.shiny) {
+        if (!prev.shiny.contains(id) && w.catalog.item(id) != null) {
+          _newIds.add(id);
+        }
+      }
+    }
+    _newIds.removeWhere(
+      (id) => !w.owned.contains(id) || w.catalog.item(id) == null,
+    );
+    if (_newIds.isEmpty) _newOnly = false;
     setState(() => _wardrobe = w);
     widget.onChanged?.call(w);
     _dress();
+  }
+
+  void _markSeen(String id) {
+    if (_newIds.remove(id)) {
+      setState(() {
+        if (_newIds.isEmpty) _newOnly = false;
+      });
+    }
   }
 
   Future<void> _open({
@@ -357,7 +422,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
             ),
     );
     if (next != null && mounted) {
-      _update(next);
+      _update(next, recordNew: true);
       await _celebrateUnique(next);
     }
   }
@@ -430,7 +495,22 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     setState(() => _busy = true);
     try {
       final w = await wearItem(controller, item);
-      if (mounted) _update(w);
+      if (!mounted) return;
+      _newIds.remove(item.id);
+      if (_newIds.isEmpty) _newOnly = false;
+      _update(w);
+      final label = item.kind == WardrobeKind.character && !item.unique
+          ? nameInRole(item.name, w.roleOf(item))
+          : item.name;
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Angelegt: $label'),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
     } catch (e) {
       if (mounted) showProblem(context, e);
     } finally {
@@ -438,10 +518,114 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     }
   }
 
+  /// Picks a random owned item (different from the worn one) for every slot
+  /// with at least two owned items.
+  Future<void> _randomizeOutfit(Wardrobe w) async {
+    final random = Random();
+    final picks = <WardrobeItem>[];
+    for (final kind in WardrobeKind.values) {
+      final owned = [
+        for (final i in w.catalog.items)
+          if (i.kind == kind && w.owns(i)) i,
+      ];
+      if (owned.length < 2) continue;
+      final wornId = w.worn(kind)?.id;
+      final choices = owned.where((i) => i.id != wornId).toList();
+      if (choices.isEmpty) continue;
+      picks.add(choices[random.nextInt(choices.length)]);
+    }
+    if (picks.isEmpty) return;
+    setState(() => _busy = true);
+    try {
+      var latest = w;
+      for (final pick in picks) {
+        latest = await wearItem(controller, pick);
+        _newIds.remove(pick.id);
+        if (!mounted) return;
+      }
+      if (_newIds.isEmpty) _newOnly = false;
+      _update(latest);
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              picks.length == 1
+                  ? 'Zufällig angelegt: ${picks.single.name}'
+                  : 'Zufalls-Outfit angelegt',
+            ),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Filters the collection to missing figures of [targetPlay] (a production
+  /// name or [_techFilter]).
+  void _jumpToMissingPlay(String targetPlay) {
+    _search.clear();
+    setState(() {
+      _selectedKind = WardrobeKind.character;
+      _play = targetPlay;
+      _person = null;
+      _rarityFilter = null;
+      _ownership = _OwnershipFilter.missing;
+      _shine = _ShineFilter.all;
+      _newOnly = false;
+      _query = '';
+    });
+  }
+
+  /// Where a missing collectible [item] can come from (crates, trades).
+  List<String> _sourcesOf(Wardrobe w, WardrobeItem item) {
+    final sources = <String>[];
+    if (_targets && w.crateTargets.isNotEmpty) {
+      if (w.crateTargets.any((t) => t.isRandom)) {
+        sources.add('Zufallskiste');
+      }
+      if (item.kind == WardrobeKind.character && item.role != null) {
+        final role = item.role!;
+        if (role.isFunction) {
+          final tech = w.crateTargets
+              .where((t) => t.kind == CrateTargetKind.tech)
+              .firstOrNull;
+          if (tech != null) sources.add(tech.title);
+        } else if (role.play != null) {
+          final playTarget = w.crateTargets
+              .where(
+                (t) =>
+                    t.kind == CrateTargetKind.play &&
+                    t.play == role.play &&
+                    (t.year == null || role.year == null || t.year == role.year),
+              )
+              .firstOrNull;
+          if (playTarget != null) sources.add('Kiste „${playTarget.title}“');
+        }
+      }
+    } else {
+      sources.add('Kostümkisten');
+    }
+    if (_dupes) {
+      final trade = w.trades
+          .where((t) => item.rarities.contains(t.to))
+          .firstOrNull;
+      if (trade != null) {
+        sources.add('Tauschvertrag (${gageText(trade.cost)})');
+      }
+    }
+    return sources;
+  }
+
   /// An owned figure gets a page of its own; everything else (and what is
   /// still missing, which keeps its secret) the details below.
   void _details(WardrobeItem item) {
     final w = _wardrobe!;
+    _markSeen(item.id);
     if (item.kind == WardrobeKind.character && w.owns(item)) {
       openFigureDetail(
         context,
@@ -452,6 +636,10 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         busy: _busy,
         dupes: _dupes,
         onWear: _wear,
+        onMissingTap: (missing) {
+          Navigator.pop(context);
+          _details(missing);
+        },
       );
       return;
     }
@@ -465,18 +653,28 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final cost = _dupes ? w.buyCost(item) : null;
     final milestone = item.reward ? w.ensemble?.rewardOf(item) : null;
     final unique = uniqueProgressOf(w, item);
+    final lockProgress = !owned && !item.unique && !item.reward
+        ? w.lockProgress(catalog.rarityOf(item))
+        : null;
+    final sources = !owned && !item.unique && !item.reward && hint == null
+        ? _sourcesOf(w, item)
+        : const <String>[];
+    final canGoToCrates = !owned && !item.unique && !item.reward && hint == null;
+    final showUniqueParts =
+        !owned && item.unique && unique != null && !unique.itemSet;
     showModalBottomSheet<void>(
       isScrollControlled: true,
       context: context,
       showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Padding(
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(
                     width: 96,
@@ -503,7 +701,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                               : item.unique
                               ? '???'
                               : 'Noch nicht gefunden',
-                          style: Theme.of(context).textTheme.titleLarge,
+                          style: Theme.of(sheetContext).textTheme.titleLarge,
                         ),
                         // "als Lucy · Creepshow 2026": the worn role; a
                         // unique figure is the character itself.
@@ -514,7 +712,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                                   ? uniqueRoleLine(playing, unique)
                                   : playing.line,
                               key: const ValueKey('wardrobe-role'),
-                              style: Theme.of(context).textTheme.titleSmall,
+                              style: Theme.of(sheetContext).textTheme.titleSmall,
                             ),
                         const SizedBox(height: 4),
                         Text(
@@ -525,7 +723,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                           style: TextStyle(
                             color: StageTheme.legible(
                               rarities.first.color,
-                              Theme.of(context).colorScheme.surface,
+                              Theme.of(sheetContext).colorScheme.surface,
                               minimum: 3,
                             ),
                             fontWeight: FontWeight.w700,
@@ -542,9 +740,13 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                                   color: Color(0xFFE4AE39),
                                 ),
                                 SizedBox(width: 4),
-                                Text(
-                                  'Glanz-Version',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
+                                Flexible(
+                                  child: Text(
+                                    'Glanz-Version',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
@@ -555,7 +757,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
                               item.rarityReason!,
-                              style: Theme.of(context).textTheme.bodySmall,
+                              style: Theme.of(sheetContext).textTheme.bodySmall,
                             ),
                           ),
                         if (owned && item.placeholder)
@@ -563,7 +765,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
                               'Platzhalter: die eigene Grafik kommt noch.',
-                              style: Theme.of(context).textTheme.bodySmall,
+                              style: Theme.of(sheetContext).textTheme.bodySmall,
                             ),
                           ),
                         if (milestone != null && owned)
@@ -577,7 +779,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
-                              unique?.allTechnicians == true
+                              unique?.itemSet == true
+                                  ? 'Freigeschaltet: alle ${unique!.itemNoun!.many} gesammelt.'
+                                  : unique?.allTechnicians == true
                                   ? 'Freigeschaltet: alle Techniker gesammelt.'
                                   : 'Freigeschaltet: alle Rollen aus ${unique?.play ?? item.role?.play ?? 'dem Stück'} gesammelt.',
                             ),
@@ -589,7 +793,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                               item.reward && milestone?.reached != true
                                   ? '$hint: für alle, sobald das Ensemble so weit gelaufen ist.'
                                   : item.unique
-                                  ? unique?.allTechnicians == true
+                                  ? unique?.itemSet == true
+                                        ? '$hint. Wer alle ${unique!.itemNoun!.many} hat, bekommt die Unique-Figur dazu – nicht aus Kisten.'
+                                        : unique?.allTechnicians == true
                                         ? '$hint. Wer alle Techniker hat, bekommt die Unique-Figur dazu. Sie kommt nicht aus Kisten.'
                                         : '$hint. Wer alle Rollen ${unique?.several == true ? 'dieser Stücke' : 'des Stücks'} hat, bekommt die Unique-Figur dazu – nicht aus Kisten.'
                                   : hint,
@@ -602,6 +808,15 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                               'Kommt vielleicht aus der nächsten Kostümkiste.',
                             ),
                           ),
+                        if (lockProgress != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              'Fortschritt zum Freischalten: ${lockProgress.$1}/${lockProgress.$2}',
+                              key: const ValueKey('wardrobe-lock-progress'),
+                              style: Theme.of(sheetContext).textTheme.bodySmall,
+                            ),
+                          ),
                         // Across plays: how far each of them is.
                         if (!owned && unique != null && unique.several)
                           Padding(
@@ -609,7 +824,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                             child: Text(
                               unique.parts.map((p) => p.line).join(' · '),
                               key: const ValueKey('wardrobe-unique-parts'),
-                              style: Theme.of(context).textTheme.bodySmall,
+                              style: Theme.of(sheetContext).textTheme.bodySmall,
                             ),
                           ),
                         if (!owned &&
@@ -622,7 +837,21 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
                               '${catalog.rarityOf(item).name} gibt es nur aus Kisten und Tauschverträgen.',
-                              style: Theme.of(context).textTheme.bodySmall,
+                              style: Theme.of(sheetContext).textTheme.bodySmall,
+                            ),
+                          ),
+                        if (sources.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              'Fundorte: ${sources.join(' · ')}',
+                              key: const ValueKey('wardrobe-source'),
+                              style: Theme.of(sheetContext).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      sheetContext,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
                             ),
                           ),
                       ],
@@ -636,40 +865,113 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                   onPressed: _busy
                       ? null
                       : () {
-                          Navigator.pop(context);
+                          Navigator.pop(sheetContext);
                           _wear(item);
                         },
                   icon: const Icon(Icons.checkroom),
                   label: const Text('Anlegen'),
                 ),
               ],
+              if (showUniqueParts) ...[
+                const SizedBox(height: 16),
+                if (unique.allTechnicians)
+                  OutlinedButton.icon(
+                    key: const ValueKey('wardrobe-unique-show-missing'),
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      _jumpToMissingPlay(_techFilter);
+                    },
+                    icon: const Icon(Icons.filter_list),
+                    label: const Text('Fehlende Techniker anzeigen'),
+                  )
+                else if (unique.several)
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final (i, p) in () {
+                        final open = unique.parts
+                            .where((p) => p.have < p.total)
+                            .toList();
+                        return open.isEmpty ? unique.parts : open;
+                      }().indexed)
+                        OutlinedButton.icon(
+                          key: i == 0
+                              ? const ValueKey('wardrobe-unique-show-missing')
+                              : ValueKey(
+                                  'wardrobe-unique-show-missing-${p.production}',
+                                ),
+                          onPressed: () {
+                            Navigator.pop(sheetContext);
+                            _jumpToMissingPlay(p.production);
+                          },
+                          icon: const Icon(Icons.filter_list),
+                          label: Text('Fehlende: ${p.production}'),
+                        ),
+                    ],
+                  )
+                else
+                  OutlinedButton.icon(
+                    key: const ValueKey('wardrobe-unique-show-missing'),
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      _jumpToMissingPlay(unique.production);
+                    },
+                    icon: const Icon(Icons.filter_list),
+                    label: const Text('Fehlende Rollen anzeigen'),
+                  ),
+              ],
               // Too little gage: what it costs and what is missing, no
               // disabled button.
-              if (cost != null && hint == null)
-                if (w.gage >= cost) ...[
-                  const SizedBox(height: 20),
-                  FilledButton.tonalIcon(
-                    key: const ValueKey('wardrobe-buy'),
-                    onPressed: _busy
-                        ? null
-                        : () {
-                            Navigator.pop(context);
-                            _buy(item, cost);
-                          },
-                    icon: const Icon(Icons.shopping_bag_outlined),
-                    label: Text('Gezielt holen · ${gageText(cost)}'),
-                  ),
-                ] else
-                  Padding(
-                    padding: const EdgeInsets.only(top: 16),
-                    child: Text(
-                      'Gezielt holen kostet ${gageText(cost)} – dir fehlen noch ${gageText(cost - w.gage)}. Gage gibt es für Duplikate.',
-                      key: const ValueKey('wardrobe-buy-missing'),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+              if ((cost != null && hint == null && w.gage >= cost) ||
+                  canGoToCrates) ...[
+                const SizedBox(height: 20),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (cost != null && hint == null && w.gage >= cost)
+                      FilledButton.tonalIcon(
+                        key: const ValueKey('wardrobe-buy'),
+                        onPressed: _busy
+                            ? null
+                            : () {
+                                Navigator.pop(sheetContext);
+                                _buy(item, cost);
+                              },
+                        icon: const Icon(Icons.shopping_bag_outlined),
+                        label: Text('Gezielt holen · ${gageText(cost)}'),
                       ),
+                    if (canGoToCrates)
+                      OutlinedButton.icon(
+                        key: const ValueKey('wardrobe-to-crates'),
+                        onPressed: () {
+                          Navigator.pop(sheetContext);
+                          _tabs?.animateTo(1);
+                        },
+                        icon: const Icon(Icons.inventory_2_outlined),
+                        label: Text(
+                          _waitingCrates > 0
+                              ? 'Zu den Kisten ($_waitingCrates)'
+                              : 'Zu den Kisten',
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+              if (cost != null && hint == null && w.gage < cost)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    'Gezielt holen kostet ${gageText(cost)} – dir fehlen noch ${gageText(cost - w.gage)}. Gage gibt es für Duplikate.',
+                    key: const ValueKey('wardrobe-buy-missing'),
+                    style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(
+                        sheetContext,
+                      ).colorScheme.onSurfaceVariant,
                     ),
                   ),
+                ),
             ],
           ),
         ),
@@ -755,7 +1057,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     try {
       final deal = await run();
       if (!mounted) return;
-      _update(deal.wardrobe);
+      _update(deal.wardrobe, recordNew: true);
       widget.sound.play(RunnerSfx.reveal);
       await showDialog<void>(
         context: context,
@@ -812,83 +1114,103 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
     final page = DefaultTabController(
       length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: _title(),
-          // Room for the countdown line under the title in large text.
-          toolbarHeight: _wardrobe?.nextDrop == null
-              ? null
-              : max(
-                  kToolbarHeight,
-                  MediaQuery.textScalerOf(context).scale(44) + 12,
-                ),
-          bottom: TabBar(
-            isScrollable: largeText,
-            tabAlignment: largeText ? TabAlignment.start : TabAlignment.fill,
-            tabs: [
-              Tab(
-                key: const ValueKey('wardrobe-tab-collection'),
-                height: largeText ? 64 : null,
-                text: 'Sammlung',
-              ),
-              Tab(
-                key: const ValueKey('wardrobe-tab-crates'),
-                height: largeText ? 64 : null,
-                child: Semantics(
-                  label: 'Kisten, $_waitingCrates wartend',
-                  excludeSemantics: true,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Badge.count(
-                      // Beside the word, not over its last letter.
-                      offset: const Offset(14, -6),
-                      count: _waitingCrates,
-                      isLabelVisible: _waitingCrates > 0,
-                      child: const Text('Kisten'),
+      initialIndex: widget.initialTab.clamp(0, 2),
+      child: Builder(
+        builder: (context) {
+          _tabs = DefaultTabController.maybeOf(context);
+          return Scaffold(
+            appBar: AppBar(
+              title: _title(),
+              // Room for the countdown line under the title in large text.
+              toolbarHeight: _wardrobe?.nextDrop == null
+                  ? null
+                  : max(
+                      kToolbarHeight,
+                      MediaQuery.textScalerOf(context).scale(44) + 12,
+                    ),
+              bottom: TabBar(
+                isScrollable: largeText,
+                tabAlignment: largeText ? TabAlignment.start : TabAlignment.fill,
+                tabs: [
+                  Tab(
+                    key: const ValueKey('wardrobe-tab-collection'),
+                    height: largeText ? 64 : null,
+                    child: Semantics(
+                      label: _newIds.isEmpty
+                          ? 'Sammlung'
+                          : 'Sammlung, ${_newIds.length} neu',
+                      excludeSemantics: true,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Badge.count(
+                          offset: const Offset(14, -6),
+                          count: _newIds.length,
+                          isLabelVisible: _newIds.isNotEmpty,
+                          child: const Text('Sammlung'),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-              Tab(
-                key: const ValueKey('wardrobe-tab-stats'),
-                height: largeText ? 64 : null,
-                text: 'Statistik',
-              ),
-            ],
-          ),
-        ),
-        body: _wardrobe == null
-            ? Center(
-                child: _loading
-                    ? const CircularProgressIndicator()
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _error ??
-                                'Die Garderobe konnte nicht geladen werden.',
-                          ),
-                          TextButton(
-                            onPressed: _load,
-                            child: const Text('Erneut laden'),
-                          ),
-                        ],
+                  Tab(
+                    key: const ValueKey('wardrobe-tab-crates'),
+                    height: largeText ? 64 : null,
+                    child: Semantics(
+                      label: 'Kisten, $_waitingCrates wartend',
+                      excludeSemantics: true,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Badge.count(
+                          // Beside the word, not over its last letter.
+                          offset: const Offset(14, -6),
+                          count: _waitingCrates,
+                          isLabelVisible: _waitingCrates > 0,
+                          child: const Text('Kisten'),
+                        ),
                       ),
-              )
-            : TabBarView(
-                children: [
-                  // Below the DefaultTabController: the collection and the
-                  // crates switch to each other with it.
-                  Builder(builder: _costumes),
-                  Builder(builder: _rewards),
-                  Builder(builder: _statistics),
+                    ),
+                  ),
+                  Tab(
+                    key: const ValueKey('wardrobe-tab-stats'),
+                    height: largeText ? 64 : null,
+                    text: 'Statistik',
+                  ),
                 ],
               ),
+            ),
+            body: _wardrobe == null
+                ? Center(
+                    child: _loading
+                        ? const CircularProgressIndicator()
+                        : Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _error ??
+                                    'Die Garderobe konnte nicht geladen werden.',
+                              ),
+                              TextButton(
+                                onPressed: _load,
+                                child: const Text('Erneut laden'),
+                              ),
+                            ],
+                          ),
+                  )
+                : TabBarView(
+                    children: [
+                      // Below the DefaultTabController: the collection and the
+                      // crates switch to each other with it.
+                      Builder(builder: _costumes),
+                      Builder(builder: _rewards),
+                      Builder(builder: _statistics),
+                    ],
+                  ),
+          );
+        },
       ),
     );
-    return widget.initial == null
-        ? page
-        : _AfterEntrance(onEntered: _start, child: page);
+    return _waitForEntrance
+        ? _AfterEntrance(onEntered: _start, child: page)
+        : page;
   }
 
   /// "Garderobe", with the countdown to a content drop less than a day away
@@ -922,6 +1244,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         : kinds.firstOrNull;
     final overview = WardrobeOverview.of(w, unique: _unique);
     final plays = overview.plays;
+    final outfitBar = _outfitBar(context, w, kinds, selected);
     return CustomScrollView(
       key: const PageStorageKey('wardrobe-costumes'),
       slivers: [
@@ -932,9 +1255,16 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               overview: overview,
               waitingCrates: _waitingCrates,
               onCrates: () => DefaultTabController.of(context).animateTo(1),
+              selectedRarity: _rarityFilter,
+              onSelectRarity: (r) => setState(() => _rarityFilter = r),
             ),
           ),
         ),
+        if (outfitBar != null)
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(padding.left, 0, padding.right, 8),
+            sliver: SliverToBoxAdapter(child: outfitBar),
+          ),
         // The kinds wrap instead of scrolling: on a phone the last one
         // goes to a line of its own rather than being cut off.
         if (kinds.length > 1)
@@ -985,6 +1315,108 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
           ),
         const SliverToBoxAdapter(child: SizedBox(height: 32)),
       ],
+    );
+  }
+
+  /// Compact summary of the currently equipped outfit across active slots,
+  /// with a one-tap random-outfit button when at least one slot has choices.
+  Widget? _outfitBar(
+    BuildContext context,
+    Wardrobe w,
+    List<WardrobeKind> kinds,
+    WardrobeKind? selected,
+  ) {
+    final slots = [
+      for (final kind in kinds)
+        if (w.worn(kind) case final item?) (kind, item),
+    ];
+    if (slots.isEmpty) return null;
+    final canRandomize = kinds.any(
+      (kind) => w.catalog.items.where((i) => i.kind == kind && w.owns(i)).length >= 2,
+    );
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      key: const ValueKey('wardrobe-outfit-bar'),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (final (kind, item) in slots)
+            InkWell(
+              key: ValueKey('wardrobe-outfit-${kind.name}'),
+              borderRadius: BorderRadius.circular(8),
+              onTap: () {
+                if (kinds.length > 1 && selected != kind) {
+                  setState(() => _selectedKind = kind);
+                } else {
+                  _details(item);
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: selected == kind && kinds.length > 1
+                      ? StageTheme.selectedTint(theme.brightness)
+                      : scheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: scheme.outlineVariant),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: ColoredBox(
+                          color: wardrobeInk,
+                          child: WardrobeItemArt(
+                            item: item.inRole(w.variantOf(item)),
+                            controller: controller,
+                            art: _base,
+                            small: true,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        '${kind.singular}: ${item.name}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (canRandomize)
+            TextButton.icon(
+              key: const ValueKey('wardrobe-random-outfit'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+              onPressed: _busy ? null : () => _randomizeOutfit(w),
+              icon: const Icon(Icons.shuffle, size: 16),
+              label: const Text('Zufalls-Outfit'),
+            ),
+        ],
+      ),
     );
   }
 
@@ -1109,12 +1541,19 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     ];
     GageOffer trade(TradeOption t) {
       final to = _rarity(w, t.to);
+      final remaining = w.catalog.collectible
+          .where((i) => w.counts(i) && i.rarities.contains(t.to) && !w.owns(i))
+          .length;
+      final subtitle = switch (remaining) {
+        1 => 'Tauschvertrag · noch 1 offen (garantiert!)',
+        final n when n > 1 => 'Tauschvertrag · noch $n offen',
+        _ => 'Tauschvertrag',
+      };
       return GageOffer(
         id: 'trade-${t.to}',
         action: 'trade-${t.to}',
         title: 'Neues ${to.name}-Teil',
-        // What a Tauschvertrag brings the card says once above.
-        subtitle: 'Tauschvertrag',
+        subtitle: subtitle,
         // The server's price, never worked out here.
         price: t.cost,
         verb: 'Tauschvertrag für ein neues ${to.name}-Teil',
@@ -1157,8 +1596,15 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
           : GageShop(
               from: costs.reduce((a, b) => a < b ? a : b),
               onShow: () {
+                _search.clear();
                 setState(() {
-                  _missingOnly = true;
+                  _query = '';
+                  _play = null;
+                  _person = null;
+                  _rarityFilter = null;
+                  _ownership = _OwnershipFilter.missing;
+                  _shine = _ShineFilter.all;
+                  _newOnly = false;
                   _selectedKind = WardrobeKind.character;
                 });
                 DefaultTabController.of(context).animateTo(0);
@@ -1472,35 +1918,102 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   /// The chance of each rarity, available before opening a crate.
   Widget _odds(BuildContext context, Wardrobe w) {
     final theme = Theme.of(context);
+    final quiet = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
     final catalog = w.catalog;
-    return Wrap(
+    final lockedNotes = [
+      for (final r in catalog.rarities.reversed)
+        if (w.lockedRarities.contains(r.id) &&
+            catalog.collectible.any((i) => i.rarities.contains(r.id)))
+          if ((w.lockProgress(r), r.hint) case (final progress, final hint)
+              when progress != null || hint != null)
+            (
+              r.id,
+              [
+                '${r.name} freischalten',
+                if (progress != null) '${progress.$1}/${progress.$2}',
+                ?hint,
+              ].join(' · '),
+            ),
+    ];
+    final dupeGage = _dupes
+        ? [
+            for (final r in catalog.rarities)
+              if (r.gage > 0 &&
+                  catalog.collectible.any((i) => i.rarities.contains(r.id)))
+                '${r.name} ${r.gage}',
+          ]
+        : const <String>[];
+    const shineLabels = [
+      ('targeted', 'Gezielt'),
+      ('mission', 'Mission'),
+      ('ensemble', 'Ensemble'),
+      ('event', 'Termin'),
+      ('weekly', 'Woche'),
+      ('gala', 'Gala'),
+    ];
+    final baseShine = catalog.dupes.shinyChance;
+    final extraShines = _dupes
+        ? [
+            for (final (key, label) in shineLabels)
+              if (catalog.dupes.shinyChances[key] case final rate?
+                  when (rate - baseShine).abs() > 1e-6)
+                '$label ${_percent(rate)}',
+          ]
+        : const <String>[];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: 8,
-      runSpacing: 6,
       children: [
-        for (final r in catalog.rarities.reversed)
-          if (catalog.collectible.any((i) => i.rarities.contains(r.id)))
-            Chip(
-              visualDensity: VisualDensity.compact,
-              avatar: CircleAvatar(backgroundColor: r.color, radius: 6),
-              label: Text(
-                w.lockedRarities.contains(r.id)
-                    ? '${r.name}: gesperrt'
-                    : '${r.name}: ${_percent(catalog.chance(r, w.lockedRarities))}',
-                style: theme.textTheme.bodySmall,
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            for (final r in catalog.rarities.reversed)
+              if (catalog.collectible.any((i) => i.rarities.contains(r.id)))
+                Chip(
+                  visualDensity: VisualDensity.compact,
+                  avatar: CircleAvatar(backgroundColor: r.color, radius: 6),
+                  label: Text(
+                    w.lockedRarities.contains(r.id)
+                        ? '${r.name}: gesperrt'
+                        : '${r.name}: ${_percent(catalog.chance(r, w.lockedRarities))}',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+            if (_dupes)
+              Chip(
+                visualDensity: VisualDensity.compact,
+                avatar: const Icon(
+                  Icons.auto_awesome,
+                  size: 14,
+                  color: Color(0xFFE4AE39),
+                ),
+                label: Text(
+                  'Glanz: ${_percent(catalog.dupes.shinyChance)}',
+                  style: theme.textTheme.bodySmall,
+                ),
               ),
-            ),
-        if (_dupes)
-          Chip(
-            visualDensity: VisualDensity.compact,
-            avatar: const Icon(
-              Icons.auto_awesome,
-              size: 14,
-              color: Color(0xFFE4AE39),
-            ),
-            label: Text(
-              'Glanz: ${_percent(catalog.dupes.shinyChance)}',
-              style: theme.textTheme.bodySmall,
-            ),
+          ],
+        ),
+        for (final (id, text) in lockedNotes)
+          Text(
+            text,
+            key: ValueKey('wardrobe-odds-locked-$id'),
+            style: quiet,
+          ),
+        if (dupeGage.isNotEmpty)
+          Text(
+            'Duplikat-Gage: ${dupeGage.join(' · ')}',
+            key: const ValueKey('wardrobe-odds-gage'),
+            style: quiet,
+          ),
+        if (extraShines.isNotEmpty)
+          Text(
+            'Glanz nach Kiste: Zufall ${_percent(baseShine)} · ${extraShines.join(' · ')}',
+            key: const ValueKey('wardrobe-odds-shine'),
+            style: quiet,
           ),
       ],
     );
@@ -1511,298 +2024,120 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     return '${NumberFormat(p < 10 ? '0.0' : '0', 'de').format(p)} %';
   }
 
-  List<Widget> _kind(
-    BuildContext context,
-    Wardrobe w,
-    WardrobeOverview overview,
-    WardrobeKind kind,
-    EdgeInsets padding,
-    bool chips,
-  ) {
-    if (kind == WardrobeKind.character) {
-      return _characters(context, w, overview, padding, chips);
-    }
-    final items = w.catalog.items.where((i) => i.kind == kind).toList()
-      // Defaults first, then from rare to common; owned before missing.
-      ..sort((a, b) {
-        if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
-        final rank = w.catalog.rarityOf(b).rank - w.catalog.rarityOf(a).rank;
-        if (rank != 0) return rank;
-        return a.name.compareTo(b.name);
-      });
-    // The same count as the kind's chip: ensemble rewards are everybody's
-    // and do not count for the collection, as in the Sammel-Rangliste.
-    final tally = overview.kinds[kind] ?? const Tally(0, 0);
-    final worn = w.worn(kind)?.id;
-    if (_missingOnly) items.removeWhere(w.owns);
-    return [
-      // The kind's chip already counts it.
-      SliverPadding(
-        padding: EdgeInsets.fromLTRB(
-          padding.left,
-          chips ? 0 : 12,
-          padding.right,
-          8,
-        ),
-        sliver: SliverToBoxAdapter(
-          child: chips
-              ? Align(
-                  alignment: Alignment.centerLeft,
-                  child: _missingChip(tally),
-                )
-              : _tallyHeader(context, '${kind.plural}: ${tally.text}', tally),
-        ),
-      ),
-      if (items.isEmpty)
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(padding.left, 4, padding.right, 0),
-          sliver: SliverToBoxAdapter(
-            child: Text('Alle ${kind.plural} gefunden.'),
-          ),
-        ),
-      SliverPadding(
-        padding: EdgeInsets.symmetric(horizontal: padding.left),
-        sliver: SliverGrid.builder(
-          // Figures are a little taller: their role stands under the name.
-          gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: _cardWidth(context),
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: kind == WardrobeKind.character ? .7 : .78,
-          ),
-          itemCount: items.length,
-          itemBuilder: (context, i) => WardrobeCard(
-            key: ValueKey('wardrobe-${items[i].id}'),
-            item: items[i],
-            wardrobe: w,
-            controller: controller,
-            art: _base,
-            worn: items[i].id == worn,
-            onTap: () => _details(items[i]),
-            small: true,
-          ),
-        ),
-      ),
-    ];
-  }
-
   // The figures' filters: a play ("Creepshow 2026") or the technicians
-  // ([_techFilter]), a person, and only the missing ones.
+  // ([_techFilter]) and a person.
   String? _play;
   int? _person;
-  bool _missingOnly = false;
   static const _techFilter = '\u0000Technik';
 
-  /// The switch to the missing ones: "Nur fehlende (37)".
-  Widget _missingChip(Tally tally) => FilterChip(
-    key: const ValueKey('wardrobe-missing-only'),
-    label: Text(
-      tally.missing > 0 ? 'Nur fehlende (${tally.missing})' : 'Nur fehlende',
-    ),
-    selected: _missingOnly,
-    onSelected: (on) => setState(() => _missingOnly = on),
-  );
+  bool get _missingOnly => _ownership == _OwnershipFilter.missing;
 
-  /// "Bühnenbilder: 3 von 12" with a bar and the switch to the missing ones,
-  /// when there is only one kind and so no chip counts it; narrow, the
-  /// switch goes below.
-  Widget _tallyHeader(BuildContext context, String text, Tally tally) {
-    final theme = Theme.of(context);
-    final count = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(text, style: theme.textTheme.titleSmall),
-        const SizedBox(height: 4),
-        TallyBar(tally.fraction, color: StageTheme.orange, height: 4),
-      ],
-    );
-    return LayoutBuilder(
-      builder: (context, constraints) =>
-          constraints.maxWidth < 360 * wardrobeScale(context)
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                count,
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: _missingChip(tally),
-                ),
-              ],
-            )
-          : Row(
-              children: [
-                Expanded(child: count),
-                const SizedBox(width: 12),
-                _missingChip(tally),
-              ],
-            ),
-    );
+  bool get _hasActiveFilters =>
+      _query.trim().isNotEmpty ||
+      _play != null ||
+      _person != null ||
+      _rarityFilter != null ||
+      _ownership != _OwnershipFilter.all ||
+      _shine != _ShineFilter.all ||
+      _newOnly ||
+      _sort != _WardrobeSort.rarity;
+
+  void _resetFilters() {
+    _search.clear();
+    setState(() {
+      _query = '';
+      _play = null;
+      _person = null;
+      _rarityFilter = null;
+      _ownership = _OwnershipFilter.all;
+      _shine = _ShineFilter.all;
+      _newOnly = false;
+      _sort = _WardrobeSort.rarity;
+    });
   }
 
-  /// The figures' filters: play and person side by side, the switch to the
-  /// missing ones after them (wide) or below (phone); with large text all
-  /// below each other.
-  Widget _filterBar({Widget? play, Widget? person, required Widget chip}) {
-    final dropdowns = [?play, ?person];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
-        if (largeText) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            spacing: 8,
-            children: [
-              ...dropdowns,
-              Align(alignment: Alignment.centerLeft, child: chip),
-            ],
-          );
-        }
-        if (constraints.maxWidth >= 640) {
-          // Up to 240 each, narrower before the switch is cut.
-          return Row(
-            children: [
-              Expanded(
-                child: Row(
-                  spacing: 16,
-                  children: [
-                    for (final d in dropdowns)
-                      Flexible(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 240),
-                          child: d,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 16),
-              chip,
-            ],
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (dropdowns.isNotEmpty) ...[
-              Row(
-                spacing: 12,
-                children: [for (final d in dropdowns) Expanded(child: d)],
-              ),
-              const SizedBox(height: 8),
-            ],
-            Align(alignment: Alignment.centerLeft, child: chip),
-          ],
-        );
-      },
-    );
+  bool _isBuyableNow(Wardrobe w, WardrobeItem i) {
+    if (!_dupes) return false;
+    final cost = w.buyCost(i);
+    if (cost == null) return false;
+    final hint = w.lockHint(i) ?? rewardHint(w, i) ?? uniqueHint(w, i);
+    return hint == null && w.gage >= cost;
   }
 
-  /// The figures, one card per role: grouped by rarity from rare to common,
-  /// in a rarity the owned ones first, then by the weight of the role. The
-  /// list can be narrowed to one play or one person.
-  List<Widget> _characters(
-    BuildContext context,
-    Wardrobe w,
-    WardrobeOverview overview,
-    EdgeInsets padding,
-    bool chips,
-  ) {
-    final theme = Theme.of(context);
+  bool _matchesOwnership(Wardrobe w, WardrobeItem i) => switch (_ownership) {
+    _OwnershipFilter.all => true,
+    _OwnershipFilter.owned => w.owns(i),
+    _OwnershipFilter.missing => !w.owns(i),
+    _OwnershipFilter.buyable => _isBuyableNow(w, i),
+  };
+
+  bool _matchesShine(Wardrobe w, WardrobeItem i) => switch (_shine) {
+    _ShineFilter.all => true,
+    _ShineFilter.shiny => w.owns(i) && w.isShiny(i),
+    _ShineFilter.plain =>
+      w.owns(i) && !w.isShiny(i) && !i.unique && !i.isDefault,
+  };
+
+  bool _matchesRarity(WardrobeItem i) {
+    final r = _rarityFilter;
+    if (r == null) return true;
+    return i.rarity == r || i.rarities.contains(r);
+  }
+
+  bool _matchesNew(WardrobeItem i) => !_newOnly || _newIds.contains(i.id);
+
+  /// Multi-token search across visible metadata without spoiling secret names
+  /// or roles of unowned figures.
+  bool _matchesQuery(Wardrobe w, WardrobeItem item) {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    final tokens = q.split(RegExp(r'\s+')).where((t) => t.isNotEmpty);
+    final owned = w.owns(item);
     final catalog = w.catalog;
-    final all = [
-      for (final i in catalog.items)
-        if (i.kind == WardrobeKind.character) i,
-    ];
-    final collectible = [
-      for (final i in all)
-        if (!i.isDefault && !i.unique) i,
-    ];
-    final years = <String, int>{
-      for (final i in collectible) ?i.role?.production: i.role?.year ?? 0,
-    };
-    // Newest play first.
-    final plays = years.keys.toList()
-      ..sort((a, b) {
-        final year = years[b]!.compareTo(years[a]!);
-        return year != 0 ? year : a.compareTo(b);
-      });
-    final people = <int, String>{
-      for (final i in collectible) ?i.personId: i.name,
-    };
-    final persons = people.entries.toList()
-      ..sort((a, b) => a.value.compareTo(b.value));
-    final technicians = collectible.any((i) => i.role?.isFunction == true);
-    final play = plays.contains(_play) || (technicians && _play == _techFilter)
-        ? _play
-        : null;
-    final person = people.containsKey(_person) ? _person : null;
-    bool shown(WardrobeItem i) =>
-        (play == null ||
-            (play == _techFilter
-                ? i.role?.isFunction == true
-                : i.role?.production == play)) &&
-        (person == null || i.personId == person) &&
-        (!_missingOnly || !w.owns(i));
-    int order(WardrobeItem a, WardrobeItem b) {
-      if (w.owns(a) != w.owns(b)) return w.owns(a) ? -1 : 1;
-      final weight = (b.importance ?? 0).compareTo(a.importance ?? 0);
-      if (weight != 0) return weight;
-      return nameInRole(a.name, a.role).compareTo(nameInRole(b.name, b.role));
-    }
+    final role = owned ? (w.roleOf(item) ?? item.role) : item.role;
+    final unique = item.unique ? uniqueProgressOf(w, item) : null;
+    final haystack = [
+      if (owned || item.reward) item.name,
+      if (owned && role != null) role.role,
+      if (role?.play != null) role!.play!,
+      if (role?.year != null) '${role!.year}',
+      if (role?.isFunction == true) 'technik',
+      if (owned && catalog.labelOf(item) != null) catalog.labelOf(item)!,
+      if (owned)
+        for (final d in item.departments) ?catalog.department(d)?.name,
+      for (final r in catalog.raritiesOf(item)) r.name,
+      if (item.unique) 'unique',
+      if (unique != null) ...[
+        unique.play,
+        if (unique.allTechnicians) 'technik',
+        if (unique.itemSet) ...[unique.itemNoun!.one, unique.itemNoun!.many],
+        for (final p in unique.parts) p.production,
+      ],
+      if (owned && w.isShiny(item)) 'glanz shiny',
+      item.kind.singular,
+      item.kind.plural,
+    ].join(' ').toLowerCase();
+    return tokens.every(haystack.contains);
+  }
 
-    final worn = w.worn(WardrobeKind.character)?.id;
-    // The default figure only for whoever still wears it: with a figure of
-    // their own (a present) Engel Logge is not in the collection.
-    final defaults = [
-      if (play == null && person == null && !_missingOnly)
-        for (final i in all)
-          if (i.isDefault && w.owns(i)) i,
-    ];
-    // The unique figures, one per play (unlocked or hidden), on top.
-    final uniques = [
-      if (_unique && person == null && play != _techFilter)
-        for (final i in uniqueCards(w))
-          if ((play == null || i.role?.production == play) &&
-              (!_missingOnly || !w.owns(i)))
-            i,
-    ];
-    // Per rarity the shown figures and how many of the selection (without
-    // the switch to the missing ones) are owned.
-    bool selection(WardrobeItem i) =>
-        (play == null ||
-            (play == _techFilter
-                ? i.role?.isFunction == true
-                : i.role?.production == play)) &&
-        (person == null || i.personId == person);
-    final groups = [
-      for (final r in catalog.rarities.reversed)
-        if ([
-              for (final i in collectible)
-                if (i.rarity == r.id && shown(i)) i,
-            ]..sort(order)
-            case final items when items.isNotEmpty)
-          (
-            r,
-            items,
-            Tally.of(
-              collectible.where((i) => i.rarity == r.id && selection(i)),
-              w,
-            ),
-          ),
-    ];
-    // The same count as the kind's chip.
-    final tally =
-        overview.kinds[WardrobeKind.character] ?? Tally.of(collectible, w);
-    Widget filter<T>({
-      required Key key,
-      required T? value,
-      required String all,
-      required List<(T, String)> options,
-      required ValueChanged<T?> onChanged,
-    }) => Container(
-      // A field like the chips beside it, not a heading.
-      constraints: const BoxConstraints(minHeight: 48),
+  bool _matchesCommonFilters(Wardrobe w, WardrobeItem i) =>
+      _matchesOwnership(w, i) &&
+      _matchesShine(w, i) &&
+      _matchesRarity(i) &&
+      _matchesNew(i) &&
+      _matchesQuery(w, i);
+
+  Widget _dropdownBox<T>(
+    BuildContext context, {
+    required Key key,
+    required T? value,
+    required String all,
+    required List<(T, String)> options,
+    required ValueChanged<T?> onChanged,
+  }) {
+    final theme = Theme.of(context);
+    return Container(
+      constraints: const BoxConstraints(minHeight: 44),
       alignment: Alignment.centerLeft,
       padding: const EdgeInsets.only(left: 12, right: 4),
       decoration: BoxDecoration(
@@ -1834,8 +2169,539 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         onChanged: onChanged,
       ),
     );
-    final playFilter = plays.length > 1
-        ? filter<String>(
+  }
+
+  Widget _sortDropdown(BuildContext context, {required bool forCharacters}) {
+    final theme = Theme.of(context);
+    final modes = [
+      _WardrobeSort.rarity,
+      _WardrobeSort.ownedFirst,
+      if (forCharacters) _WardrobeSort.playYear,
+      _WardrobeSort.alpha,
+    ];
+    final current = modes.contains(_sort) ? _sort : _WardrobeSort.rarity;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 44),
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.only(left: 12, right: 4),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: DropdownButton<_WardrobeSort>(
+        key: const ValueKey('wardrobe-sort'),
+        value: current,
+        isDense: true,
+        isExpanded: true,
+        underline: const SizedBox.shrink(),
+        borderRadius: BorderRadius.circular(12),
+        style: theme.textTheme.labelLarge?.copyWith(
+          fontWeight: FontWeight.w600,
+          color: theme.colorScheme.onSurface,
+        ),
+        items: [
+          for (final mode in modes)
+            DropdownMenuItem<_WardrobeSort>(
+              value: mode,
+              child: Text(
+                mode == _WardrobeSort.rarity
+                    ? 'Sortierung: ${mode.label}'
+                    : mode.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+        ],
+        onChanged: (v) {
+          if (v != null) setState(() => _sort = v);
+        },
+      ),
+    );
+  }
+
+  Widget _searchField(BuildContext context, WardrobeKind kind) => TextField(
+    key: const ValueKey('wardrobe-search'),
+    controller: _search,
+    textInputAction: TextInputAction.search,
+    onChanged: (value) => setState(() => _query = value),
+    decoration: InputDecoration(
+      isDense: true,
+      hintText: kind == WardrobeKind.character
+          ? 'Figur, Rolle, Stück oder Seltenheit suchen'
+          : '${kind.plural} oder Seltenheit suchen',
+      prefixIcon: const Icon(Icons.search, size: 20),
+      prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+      suffixIcon: _query.isEmpty
+          ? null
+          : IconButton(
+              key: const ValueKey('wardrobe-search-clear'),
+              tooltip: 'Suche leeren',
+              icon: const Icon(Icons.close, size: 18),
+              onPressed: () {
+                _search.clear();
+                setState(() => _query = '');
+              },
+            ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  );
+
+  /// The switch to the missing ones: "Nur fehlende (37)".
+  Widget _missingChip(Tally tally) => FilterChip(
+    key: const ValueKey('wardrobe-missing-only'),
+    visualDensity: VisualDensity.compact,
+    label: Text(
+      tally.missing > 0 ? 'Nur fehlende (${tally.missing})' : 'Nur fehlende',
+    ),
+    selected: _missingOnly,
+    onSelected: (on) => setState(
+      () => _ownership = on ? _OwnershipFilter.missing : _OwnershipFilter.all,
+    ),
+  );
+
+  Widget _filterChips(
+    BuildContext context,
+    Wardrobe w,
+    Tally tally,
+    Iterable<WardrobeItem> scope,
+  ) {
+    final buyableCount = _dupes
+        ? scope.where((i) => _isBuyableNow(w, i)).length
+        : 0;
+    final selectedRarityObj = _rarityFilter == null
+        ? null
+        : w.catalog.rarities.where((r) => r.id == _rarityFilter).firstOrNull ??
+              (w.catalog.uniqueRarity?.id == _rarityFilter
+                  ? w.catalog.uniqueRarity
+                  : null);
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        FilterChip(
+          key: const ValueKey('wardrobe-owned-only'),
+          visualDensity: VisualDensity.compact,
+          label: const Text('Nur besessen'),
+          selected: _ownership == _OwnershipFilter.owned,
+          onSelected: (on) => setState(
+            () => _ownership = on ? _OwnershipFilter.owned : _OwnershipFilter.all,
+          ),
+        ),
+        _missingChip(tally),
+        if (_dupes) ...[
+          FilterChip(
+            key: const ValueKey('wardrobe-buyable-only'),
+            visualDensity: VisualDensity.compact,
+            label: Text(
+              buyableCount > 0 ? 'Kaufbar ($buyableCount)' : 'Kaufbar',
+            ),
+            selected: _ownership == _OwnershipFilter.buyable,
+            onSelected: (on) => setState(
+              () => _ownership =
+                  on ? _OwnershipFilter.buyable : _OwnershipFilter.all,
+            ),
+          ),
+          FilterChip(
+            key: const ValueKey('wardrobe-shiny-only'),
+            visualDensity: VisualDensity.compact,
+            label: const Text('Glanz'),
+            selected: _shine == _ShineFilter.shiny,
+            onSelected: (on) => setState(
+              () => _shine = on ? _ShineFilter.shiny : _ShineFilter.all,
+            ),
+          ),
+          FilterChip(
+            key: const ValueKey('wardrobe-plain-only'),
+            visualDensity: VisualDensity.compact,
+            label: const Text('Ohne Glanz'),
+            selected: _shine == _ShineFilter.plain,
+            onSelected: (on) => setState(
+              () => _shine = on ? _ShineFilter.plain : _ShineFilter.all,
+            ),
+          ),
+        ],
+        if (_newIds.isNotEmpty)
+          FilterChip(
+            key: const ValueKey('wardrobe-new-only'),
+            visualDensity: VisualDensity.compact,
+            label: Text('Neu (${_newIds.length})'),
+            selected: _newOnly,
+            onSelected: (on) => setState(() => _newOnly = on),
+          ),
+        if (selectedRarityObj != null)
+          InputChip(
+            key: const ValueKey('wardrobe-rarity-active'),
+            visualDensity: VisualDensity.compact,
+            avatar: CircleAvatar(
+              radius: 5,
+              backgroundColor: selectedRarityObj.color,
+            ),
+            label: Text(selectedRarityObj.name),
+            onDeleted: () => setState(() => _rarityFilter = null),
+          ),
+        if (_hasActiveFilters)
+          ActionChip(
+            key: const ValueKey('wardrobe-reset-filters'),
+            visualDensity: VisualDensity.compact,
+            avatar: const Icon(Icons.restart_alt, size: 16),
+            label: const Text('Zurücksetzen'),
+            onPressed: _resetFilters,
+          ),
+      ],
+    );
+  }
+
+  /// "Bühnenbilder: 3 von 12" with a bar when there is only one kind and so
+  /// no chip counts it.
+  Widget _tallyHeader(BuildContext context, String text, Tally tally) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(text, style: theme.textTheme.titleSmall),
+        const SizedBox(height: 4),
+        TallyBar(tally.fraction, color: StageTheme.orange, height: 4),
+      ],
+    );
+  }
+
+  /// Search, responsive dropdowns and filter chips without overflowing on
+  /// narrow screens or large text.
+  Widget _filterControls({
+    required BuildContext context,
+    required WardrobeKind kind,
+    required List<Widget> dropdowns,
+    required Widget chips,
+  }) => LayoutBuilder(
+    builder: (context, constraints) {
+      final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
+      final search = _searchField(context, kind);
+      if (largeText) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: 8,
+          children: [search, ...dropdowns, chips],
+        );
+      }
+      if (constraints.maxWidth >= 640) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: 8,
+          children: [
+            search,
+            if (dropdowns.isNotEmpty)
+              Row(
+                spacing: 12,
+                children: [
+                  for (final d in dropdowns)
+                    Expanded(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 240),
+                        child: d,
+                      ),
+                    ),
+                ],
+              ),
+            chips,
+          ],
+        );
+      }
+      // Phone: up to 2 dropdowns per row so labels stay readable.
+      final rows = <Widget>[];
+      for (var i = 0; i < dropdowns.length; i += 2) {
+        final pair = dropdowns.sublist(i, min(i + 2, dropdowns.length));
+        rows.add(
+          Row(
+            spacing: 10,
+            children: [for (final d in pair) Expanded(child: d)],
+          ),
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: 8,
+        children: [search, ...rows, chips],
+      );
+    },
+  );
+
+  Widget _emptyState(BuildContext context, String message) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(message),
+      if (_hasActiveFilters)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: TextButton.icon(
+            key: const ValueKey('wardrobe-empty-reset'),
+            onPressed: _resetFilters,
+            icon: const Icon(Icons.restart_alt, size: 18),
+            label: const Text('Filter zurücksetzen'),
+          ),
+        ),
+    ],
+  );
+
+  List<Widget> _kind(
+    BuildContext context,
+    Wardrobe w,
+    WardrobeOverview overview,
+    WardrobeKind kind,
+    EdgeInsets padding,
+    bool chips,
+  ) {
+    if (kind == WardrobeKind.character) {
+      return _characters(context, w, overview, padding, chips);
+    }
+    final allOfKind = [
+      for (final i in w.catalog.items)
+        if (i.kind == kind) i,
+    ];
+    final items = [
+      for (final i in allOfKind)
+        if (_matchesCommonFilters(w, i)) i,
+    ];
+    items.sort((a, b) {
+      if (_sort == _WardrobeSort.alpha) {
+        if (w.owns(a) != w.owns(b)) return w.owns(a) ? -1 : 1;
+        if (w.owns(a)) {
+          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        }
+        final rank = w.catalog.rarityOf(b).rank - w.catalog.rarityOf(a).rank;
+        return rank != 0 ? rank : a.id.compareTo(b.id);
+      }
+      if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
+      if (_sort == _WardrobeSort.ownedFirst && w.owns(a) != w.owns(b)) {
+        return w.owns(a) ? -1 : 1;
+      }
+      final rank = w.catalog.rarityOf(b).rank - w.catalog.rarityOf(a).rank;
+      if (rank != 0) return rank;
+      return a.name.compareTo(b.name);
+    });
+    // The same count as the kind's chip: ensemble rewards are everybody's
+    // and do not count for the collection, as in the Sammel-Rangliste.
+    final tally = overview.kinds[kind] ?? const Tally(0, 0);
+    final worn = w.worn(kind)?.id;
+    final rarityOptions = [
+      for (final r in overview.rarities) (r.rarity.id, r.rarity.name),
+    ];
+    final activeRarity = rarityOptions.any((o) => o.$1 == _rarityFilter)
+        ? _rarityFilter
+        : null;
+    final dropdowns = <Widget>[
+      if (rarityOptions.length > 1)
+        _dropdownBox<String>(
+          context,
+          key: const ValueKey('wardrobe-filter-rarity'),
+          value: activeRarity,
+          all: 'Alle Seltenheiten',
+          options: rarityOptions,
+          onChanged: (v) => setState(() => _rarityFilter = v),
+        ),
+      _sortDropdown(context, forCharacters: false),
+    ];
+    return [
+      if (!chips)
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(padding.left, 12, padding.right, 4),
+          sliver: SliverToBoxAdapter(
+            child: _tallyHeader(context, '${kind.plural}: ${tally.text}', tally),
+          ),
+        ),
+      SliverPadding(
+        padding: EdgeInsets.fromLTRB(
+          padding.left,
+          chips ? 4 : 4,
+          padding.right,
+          8,
+        ),
+        sliver: SliverToBoxAdapter(
+          child: _filterControls(
+            context: context,
+            kind: kind,
+            dropdowns: dropdowns,
+            chips: _filterChips(context, w, tally, allOfKind),
+          ),
+        ),
+      ),
+      if (items.isEmpty)
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(padding.left, 4, padding.right, 0),
+          sliver: SliverToBoxAdapter(
+            child: _emptyState(
+              context,
+              _missingOnly && !_hasOtherFiltersThanOwnership
+                  ? 'Alle ${kind.plural} gefunden.'
+                  : _ownership == _OwnershipFilter.buyable
+                  ? 'Mit deiner aktuellen Gage (${gageText(w.gage)}) ist gerade nichts kaufbar.'
+                  : 'Keine ${kind.plural} in dieser Auswahl.',
+            ),
+          ),
+        ),
+      SliverPadding(
+        padding: EdgeInsets.symmetric(horizontal: padding.left),
+        sliver: SliverGrid.builder(
+          // Figures are a little taller: their role stands under the name.
+          gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: _cardWidth(context),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: kind == WardrobeKind.character ? .7 : .78,
+          ),
+          itemCount: items.length,
+          itemBuilder: (context, i) => WardrobeCard(
+            key: ValueKey('wardrobe-${items[i].id}'),
+            item: items[i],
+            wardrobe: w,
+            controller: controller,
+            art: _base,
+            worn: items[i].id == worn,
+            onTap: () => _details(items[i]),
+            onQuickEquip: _busy ? null : () => _wear(items[i]),
+            isNew: _newIds.contains(items[i].id),
+            showPrice: _dupes,
+            small: true,
+          ),
+        ),
+      ),
+    ];
+  }
+
+  bool get _hasOtherFiltersThanOwnership =>
+      _query.trim().isNotEmpty ||
+      _play != null ||
+      _person != null ||
+      _rarityFilter != null ||
+      _shine != _ShineFilter.all ||
+      _newOnly;
+
+  /// The figures, one card per role: grouped by rarity from rare to common
+  /// (or sorted by ownership, play & year, or A–Z). Can be narrowed by search,
+  /// play, person, rarity, ownership, shine or new-in-session.
+  List<Widget> _characters(
+    BuildContext context,
+    Wardrobe w,
+    WardrobeOverview overview,
+    EdgeInsets padding,
+    bool chips,
+  ) {
+    final theme = Theme.of(context);
+    final catalog = w.catalog;
+    final all = [
+      for (final i in catalog.items)
+        if (i.kind == WardrobeKind.character) i,
+    ];
+    final collectible = [
+      for (final i in all)
+        if (!i.isDefault && !i.unique) i,
+    ];
+    final allYears = <String, int>{
+      for (final i in collectible) ?i.role?.production: i.role?.year ?? 0,
+    };
+    final allHasTech = collectible.any((i) => i.role?.isFunction == true);
+    final allPeople = <int, String>{
+      for (final i in collectible) ?i.personId: i.name,
+    };
+    bool matchesPlay(WardrobeItem i, String? p) =>
+        p == null ||
+        (p == _techFilter
+            ? i.role?.isFunction == true
+            : i.role?.production == p);
+    var play = allYears.containsKey(_play) || (allHasTech && _play == _techFilter)
+        ? _play
+        : null;
+    var person = allPeople.containsKey(_person) ? _person : null;
+    // Cross-filter: if both are selected but yield no overlap, keep play so a
+    // tap on PlayProgressStrip or play dropdown always shows its cast.
+    if (play != null &&
+        person != null &&
+        !collectible.any((i) => matchesPlay(i, play) && i.personId == person)) {
+      person = null;
+    }
+    final playSource = person == null
+        ? collectible
+        : collectible.where((i) => i.personId == person);
+    final years = <String, int>{
+      for (final i in playSource) ?i.role?.production: i.role?.year ?? 0,
+    };
+    // Newest play first.
+    final plays = years.keys.toList()
+      ..sort((a, b) {
+        final year = years[b]!.compareTo(years[a]!);
+        return year != 0 ? year : a.compareTo(b);
+      });
+    final technicians = playSource.any((i) => i.role?.isFunction == true);
+    final personSource = play == null
+        ? collectible
+        : collectible.where((i) => matchesPlay(i, play));
+    final people = <int, String>{
+      for (final i in personSource) ?i.personId: i.name,
+    };
+    final persons = people.entries.toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+
+    bool selection(WardrobeItem i) =>
+        matchesPlay(i, play) && (person == null || i.personId == person);
+    bool shown(WardrobeItem i) => selection(i) && _matchesCommonFilters(w, i);
+    int order(WardrobeItem a, WardrobeItem b) {
+      if (w.owns(a) != w.owns(b)) return w.owns(a) ? -1 : 1;
+      final weight = (b.importance ?? 0).compareTo(a.importance ?? 0);
+      if (weight != 0) return weight;
+      return nameInRole(a.name, a.role).compareTo(nameInRole(b.name, b.role));
+    }
+
+    int orderByRarityThenRole(WardrobeItem a, WardrobeItem b) {
+      final rank = catalog.rarityOf(b).rank - catalog.rarityOf(a).rank;
+      if (rank != 0) return rank;
+      final weight = (b.importance ?? 0).compareTo(a.importance ?? 0);
+      if (weight != 0) return weight;
+      return nameInRole(a.name, a.role).compareTo(nameInRole(b.name, b.role));
+    }
+
+    bool matchesUniquePlay(WardrobeItem i) {
+      if (play == null) return true;
+      final p = uniqueProgressOf(w, i);
+      if (play == _techFilter) return p?.allTechnicians == true;
+      if (p != null && p.matchesProduction(play)) return true;
+      return i.role?.production == play;
+    }
+
+    final worn = w.worn(WardrobeKind.character)?.id;
+    // The default figure only for whoever still wears it: with a figure of
+    // their own (a present) Engel Logge is not in the collection.
+    final defaults = [
+      if (play == null &&
+          person == null &&
+          _rarityFilter == null &&
+          _ownership != _OwnershipFilter.missing &&
+          _ownership != _OwnershipFilter.buyable &&
+          _shine == _ShineFilter.all &&
+          !_newOnly &&
+          _query.trim().isEmpty)
+        for (final i in all)
+          if (i.isDefault && w.owns(i)) i,
+    ];
+    // The unique figures (unlocked or hidden), including Technik and
+    // multi-play figures under every involved play.
+    final uniques = [
+      if (_unique && person == null)
+        for (final i in uniqueCards(w))
+          if (matchesUniquePlay(i) && _matchesCommonFilters(w, i)) i,
+    ];
+    final filtered = [
+      for (final i in collectible)
+        if (shown(i)) i,
+    ];
+    // The same count as the kind's chip.
+    final tally =
+        overview.kinds[WardrobeKind.character] ?? Tally.of(collectible, w);
+    final showPlayFilter =
+        allYears.length > 1 || (allYears.isNotEmpty && allHasTech);
+    final showPersonFilter = allPeople.length > 1;
+    final playFilter = showPlayFilter
+        ? _dropdownBox<String>(
+            context,
             key: const ValueKey('wardrobe-filter-play'),
             value: play,
             all: 'Alle Stücke',
@@ -1843,11 +2709,21 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               for (final p in plays) (p, p),
               if (technicians) (_techFilter, 'Technik'),
             ],
-            onChanged: (v) => setState(() => _play = v),
+            onChanged: (v) => setState(() {
+              _play = v;
+              if (v != null &&
+                  _person != null &&
+                  !collectible.any(
+                    (i) => matchesPlay(i, v) && i.personId == _person,
+                  )) {
+                _person = null;
+              }
+            }),
           )
         : null;
-    final personFilter = persons.length > 1
-        ? filter<int>(
+    final personFilter = showPersonFilter
+        ? _dropdownBox<int>(
+            context,
             key: const ValueKey('wardrobe-filter-person'),
             value: person,
             all: 'Alle Personen',
@@ -1855,39 +2731,243 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
             onChanged: (v) => setState(() => _person = v),
           )
         : null;
-    return [
-      // With the kinds' chips counting, one bar of filters; else the
-      // count of the figures leads.
-      if (chips)
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(padding.left, 4, padding.right, 4),
-          sliver: SliverToBoxAdapter(
-            child: _filterBar(
-              play: playFilter,
-              person: personFilter,
-              chip: _missingChip(tally),
+    final rarityOptions = [
+      for (final r in overview.rarities) (r.rarity.id, r.rarity.name),
+      if (_unique &&
+          catalog.uniqueRarity != null &&
+          uniqueCards(w).isNotEmpty)
+        (catalog.uniqueRarity!.id, catalog.uniqueRarity!.name),
+    ];
+    final activeRarity = rarityOptions.any((o) => o.$1 == _rarityFilter)
+        ? _rarityFilter
+        : null;
+    final rarityFilter = rarityOptions.length > 1
+        ? _dropdownBox<String>(
+            context,
+            key: const ValueKey('wardrobe-filter-rarity'),
+            value: activeRarity,
+            all: 'Alle Seltenheiten',
+            options: rarityOptions,
+            onChanged: (v) => setState(() => _rarityFilter = v),
+          )
+        : null;
+    final dropdowns = <Widget>[
+      ?playFilter,
+      ?personFilter,
+      ?rarityFilter,
+      _sortDropdown(context, forCharacters: true),
+    ];
+    final sectionSlivers = <Widget>[];
+    switch (_sort) {
+      case _WardrobeSort.rarity:
+        final groups = [
+          for (final r in catalog.rarities.reversed)
+            if ([
+                  for (final i in filtered)
+                    if (i.rarity == r.id) i,
+                ]..sort(order)
+                case final items when items.isNotEmpty)
+              (
+                r,
+                items,
+                Tally.of(
+                  collectible.where((i) => i.rarity == r.id && selection(i)),
+                  w,
+                ),
+              ),
+        ];
+        for (final (rarity, items, groupTally) in groups) {
+          final lockProgress = w.lockProgress(rarity);
+          final lockedText = [
+            rarity.name,
+            if (lockProgress != null) '${lockProgress.$1}/${lockProgress.$2}',
+            rarity.hint ?? 'gesperrt',
+          ].join(' · ');
+          sectionSlivers.addAll([
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(padding.left, 14, padding.right, 6),
+              sliver: SliverToBoxAdapter(
+                // The summary card has the bar; here only the count.
+                child: Row(
+                  key: ValueKey('wardrobe-group-${rarity.id}'),
+                  children: [
+                    CircleAvatar(radius: 5, backgroundColor: rarity.color),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        w.lockedRarities.contains(rarity.id)
+                            ? lockedText
+                            : rarity.name,
+                        style: theme.textTheme.titleSmall,
+                      ),
+                    ),
+                    Text(
+                      groupTally.complete
+                          ? 'alle ${groupTally.total} ✓'
+                          : '${groupTally.owned}/${groupTally.total}',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-        )
-      else ...[
+            _grid(items, w, worn, padding),
+          ]);
+        }
+      case _WardrobeSort.ownedFirst:
+        final ownedItems = [
+          for (final i in filtered)
+            if (w.owns(i)) i,
+        ]..sort(orderByRarityThenRole);
+        final missingItems = [
+          for (final i in filtered)
+            if (!w.owns(i)) i,
+        ]..sort(orderByRarityThenRole);
+        for (final (keyId, title, color, items) in [
+          if (ownedItems.isNotEmpty)
+            ('owned', 'Besessen', StageTheme.green, ownedItems),
+          if (missingItems.isNotEmpty)
+            (
+              'missing',
+              'Noch fehlend',
+              theme.colorScheme.onSurfaceVariant,
+              missingItems,
+            ),
+        ]) {
+          sectionSlivers.addAll([
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(padding.left, 14, padding.right, 6),
+              sliver: SliverToBoxAdapter(
+                child: Row(
+                  key: ValueKey('wardrobe-group-$keyId'),
+                  children: [
+                    CircleAvatar(radius: 5, backgroundColor: color),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(title, style: theme.textTheme.titleSmall),
+                    ),
+                    Text('${items.length}', style: theme.textTheme.bodySmall),
+                  ],
+                ),
+              ),
+            ),
+            _grid(items, w, worn, padding),
+          ]);
+        }
+      case _WardrobeSort.playYear:
+        final byGroup = <String, List<WardrobeItem>>{};
+        final groupYear = <String, int>{};
+        for (final i in filtered) {
+          final String groupKey;
+          if (i.role?.production case final prod?) {
+            groupKey = prod;
+            groupYear[groupKey] = i.role?.year ?? 0;
+          } else if (i.role?.isFunction == true) {
+            groupKey = 'Technik';
+            groupYear[groupKey] = -1;
+          } else {
+            groupKey = 'Sonstige';
+            groupYear[groupKey] = -2;
+          }
+          (byGroup[groupKey] ??= []).add(i);
+        }
+        final orderedKeys = byGroup.keys.toList()
+          ..sort((a, b) {
+            final year = groupYear[b]!.compareTo(groupYear[a]!);
+            return year != 0 ? year : a.compareTo(b);
+          });
+        for (final title in orderedKeys) {
+          final items = byGroup[title]!
+            ..sort((a, b) {
+              if (w.owns(a) != w.owns(b)) return w.owns(a) ? -1 : 1;
+              return orderByRarityThenRole(a, b);
+            });
+          final groupTally = Tally.of(items, w);
+          sectionSlivers.addAll([
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(padding.left, 14, padding.right, 6),
+              sliver: SliverToBoxAdapter(
+                child: Row(
+                  key: ValueKey('wardrobe-group-play-$title'),
+                  children: [
+                    Expanded(
+                      child: Text(title, style: theme.textTheme.titleSmall),
+                    ),
+                    Text(
+                      '${groupTally.owned}/${groupTally.total}',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            _grid(items, w, worn, padding),
+          ]);
+        }
+      case _WardrobeSort.alpha:
+        if (filtered.isNotEmpty) {
+          final sorted = [...filtered]
+            ..sort((a, b) {
+              if (w.owns(a) != w.owns(b)) return w.owns(a) ? -1 : 1;
+              if (w.owns(a)) {
+                return nameInRole(a.name, a.role)
+                    .toLowerCase()
+                    .compareTo(nameInRole(b.name, b.role).toLowerCase());
+              }
+              // Keep unowned cards spoiler-free: never reveal alphabetical name.
+              final prodA = a.role?.production ?? 'Technik';
+              final prodB = b.role?.production ?? 'Technik';
+              final prod = prodA.compareTo(prodB);
+              if (prod != 0) return prod;
+              final rank = catalog.rarityOf(b).rank - catalog.rarityOf(a).rank;
+              return rank != 0 ? rank : a.id.compareTo(b.id);
+            });
+          sectionSlivers.addAll([
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(padding.left, 14, padding.right, 6),
+              sliver: SliverToBoxAdapter(
+                child: Row(
+                  key: const ValueKey('wardrobe-group-alpha'),
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Figuren A–Z',
+                        style: theme.textTheme.titleSmall,
+                      ),
+                    ),
+                    Text('${sorted.length}', style: theme.textTheme.bodySmall),
+                  ],
+                ),
+              ),
+            ),
+            _grid(sorted, w, worn, padding),
+          ]);
+        }
+    }
+    return [
+      if (!chips)
         SliverPadding(
           padding: EdgeInsets.fromLTRB(padding.left, 12, padding.right, 4),
           sliver: SliverToBoxAdapter(
             child: _tallyHeader(context, 'Figuren: ${tally.text}', tally),
           ),
         ),
-        if (playFilter != null || personFilter != null)
-          SliverPadding(
-            padding: EdgeInsets.fromLTRB(padding.left, 0, padding.right, 4),
-            sliver: SliverToBoxAdapter(
-              child: _filterBar(
-                play: playFilter,
-                person: personFilter,
-                chip: const SizedBox.shrink(),
-              ),
+      SliverPadding(
+        padding: EdgeInsets.fromLTRB(padding.left, 4, padding.right, 4),
+        sliver: SliverToBoxAdapter(
+          child: _filterControls(
+            context: context,
+            kind: WardrobeKind.character,
+            dropdowns: dropdowns,
+            chips: _filterChips(
+              context,
+              w,
+              tally,
+              collectible.where(selection),
             ),
           ),
-      ],
+        ),
+      ),
       if (defaults.isNotEmpty) _grid(defaults, w, worn, padding, top: 8),
       if (uniques.isNotEmpty) ...[
         SliverPadding(
@@ -1921,42 +3001,16 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         ),
         _grid(uniques, w, worn, padding),
       ],
-      for (final (rarity, items, tally) in groups) ...[
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(padding.left, 14, padding.right, 6),
-          sliver: SliverToBoxAdapter(
-            // The summary card has the bar; here only the count.
-            child: Row(
-              key: ValueKey('wardrobe-group-${rarity.id}'),
-              children: [
-                CircleAvatar(radius: 5, backgroundColor: rarity.color),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    w.lockedRarities.contains(rarity.id)
-                        ? '${rarity.name} · ${rarity.hint ?? 'gesperrt'}'
-                        : rarity.name,
-                    style: theme.textTheme.titleSmall,
-                  ),
-                ),
-                Text(
-                  tally.complete
-                      ? 'alle ${tally.total} ✓'
-                      : '${tally.owned}/${tally.total}',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-        ),
-        _grid(items, w, worn, padding),
-      ],
-      if (groups.isEmpty)
+      ...sectionSlivers,
+      if (sectionSlivers.isEmpty && uniques.isEmpty && defaults.isEmpty)
         SliverPadding(
           padding: EdgeInsets.fromLTRB(padding.left, 12, padding.right, 0),
           sliver: SliverToBoxAdapter(
-            child: Text(
-              _missingOnly
+            child: _emptyState(
+              context,
+              _ownership == _OwnershipFilter.buyable
+                  ? 'Mit deiner aktuellen Gage (${gageText(w.gage)}) ist gerade nichts kaufbar.'
+                  : _missingOnly
                   ? 'In dieser Auswahl fehlt dir nichts mehr.'
                   : 'Keine Figur in dieser Auswahl.',
             ),
@@ -1999,6 +3053,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         art: _base,
         worn: items[i].id == worn,
         onTap: () => _details(items[i]),
+        onQuickEquip: _busy ? null : () => _wear(items[i]),
+        isNew: _newIds.contains(items[i].id),
+        showPrice: _dupes,
         small: true,
       ),
     ),

@@ -178,6 +178,14 @@ class EnsembleCard extends StatelessWidget {
               key: const ValueKey('ensemble-section'),
               style: theme.textTheme.bodySmall,
             ),
+            const SizedBox(height: 2),
+            Text(
+              'Jedes aktive Mitglied erhält die Ensemble-Kiste bei jedem Ziel – auch ohne eigenen Beitrag im Abschnitt.',
+              key: const ValueKey('ensemble-eligibility-note'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
             if (e.crates > 0) ...[
               const SizedBox(height: 14),
               FilledButton.icon(
@@ -203,30 +211,74 @@ class EnsembleCard extends StatelessWidget {
                 tilePadding: EdgeInsets.zero,
                 title: const Text('Alle Ziele'),
                 children: [
-                  for (final m in e.milestones)
-                    ListTile(
-                      key: ValueKey('ensemble-goal-${m.km}'),
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(
-                        m.reached
-                            ? Icons.check_circle
-                            : m.hidden
-                            ? Icons.help_outline
-                            : Icons.flag_outlined,
-                        color: m.reached ? StageTheme.green : null,
-                      ),
-                      title: Text('${kmText(m.meters)} · ${m.name}'),
-                      subtitle: _goalNote(m) == null
-                          ? null
-                          : Text(_goalNote(m)!),
-                    ),
+                  for (final m in e.milestones) _goalTile(context, m),
                 ],
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _goalTile(BuildContext context, EnsembleMilestone m) {
+    final rewardItem = !m.hidden && m.reached && m.rewardId != null
+        ? wardrobe.catalog.item(m.rewardId!)
+        : null;
+    final canOpen = rewardItem != null && onReward != null;
+    final Widget leading;
+    if (rewardItem != null) {
+      leading = SizedBox(
+        width: 36,
+        height: 36,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: DecoratedBox(
+            decoration: const BoxDecoration(color: wardrobeInk),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                WardrobeItemArt(
+                  item: rewardItem,
+                  controller: controller,
+                  art: art,
+                  small: true,
+                ),
+                const Positioned(
+                  right: 1,
+                  bottom: 1,
+                  child: Icon(
+                    Icons.check_circle,
+                    size: 13,
+                    color: StageTheme.green,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } else {
+      leading = Icon(
+        m.reached
+            ? Icons.check_circle
+            : m.hidden
+            ? Icons.help_outline
+            : Icons.flag_outlined,
+        color: m.reached ? StageTheme.green : null,
+      );
+    }
+    return ListTile(
+      key: ValueKey('ensemble-goal-${m.km}'),
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: leading,
+      title: Text('${kmText(m.meters)} · ${m.name}'),
+      subtitle: _goalNote(m) == null ? null : Text(_goalNote(m)!),
+      trailing: canOpen
+          ? Icon(Icons.chevron_right, color: Theme.of(context).hintColor)
+          : null,
+      onTap: canOpen ? () => onReward!(rewardItem) : null,
     );
   }
 
@@ -244,6 +296,9 @@ class EnsembleCard extends StatelessWidget {
         ? null
         : wardrobe.catalog.item(m.rewardId!);
     final kind = unlocked?.kind ?? m.rewardKind;
+    final reachedDate = m.reachedAt == null
+        ? null
+        : 'erreicht am ${m.reachedAt!.day.toString().padLeft(2, '0')}.${m.reachedAt!.month.toString().padLeft(2, '0')}.${m.reachedAt!.year}';
     return [
       ?m.note,
       if (m.reached && m.rewardId != null)
@@ -252,6 +307,7 @@ class EnsembleCard extends StatelessWidget {
                   ? 'Für alle freigeschaltet'
                   : '${kind.singular} · für alle freigeschaltet'
             : 'Belohnung wird vorbereitet',
+      ?reachedDate,
     ].join(' · ').nullIfEmpty;
   }
 }

@@ -405,6 +405,9 @@ class WardrobeCard extends StatelessWidget {
     this.art,
     this.worn = false,
     this.onTap,
+    this.onQuickEquip,
+    this.isNew = false,
+    this.showPrice = false,
     this.animateShine = false,
     this.role,
     this.showRole = true,
@@ -416,6 +419,15 @@ class WardrobeCard extends StatelessWidget {
   final RunnerArt? art;
   final bool worn;
   final VoidCallback? onTap;
+
+  /// Direct 1-tap / long-press equip for an owned, currently unworn item.
+  final VoidCallback? onQuickEquip;
+
+  /// Marks an item newly acquired during the current session.
+  final bool isNew;
+
+  /// Shows a compact Gage price badge on missing buyable items.
+  final bool showPrice;
 
   /// Lets the shine of a shiny card sweep (in the reveal and the details);
   /// in the grid it stands still.
@@ -480,6 +492,11 @@ class WardrobeCard extends StatelessWidget {
             null => null,
           };
     final gift = owned && wardrobe.isGift(item);
+    final buyPrice = !owned && hint == null && showPrice
+        ? wardrobe.buyCost(item)
+        : null;
+    final affordable = buyPrice != null && wardrobe.gage >= buyPrice;
+    final quickEquip = owned && !worn ? onQuickEquip : null;
     return Semantics(
       button: onTap != null,
       selected: worn,
@@ -510,6 +527,7 @@ class WardrobeCard extends StatelessWidget {
         ),
         child: InkWell(
           onTap: onTap,
+          onLongPress: quickEquip,
           child: ExcludeSemantics(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -609,6 +627,109 @@ class WardrobeCard extends StatelessWidget {
                               Icons.check_circle,
                               size: 18,
                               color: Color(0xFFFFE7A3),
+                            ),
+                          )
+                        else if (quickEquip != null)
+                          Positioned(
+                            right: 4,
+                            top: 4,
+                            child: Tooltip(
+                              message: 'Direkt anlegen',
+                              child: Material(
+                                color: const Color(0xAA000000),
+                                shape: const CircleBorder(),
+                                clipBehavior: Clip.antiAlias,
+                                child: InkWell(
+                                  key: ValueKey('card-equip-${item.id}'),
+                                  onTap: quickEquip,
+                                  child: const Padding(
+                                    padding: EdgeInsets.all(5),
+                                    child: Icon(
+                                      Icons.checkroom,
+                                      size: 14,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (isNew && owned)
+                          Positioned(
+                            left: 6,
+                            top: department != null ? 24 : 6,
+                            child: DecoratedBox(
+                              key: ValueKey('card-new-${item.id}'),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE96131),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 1.5,
+                                ),
+                                child: Text(
+                                  'NEU',
+                                  textScaler: TextScaler.noScaling,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: .4,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (buyPrice != null)
+                          Positioned(
+                            right: 5,
+                            bottom: 4,
+                            child: DecoratedBox(
+                              key: ValueKey('card-price-${item.id}'),
+                              decoration: BoxDecoration(
+                                color: affordable
+                                    ? const Color(0xE6E96131)
+                                    : const Color(0xB3000000),
+                                borderRadius: BorderRadius.circular(6),
+                                border: affordable
+                                    ? Border.all(
+                                        color: const Color(0xFFFFE7A3),
+                                        width: .8,
+                                      )
+                                    : null,
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 1.5,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (affordable) ...[
+                                      const Icon(
+                                        Icons.shopping_bag_outlined,
+                                        size: 10,
+                                        color: Colors.white,
+                                      ),
+                                      const SizedBox(width: 2),
+                                    ],
+                                    Text(
+                                      '$buyPrice G',
+                                      textScaler: TextScaler.noScaling,
+                                      style: TextStyle(
+                                        color: affordable
+                                            ? Colors.white
+                                            : Colors.white70,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         if (gift)
@@ -719,6 +840,9 @@ UniqueFigureProgress? uniqueProgressOf(Wardrobe wardrobe, WardrobeItem item) {
   if (!item.unique) return null;
   final plays = wardrobe.uniqueFigures?.plays ?? const [];
   return plays.where((p) => p.itemId == item.id).firstOrNull ??
+      plays
+          .where((p) => !p.unlocked && item.id == 'unique-hidden:${p.production}')
+          .firstOrNull ??
       plays.where((p) => !p.unlocked && p.play == item.role?.play).firstOrNull;
 }
 

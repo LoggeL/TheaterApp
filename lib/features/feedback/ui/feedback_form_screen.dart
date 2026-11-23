@@ -10,6 +10,7 @@ import '../../../shared/widgets/page_header.dart';
 import '../data/feedback_api.dart';
 import '../domain/feedback_ticket.dart';
 import 'feedback_category_icon.dart';
+import 'feedback_ticket_screen.dart';
 import 'my_feedback_screen.dart';
 
 /// Lets a member send an idea, a bug report or anything else about the app
@@ -25,7 +26,7 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
   final _message = TextEditingController();
   String _category = 'idea';
   bool _busy = false, _sent = false;
-  String? _error;
+  String? _error, _sentTicketId;
 
   /// Own tickets with an unread answer; null until loaded (or unsupported).
   int? _unread;
@@ -55,6 +56,16 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
     if (mounted) await _loadUnread();
   }
 
+  Future<void> _openSentTicket() async {
+    final ticketId = _sentTicketId;
+    if (ticketId == null) return;
+    await openPage<void>(
+      context,
+      FeedbackTicketScreen(controller: controller, ticketId: ticketId),
+    );
+    if (mounted) await _loadUnread();
+  }
+
   @override
   void dispose() {
     _message.dispose();
@@ -75,10 +86,15 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
       _error = null;
     });
     try {
-      await submitFeedback(controller, message: _text, category: _category);
+      final ticketId = await submitFeedback(
+        controller,
+        message: _text,
+        category: _category,
+      );
       if (!mounted) return;
       setState(() {
         _sent = true;
+        _sentTicketId = ticketId.isEmpty ? null : ticketId;
         _message.clear();
       });
     } catch (e) {
@@ -90,6 +106,7 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
 
   void _again() => setState(() {
     _sent = false;
+    _sentTicketId = null;
     _category = 'idea';
   });
 
@@ -146,6 +163,14 @@ class _FeedbackFormScreenState extends State<FeedbackFormScreen> {
                     onPressed: () => Navigator.maybePop(context),
                     child: const Text('Fertig'),
                   ),
+                  if (feedbackTicketsAvailable(controller) &&
+                      _sentTicketId != null)
+                    OutlinedButton.icon(
+                      key: const ValueKey('feedback-open-ticket'),
+                      onPressed: _openSentTicket,
+                      icon: const Icon(Icons.open_in_new, size: 18),
+                      label: const Text('Feedback ansehen'),
+                    ),
                   OutlinedButton(
                     onPressed: _again,
                     child: const Text('Weiteres Feedback senden'),

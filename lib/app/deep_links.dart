@@ -15,6 +15,7 @@ import '../features/slots/ui/slot_pool_screen.dart';
 import '../shared/feedback.dart';
 import '../shared/navigation.dart';
 import 'shell/app_section.dart';
+import 'shell/app_shell.dart';
 
 /// Opens notification and link targets. Targets that arrive before the
 /// member has access wait until [takePending] hands them back.
@@ -155,6 +156,11 @@ class DeepLinkRouter {
     // page with unsaved input stays below the target instead.
     final context = navigator.currentContext!;
     final state = navigator.currentState!;
+    if (target.kind == 'polls') {
+      communicationPollsSegment(controller).value = true;
+    } else if (target.kind == 'messages') {
+      communicationPollsSegment(controller).value = false;
+    }
     selectSection(context, section);
     if (!hasUnsavedChanges(state)) state.popUntil((route) => route.isFirst);
     if (!launch) {

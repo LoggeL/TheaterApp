@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/brand.dart';
 import '../../../core/app_controller.dart';
+import '../../../core/controller/pending_action.dart';
 import '../../../core/device_services.dart';
 import '../../../core/telemetry/perf_telemetry.dart';
 import '../../../shared/feedback.dart';
@@ -81,6 +82,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  static const _queuedReminderMessage =
+      'Vorgemerkt – wird übertragen, sobald wieder eine Verbindung besteht.';
+
+  Future<void> _saveReminder(Future<ActionOutcome> Function() action) async {
+    try {
+      final outcome = await action();
+      if (mounted && outcome == ActionOutcome.queued) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        showDone(context, _queuedReminderMessage);
+      }
+    } catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+  }
+
   /// One card of personal push switches: preference key, icon, title, hint.
   /// A missing preference counts as on.
   Widget _switchCard(List<(String, IconData, String, String)> items) => Card(
@@ -93,8 +109,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: Text(title),
             subtitle: Text(hint),
             value: controller.reminders[key] ?? true,
-            onChanged: (value) => runAction(
-              context,
+            onChanged: (value) => _saveReminder(
               () => controller.saveReminders({
                 ...controller.reminders,
                 key: value,
@@ -137,6 +152,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     value: _pushAvailable && _pushOn,
                     onChanged: _pushAvailable && !_pushBusy ? _setPush : null,
                   ),
+                  if (!controller.isDemo && controller.pushConfigured)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: TextButton.icon(
+                        key: const ValueKey('test-push-button'),
+                        icon: const Icon(Icons.notifications_active_outlined),
+                        label: const Text('Test-Push senden'),
+                        onPressed: controller.isOffline
+                            ? null
+                            : () => runAction(
+                                context,
+                                () => controller.performAction({
+                                  'action': 'push.test',
+                                }),
+                                message: 'Test-Push angefordert.',
+                                queuedMessage:
+                                    'Test-Push vorgemerkt – wird gesendet, sobald wieder eine Verbindung besteht.',
+                              ),
+                      ),
+                    ),
                   const Divider(height: 1),
                   SwitchListTile(
                     secondary: const Icon(Icons.mail_outline),
@@ -148,8 +183,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     value: controller.reminders['emailEnabled'] ?? false,
                     onChanged: controller.emailConfigured
-                        ? (value) => runAction(
-                            context,
+                        ? (value) => _saveReminder(
                             () => controller.saveReminders({
                               ...controller.reminders,
                               'emailEnabled': value,
@@ -227,8 +261,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       title: Text(item.$2),
                       subtitle: Text(item.$3),
                       value: controller.reminders[item.$1] ?? true,
-                      onChanged: (v) => runAction(
-                        context,
+                      onChanged: (v) => _saveReminder(
                         () => controller.saveReminders({
                           ...controller.reminders,
                           item.$1: v,
@@ -258,10 +291,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             child: Text(reminderLeadTimeLabel(minutes)),
                           ),
                       ],
-                      onChanged: (v) => runAction(
-                        context,
-                        () => controller.saveCustomReminder(v),
-                      ),
+                      onChanged: (v) =>
+                          _saveReminder(() => controller.saveCustomReminder(v)),
                     ),
                   ),
                 ],

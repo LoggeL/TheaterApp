@@ -112,6 +112,15 @@ abstract interface class RunnerVolumes {
   void previewEffect(RunnerSfx sfx);
 }
 
+/// Optional music preview for the volume settings outside a run, and whether
+/// another app's music currently keeps the game's music quiet.
+abstract interface class RunnerMusicPreview {
+  ValueListenable<bool> get otherMusicActive;
+  void refreshOtherMusic();
+  void startMusicPreview();
+  void stopMusicPreview();
+}
+
 /// The gain for a volume [share] (0 to 1) of a slider: its square, as the
 /// ear hears loudness about logarithmically. Half way is then about half
 /// as loud (-12 dB), not hardly quieter (-6 dB). Exactly 0 and 1 at the
@@ -255,7 +264,7 @@ Future<void> runnerSoundSettingsReady(RunnerSound sound) =>
 /// new AVPlayerItem on the UI thread) while it is played.
 class PluginRunnerSound
     with _RememberedSettings
-    implements RunnerSound, RunnerMusic, RunnerVolumes {
+    implements RunnerSound, RunnerMusic, RunnerVolumes, RunnerMusicPreview {
   PluginRunnerSound({
     @visibleForTesting AudioPlayer Function()? newPlayer,
     @visibleForTesting Future<bool> Function()? othersPlaying,
@@ -319,6 +328,11 @@ class PluginRunnerSound
   /// The last answer of [_othersPlaying] that the game's own effects did not
   /// spoil.
   bool _othersLast = false;
+  final _otherMusicActive = ValueNotifier<bool>(false);
+  bool _musicPreviewing = false;
+
+  @override
+  ValueListenable<bool> get otherMusicActive => _otherMusicActive;
 
   void _heardOwnSound() {
     _ownSound?.cancel();
@@ -334,7 +348,11 @@ class PluginRunnerSound
     if (_ownSound != null && defaultTargetPlatform == TargetPlatform.android) {
       return _othersLast;
     }
-    return _othersLast = await _othersPlaying();
+    final active = _othersLast = await _othersPlaying();
+    if (!_disposed && _otherMusicActive.value != active) {
+      _otherMusicActive.value = active;
+    }
+    return active;
   }
 
   /// Asks the system: Android's `AudioManager.isMusicActive`, iOS's
@@ -394,7 +412,11 @@ class PluginRunnerSound
     _remember(on);
     if (on) {
       prepare();
-      if (_musicWanted && !_hidden) _run(_resumeMusic);
+      if (_musicWanted && !_hidden) {
+        _run(_resumeMusic);
+      } else if (_musicPreviewing && !_hidden) {
+        _run(_startPreviewPlayer);
+      }
     } else {
       _run(() async {
         await _musicPlayer?.pause();
@@ -622,8 +644,76 @@ class PluginRunnerSound
     });
   }
 
+  Future<void> _startPreviewPlayer() async {
+    if (!_musicPreviewing ||
+        _musicWanted ||
+        !_canSound ||
+        _hidden ||
+        _musicGain == 0) {
+      return;
+    }
+    if (_musicPlayer?.state != PlayerState.playing &&
+        await _othersPlayingNow()) {
+      return;
+    }
+    if (!_musicPreviewing ||
+        _musicWanted ||
+        !_canSound ||
+        _hidden ||
+        _musicGain == 0) {
+      return;
+    }
+    final player = await _readyMusic();
+    if (!_musicPreviewing ||
+        _musicWanted ||
+        !_canSound ||
+        _hidden ||
+        _musicGain == 0) {
+      return;
+    }
+    _musicLevel = 1;
+    await player.setVolume(_musicOut(1));
+    if (!_musicPreviewing ||
+        _musicWanted ||
+        !_canSound ||
+        _hidden ||
+        _musicGain == 0) {
+      return;
+    }
+    await player.resume();
+  }
+
+  @override
+  void refreshOtherMusic() {
+    if (_disposed) return;
+    _run(() async {
+      await _othersPlayingNow();
+    }, needsSound: false);
+  }
+
+  @override
+  void startMusicPreview() {
+    if (_disposed || _musicWanted) return;
+    _musicPreviewing = true;
+    if (!_enabled.value || _hidden || _musicGain == 0) return;
+    _run(_startPreviewPlayer);
+  }
+
+  @override
+  void stopMusicPreview() {
+    if (!_musicPreviewing) return;
+    _musicPreviewing = false;
+    if (_musicWanted) return;
+    _run(() async {
+      if (!_musicWanted && !_musicPreviewing) {
+        await _musicPlayer?.stop();
+      }
+    }, needsSound: false);
+  }
+
   @override
   void startMusic() {
+    _musicPreviewing = false;
     _musicWanted = true;
     if (!_enabled.value || _hidden) return;
     _musicLevel = 0;
@@ -633,10 +723,11 @@ class PluginRunnerSound
 
   @override
   void stopMusic() {
+    _musicPreviewing = false;
     _musicWanted = false;
     Future<void> stop() async {
       // A new run may have started the music again meanwhile.
-      if (!_musicWanted) await _musicPlayer?.stop();
+      if (!_musicWanted && !_musicPreviewing) await _musicPlayer?.stop();
     }
 
     if (_enabled.value && !_hidden && _musicPlayer != null) {
@@ -650,8 +741,11 @@ class PluginRunnerSound
   @override
   void setMusicVolume(double share) {
     if (!_rememberVolume(share, music: true)) return;
-    // Only the music of a run plays; the next one starts at this volume.
-    if (!_musicWanted || !_enabled.value || _hidden || _musicVolumeQueued) {
+    // Only the music of a run (or an active menu preview) plays.
+    if ((!_musicWanted && !_musicPreviewing) ||
+        !_enabled.value ||
+        _hidden ||
+        _musicVolumeQueued) {
       return;
     }
     _musicVolumeQueued = true;
@@ -660,7 +754,7 @@ class PluginRunnerSound
     // comes.
     _run(() async {
       _musicVolumeQueued = false;
-      if (!_canSound || !_musicWanted || _hidden) return;
+      if (!_canSound || (!_musicWanted && !_musicPreviewing) || _hidden) return;
       final player = _musicPlayer;
       final playing = player != null && player.state == PlayerState.playing;
       if (_musicGain == 0) {
@@ -668,9 +762,11 @@ class PluginRunnerSound
         if (playing) await player.pause();
       } else if (playing) {
         await player.setVolume(_musicOut(_musicLevel));
-      } else {
+      } else if (_musicWanted) {
         // Up from 0 %: it goes on.
         await _resumeMusic();
+      } else if (_musicPreviewing) {
+        await _startPreviewPlayer();
       }
     }, needsSound: false);
   }
@@ -734,6 +830,7 @@ class PluginRunnerSound
     for (final p in players) {
       unawaited(p.dispose().catchError((Object _) {}));
     }
+    _otherMusicActive.dispose();
     _disposeSettings();
   }
 }
@@ -791,7 +888,7 @@ abstract class WebAudioVoice {
 /// changes its sound, and seeks and restarts the element for every play.)
 class WebRunnerSound
     with _RememberedSettings
-    implements RunnerSound, RunnerMusic, RunnerVolumes {
+    implements RunnerSound, RunnerMusic, RunnerVolumes, RunnerMusicPreview {
   WebRunnerSound({
     @visibleForTesting WebAudio Function()? open,
     @visibleForTesting AssetBundle? bundle,
@@ -832,6 +929,33 @@ class WebRunnerSound
 
   /// Paused with the app in the background.
   bool _hidden = false;
+  bool _musicPreviewing = false;
+  final _otherMusicActive = ValueNotifier<bool>(false);
+
+  @override
+  ValueListenable<bool> get otherMusicActive => _otherMusicActive;
+
+  @override
+  void refreshOtherMusic() {}
+
+  @override
+  void startMusicPreview() {
+    if (_disposed || _musicWanted) return;
+    _musicPreviewing = true;
+    if (!_enabled.value || _hidden || _musicGain == 0) return;
+    prepare();
+    _startMusic();
+  }
+
+  @override
+  void stopMusicPreview() {
+    if (!_musicPreviewing) return;
+    _musicPreviewing = false;
+    if (_musicWanted) return;
+    final voice = _musicVoice;
+    _musicVoice = null;
+    if (voice != null) _safely(() => voice.stop(fadeOut: _silenceFade));
+  }
 
   void _safely(void Function() call) {
     try {
@@ -846,7 +970,7 @@ class WebRunnerSound
     _remember(on);
     if (on) {
       prepare();
-      if (_musicWanted) _startMusic();
+      if ((_musicWanted || _musicPreviewing) && !_hidden) _startMusic();
     } else {
       _safely(() {
         for (final voice in _voices.values) {
@@ -915,7 +1039,9 @@ class WebRunnerSound
       _musicVoice = null;
       _safely(() => before.stop(fadeOut: musicFadeOut));
     }
-    if (_musicWanted && _enabled.value) _startMusic();
+    if ((_musicWanted || _musicPreviewing) && _enabled.value && !_hidden) {
+      _startMusic();
+    }
   }
 
   /// The bytes come from Flutter's asset bundle, which knows the versioned
@@ -1011,7 +1137,9 @@ class WebRunnerSound
       final voice = _musicVoice;
       _musicVoice = null;
       if (voice != null) _safely(() => voice.stop(fadeOut: _silenceFade));
-    } else if (_musicWanted && _enabled.value) {
+    } else if ((_musicWanted || _musicPreviewing) &&
+        _enabled.value &&
+        !_hidden) {
       _startMusic();
     }
   }
@@ -1055,12 +1183,14 @@ class WebRunnerSound
 
   @override
   void startMusic() {
+    _musicPreviewing = false;
     _musicWanted = true;
-    if (_enabled.value) _startMusic();
+    if (_enabled.value && !_hidden) _startMusic();
   }
 
   @override
   void stopMusic() {
+    _musicPreviewing = false;
     _musicWanted = false;
     final voice = _musicVoice;
     _musicVoice = null;
@@ -1118,19 +1248,28 @@ class WebRunnerSound
     if (audio != null) _safely(audio.suspend);
   }
 
-  /// Back from the background. Safari lets a context continue that a tap
-  /// once started; otherwise the next "Vorhang auf" starts it.
+  /// Back from the background, or rescuing an AudioContext Safari suspended
+  /// during a system interruption (call, Siri, lock screen) without firing
+  /// [pauseMusic].
   @override
   void resumeMusic() {
-    if (!_hidden) return;
+    final wasHidden = _hidden;
     _hidden = false;
     final audio = _audio;
-    if (audio != null && _enabled.value) _safely(audio.resume);
+    if (audio != null && _enabled.value) {
+      _safely(audio.resume);
+      if (wasHidden &&
+          (_musicWanted || _musicPreviewing) &&
+          _musicVoice == null) {
+        _startMusic();
+      }
+    }
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _musicPreviewing = false;
     final audio = _audio;
     _audio = null;
     _clips.clear();
@@ -1142,6 +1281,7 @@ class WebRunnerSound
     _musicVoice = null;
     // Closing the context ends everything that still sounds.
     if (audio != null) _safely(audio.close);
+    _otherMusicActive.dispose();
     _disposeSettings();
   }
 }

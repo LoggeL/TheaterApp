@@ -677,6 +677,12 @@ void main() {
       expect(find.text('Leicht · Lauf 1 m in einem Durchgang'), findsOneWidget);
       expect(find.text('0/25 Rosen · +600 m für die Kisten'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('mission-reroll-hard')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('mission-reroll-confirm')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('mission-reroll-confirm-ok')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       expect(calls, contains('POST missions/reroll'));

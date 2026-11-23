@@ -29,12 +29,20 @@ class Tally {
 
 /// How far a rarity of the draw is collected.
 class RarityTally {
-  const RarityTally(this.rarity, this.tally, {this.locked = false});
+  const RarityTally(
+    this.rarity,
+    this.tally, {
+    this.locked = false,
+    this.lockProgress,
+  });
   final WardrobeRarity rarity;
   final Tally tally;
 
   /// Not in the draw yet ([Wardrobe.lockedRarities]).
   final bool locked;
+
+  /// Unlock progress `(have, need)` while [locked], if declared.
+  final (int, int)? lockProgress;
 }
 
 /// How far the figures of a play (or the technicians) are collected, and
@@ -48,6 +56,7 @@ class PlayTally {
     this.technicians = false,
     this.missing = const [],
     this.unique,
+    this.extraUniques = const [],
   });
 
   /// "Creepshow 2026", or "Technik".
@@ -60,6 +69,12 @@ class PlayTally {
 
   /// The way to the play's unique figure, if it has one.
   final UniqueFigureProgress? unique;
+
+  /// Additional multi-play unique figures involving this play.
+  final List<UniqueFigureProgress> extraUniques;
+
+  /// All unique figures involving this play.
+  List<UniqueFigureProgress> get uniques => [?unique, ...extraUniques];
 
   /// The production as the figure filter knows it; null for technicians.
   String? get production => technicians ? null : title;
@@ -74,19 +89,30 @@ class PlayTally {
   String? get uniqueText {
     final u = unique;
     if (u == null) return null;
-    if (u.unlocked) return 'Unique freigeschaltet';
-    final left = (u.total - u.have).clamp(0, u.total);
-    final noun = u.itemNoun;
-    final what = noun != null
-        ? left == 1
-              ? noun.one
-              : noun.many
-        : u.allTechnicians
-        ? 'Techniker'
-        : left == 1
-        ? 'Rolle'
-        : 'Rollen';
-    return 'Unique: noch $left $what';
+    final String base;
+    if (u.unlocked) {
+      base = 'Unique freigeschaltet';
+    } else {
+      final left = (u.total - u.have).clamp(0, u.total);
+      final noun = u.itemNoun;
+      final what = noun != null
+          ? left == 1
+                ? noun.one
+                : noun.many
+          : u.allTechnicians
+          ? 'Techniker'
+          : left == 1
+          ? 'Rolle'
+          : 'Rollen';
+      base = 'Unique: noch $left $what';
+    }
+    if (extraUniques.isEmpty) return base;
+    final openExtra = extraUniques.where((e) => !e.unlocked).firstOrNull;
+    if (u.unlocked && openExtra != null) {
+      final left = (openExtra.total - openExtra.have).clamp(0, openExtra.total);
+      return 'Unique ✓ · Kombi: noch $left';
+    }
+    return openExtra != null ? '$base · +Kombi' : '$base · Kombi ✓';
   }
 }
 
@@ -147,6 +173,7 @@ class WardrobeOverview {
             r,
             Tally.of(items, w),
             locked: w.lockedRarities.contains(r.id),
+            lockProgress: w.lockProgress(r),
           ),
     ];
     final progress = unique
@@ -175,22 +202,38 @@ class WardrobeOverview {
     final plays =
         [
           for (final MapEntry(key: title, value: items) in byPlay.entries)
-            PlayTally(
-              title: title,
-              play: items.first.role?.play,
-              year: items.first.role?.year,
-              tally: Tally.of(items, w),
-              missing: missing(items),
-              unique: progress
-                  .where(
-                    (p) =>
-                        !p.several &&
-                        !p.allTechnicians &&
-                        p.play == items.first.role?.play &&
-                        (p.year == null || p.year == items.first.role?.year),
-                  )
-                  .firstOrNull,
-            ),
+            () {
+              final playName = items.first.role?.play;
+              final playYear = items.first.role?.year;
+              final ownUnique = playName == null
+                  ? null
+                  : progress
+                        .where(
+                          (p) =>
+                              !p.several &&
+                              !p.allTechnicians &&
+                              !p.itemSet &&
+                              p.involvesPlay(playName, playYear),
+                        )
+                        .firstOrNull;
+              final multiUniques = playName == null
+                  ? const <UniqueFigureProgress>[]
+                  : [
+                      for (final p in progress)
+                        if (p.several && p.involvesPlay(playName, playYear)) p,
+                    ];
+              return PlayTally(
+                title: title,
+                play: playName,
+                year: playYear,
+                tally: Tally.of(items, w),
+                missing: missing(items),
+                unique: ownUnique ?? multiUniques.firstOrNull,
+                extraUniques: ownUnique == null
+                    ? multiUniques.skip(1).toList()
+                    : multiUniques,
+              );
+            }(),
         ]..sort((a, b) {
           final year = (b.year ?? 0).compareTo(a.year ?? 0);
           return year != 0 ? year : a.title.compareTo(b.title);
@@ -323,12 +366,20 @@ class CollectionSummaryCard extends StatelessWidget {
     required this.overview,
     required this.waitingCrates,
     this.onCrates,
+    this.selectedRarity,
+    this.onSelectRarity,
   });
   final WardrobeOverview overview;
   final int waitingCrates;
 
   /// To the crates; the way there shows only while [waitingCrates] wait.
   final VoidCallback? onCrates;
+
+  /// Currently active rarity filter, if any.
+  final String? selectedRarity;
+
+  /// Toggles filtering by a rarity when its cell is tapped.
+  final ValueChanged<String?>? onSelectRarity;
 
   @override
   Widget build(BuildContext context) {
@@ -478,58 +529,115 @@ class CollectionSummaryCard extends StatelessWidget {
                     Semantics(
                       key: ValueKey('wardrobe-rarity-${r.rarity.id}'),
                       container: true,
+                      button: onSelectRarity != null,
+                      selected: selectedRarity == r.rarity.id,
                       label:
                           '${r.rarity.name}: ${r.tally.text}${r.locked ? ', noch gesperrt' : ''}',
                       excludeSemantics: true,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              if (r.locked)
-                                Icon(
-                                  Icons.lock_outline,
-                                  size: 12,
-                                  color: scheme.onSurfaceVariant,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: onSelectRarity == null
+                            ? null
+                            : () => onSelectRarity!(
+                                selectedRarity == r.rarity.id
+                                    ? null
+                                    : r.rarity.id,
+                              ),
+                        child: Container(
+                          padding: selectedRarity == r.rarity.id
+                              ? const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
                                 )
-                              else
-                                CircleAvatar(
-                                  radius: 4,
-                                  backgroundColor: r.rarity.color,
+                              : EdgeInsets.zero,
+                          decoration: selectedRarity == r.rarity.id
+                              ? BoxDecoration(
+                                  color: StageTheme.selectedTint(
+                                    theme.brightness,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                )
+                              : null,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  if (r.locked)
+                                    Icon(
+                                      Icons.lock_outline,
+                                      size: 12,
+                                      color: scheme.onSurfaceVariant,
+                                    )
+                                  else
+                                    CircleAvatar(
+                                      radius: 4,
+                                      backgroundColor: r.rarity.color,
+                                    ),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      r.rarity.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.labelMedium,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              TallyBar(
+                                r.tally.fraction,
+                                color: StageTheme.legible(
+                                  r.rarity.color,
+                                  surface,
+                                  minimum: 3,
                                 ),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  r.rarity.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.labelMedium,
-                                ),
+                                height: 4,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                r.tally.complete
+                                    ? '${r.tally.owned} ✓'
+                                    : '${r.tally.owned}/${r.tally.total}',
+                                style: theme.textTheme.bodySmall,
                               ),
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          TallyBar(
-                            r.tally.fraction,
-                            color: StageTheme.legible(
-                              r.rarity.color,
-                              surface,
-                              minimum: 3,
-                            ),
-                            height: 4,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            r.tally.complete
-                                ? '${r.tally.owned} ✓'
-                                : '${r.tally.owned}/${r.tally.total}',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                 ],
               ),
+              for (final r in overview.rarities)
+                if (r.locked &&
+                    (r.lockProgress != null || r.rarity.hint != null))
+                  Padding(
+                    key: ValueKey('wardrobe-locked-hint-${r.rarity.id}'),
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.lock_outline,
+                          size: 14,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            [
+                              '${r.rarity.name} gesperrt',
+                              if (r.lockProgress case (final have, final need))
+                                '$have/$need',
+                              ?r.rarity.hint,
+                            ].join(' · '),
+                            style: quiet,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
             ],
             if (notes.isNotEmpty || crates != null) ...[
               const SizedBox(height: 8),

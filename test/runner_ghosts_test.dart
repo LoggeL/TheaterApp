@@ -68,10 +68,18 @@ class _Drawn implements Canvas {
   void saveLayer(Rect? bounds, Paint paint) =>
       calls.add(('layer', null, bounds, paint.color.a));
 
-  /// Only the ghosts' crosses draw lines on this stage.
+  static const _ghostMarkColors = {
+    0x40DCE6F0,
+    0xCCF2C45A,
+    0xCCD5DCE2,
+    0xCCD9A06A,
+    0xDDE96131,
+  };
+
+  /// Only the ghosts' crosses draw lines in these colours on this stage.
   @override
   void drawLine(Offset p1, Offset p2, Paint paint) {
-    if (paint.color.toARGB32() == 0x40DCE6F0) {
+    if (_ghostMarkColors.contains(paint.color.toARGB32())) {
       calls.add(('line', null, null, paint.color.a));
     }
   }

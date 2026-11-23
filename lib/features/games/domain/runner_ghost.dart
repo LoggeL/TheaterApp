@@ -152,6 +152,14 @@ class RunnerGhost {
   /// The name tag: "2. Lena", or "2. Du".
   late final String tag = me ? '$rank. Du' : '$rank. $name';
 
+  /// Short label beside the crash marker when passing it: "Du" for the own
+  /// best run (or "$rank. Du" in the top three), else "$rank. $name".
+  late final String crashTag = me ? (top ? '$rank. Du' : 'Du') : tag;
+
+  /// Whether this ghost's crash marker is highlighted with its medal or own
+  /// colour and a short label.
+  bool get highlightCrash => top || me;
+
   /// The height at [time], between the samples around it.
   double yAt(double time) {
     if (samples.isEmpty) return StageRunner.floor;

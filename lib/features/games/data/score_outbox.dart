@@ -36,7 +36,7 @@ class RunScore {
 /// and keeps those that failed for want of a connection to send them again
 /// later (in this app session). The server takes a repeated result once
 /// (see server/src/runner-rounds.mjs), so a resend never counts twice.
-class RunnerScoreOutbox {
+class RunnerScoreOutbox extends ChangeNotifier {
   RunnerScoreOutbox(this.controller);
   final AppController controller;
 
@@ -46,10 +46,17 @@ class RunnerScoreOutbox {
   static const limit = 20;
 
   final _waiting = <_Waiting>[];
-  Future<void>? _retrying;
+  Future<int>? _retrying;
+  RoundResult? _lastResult;
 
   /// How many results wait for a resend.
   int get waiting => _waiting.length;
+
+  /// Whether a resend is currently in flight.
+  bool get retrying => _retrying != null;
+
+  /// The most recent server result received via [send] or [retry].
+  RoundResult? get lastResult => _lastResult;
 
   /// Whether [run] waits for a resend.
   bool waits(RunScore run) => _waiting.any((w) => identical(w.run, run));
@@ -62,6 +69,7 @@ class RunnerScoreOutbox {
     final entry = _Waiting(roundId, run);
     try {
       final result = await _submit(entry);
+      _lastResult = result;
       unawaited(retry());
       return result;
     } catch (e) {
@@ -71,27 +79,35 @@ class RunnerScoreOutbox {
   }
 
   /// Sends the waiting results again, one after the other; stops at the
-  /// first one that still finds no connection.
-  Future<void> retry() =>
-      _retrying ??= _retryAll().whenComplete(() => _retrying = null);
+  /// first one that still finds no connection. Returns how many were sent.
+  Future<int> retry() => _retrying ??= _retryAll().whenComplete(() {
+    _retrying = null;
+    notifyListeners();
+  });
 
-  Future<void> _retryAll() async {
+  Future<int> _retryAll() async {
+    var sent = 0;
+    notifyListeners();
     while (_waiting.isNotEmpty) {
       final entry = _waiting.first;
       try {
-        await _submit(entry);
+        _lastResult = await _submit(entry);
+        sent++;
       } catch (e) {
-        if (_retryable(e)) return;
+        if (_retryable(e)) return sent;
         if (kDebugMode) debugPrint('Bühnenlauf: Ergebnis verworfen: $e');
       }
       _waiting.remove(entry);
+      notifyListeners();
     }
+    return sent;
   }
 
   void _keep(_Waiting entry) {
     if (_waiting.any((w) => w.roundId == entry.roundId)) return;
     _waiting.add(entry);
     if (_waiting.length > limit) _waiting.removeAt(0);
+    notifyListeners();
   }
 
   Future<RoundResult> _submit(_Waiting entry) => submitRound(

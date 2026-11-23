@@ -403,8 +403,8 @@ void main() {
       double top(String key) => tester.getTopLeft(find.byKey(ValueKey(key))).dy;
       expect(top('runner-hero'), lessThan(top('runner-stand')));
       expect(top('runner-stand'), lessThan(top('ensemble-strip')));
-      expect(top('ensemble-strip'), lessThan(top('runner-ranking')));
-      expect(top('runner-ranking'), lessThan(top('runner-missions')));
+      expect(top('ensemble-strip'), lessThan(top('runner-missions')));
+      expect(top('runner-missions'), lessThan(top('runner-ranking')));
       await tester.pumpWidget(const SizedBox());
     });
 

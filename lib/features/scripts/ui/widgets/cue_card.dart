@@ -1,8 +1,16 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/theme/stage_theme.dart';
 import '../../domain/cue_category.dart';
 import '../../domain/script_document.dart';
 import 'reader_style.dart';
+
+String _microphoneLabel(String raw) {
+  final value = raw.trim();
+  if (value.isEmpty) return '';
+  if (value.toLowerCase().startsWith('mikro')) return value;
+  return 'Mikro $value';
+}
 
 /// One cue in the reader list.
 ///
@@ -50,9 +58,17 @@ class _CueCardState extends State<CueCard> {
         direction = cue.kind == 'direction',
         technical = cue.isTechnical,
         category = cueCategoryInfo(cue.kind),
-        comments = widget.commentCount;
+        comments = widget.commentCount,
+        micType = cue.micCueType.trim().toUpperCase(),
+        micLabel = _microphoneLabel(cue.microphone);
     final header =
-        !direction || widget.bookmarked || widget.hasNote || comments > 0;
+        !direction ||
+        widget.bookmarked ||
+        widget.hasNote ||
+        comments > 0 ||
+        cue.isAutoMic ||
+        micType.isNotEmpty ||
+        micLabel.isNotEmpty;
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -60,9 +76,13 @@ class _CueCardState extends State<CueCard> {
           Row(
             children: [
               Expanded(
-                child: direction
-                    ? const SizedBox.shrink()
-                    : Text(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (!direction)
+                      Text(
                         technical ? category.label.toUpperCase() : cue.role,
                         style: TextStyle(
                           fontSize: 12 * widget.fontScale,
@@ -75,9 +95,13 @@ class _CueCardState extends State<CueCard> {
                               : theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
+                    if (micType.isNotEmpty) _MicCuePill(micType: micType),
+                    if (micLabel.isNotEmpty) _MicChannelBadge(label: micLabel),
+                    if (cue.isAutoMic)
+                      Text('AUTO', style: theme.textTheme.labelSmall),
+                  ],
+                ),
               ),
-              if (cue.isAutoMic)
-                Text('AUTO', style: theme.textTheme.labelSmall),
               if (comments > 0)
                 TextButton.icon(
                   onPressed: widget.onComments,
@@ -251,4 +275,102 @@ TextSpan highlightedText(String text, String query, TextStyle style) {
     cursor = index + needle.length;
   }
   return TextSpan(style: style, children: spans);
+}
+
+/// High-contrast EIN/AUS indicator for automatic microphone cues.
+class _MicCuePill extends StatelessWidget {
+  const _MicCuePill({required this.micType});
+  final String micType;
+
+  @override
+  Widget build(BuildContext context) {
+    final isOn = micType == 'EIN';
+    final isOff = micType == 'AUS';
+    final accent = isOn
+        ? StageTheme.green
+        : isOff
+        ? const Color(0xFFAA4040)
+        : cueCategoryInfo('microphone').color;
+    final (:fill, :foreground) = StageTheme.tintedLabel(
+      accent,
+      Theme.of(context).brightness,
+    );
+    final semantics = isOn
+        ? 'Mikrofon einschalten'
+        : isOff
+        ? 'Mikrofon ausschalten'
+        : 'Mikrofon $micType';
+    return Semantics(
+      label: semantics,
+      child: ExcludeSemantics(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: fill,
+            borderRadius: BorderRadius.circular(50),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isOn
+                    ? Icons.mic_rounded
+                    : isOff
+                    ? Icons.mic_off_rounded
+                    : Icons.mic_none_rounded,
+                size: 13,
+                color: foreground,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                micType,
+                style: TextStyle(
+                  color: foreground,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: .5,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact badge showing the assigned microphone channel of a cue.
+class _MicChannelBadge extends StatelessWidget {
+  const _MicChannelBadge({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final (:fill, :foreground) = StageTheme.tintedLabel(
+      cueCategoryInfo('microphone').color,
+      Theme.of(context).brightness,
+    );
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(50),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.mic_none_rounded, size: 13, color: foreground),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: foreground,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

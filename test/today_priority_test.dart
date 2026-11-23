@@ -360,7 +360,8 @@ void main() {
       await signIn(controller);
       server.offline = true;
       await _pump(tester, controller);
-      expect(find.text('Kleine Bühne'), findsNothing);
+      expect(find.text('Kleine Bühne'), findsOneWidget);
+      expect(find.byIcon(Icons.check_box_outline_blank), findsNWidgets(2));
       await tester.tap(find.text('Jetzt abstimmen'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Großer Saal'));
@@ -381,6 +382,48 @@ void main() {
       await tester.tap(find.text('Großer Saal'));
       await tester.pumpAndSettle();
       expect(controller.polls.single.selectedOptionIds, ['b']);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
+    'multiple-choice poll can be ticked inline on Today without disappearing',
+    (tester) async {
+      addTearDown(tester.view.reset);
+      final server = TestServer()
+        ..data['polls'] = [
+          {..._poll(), 'allowMultiple': true, 'totalVotes': 3},
+        ];
+      final controller = server.controller();
+      await signIn(controller);
+      server.offline = true;
+      await _pump(tester, controller);
+      expect(find.byIcon(Icons.check_box_outline_blank), findsNWidgets(2));
+      // Full-size targets on inline multi-select rows too.
+      final answer = find.ancestor(
+        of: find.text('Großer Saal'),
+        matching: find.byType(InkWell),
+      );
+      expect(tester.getSize(answer.first).height, greaterThanOrEqualTo(48));
+
+      await tester.tap(find.text('Großer Saal'));
+      await tester.pumpAndSettle();
+      // Stays pinned on top so further options can be ticked immediately.
+      expect(find.byKey(const ValueKey('today-poll-poll')), findsOneWidget);
+      expect(find.byKey(const ValueKey('today-poll-voted')), findsNothing);
+      expect(find.byIcon(Icons.check_box), findsOneWidget);
+      expect(find.byIcon(Icons.check_box_outline_blank), findsOneWidget);
+      expect(controller.polls.single.selectedOptionIds, ['a']);
+
+      await tester.tap(find.text('Kleine Bühne'));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.check_box), findsNWidgets(2));
+      expect(controller.polls.single.selectedOptionIds, ['a', 'b']);
+
+      // Fits small phones with large text too.
+      await _pump(tester, controller, width: 320, scale: 2);
+      expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
     },

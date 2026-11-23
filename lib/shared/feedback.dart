@@ -146,14 +146,22 @@ Future<bool> confirmDiscardChanges(BuildContext context) => confirmDestructive(
 /// The mounted guards that currently hold unsaved input.
 final _dirtyGuards = <_DiscardGuardState>{};
 
+List<_DiscardGuardState> _activeDirtyGuards(
+  NavigatorState navigator, [
+  RoutePredicate? until,
+]) => [
+  for (final guard in _dirtyGuards)
+    if (guard.route case final route?
+        when route.navigator == navigator &&
+            route.isActive &&
+            !route.isFirst &&
+            (until == null || !until(route)))
+      guard,
+];
+
 /// Whether a page above the first route of [navigator] holds unsaved input.
-bool hasUnsavedChanges(NavigatorState navigator) => _dirtyGuards.any((guard) {
-  final route = guard.route;
-  return route != null &&
-      route.navigator == navigator &&
-      route.isActive &&
-      !route.isFirst;
-});
+bool hasUnsavedChanges(NavigatorState navigator) =>
+    _activeDirtyGuards(navigator).isNotEmpty;
 
 /// Goes back to the first route of [navigator]. Pages with unsaved input ask
 /// first; resolves to false (and stays put) when the member keeps editing.
@@ -170,8 +178,12 @@ Future<bool> popBackTo(
   NavigatorState navigator,
   RoutePredicate until,
 ) async {
-  if (hasUnsavedChanges(navigator) && !await confirmDiscardChanges(context)) {
-    return false;
+  final guards = _activeDirtyGuards(navigator, until);
+  if (guards.isNotEmpty) {
+    final guard =
+        guards.where((g) => g.route?.isCurrent == true).lastOrNull ??
+        guards.last;
+    if (!await guard.confirm(context)) return false;
   }
   if (!navigator.mounted) return false;
   navigator.popUntil((route) => route.isFirst || until(route));
@@ -179,10 +191,19 @@ Future<bool> popBackTo(
 }
 
 /// Blocks leaving a page with unsaved input until the member confirms.
+///
+/// By default asks with [confirmDiscardChanges]; pass [confirm] for a custom
+/// prompt (e.g. pausing and confirming before leaving an active game run).
 class DiscardGuard extends StatefulWidget {
-  const DiscardGuard({super.key, required this.dirty, required this.child});
+  const DiscardGuard({
+    super.key,
+    required this.dirty,
+    required this.child,
+    this.confirm,
+  });
   final bool dirty;
   final Widget child;
+  final Future<bool> Function(BuildContext context)? confirm;
 
   @override
   State<DiscardGuard> createState() => _DiscardGuardState();
@@ -190,6 +211,17 @@ class DiscardGuard extends StatefulWidget {
 
 class _DiscardGuardState extends State<DiscardGuard> {
   ModalRoute<Object?>? route;
+  bool _confirming = false;
+
+  Future<bool> confirm(BuildContext context) async {
+    if (_confirming) return false;
+    _confirming = true;
+    try {
+      return await (widget.confirm ?? confirmDiscardChanges)(context);
+    } finally {
+      _confirming = false;
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -215,7 +247,9 @@ class _DiscardGuardState extends State<DiscardGuard> {
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
         final navigator = Navigator.of(context);
-        if (await confirmDiscardChanges(context)) navigator.pop(result);
+        if (await confirm(context) && navigator.mounted) {
+          navigator.pop(result);
+        }
       },
       child: widget.child,
     );
