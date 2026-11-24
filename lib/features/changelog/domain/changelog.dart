@@ -27,6 +27,15 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.17.1',
+    date: '24. November 2026',
+    items: [
+      'Flüssigere Darstellung und schnellere Ladezeiten in der ganzen App sowie im Browser.',
+      'Gewertete Läufe der Wochenprobe zählen jetzt auch für die Gesamt- und Monatsrangliste, während Training getrennt bleibt.',
+      'Überarbeitete Figuren-Grafiken und kleine Verbesserungen im Hintergrund.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.17.0',
     date: '23. November 2026',
     items: [

@@ -1,0 +1,1 @@
+Flüssigere Darstellung und schnellere Ladezeiten in der App und im Browser. Gewertete Läufe der Wochenprobe zählen jetzt auch für die Gesamt- und Monatsrangliste, während Training getrennt bleibt. Außerdem überarbeitete Figuren-Grafiken und kleine Verbesserungen im Hintergrund.
