@@ -3404,6 +3404,7 @@ class StageRunnerPainter extends CustomPainter {
     _rim.dispose();
     _backdropShader?.dispose();
     _backdropShader = null;
+    _backdropShaderPaint.shader = null;
     _backdropImage = null;
   }
 
@@ -3532,7 +3533,7 @@ class StageRunnerPainter extends CustomPainter {
       _backdropTile = tile;
       _backdropH = h;
       _backdropQuality = quality;
-      _backdropShader = ui.ImageShader(
+      _backdropShader = _createImageShader(
         image,
         TileMode.mirror,
         TileMode.clamp,
@@ -5733,6 +5734,29 @@ class _DiscBatch {
   }
 }
 
+/// Flutter's CanvasKit [ui.ImageShader] keeps the passed [ui.Image] handle
+/// without cloning it and disposes that handle in [ui.ImageShader.dispose]
+/// (`CkImageShader.dispose`), unlike Skwasm and native engines. Passing a
+/// cloned handle on CanvasKit keeps ownership uniform across all backends:
+/// callers always retain their own [ui.Image] (e.g. a shared backdrop in
+/// [RunnerArt] or [WardrobePictures]) and still dispose images they own (e.g.
+/// [_BakedStrip]) without double-disposing.
+const _imageShaderDisposesInput = kIsWeb && !kIsWasm;
+
+ui.ImageShader _createImageShader(
+  ui.Image image,
+  TileMode tmx,
+  TileMode tmy,
+  Float64List matrix4, {
+  FilterQuality? filterQuality,
+}) => ui.ImageShader(
+  _imageShaderDisposesInput ? image.clone() : image,
+  tmx,
+  tmy,
+  matrix4,
+  filterQuality: filterQuality,
+);
+
 /// Pre-baked repeating texture entry for a single periodic decoration strip.
 class _BakedStrip {
   _BakedStrip(this.image, this.shader, this.paint, this.stripTop, this.stripH);
@@ -5742,6 +5766,7 @@ class _BakedStrip {
   final double stripTop, stripH;
 
   void dispose() {
+    paint.shader = null;
     shader.dispose();
     image.dispose();
   }
@@ -5924,7 +5949,7 @@ class _DecorationCache {
       _rasterFailed = true;
       return null;
     }
-    final shader = ui.ImageShader(
+    final shader = _createImageShader(
       img,
       TileMode.repeated,
       TileMode.clamp,
@@ -6030,7 +6055,7 @@ class _DecorationCache {
       _rasterFailed = true;
       return null;
     }
-    final shader = ui.ImageShader(
+    final shader = _createImageShader(
       img,
       TileMode.repeated,
       TileMode.clamp,
@@ -6141,7 +6166,7 @@ class _DecorationCache {
       _rasterFailed = true;
       return null;
     }
-    final shader = ui.ImageShader(
+    final shader = _createImageShader(
       img,
       TileMode.repeated,
       TileMode.clamp,
@@ -6724,7 +6749,7 @@ class _DecorationCache {
       _rasterFailed = true;
       return null;
     }
-    final shader = ui.ImageShader(
+    final shader = _createImageShader(
       img,
       TileMode.repeated,
       TileMode.clamp,
