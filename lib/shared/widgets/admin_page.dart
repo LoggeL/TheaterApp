@@ -4,23 +4,32 @@ import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import '../../core/account_permissions.dart';
 import '../../core/app_controller.dart';
 import '../feedback.dart';
+import 'visible_listenable_builder.dart';
 
 class AdminPage extends StatelessWidget {
   const AdminPage({
     super.key,
     required this.controller,
     required this.title,
-    required this.children,
+    this.children,
+    this.slivers,
     this.actions,
     this.scrollController,
     this.cacheExtent,
     this.floatingActionButton,
     this.onRefresh,
     this.permission,
-  });
+  }) : assert(
+         (children != null) != (slivers != null),
+         'Provide either children or slivers.',
+       );
   final AppController controller;
   final String title;
-  final List<Widget> Function(BuildContext) children;
+  final List<Widget> Function(BuildContext)? children;
+
+  /// Optional sliver builder for long lists that benefit from lazy
+  /// `SliverList.builder` virtualization.
+  final List<Widget> Function(BuildContext)? slivers;
   final List<Widget>? actions;
   final ScrollController? scrollController;
 
@@ -43,8 +52,8 @@ class AdminPage extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: controller,
+  Widget build(BuildContext context) => VisibleListenableBuilder(
+    listenable: controller,
     builder: (context, _) => Scaffold(
       appBar: AppBar(title: Text(title), actions: actions),
       floatingActionButton: _allowed ? floatingActionButton : null,
@@ -63,19 +72,26 @@ class AdminPage extends StatelessWidget {
                   onRefresh:
                       onRefresh ??
                       () => refreshWithFeedback(context, controller),
-                  child: ListView(
-                    controller: scrollController,
-                    scrollCacheExtent: cacheExtent,
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    // Room below the last card for the create button.
-                    padding: EdgeInsets.fromLTRB(
-                      22,
-                      14,
-                      22,
-                      floatingActionButton == null ? 32 : 96,
-                    ),
-                    children: children(context),
-                  ),
+                  child: slivers != null
+                      ? CustomScrollView(
+                          controller: scrollController,
+                          scrollCacheExtent: cacheExtent,
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          slivers: slivers!(context),
+                        )
+                      : ListView(
+                          controller: scrollController,
+                          scrollCacheExtent: cacheExtent,
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          // Room below the last card for the create button.
+                          padding: EdgeInsets.fromLTRB(
+                            22,
+                            14,
+                            22,
+                            floatingActionButton == null ? 32 : 96,
+                          ),
+                          children: children!(context),
+                        ),
                 ),
               ),
             ),

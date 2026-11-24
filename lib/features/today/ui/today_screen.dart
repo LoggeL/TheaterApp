@@ -28,8 +28,14 @@ import '../../slots/ui/slot_pools_screen.dart';
 import '../domain/today_digest.dart';
 import 'quick_rsvp.dart';
 
+// Created once: building a DateFormat parses its pattern and locale symbols.
+final _shortDateFormat = DateFormat('EEE d. MMM', 'de');
+final _headerDateFormat = DateFormat('EEEE, d. MMMM', 'de');
+final _pollCloseFormat = DateFormat('d. MMMM · HH:mm', 'de');
+final _badgeDayFormat = DateFormat('dd.MM.');
+
 /// Weekday and date, short enough for one line on the cards.
-String _shortDate(DateTime date) => DateFormat('EEE d. MMM', 'de').format(date);
+String _shortDate(DateTime date) => _shortDateFormat.format(date);
 
 /// The start page, ordered by urgency: things still waiting for the person
 /// (an open response, unread messages, an open poll, a slot to choose) come
@@ -146,7 +152,7 @@ class _TodayScreenState extends State<TodayScreen> {
       ),
       const SizedBox(height: 8),
       Text(
-        DateFormat('EEEE, d. MMMM', 'de').format(now),
+        _headerDateFormat.format(now),
         style: Theme.of(context).textTheme.bodyMedium,
       ),
     ];
@@ -352,33 +358,31 @@ class _TodayScreenState extends State<TodayScreen> {
         ),
         for (final (i, m) in openForms.take(3).indexed) ...[
           if (i > 0) const SizedBox(height: 10),
-          _CompactTile(
-            key: ValueKey('today-form-${m['id']}'),
-            icon: Icons.description_outlined,
-            title: textValue(
-              jsonMap(m['form'])['title'],
-              textValue(m['title']),
-            ),
-            subtitle:
-                textValue(m['title']).isNotEmpty &&
-                    textValue(m['title']) !=
-                        textValue(jsonMap(m['form'])['title'])
-                ? '${textValue(m['title'])} · Formular ausfüllen'
-                : 'Formular ausfüllen',
-            highlight: true,
-            onTap: () async {
-              await openPage(
-                context,
-                FormResponseScreen(
-                  controller: controller,
-                  messageId: textValue(m['id']),
-                ),
-              );
-              if (context.mounted) {
-                await refreshWithFeedback(context, controller);
-              }
-            },
-          ),
+          () {
+            final formTitle = textValue(readJsonMap(m['form'])['title']);
+            final msgTitle = textValue(m['title']);
+            return _CompactTile(
+              key: ValueKey('today-form-${m['id']}'),
+              icon: Icons.description_outlined,
+              title: formTitle.isNotEmpty ? formTitle : msgTitle,
+              subtitle: msgTitle.isNotEmpty && msgTitle != formTitle
+                  ? '$msgTitle · Formular ausfüllen'
+                  : 'Formular ausfüllen',
+              highlight: true,
+              onTap: () async {
+                await openPage(
+                  context,
+                  FormResponseScreen(
+                    controller: controller,
+                    messageId: textValue(m['id']),
+                  ),
+                );
+                if (context.mounted) {
+                  await refreshWithFeedback(context, controller);
+                }
+              },
+            );
+          }(),
         ],
         if (openForms.length > 3)
           Padding(
@@ -657,7 +661,7 @@ class _PollPreviewState extends State<_PollPreview> {
                 Text(
                   poll.closesAt == null
                       ? 'Ohne Frist'
-                      : 'Bis ${DateFormat('d. MMMM · HH:mm', 'de').format(poll.closesAt!.toLocal())}',
+                      : 'Bis ${_pollCloseFormat.format(poll.closesAt!.toLocal())}',
                 ),
               ],
             ),
@@ -838,7 +842,7 @@ class _NextRehearsal extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    DateFormat('dd.MM.').format(event.startsAt!),
+                    _badgeDayFormat.format(event.startsAt!),
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w700,

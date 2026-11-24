@@ -15,18 +15,16 @@ int unansweredSoon(AppController controller, DateTime now) => controller.events
     .length;
 
 /// Events that have not ended yet, sorted by start; undated events last.
-List<TheaterEvent> upcomingEvents(AppController controller, DateTime now) =>
-    controller.events
-        .where(
-          (e) => e.startsAt == null || (e.endsAt ?? e.startsAt!).isAfter(now),
-        )
-        .toList()
-      ..sort(
-        (a, b) => (a.startsAt ?? DateTime(9999)).compareTo(
-          b.startsAt ?? DateTime(9999),
-        ),
-      );
+/// [AppController.events] is already maintained in start-time order.
+List<TheaterEvent> upcomingEvents(AppController controller, DateTime now) => [
+  for (final e in controller.events)
+    if (e.startsAt == null || (e.endsAt ?? e.startsAt!).isAfter(now)) e,
+];
 
 /// The first of the [upcomingEvents], if any.
-TheaterEvent? nextEvent(AppController controller, DateTime now) =>
-    upcomingEvents(controller, now).firstOrNull;
+TheaterEvent? nextEvent(AppController controller, DateTime now) {
+  for (final e in controller.events) {
+    if (e.startsAt == null || (e.endsAt ?? e.startsAt!).isAfter(now)) return e;
+  }
+  return null;
+}

@@ -80,6 +80,8 @@ flutter test integration_test/app_flow_test.dart -d emulator-5554 --dart-define-
 
 Die tatsächliche Geräte-ID steht in `flutter devices`.
 
+Der [Bühnenlauf-Agent](tool/runner_agent/README.md) spielt offline mit begrenzter Reaktionszeit. Seine Läufe lassen sich auswerten und als Video ansehen.
+
 ## Konfiguration und Betrieb
 
 Öffentliche Firebase-Clientkonfiguration liegt unter `config/`, `android/app/google-services.json` und `ios/Runner/GoogleService-Info.plist`. Diese Identifikatoren sind keine Server-Anmeldeschlüssel. Der Server prüft ID-Token und die eigene Freigabe bei jedem geschützten Zugriff.

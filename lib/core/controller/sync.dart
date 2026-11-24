@@ -194,11 +194,11 @@ extension SyncController on AppController {
         }
         if (error is! ApiException || error.retryable) {
           _isOffline = true;
-          _outbox = _outbox
-              .map(
-                (e) => e.id == action.id ? e.withStatus('pending', _error) : e,
-              )
-              .toList();
+          _replaceOutbox(
+            _outbox.map(
+              (e) => e.id == action.id ? e.withStatus('pending', _error) : e,
+            ),
+          );
           await _persistCore(generation);
           _rebuild();
           _notify();
@@ -227,44 +227,46 @@ extension SyncController on AppController {
         // member's draft. The refresh after sending loads the current state.
         var afterRejectedAction = false;
         final rejectedEventId = _versionedEventId(action.payload);
-        _outbox = _outbox.map((pending) {
-          if (pending.id == action.id) {
-            afterRejectedAction = true;
-            return pending.withStatus(
-              'failed',
-              _error,
-              error.statusCode,
-              error.code,
-            );
-          }
-          if (afterRejectedAction &&
-              !pending.failed &&
-              rejectedEventId != null &&
-              _versionedEventId(pending.payload) == rejectedEventId) {
-            // Later projected versions depend on the preceding save succeeding.
-            // Keep the original base version for explicit retry as well, so a
-            // coincidentally matching foreign version cannot be overwritten.
-            return PendingAction(
-              id: pending.id,
-              payload: {
-                ...pending.payload,
-                'version':
-                    action.payload['version'] ??
-                    jsonList(_baseSnapshot['events'])
-                        .map(jsonMap)
-                        .where((e) => e['id'] == rejectedEventId)
-                        .map((e) => intValue(e['version'], 1))
-                        .firstOrNull ??
-                    1,
-              },
-              createdAt: pending.createdAt,
-              status: 'failed',
-              lastError:
-                  'Eine frühere Terminänderung wurde abgelehnt. Lade den aktuellen Termin und prüfe deinen Entwurf vor dem Speichern.',
-            );
-          }
-          return pending;
-        }).toList();
+        _replaceOutbox(
+          _outbox.map((pending) {
+            if (pending.id == action.id) {
+              afterRejectedAction = true;
+              return pending.withStatus(
+                'failed',
+                _error,
+                error.statusCode,
+                error.code,
+              );
+            }
+            if (afterRejectedAction &&
+                !pending.failed &&
+                rejectedEventId != null &&
+                _versionedEventId(pending.payload) == rejectedEventId) {
+              // Later projected versions depend on the preceding save succeeding.
+              // Keep the original base version for explicit retry as well, so a
+              // coincidentally matching foreign version cannot be overwritten.
+              return PendingAction(
+                id: pending.id,
+                payload: {
+                  ...pending.payload,
+                  'version':
+                      action.payload['version'] ??
+                      jsonList(_baseSnapshot['events'])
+                          .map(readJsonMap)
+                          .where((e) => e['id'] == rejectedEventId)
+                          .map((e) => intValue(e['version'], 1))
+                          .firstOrNull ??
+                      1,
+                },
+                createdAt: pending.createdAt,
+                status: 'failed',
+                lastError:
+                    'Eine frühere Terminänderung wurde abgelehnt. Lade den aktuellen Termin und prüfe deinen Entwurf vor dem Speichern.',
+              );
+            }
+            return pending;
+          }),
+        );
         await _persistCore(generation);
       }
       if (_current(generation)) {
@@ -285,14 +287,14 @@ extension SyncController on AppController {
       payload: action.payload,
       createdAt: _clock(),
     );
-    _outbox = _outbox.map((e) => e.id == id ? replacement : e).toList();
+    _replaceOutbox(_outbox.map((e) => e.id == id ? replacement : e));
     try {
       await _persistCore(generation);
     } catch (_) {
       if (_current(generation)) {
-        _outbox = _outbox
-            .map((e) => e.id == replacement.id ? action : e)
-            .toList();
+        _replaceOutbox(
+          _outbox.map((e) => e.id == replacement.id ? action : e),
+        );
       }
       rethrow;
     }
@@ -483,36 +485,64 @@ extension SyncController on AppController {
   }
 
   void _rebuild() {
-    var view = cloneJson(_baseSnapshot);
-    for (final action in _outbox.where((e) => !e.failed)) {
-      view = _applyAction(view, action);
+    // Nothing mutates `view` in place, and [_applyAction] is copy-on-write,
+    // so an empty outbox avoids cloning the entire snapshot altogether.
+    var view = _baseSnapshot;
+    for (final action in _outbox) {
+      if (!action.failed) view = _applyAction(view, action);
     }
-    if (jsonMap(view['user']).isNotEmpty) {
-      _user = AppUser.fromJson(jsonMap(view['user']));
+    final userJson = readJsonMap(view['user']);
+    if (userJson.isNotEmpty) {
+      _user = AppUser.fromJson(userJson);
     }
-    final attendance = jsonMap(view['attendanceByEvent']),
-        reasons = jsonMap(view['declineReasons']);
-    final arrivals = jsonMap(view['expectedArrivals']);
+    final attendance = readJsonMap(view['attendanceByEvent']),
+        reasons = readJsonMap(view['declineReasons']);
+    final arrivals = readJsonMap(view['expectedArrivals']);
     // Ensembles and the own member record decide the audience fallback below.
-    _productions = jsonList(view['productions']).map((e) {
-      final production = Production.fromJson(jsonMap(e));
-      return _scripts[production.id] == null
-          ? production
-          : production.withScript(_scripts[production.id]!);
-    }).toList()..sort(Production.compareNewestFirst);
-    _members = jsonList(
-      view['members'],
-    ).map((e) => TheaterMember.fromJson(jsonMap(e))).toList();
+    final productionPairs = <(Production, JsonMap)>[
+      for (final raw in jsonList(view['productions']))
+        () {
+          final record = readJsonMap(raw);
+          final parsed = Production.fromJson(record);
+          final script = _scripts[parsed.id];
+          return (script == null ? parsed : parsed.withScript(script), record);
+        }(),
+    ]..sort((a, b) => Production.compareNewestFirst(a.$1, b.$1));
+    _productions = [for (final pair in productionPairs) pair.$1];
+    _productionById = {for (final p in _productions) p.id: p};
+    _productionsView = List.unmodifiable(_productions);
+    _activeProductionsView = List.unmodifiable(
+      _productions.where((p) => !p.archived),
+    );
+    _archivedProductionsView = List.unmodifiable(
+      _productions.where((p) => p.archived),
+    );
+    _productionRecordsView = List.unmodifiable([
+      for (final pair in productionPairs) pair.$2,
+    ]);
+    final rawMembers = jsonList(view['members']);
+    final memberRecords = <JsonMap>[];
+    final members = <TheaterMember>[];
+    for (final raw in rawMembers) {
+      final record = readJsonMap(raw);
+      memberRecords.add(record);
+      members.add(TheaterMember.fromJson(record));
+    }
+    _members = members;
+    _memberById = {for (final m in members) m.id: m};
+    _membersView = List.unmodifiable(members);
+    _memberRecordsView = List.unmodifiable(memberRecords);
     final me = _audienceMember();
     // Before the events: own absences decide implicit attendance below.
-    _absences =
-        jsonList(
-            view['absences'],
-          ).map((e) => Absence.fromJson(jsonMap(e))).toList()
-          ..sort((a, b) => a.from.compareTo(b.from));
-    _events =
-        jsonList(view['events']).map((e) {
-          final json = jsonMap(e);
+    _absences = [
+      for (final raw in jsonList(view['absences']))
+        Absence.fromJson(readJsonMap(raw)),
+    ]..sort((a, b) => a.from.compareTo(b.from));
+    _absencesView = List.unmodifiable(_absences);
+    _events = [
+      for (final raw in jsonList(view['events']))
+        () {
+          final json = readJsonMap(raw);
           final event = TheaterEvent.fromJson(json);
           final projected = event.copyWith(
             // Older servers send no `addressedToMe`; admins receive every
@@ -542,16 +572,54 @@ extension SyncController on AppController {
                 !const {'yes', 'late', 'no'}.contains(projected.response) &&
                 !(start != null && _absences.any((a) => a.coversDay(start))),
           );
-        }).toList()..sort(
-          (a, b) => (a.startsAt ?? DateTime(9999)).compareTo(
-            b.startsAt ?? DateTime(9999),
-          ),
-        );
-    _polls = jsonList(
-      view['polls'],
-    ).map((e) => Poll.fromJson(jsonMap(e))).toList();
-    _slotPools = List.unmodifiable(jsonList(view['slotPools']).map(jsonMap));
-    final reminders = jsonMap(view['reminders']);
+        }(),
+    ]..sort(
+        (a, b) => (a.startsAt ?? DateTime(9999)).compareTo(
+          b.startsAt ?? DateTime(9999),
+        ),
+      );
+    _eventById = {for (final e in _events) e.id: e};
+    _eventsView = List.unmodifiable(_events);
+    _polls = [
+      for (final raw in jsonList(view['polls']))
+        Poll.fromJson(readJsonMap(raw)),
+    ];
+    _pollsView = List.unmodifiable(_polls);
+    _slotPools = List.unmodifiable(jsonList(view['slotPools']).map(readJsonMap));
+    _messagesView = List.unmodifiable(
+      jsonList(view['messages']).map(readJsonMap),
+    );
+    final pendingAccounts = [
+      for (final raw in jsonList(view['pendingAccounts'])) readJsonMap(raw),
+    ];
+    _pendingAccountsView = List.unmodifiable(pendingAccounts);
+    var openRegs = 0;
+    for (final a in pendingAccounts) {
+      if (a['status'] == 'pending' && a['identityReady'] == true) openRegs++;
+    }
+    _openRegistrationCount = openRegs;
+    _personRolesView = List.unmodifiable(
+      jsonList(view['personRoles']).map(readJsonMap),
+    );
+    _memberAttendanceByEventView = Map.unmodifiable(
+      readJsonMap(_baseSnapshot['memberAttendanceByEvent']),
+    );
+    _implicitAttendanceByEventView = Map.unmodifiable(
+      readJsonMap(_baseSnapshot['implicitAttendanceByEvent']),
+    );
+    _arrivalsByEventView = Map.unmodifiable(
+      readJsonMap(_baseSnapshot['arrivalsByEvent']),
+    );
+    final autoRaw = readJsonMap(view['autoCheckinsByEvent']);
+    _autoCheckinsByEvent = autoRaw.isEmpty
+        ? const {}
+        : {
+            for (final entry in autoRaw.entries)
+              entry.key: Set.unmodifiable({
+                for (final id in jsonList(entry.value)) intValue(id),
+              }),
+          };
+    final reminders = readJsonMap(view['reminders']);
     _reminders = {
       for (final key in ['dayBefore', 'twoHours', 'changes', 'emailEnabled'])
         key: reminders[key] == true,
@@ -559,14 +627,21 @@ extension SyncController on AppController {
       for (final key in ['lateDeclines', ...memberPushKeys, ...adminPushKeys])
         key: reminders[key] != false,
     };
-    final customMinutes = jsonMap(view['reminders'])['customMinutes'];
+    _remindersView = Map.unmodifiable(_reminders);
+    final customMinutes = reminders['customMinutes'];
     _customReminderMinutes = customMinutes is num
         ? customMinutes.toInt()
         : null;
     _checkinsByEvent = jsonMap(view['checkinsByEvent']);
+    _checkinsByEventView = Map.unmodifiable(_checkinsByEvent);
     _checkinVersions = jsonMap(view['checkinVersions']);
+    _checkinVersionsView = Map.unmodifiable(_checkinVersions);
     _capabilities = jsonMap(view['capabilities']);
-    _view = view;
+    _capabilitiesView = Map.unmodifiable(_capabilities);
+    _features = {
+      for (final f in jsonList(_capabilities['features'])) f.toString(),
+    };
+    _dataVersion++;
   }
 
   /// The signed-in admin as a member, to decide audiences that older servers
@@ -575,7 +650,7 @@ extension SyncController on AppController {
   TheaterMember? _audienceMember() {
     final user = _user, personId = user?.personId;
     if (user == null || !user.isAdmin || personId == null) return null;
-    return _members.where((m) => m.id == personId).firstOrNull ??
+    return _memberById[personId] ??
         TheaterMember(id: personId, name: user.name, roleIds: user.roleIds);
   }
 }

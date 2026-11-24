@@ -665,6 +665,8 @@ class WardrobeItem {
     final kind = WardrobeKind.parse(json['kind']);
     if (kind == null) return null;
     String? path(Object? v) => v is String && v.isNotEmpty ? v : null;
+    final rarity = textValue(json['rarity']);
+    final rawRarities = jsonList(json['rarities']);
     return WardrobeItem(
       role: WardrobeRole.fromJson(json),
       reward: json['reward'] == true,
@@ -676,11 +678,10 @@ class WardrobeItem {
       id: textValue(json['id']),
       kind: kind,
       name: textValue(json['name']),
-      rarity: textValue(json['rarity']),
-      rarities: [
-        for (final r in jsonList(json['rarities'])) '$r',
-        if (jsonList(json['rarities']).isEmpty) textValue(json['rarity']),
-      ],
+      rarity: rarity,
+      rarities: rawRarities.isEmpty
+          ? [rarity]
+          : [for (final r in rawRarities) '$r'],
       label: path(json['label']),
       departments: [for (final d in jsonList(json['departments'])) '$d'],
       rarityReason: path(json['rarityReason']),
@@ -895,7 +896,8 @@ class WardrobeCatalog {
          for (final r in rarities) r.id: r,
          ?ensembleRarity?.id: ?ensembleRarity,
          ?uniqueRarity?.id: ?uniqueRarity,
-       };
+       },
+       _departments = {for (final d in departments) d.id: d};
 
   /// The rarities of the draw, common to rare; the ensemble's look of its
   /// rewards is not one of them ([ensembleRarity]).
@@ -911,8 +913,22 @@ class WardrobeCatalog {
   final WardrobeRarity? uniqueRarity;
   final Map<String, WardrobeItem> _items;
   final Map<String, WardrobeRarity> _rarities;
+  final Map<String, WardrobeDepartment> _departments;
+
+  late final List<WardrobeItem> _collectible = [
+    for (final i in items)
+      if (!i.isDefault && !i.reward && !i.unique) i,
+  ];
+  late final Set<String> _collectibleRarities = {
+    for (final i in _collectible) ...i.rarities,
+  };
+  late final Map<WardrobeKind, WardrobeItem> _defaultsByKind = {
+    for (final i in items)
+      if (i.isDefault) i.kind: i,
+  };
 
   WardrobeItem? item(String id) => _items[id];
+  WardrobeRarity? rarity(String id) => _rarities[id];
   WardrobeRarity rarityOf(WardrobeItem item) =>
       _rarities[item.rarity] ?? WardrobeRarity.unknown;
 
@@ -927,8 +943,13 @@ class WardrobeCatalog {
       (item.departments.isEmpty
           ? null
           : item.departments.map((d) => department(d)?.name ?? d).join(' · '));
-  WardrobeDepartment? department(String id) =>
-      departments.where((d) => d.id == id).firstOrNull;
+  WardrobeDepartment? department(String id) => _departments[id];
+
+  /// Default item of [kind], if any.
+  WardrobeItem? defaultOf(WardrobeKind kind) => _defaultsByKind[kind];
+
+  /// Whether at least one collectible item belongs to rarity [id].
+  bool hasCollectibleRarity(String id) => _collectibleRarities.contains(id);
 
   /// The catalog with only the items [keep] lets through.
   WardrobeCatalog where(bool Function(WardrobeItem item) keep) =>
@@ -943,8 +964,7 @@ class WardrobeCatalog {
 
   /// Items that can come from a crate (all but the default outfit, the
   /// ensemble rewards and the unique figures).
-  Iterable<WardrobeItem> get collectible =>
-      items.where((i) => !i.isDefault && !i.reward && !i.unique);
+  Iterable<WardrobeItem> get collectible => _collectible;
 
   /// The unique figures the person has unlocked (the server sends no other).
   Iterable<WardrobeItem> get uniques => items.where((i) => i.unique);
@@ -957,74 +977,92 @@ class WardrobeCatalog {
   /// [locked] ones (the server passes the chance of used-up and locked
   /// rarities on to the others).
   double chance(WardrobeRarity rarity, [Set<String> locked = const {}]) {
-    final present = rarities.where(
-      (r) =>
-          !locked.contains(r.id) &&
-          collectible.any((i) => i.rarities.contains(r.id)),
-    );
-    final total = present.fold<double>(0, (n, r) => n + r.weight);
-    return total <= 0 || !present.contains(rarity) ? 0 : rarity.weight / total;
+    if (locked.contains(rarity.id) || !_collectibleRarities.contains(rarity.id)) {
+      return 0;
+    }
+    var total = 0.0;
+    for (final r in rarities) {
+      if (!locked.contains(r.id) && _collectibleRarities.contains(r.id)) {
+        total += r.weight;
+      }
+    }
+    return total <= 0 ? 0 : rarity.weight / total;
   }
 
-  factory WardrobeCatalog.fromJson(JsonMap json) => WardrobeCatalog(
-    rarities: [
-      for (final (i, r) in jsonList(json['rarities']).indexed)
-        WardrobeRarity(
-          id: textValue(jsonMap(r)['id']),
-          name: textValue(jsonMap(r)['name']),
-          color: _color(jsonMap(r)['color']),
-          weight: _double(jsonMap(r)['weight'], 1),
-          rank: i,
-          style: jsonMap(r)['style'] as String?,
-          hint: jsonMap(r)['hint'] as String?,
-          requires: WardrobeRequirement.fromJson(jsonMap(r)['requires']),
-          gage: intValue(jsonMap(r)['gage']),
-          buyable: jsonMap(r)['buyable'] != false,
-        ),
-    ],
-    dupes: DupeRules.fromJson(jsonMap(json['dupes'])),
-    ensembleRarity: json['ensembleRarity'] is Map
-        ? WardrobeRarity(
-            id: textValue(jsonMap(json['ensembleRarity'])['id'], 'ensemble'),
-            name: textValue(
-              jsonMap(json['ensembleRarity'])['name'],
-              'Ensemble',
+  factory WardrobeCatalog.fromJson(
+    JsonMap json, {
+    bool Function(WardrobeItem item)? filter,
+  }) {
+    final ensembleMap = json['ensembleRarity'] is Map
+        ? jsonMap(json['ensembleRarity'])
+        : null;
+    final uniqueMap = json['uniqueRarity'] is Map
+        ? jsonMap(json['uniqueRarity'])
+        : null;
+    final items = <WardrobeItem>[];
+    for (final raw in [
+      ...jsonList(json['items']),
+      ...jsonList(json['rewards']),
+      ...jsonList(json['uniques']),
+    ]) {
+      final parsed = WardrobeItem.fromJson(jsonMap(raw));
+      if (parsed != null && (filter == null || filter(parsed))) {
+        items.add(parsed);
+      }
+    }
+    return WardrobeCatalog(
+      rarities: [
+        for (final (i, r) in jsonList(json['rarities']).indexed)
+          () {
+            final map = jsonMap(r);
+            return WardrobeRarity(
+              id: textValue(map['id']),
+              name: textValue(map['name']),
+              color: _color(map['color']),
+              weight: _double(map['weight'], 1),
+              rank: i,
+              style: map['style'] as String?,
+              hint: map['hint'] as String?,
+              requires: WardrobeRequirement.fromJson(map['requires']),
+              gage: intValue(map['gage']),
+              buyable: map['buyable'] != false,
+            );
+          }(),
+      ],
+      dupes: DupeRules.fromJson(jsonMap(json['dupes'])),
+      ensembleRarity: ensembleMap == null
+          ? null
+          : WardrobeRarity(
+              id: textValue(ensembleMap['id'], 'ensemble'),
+              name: textValue(ensembleMap['name'], 'Ensemble'),
+              color: _color(ensembleMap['color']),
+              rank: -1,
             ),
-            color: _color(jsonMap(json['ensembleRarity'])['color']),
-            rank: -1,
-          )
-        : null,
-    uniqueRarity: json['uniqueRarity'] is Map
-        ? WardrobeRarity(
-            id: textValue(jsonMap(json['uniqueRarity'])['id'], 'unique'),
-            name: textValue(jsonMap(json['uniqueRarity'])['name'], 'Unique'),
-            color: _color(
-              jsonMap(json['uniqueRarity'])['color'],
-              const Color(0xFFB388FF),
+      uniqueRarity: uniqueMap == null
+          ? null
+          : WardrobeRarity(
+              id: textValue(uniqueMap['id'], 'unique'),
+              name: textValue(uniqueMap['name'], 'Unique'),
+              color: _color(uniqueMap['color'], const Color(0xFFB388FF)),
+              style: textValue(uniqueMap['style'], 'holo'),
+              rank: -1,
             ),
-            style: textValue(jsonMap(json['uniqueRarity'])['style'], 'holo'),
-            rank: -1,
-          )
-        : null,
-    departments: [
-      for (final d in jsonList(json['departments']))
-        WardrobeDepartment(
-          id: textValue(jsonMap(d)['id']),
-          name: textValue(jsonMap(d)['name']),
-          icon: jsonMap(d)['icon'] as String?,
-        ),
-    ],
-    // Rewards and unique figures come apart from the items, so older apps
-    // leave them out.
-    items: [
-      for (final i in [
-        ...jsonList(json['items']),
-        ...jsonList(json['rewards']),
-        ...jsonList(json['uniques']),
-      ])
-        ?WardrobeItem.fromJson(jsonMap(i)),
-    ],
-  );
+      departments: [
+        for (final d in jsonList(json['departments']))
+          () {
+            final map = jsonMap(d);
+            return WardrobeDepartment(
+              id: textValue(map['id']),
+              name: textValue(map['name']),
+              icon: map['icon'] as String?,
+            );
+          }(),
+      ],
+      // Rewards and unique figures come apart from the items, so older apps
+      // leave them out.
+      items: items,
+    );
+  }
 }
 
 /// Metres run and crates earned.
@@ -1278,10 +1316,12 @@ class CrateTarget {
 
   bool get isRandom => kind == CrateTargetKind.random;
 
+  static final _yearPattern = RegExp(r'\d{4}');
+
   /// "Creepshow 2026", "Technik-Kiste", "Zufallskiste"; a play with a
   /// number in its name keeps it alone ("Anno 1146", not "Anno 1146 2025").
   String get title =>
-      kind == CrateTargetKind.play && !RegExp(r'\d{4}').hasMatch(name)
+      kind == CrateTargetKind.play && !_yearPattern.hasMatch(name)
       ? [name, ?year].join(' ')
       : name;
 
@@ -1948,9 +1988,7 @@ class Wardrobe {
   WardrobeItem? worn(WardrobeKind kind) {
     final chosen = catalog.item(selected[kind] ?? '');
     if (chosen != null) return chosen;
-    final fallback = catalog.items
-        .where((i) => i.kind == kind && i.isDefault)
-        .firstOrNull;
+    final fallback = catalog.defaultOf(kind);
     if (kind == WardrobeKind.character &&
         (fallback == null || !owns(fallback))) {
       return catalog.item(gift ?? '') ?? fallback;
@@ -1986,11 +2024,16 @@ class Wardrobe {
         : null;
     // A reward is shown once its milestone is reached; the server leaves
     // the others out, the app does too if one from before sends them.
-    final catalog = WardrobeCatalog.fromJson(jsonMap(json['catalog'])).where(
-      (i) =>
-          !i.reward ||
-          owned.contains(i.id) ||
-          ensemble?.rewardOf(i)?.reached == true,
+    final reachedRewards = ensemble == null
+        ? const <String>{}
+        : {
+            for (final m in ensemble.milestones)
+              if (m.reached && m.rewardId != null) m.rewardId!,
+          };
+    final catalog = WardrobeCatalog.fromJson(
+      jsonMap(json['catalog']),
+      filter: (i) =>
+          !i.reward || owned.contains(i.id) || reachedRewards.contains(i.id),
     );
     return Wardrobe(
       nextDrop: NextDrop.fromJson(json['nextDrop'], now: json['now']),

@@ -917,9 +917,11 @@ class WebRunnerSound
   bool _musicWanted = false;
 
   /// The worn tune ([useTune]); the game's own tune stays decoded for when
-  /// no backdrop brings one.
+  /// no backdrop brings one. Up to two custom backdrop tunes also stay decoded
+  /// so toggling backdrops in the wardrobe does not re-decode them.
   Uint8List? _tune;
   WebAudioClip? _ownTune;
+  final Map<Uint8List, WebAudioClip> _customTunes = Map.identity();
   Uint8List? _musicTune;
   bool _musicReady = false;
 
@@ -983,20 +985,28 @@ class WebRunnerSound
     }
   }
 
+  bool get _allLoaded =>
+      _clips.length == RunnerSfx.values.length &&
+      _musicReady &&
+      identical(_musicTune, _tune);
+
   @override
   void prepare() {
     if (!_enabled.value || _disposed) return;
-    _safely(() {
+    try {
       final audio = _audio ??= _openAudio();
       // Still within the tap: Safari only starts audio in a user gesture.
       audio.resume();
+      if (_allLoaded) return;
       _loading ??= _settingsReady
           .then((_) async {
             if (_disposed || !_enabled.value) return;
             await _load(audio);
           })
           .whenComplete(() => _loading = null);
-    });
+    } catch (e) {
+      _silent(e);
+    }
   }
 
   /// The audio context, at the chosen volumes.
@@ -1024,9 +1034,19 @@ class WebRunnerSound
     final asked = ++_tunes, tune = _tune;
     if (_musicReady && identical(_musicTune, tune)) return;
     const channel = WebAudioChannel.music;
-    var clip = tune == null
-        ? null
-        : await _decodeBytes(audio, tune, _musicVolume, channel);
+    WebAudioClip? clip;
+    if (tune != null) {
+      clip = _customTunes[tune];
+      if (clip == null) {
+        clip = await _decodeBytes(audio, tune, _musicVolume, channel);
+        if (clip != null && !_disposed) {
+          if (_customTunes.length >= 2) {
+            _customTunes.remove(_customTunes.keys.first);
+          }
+          _customTunes[tune] = clip;
+        }
+      }
+    }
     if (asked != _tunes || _disposed || !_enabled.value) return;
     clip ??= _ownTune ??= await _decode(audio, _music, _musicVolume, channel);
     if (asked != _tunes || _disposed) return;
@@ -1105,11 +1125,13 @@ class WebRunnerSound
     // Not decoded (yet): silence rather than loading during a run.
     final clip = _clips[sfx];
     if (clip == null) return;
-    _safely(() {
+    try {
       // Still sounding: start it over, as on the other platforms.
       _voices.remove(sfx)?.stop();
       _voices[sfx] = clip.play();
-    });
+    } catch (e) {
+      _silent(e);
+    }
   }
 
   void _startMusic() {
@@ -1257,7 +1279,11 @@ class WebRunnerSound
     _hidden = false;
     final audio = _audio;
     if (audio != null && _enabled.value) {
-      _safely(audio.resume);
+      try {
+        audio.resume();
+      } catch (e) {
+        _silent(e);
+      }
       if (wasHidden &&
           (_musicWanted || _musicPreviewing) &&
           _musicVoice == null) {
@@ -1276,6 +1302,7 @@ class WebRunnerSound
     _bytes.clear();
     _decoding.clear();
     _voices.clear();
+    _customTunes.clear();
     _musicClip = null;
     _ownTune = null;
     _musicVoice = null;

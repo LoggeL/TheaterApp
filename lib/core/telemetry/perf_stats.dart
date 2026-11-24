@@ -165,9 +165,14 @@ class ThreadGap {
 /// The telemetry sets the timer and calls [fired] and [began]; this only
 /// counts, in microseconds of one clock.
 class ThreadProbe {
-  /// The timer's delay. Shorter than a frame at 60 Hz, so a busy stretch of
-  /// a frame's length shows; between smooth frames it runs about once.
+  ThreadProbe({this.intervalUs = delayUs});
+
+  /// Default timer delay for tests.
   static const delayUs = 10000;
+
+  /// Actual timer delay used by this probe instance. On live web builds a
+  /// delay above one 60 Hz frame avoids waking JS between smooth frames.
+  final int intervalUs;
 
   /// Frames further apart are pauses; the timer is not set again.
   static const _longestUs = 5000000;
@@ -204,7 +209,7 @@ class ThreadProbe {
   }
 
   void _late(int nowUs) {
-    final late = math.max(0, nowUs - _setUs - delayUs);
+    final late = math.max(0, nowUs - _setUs - intervalUs);
     if (_syncUs < 0) _syncUs = late;
     _busyUs += late;
   }

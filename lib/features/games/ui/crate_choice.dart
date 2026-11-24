@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -172,183 +173,181 @@ class CrateTargetCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final t = target;
+    final catalog = wardrobe.catalog;
     final accent = CrateMotion.of(t.animation).accent;
-    final rarities = {for (final r in wardrobe.catalog.rarities) r.id: r};
     final visibleOdds = [
       for (final (id, chance) in t.odds)
-        if (chance > 0) (rarities[id], chance),
+        if (chance > 0) (catalog.rarity(id), chance),
     ];
     final poolItems = t.complete && t.available
         ? crateTargetItems(wardrobe, t)
         : const <WardrobeItem>[];
     final shinyOwned = poolItems.where(wardrobe.isShiny).length;
-    return Opacity(
-      opacity: t.available ? 1 : .55,
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(
-            color: t.isRandom ? accent : Colors.transparent,
-            width: 1.5,
-          ),
+    final card = Card(
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: t.isRandom ? accent : Colors.transparent,
+          width: 1.5,
         ),
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AspectRatio(
-                  aspectRatio: 4 / 3,
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: CratePicture(
-                          target: t,
-                          controller: controller,
-                          art: art,
-                          crop: true,
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AspectRatio(
+                aspectRatio: 4 / 3,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: CratePicture(
+                        target: t,
+                        controller: controller,
+                        art: art,
+                        crop: true,
+                      ),
+                    ),
+                    if (t.isRandom)
+                      Positioned(
+                        left: 4,
+                        top: 4,
+                        child: _Badge(
+                          icon: Icons.auto_awesome,
+                          text: 'mehr Glanz',
+                          color: accent,
+                        ),
+                      )
+                    else if (t.complete)
+                      Positioned(
+                        left: 4,
+                        top: 4,
+                        child: _Badge(
+                          key: ValueKey('crate-target-complete-${t.id}'),
+                          icon: Icons.check_circle,
+                          text: 'komplett',
+                          color: const Color(0xFF2FBF71),
                         ),
                       ),
-                      if (t.isRandom)
-                        Positioned(
-                          left: 4,
-                          top: 4,
-                          child: _Badge(
-                            icon: Icons.auto_awesome,
-                            text: 'mehr Glanz',
-                            color: accent,
-                          ),
-                        )
-                      else if (t.complete)
-                        Positioned(
-                          left: 4,
-                          top: 4,
-                          child: _Badge(
-                            key: ValueKey('crate-target-complete-${t.id}'),
-                            icon: Icons.check_circle,
-                            text: 'komplett',
-                            color: const Color(0xFF2FBF71),
-                          ),
-                        ),
-                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                t.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall,
+              ),
+              Text(
+                crateTargetSubtitle(t),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(height: 6),
+              if (t.odds.isNotEmpty) ...[
+                Tooltip(
+                  message: [
+                    for (final (rarity, chance) in visibleOdds)
+                      if (rarity != null && rarity.name.isNotEmpty)
+                        '${rarity.name}: ${crateChanceText(chance)}',
+                  ].join(' · '),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: SizedBox(
+                      height: 5,
+                      // Stretched: a ColoredBox without a child is
+                      // only as high as it must be, i.e. not at all.
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final (id, chance) in t.odds)
+                            Expanded(
+                              flex: max(1, (chance * 1000).round()),
+                              child: ColoredBox(
+                                color:
+                                    catalog.rarity(id)?.color ??
+                                    WardrobeRarity.unknown.color,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  t.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall,
-                ),
-                Text(
-                  crateTargetSubtitle(t),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall,
-                ),
-                const SizedBox(height: 6),
-                if (t.odds.isNotEmpty) ...[
-                  Tooltip(
-                    message: [
+                if (visibleOdds.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Wrap(
+                    key: ValueKey('crate-target-odds-${t.id}'),
+                    spacing: 6,
+                    runSpacing: 2,
+                    children: [
                       for (final (rarity, chance) in visibleOdds)
                         if (rarity != null && rarity.name.isNotEmpty)
-                          '${rarity.name}: ${crateChanceText(chance)}',
-                    ].join(' · '),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: SizedBox(
-                        height: 5,
-                        // Stretched: a ColoredBox without a child is
-                        // only as high as it must be, i.e. not at all.
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            for (final (id, chance) in t.odds)
-                              Expanded(
-                                flex: max(1, (chance * 1000).round()),
-                                child: ColoredBox(
-                                  color:
-                                      rarities[id]?.color ??
-                                      WardrobeRarity.unknown.color,
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: rarity.color,
+                                  shape: BoxShape.circle,
                                 ),
                               ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (visibleOdds.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Wrap(
-                      key: ValueKey('crate-target-odds-${t.id}'),
-                      spacing: 6,
-                      runSpacing: 2,
-                      children: [
-                        for (final (rarity, chance) in visibleOdds)
-                          if (rarity != null && rarity.name.isNotEmpty)
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 7,
-                                  height: 7,
-                                  decoration: BoxDecoration(
-                                    color: rarity.color,
-                                    shape: BoxShape.circle,
-                                  ),
+                              const SizedBox(width: 3),
+                              Text(
+                                '${rarity.name} ${crateChanceText(chance)}',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
                                 ),
-                                const SizedBox(width: 3),
-                                Text(
-                                  '${rarity.name} ${crateChanceText(chance)}',
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                      ],
-                    ),
-                  ],
-                ],
-                const SizedBox(height: 6),
-                Text(
-                  t.available
-                      ? '${crateTargetProgress(t)} · Glanz ${crateChanceText(t.shinyChance)}'
-                      : _lockHint(),
-                  key: ValueKey('crate-target-progress-${t.id}'),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.w600,
+                              ),
+                            ],
+                          ),
+                    ],
                   ),
-                ),
-                if (t.complete && t.available) ...[
-                  Text(
-                    'Bringt jetzt Glanz oder Gage.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  if (poolItems.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        shinyOwned >= poolItems.length
-                            ? 'Glanz: $shinyOwned/${poolItems.length} komplett (nur noch Gage)'
-                            : 'Glanz: $shinyOwned/${poolItems.length}',
-                        key: ValueKey('crate-target-shiny-${t.id}'),
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
                 ],
               ],
-            ),
+              const SizedBox(height: 6),
+              Text(
+                t.available
+                    ? '${crateTargetProgress(t)} · Glanz ${crateChanceText(t.shinyChance)}'
+                    : _lockHint(),
+                key: ValueKey('crate-target-progress-${t.id}'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (t.complete && t.available) ...[
+                Text(
+                  'Bringt jetzt Glanz oder Gage.',
+                  style: theme.textTheme.bodySmall,
+                ),
+                if (poolItems.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      shinyOwned >= poolItems.length
+                          ? 'Glanz: $shinyOwned/${poolItems.length} komplett (nur noch Gage)'
+                          : 'Glanz: $shinyOwned/${poolItems.length}',
+                      key: ValueKey('crate-target-shiny-${t.id}'),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+              ],
+            ],
           ),
         ),
       ),
     );
+    return t.available ? card : Opacity(opacity: .55, child: card);
   }
 }
 
@@ -460,7 +459,7 @@ class _CratePictureState extends State<CratePicture> {
       return RawImage(
         image: image,
         fit: BoxFit.contain,
-        filterQuality: FilterQuality.medium,
+        filterQuality: kIsWeb ? FilterQuality.low : FilterQuality.medium,
       );
     }
     return CustomPaint(
@@ -479,6 +478,9 @@ class _CropPainter extends CustomPainter {
   final ui.Image image;
   final Rect box;
 
+  static final _paint = Paint()
+    ..filterQuality = kIsWeb ? FilterQuality.low : FilterQuality.medium;
+
   @override
   void paint(Canvas canvas, Size size) {
     final scale = image.width / 512;
@@ -494,12 +496,7 @@ class _CropPainter extends CustomPainter {
       fitted.destination,
       Offset.zero & size,
     );
-    canvas.drawImageRect(
-      image,
-      src,
-      dst,
-      Paint()..filterQuality = FilterQuality.medium,
-    );
+    canvas.drawImageRect(image, src, dst, _paint);
   }
 
   @override

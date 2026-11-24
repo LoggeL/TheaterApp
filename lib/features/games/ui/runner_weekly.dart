@@ -185,6 +185,7 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
   WeeklyLastWeek? _reward;
   bool _rewardClosed = false;
   Timer? _clock;
+  ValueListenable<TickerModeData>? _ticking;
 
   AppController get controller => widget.controller;
   DateTime get _now => controller.now;
@@ -198,8 +199,28 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
     _week = widget.initial;
     _menu.addListener(_changed);
     _load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final ticking = TickerMode.getValuesNotifier(context);
+    if (!identical(ticking, _ticking)) {
+      _ticking?.removeListener(_syncClock);
+      _ticking = ticking..addListener(_syncClock);
+    }
+    _syncClock();
+  }
+
+  void _syncClock() {
+    final enabled = _ticking?.value.enabled ?? true;
+    if (!enabled) {
+      _clock?.cancel();
+      _clock = null;
+      return;
+    }
     // The countdown; a week that ends meanwhile brings the next.
-    _clock = Timer.periodic(const Duration(seconds: 30), (_) {
+    _clock ??= Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
       final week = _week;
       if (week != null && !week.currentAt(_now) && !_loading) {
@@ -217,6 +238,7 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
   @override
   void dispose() {
     _clock?.cancel();
+    _ticking?.removeListener(_syncClock);
     _menu.removeListener(_changed);
     if (widget.preferences == null) _menu.dispose();
     super.dispose();
@@ -656,15 +678,34 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
   Widget _ranking(BuildContext context, WeeklyChallenge week) {
     final theme = Theme.of(context);
     final rows = week.leaderboard;
-    final shown = _allRanking || rows.length <= RunnerWeeklyScreen.shortList
-        ? rows
-        : rows.take(RunnerWeeklyScreen.shortList).toList();
-    final mine = rows.where((e) => e.me).firstOrNull;
-    final mineInShown = mine != null && shown.contains(mine);
-    final more = rows.any((e) => !shown.contains(e) && !e.me);
-    final above = mine == null || mine.rank <= 1
-        ? null
-        : rows.where((e) => e.rank < mine.rank).lastOrNull;
+    final limit = _allRanking || rows.length <= RunnerWeeklyScreen.shortList
+        ? rows.length
+        : RunnerWeeklyScreen.shortList;
+    var mineIndex = -1;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].me) {
+        mineIndex = i;
+        break;
+      }
+    }
+    final mine = mineIndex >= 0 ? rows[mineIndex] : null;
+    final mineInShown = mineIndex >= 0 && mineIndex < limit;
+    var more = false;
+    for (var i = limit; i < rows.length; i++) {
+      if (!rows[i].me) {
+        more = true;
+        break;
+      }
+    }
+    WeeklyEntry? above;
+    if (mine != null && mine.rank > 1) {
+      for (var i = mineIndex - 1; i >= 0; i--) {
+        if (rows[i].rank < mine.rank) {
+          above = rows[i];
+          break;
+        }
+      }
+    }
     Widget rankRow(WeeklyEntry e, {bool attachKey = false}) {
       final row = RunnerRankRow(
         rank: e.rank,
@@ -724,28 +765,27 @@ class _RunnerWeeklyScreenState extends State<RunnerWeeklyScreen> {
                 'Erster!',
               )
             else ...[
-              for (final e in shown) rankRow(e, attachKey: e.me),
+              for (var i = 0; i < limit; i++)
+                rankRow(rows[i], attachKey: rows[i].me),
               if (mine != null && !mineInShown) ...[
                 const Divider(height: 12),
                 rankRow(mine, attachKey: !more),
               ],
-              if (above != null)
+              if (above case final target?)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
-                  child: Builder(
-                    builder: (context) {
-                      final gap = above.score - mine!.score + 1;
-                      return Text(
-                        gap == 1
-                            ? 'Noch 1 Punkt bis Platz ${above.rank}'
-                            : 'Noch ${_number.format(gap)} Punkte bis Platz ${above.rank}',
-                        key: const ValueKey('weekly-rank-gap'),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      );
-                    },
-                  ),
+                  child: () {
+                    final gap = target.score - mine!.score + 1;
+                    return Text(
+                      gap == 1
+                          ? 'Noch 1 Punkt bis Platz ${target.rank}'
+                          : 'Noch ${_number.format(gap)} Punkte bis Platz ${target.rank}',
+                      key: const ValueKey('weekly-rank-gap'),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    );
+                  }(),
                 ),
               if (more ||
                   (_allRanking && rows.length > RunnerWeeklyScreen.shortList))

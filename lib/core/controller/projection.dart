@@ -7,7 +7,10 @@ extension ProjectionController on AppController {
     PendingAction action, {
     String? createdId,
   }) {
-    final view = cloneJson(original), body = action.payload;
+    // Every branch replaces the top-level keys (and copies any nested maps) it
+    // modifies, so a shallow copy of the root map leaves [original] untouched
+    // without deep-cloning the entire snapshot on every action.
+    final view = Map<String, dynamic>.of(original), body = action.payload;
     switch (body['action']) {
       case 'production.archive':
         view['productions'] = jsonList(view['productions']).map((item) {

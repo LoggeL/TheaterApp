@@ -26,18 +26,23 @@ class ProtectedImage extends StatefulWidget {
 }
 
 class _ProtectedImageState extends State<ProtectedImage> {
-  late Future<MediaData> _image;
+  Future<MediaData>? _image;
+  MediaData? _cached;
 
-  /// Scrolling a picture back into view shows it right away, without a
-  /// placeholder frame and an extra rebuild.
-  late final MediaData? _cached = widget.controller.cachedMedia(widget.path);
   @override
   void initState() {
     super.initState();
-    _load();
+    _syncOrLoad();
   }
 
-  void _load() {
+  void _syncOrLoad() {
+    final hit = widget.controller.cachedMedia(widget.path);
+    _cached = hit;
+    _image = hit == null ? widget.controller.mediaBytes(widget.path) : null;
+  }
+
+  void _reload() {
+    _cached = null;
     _image = widget.controller.mediaBytes(widget.path);
   }
 
@@ -46,44 +51,56 @@ class _ProtectedImageState extends State<ProtectedImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.path != widget.path ||
         oldWidget.controller != widget.controller) {
-      _load();
+      _syncOrLoad();
     }
   }
 
-  @override
-  Widget build(BuildContext context) => FutureBuilder<MediaData>(
-    future: _image,
-    initialData: _cached,
-    builder: (context, state) {
-      final placeholder =
-          widget.fallback ??
-          ColoredBox(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            child: const Center(child: Icon(Icons.photo_outlined)),
-          );
-      if (state.hasError) {
-        return widget.fallback ??
-            InkWell(
-              onTap: () => setState(_load),
-              child: const Center(
-                child: Tooltip(
-                  message: 'Bild erneut laden',
-                  child: Icon(Icons.refresh),
-                ),
-              ),
-            );
-      }
-      if (!state.hasData) return placeholder;
-      return Image.memory(
-        state.data!.bytes,
-        fit: widget.fit,
-        alignment: widget.alignment,
-        width: double.infinity,
-        height: double.infinity,
-        cacheWidth: widget.decodeWidth,
-        gaplessPlayback: false,
-        errorBuilder: (_, _, _) => placeholder,
+  Widget _placeholder(BuildContext context) =>
+      widget.fallback ??
+      ColoredBox(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: const Center(child: Icon(Icons.photo_outlined)),
       );
-    },
+
+  Widget _buildImage(BuildContext context, MediaData data) => Image.memory(
+    data.bytes,
+    fit: widget.fit,
+    alignment: widget.alignment,
+    width: double.infinity,
+    height: double.infinity,
+    cacheWidth: widget.decodeWidth,
+    filterQuality: FilterQuality.low,
+    gaplessPlayback: true,
+    errorBuilder: (_, _, _) => _placeholder(context),
   );
+
+  @override
+  Widget build(BuildContext context) {
+    final cached = _cached ?? widget.controller.cachedMedia(widget.path);
+    if (cached != null) {
+      _cached = cached;
+      return _buildImage(context, cached);
+    }
+    return FutureBuilder<MediaData>(
+      future: _image,
+      builder: (context, state) {
+        if (state.hasError) {
+          return widget.fallback ??
+              InkWell(
+                onTap: () => setState(_reload),
+                child: const Center(
+                  child: Tooltip(
+                    message: 'Bild erneut laden',
+                    child: Icon(Icons.refresh),
+                  ),
+                ),
+              );
+        }
+        final data = state.data;
+        if (data == null) return _placeholder(context);
+        _cached = data;
+        return _buildImage(context, data);
+      },
+    );
+  }
 }

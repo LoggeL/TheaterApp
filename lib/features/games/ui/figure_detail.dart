@@ -127,6 +127,8 @@ class _FigureShowcaseState extends State<FigureShowcase>
     vsync: this,
     duration: Duration(milliseconds: (showcasePeriod * 1000).round()),
   );
+  final _rimCache = RunnerRimCache();
+  final _stageCache = _ShowcaseStageCache();
 
   @override
   void didChangeDependencies() {
@@ -155,6 +157,8 @@ class _FigureShowcaseState extends State<FigureShowcase>
   @override
   void dispose() {
     _loop.dispose();
+    _rimCache.dispose();
+    _stageCache.dispose();
     super.dispose();
   }
 
@@ -162,7 +166,13 @@ class _FigureShowcaseState extends State<FigureShowcase>
   Widget build(BuildContext context) => RepaintBoundary(
     child: CustomPaint(
       size: Size.infinite,
-      painter: _ShowcasePainter(widget.art, _loop, widget.glow),
+      painter: _ShowcasePainter(
+        widget.art,
+        _loop,
+        widget.glow,
+        _rimCache,
+        _stageCache,
+      ),
     ),
   );
 }
@@ -173,25 +183,29 @@ const _gold = Color(0xFFD9A441), _rope = Color(0xFFBDB29C);
 const _floorColor = Color(0xFF3B2A1E), _plank = Color(0xFF2C1F16);
 const _floorEdge = Color(0xFF6B4A30);
 
-class _ShowcasePainter extends CustomPainter {
-  _ShowcasePainter(this.art, this.loop, this.glow) : super(repaint: loop);
-  final RunnerArt art;
-  final Animation<double> loop;
-  final Color glow;
+/// Caches the static stage layers (wall, glow, floor base, curtains) as
+/// [ui.Picture]s per `(size, glow)` so 60Hz showcase frames only animate
+/// floor planks and the figure.
+class _ShowcaseStageCache {
+  Size? _size;
+  Color? _glow;
+  ui.Picture? _back;
+  ui.Picture? _front;
 
-  static final _ropePaint = Paint()
-    ..color = _rope
-    ..strokeWidth = 1.5
-    ..style = PaintingStyle.stroke;
-  final _glint = Paint();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final time = loop.value * showcasePeriod;
+  void ensure(Size size, Color glow) {
+    if (_size == size && _glow == glow && _back != null && _front != null) {
+      return;
+    }
+    dispose();
+    _size = size;
+    _glow = glow;
     final floor = size.height * .86;
     final rect = Offset.zero & size;
-    // The back wall, a spot on the floor and the rarity's glow.
-    canvas.drawRect(
+    final cx = size.width / 2;
+
+    final backRec = ui.PictureRecorder();
+    final back = Canvas(backRec);
+    back.drawRect(
       rect,
       Paint()
         ..shader = const LinearGradient(
@@ -200,8 +214,7 @@ class _ShowcasePainter extends CustomPainter {
           colors: [_stageDark, _wall],
         ).createShader(rect),
     );
-    final cx = size.width / 2;
-    canvas.drawCircle(
+    back.drawCircle(
       Offset(cx, floor - size.height * .3),
       size.height * .55,
       Paint()
@@ -215,20 +228,87 @@ class _ShowcasePainter extends CustomPainter {
               ),
             ),
     );
-    // The floor, its planks passing by as on the moving stage.
-    final floorRect = Rect.fromLTRB(0, floor, size.width, size.height);
-    canvas.drawRect(floorRect, Paint()..color = _floorColor);
+    back.drawRect(
+      Rect.fromLTRB(0, floor, size.width, size.height),
+      Paint()..color = _floorColor,
+    );
+    _back = backRec.endRecording();
+
+    final frontRec = ui.PictureRecorder();
+    final front = Canvas(frontRec);
+    final side = size.width * .08;
+    final velvet = Paint()..color = _velvet;
+    final fold = Paint()..color = _velvetDark;
+    for (final left in const [true, false]) {
+      final r = left
+          ? Rect.fromLTWH(0, 0, side, size.height)
+          : Rect.fromLTWH(size.width - side, 0, side, size.height);
+      front.drawRect(r, velvet);
+      for (var i = 1; i < 3; i++) {
+        final x = r.left + r.width * i / 3;
+        front.drawRect(Rect.fromLTWH(x - 1.5, 0, 3, size.height), fold);
+      }
+    }
+    final valance = size.height * .07;
+    front.drawRect(Rect.fromLTWH(0, 0, size.width, valance), velvet);
+    front.drawRect(
+      Rect.fromLTWH(0, valance - 3, size.width, 3),
+      Paint()..color = _gold,
+    );
+    _front = frontRec.endRecording();
+  }
+
+  void dispose() {
+    _back?.dispose();
+    _front?.dispose();
+    _back = null;
+    _front = null;
+    _size = null;
+    _glow = null;
+  }
+}
+
+class _ShowcasePainter extends CustomPainter {
+  _ShowcasePainter(
+    this.art,
+    this.loop,
+    this.glow,
+    this.rimCache,
+    this.stageCache,
+  ) : super(repaint: loop);
+  final RunnerArt art;
+  final Animation<double> loop;
+  final Color glow;
+  final RunnerRimCache rimCache;
+  final _ShowcaseStageCache stageCache;
+
+  static final _ropePaint = Paint()
+    ..color = _rope
+    ..strokeWidth = 1.5
+    ..style = PaintingStyle.stroke;
+  static final _plankPaint = Paint()
+    ..color = _plank
+    ..strokeWidth = 2;
+  static final _floorEdgePaint = Paint()..color = _floorEdge;
+  static final _spotPaint = Paint()..color = const Color(0x33FFE7A3);
+  final _glint = Paint();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final time = loop.value * showcasePeriod;
+    final floor = size.height * .86;
+    final cx = size.width / 2;
+    stageCache.ensure(size, glow);
+    canvas.drawPicture(stageCache._back!);
+    // The floor planks passing by as on the moving stage.
     final spacing = size.height * .22;
     final shift = (time * size.height * .55) % spacing;
-    final plank = Paint()
-      ..color = _plank
-      ..strokeWidth = 2;
     for (var x = -shift; x < size.width; x += spacing) {
-      canvas.drawLine(Offset(x, floor), Offset(x, size.height), plank);
+      canvas.drawLine(Offset(x, floor), Offset(x, size.height), _plankPaint);
     }
     canvas.drawRect(
       Rect.fromLTWH(0, floor - 1, size.width, 3),
-      Paint()..color = _floorEdge,
+      _floorEdgePaint,
     );
     canvas.drawOval(
       Rect.fromCenter(
@@ -236,10 +316,10 @@ class _ShowcasePainter extends CustomPainter {
         width: size.height * .7,
         height: size.height * .08,
       ),
-      Paint()..color = const Color(0x33FFE7A3),
+      _spotPaint,
     );
     _figure(canvas, size, floor, time);
-    _curtains(canvas, size);
+    canvas.drawPicture(stageCache._front!);
   }
 
   void _figure(Canvas canvas, Size size, double floor, double time) {
@@ -276,7 +356,7 @@ class _ShowcasePainter extends CustomPainter {
         ..rotate(pose.angle)
         ..translate(-pivot.dx, -pivot.dy);
     }
-    if (shine) paintRim(canvas, image, sprite.rect, dst, time);
+    if (shine) rimCache.paint(canvas, image, sprite.rect, dst, time);
     canvas.drawImageRect(image, sprite.rect, dst, art.paintOf(sprite));
     if (shine) paintSheen(canvas, image, sprite.rect, dst, time);
     canvas.restore();
@@ -295,31 +375,6 @@ class _ShowcasePainter extends CustomPainter {
         );
       }
     }
-  }
-
-  /// Velvet at both sides and a valance with a golden fringe.
-  void _curtains(Canvas canvas, Size size) {
-    final side = size.width * .08;
-    final fold = Paint()..color = _velvetDark;
-    for (final left in [true, false]) {
-      final r = left
-          ? Rect.fromLTWH(0, 0, side, size.height)
-          : Rect.fromLTWH(size.width - side, 0, side, size.height);
-      canvas.drawRect(r, Paint()..color = _velvet);
-      for (var i = 1; i < 3; i++) {
-        final x = r.left + r.width * i / 3;
-        canvas.drawRect(Rect.fromLTWH(x - 1.5, 0, 3, size.height), fold);
-      }
-    }
-    final valance = size.height * .07;
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, valance),
-      Paint()..color = _velvet,
-    );
-    canvas.drawRect(
-      Rect.fromLTWH(0, valance - 3, size.width, 3),
-      Paint()..color = _gold,
-    );
   }
 
   @override
@@ -359,6 +414,11 @@ class _FigureDetailPageState extends State<FigureDetailPage> {
   late RunnerArt? _base = widget.art;
   RunnerArt? _dressed;
   bool _dressing = true, _playing = true;
+
+  Wardrobe? _rolesForWardrobe;
+  String? _rolesForId;
+  List<WardrobeItem> _cachedOtherRoles = const [];
+  int _cachedOwnedRoles = 0, _cachedTotalRoles = 0;
 
   Wardrobe get w => widget.wardrobe;
 
@@ -421,7 +481,7 @@ class _FigureDetailPageState extends State<FigureDetailPage> {
     final unique = uniqueProgressOf(w, item);
     final milestone = item.reward ? w.ensemble?.rewardOf(item) : null;
     final surface = theme.colorScheme.surface;
-    final rarityColor = StageTheme.legible(colors.first, surface, minimum: 3);
+    final rarityColor = legibleColor(colors.first, surface, minimum: 3);
     final stage = _stage(context, item, colors.first);
     final facts = <(String, String)>[
       if (playing case final r? when !item.unique) ...[
@@ -716,9 +776,9 @@ class _FigureDetailPageState extends State<FigureDetailPage> {
                       ),
               ),
               if (holo)
-                const Positioned.fill(
+                Positioned.fill(
                   child: IgnorePointer(
-                    child: HoloOverlay(animate: true, strength: .35),
+                    child: HoloOverlay(animate: _playing, strength: .35),
                   ),
                 ),
               if (_dressing)
@@ -756,25 +816,33 @@ class _FigureDetailPageState extends State<FigureDetailPage> {
   List<Widget> _otherRoles(BuildContext context, WardrobeItem item) {
     final person = item.personId;
     if (person == null || item.unique) return const [];
-    final roles =
-        [
-          for (final i in w.catalog.items)
-            if (i.kind == WardrobeKind.character &&
-                i.personId == person &&
-                !i.isDefault &&
-                !i.unique)
-              i,
-        ]..sort((a, b) {
-          if (w.owns(a) != w.owns(b)) return w.owns(a) ? -1 : 1;
-          return (b.role?.year ?? 0).compareTo(a.role?.year ?? 0);
-        });
-    final others = [
-      for (final i in roles)
-        if (i.id != item.id) i,
-    ];
+    if (!identical(_rolesForWardrobe, w) || _rolesForId != item.id) {
+      _rolesForWardrobe = w;
+      _rolesForId = item.id;
+      final roles =
+          [
+            for (final i in w.catalog.items)
+              if (i.kind == WardrobeKind.character &&
+                  i.personId == person &&
+                  !i.isDefault &&
+                  !i.unique)
+                i,
+          ]..sort((a, b) {
+            if (w.owns(a) != w.owns(b)) return w.owns(a) ? -1 : 1;
+            return (b.role?.year ?? 0).compareTo(a.role?.year ?? 0);
+          });
+      _cachedTotalRoles = roles.length;
+      _cachedOwnedRoles = roles.where(w.owns).length;
+      _cachedOtherRoles = [
+        for (final i in roles)
+          if (i.id != item.id) i,
+      ];
+    }
+    final others = _cachedOtherRoles;
     if (others.isEmpty) return const [];
     final theme = Theme.of(context);
-    final owned = roles.where(w.owns).length;
+    final owned = _cachedOwnedRoles;
+    final totalRoles = _cachedTotalRoles;
     final scale = (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(
       1.0,
       2.0,
@@ -790,7 +858,7 @@ class _FigureDetailPageState extends State<FigureDetailPage> {
             ),
           ),
           Text(
-            '$owned von ${roles.length} gefunden',
+            '$owned von $totalRoles gefunden',
             style: theme.textTheme.bodySmall,
           ),
         ],

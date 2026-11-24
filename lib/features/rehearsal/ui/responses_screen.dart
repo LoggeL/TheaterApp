@@ -22,10 +22,12 @@ import '../domain/implicit_attendance.dart';
 import 'attendance_screen.dart';
 import 'scene_planner_screen.dart';
 
+final _hmFormat = DateFormat.Hm('de');
+
 String memberResponseLabel(AppController c, TheaterEvent event, int memberId) {
   final eventId = event.id;
   final status = textValue(
-    jsonMap(c.memberAttendanceByEvent[eventId])[memberId.toString()],
+    readJsonMap(c.memberAttendanceByEvent[eventId])[memberId.toString()],
     'open',
   );
   // Auto-accepted events: nobody owes an answer. Without an own one the
@@ -37,10 +39,10 @@ String memberResponseLabel(AppController c, TheaterEvent event, int memberId) {
         : RsvpStatus.fromWire('no').label;
   }
   final arrival = dateValue(
-    jsonMap(c.arrivalsByEvent[eventId])[memberId.toString()],
+    readJsonMap(c.arrivalsByEvent[eventId])[memberId.toString()],
   );
   return status == 'late'
-      ? 'Später · ${arrival == null ? 'Uhrzeit offen' : DateFormat.Hm('de').format(arrival.toLocal())}'
+      ? 'Später · ${arrival == null ? 'Uhrzeit offen' : _hmFormat.format(arrival.toLocal())}'
       : RsvpStatus.fromWire(status).label;
 }
 
@@ -125,10 +127,7 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
   }
 
   TheaterEvent get _event =>
-      widget.controller.events
-          .where((e) => e.id == widget.event.id)
-          .firstOrNull ??
-      widget.event;
+      widget.controller.eventById(widget.event.id) ?? widget.event;
 
   /// Asks before the push goes out, naming who will get it.
   Future<void> _remind(List<TheaterMember> people) async {
@@ -184,23 +183,24 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
     children: (context) {
       final controller = widget.controller, event = _event;
       final details = _details;
-      final responses = jsonMap(controller.memberAttendanceByEvent[event.id]);
-      final arrivals = jsonMap(controller.arrivalsByEvent[event.id]);
+      final responses = readJsonMap(
+        controller.memberAttendanceByEvent[event.id],
+      );
+      final arrivals = readJsonMap(controller.arrivalsByEvent[event.id]);
       final groups = {for (final s in _responseOrder) s: <TheaterMember>[]};
       final invited = details?.invitedIds;
+      final ensembles = invited == null
+          ? controller.ensemblesOf(event.productionIds)
+          : const <List<int>>[];
       // Auto-accepted events: who has not answered attends implicitly, unless
       // an absence covers the day (then they count as declined).
       final implicit = implicitAttendees(controller, event), autoIds = <int>{};
-      for (final m in controller.members.where(
-        (m) =>
-            m.active &&
-            (invited?.contains(m.id) ??
-                m.inAudience(
-                  event.roleIds,
-                  event.personIds,
-                  controller.ensemblesOf(event.productionIds),
-                )),
-      )) {
+      for (final m in controller.members) {
+        if (!m.active) continue;
+        final isInvited =
+            invited?.contains(m.id) ??
+            m.inAudience(event.roleIds, event.personIds, ensembles);
+        if (!isInvited) continue;
         // The snapshot stays the source of the statuses: it is refreshed far
         // more often than the details, which could show a stale answer.
         final status = textValue(responses[m.id.toString()], 'open');
@@ -319,7 +319,7 @@ class _ResponsesAdminScreenState extends State<ResponsesAdminScreen> {
                       final at = arrival(m);
                       return at == null
                           ? 'Uhrzeit offen'
-                          : 'ab ${DateFormat.Hm('de').format(at)} Uhr';
+                          : 'ab ${_hmFormat.format(at)} Uhr';
                     }
                   : null,
               reason: status == 'no' ? (m) => details?.reasons[m.id] : null,

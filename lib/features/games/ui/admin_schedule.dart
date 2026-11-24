@@ -63,6 +63,9 @@ class AdminSchedulePage extends StatelessWidget {
                 ].join(' · ');
                 return CustomScrollView(
                   key: const PageStorageKey('admin-schedule'),
+                  scrollCacheExtent: kIsWeb
+                      ? const ScrollCacheExtent.pixels(300)
+                      : null,
                   slivers: [
                     if (catalog.schedule.heading.isNotEmpty || total > 0)
                       SliverPadding(

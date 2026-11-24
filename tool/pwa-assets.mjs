@@ -16,11 +16,13 @@ export async function writePwaWorker(root, entrypoints, assetPaths = {assetBase:
   // Web plugins must also initialize when an installed app starts offline.
   for (const [, src] of index.matchAll(/<script\b[^>]*\bsrc="(vendor\/[^"]+)"/g)) paths.add(src);
   const directory = assetPaths.assetBase + 'assets/';
-  // The hidden game loads its pictures and sounds on demand; they need no offline copy.
+  // The hidden game loads its pictures and sounds on demand, and open-source license
+  // texts (NOTICES is ~1.4 MB) do not need offline precaching right after first frame.
   const onDemand = directory + 'assets/games/';
+  const notices = directory + 'NOTICES';
   for (const file of await readdir(new URL(directory, root), {recursive: true, withFileTypes: true})) {
     const path = relative(fileURLToPath(root), join(file.parentPath, file.name)).split(sep).join('/');
-    if (file.isFile() && !path.startsWith(onDemand)) paths.add(path);
+    if (file.isFile() && !path.startsWith(onDemand) && path !== notices && !path.endsWith('/LICENSE.txt') && !path.includes('/LICENSE-')) paths.add(path);
   }
   // The variants flutter.js picks from. skwasm_heavy (no Wasm-capable browser needs it) and wimp stay out.
   const engine = assetPaths.canvasKitBaseUrl;

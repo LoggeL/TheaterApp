@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -178,8 +179,20 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
 
   /// Repaints the stage without rebuilding widgets; the HUD only rebuilds
   /// when its numbers change.
-  final _frame = ValueNotifier<int>(0);
+  final _frame = _FrameSignal();
   final _hud = ValueNotifier<(int, int)>((0, 0));
+  int _lastHudScore = 0, _lastHudMeters = 0;
+  // Cached mission live-pill state so _tick does zero string/RegExp work when
+  // mission counters have not changed.
+  Map<DailyMission, String> _missionUnits = const {};
+  int _lastMissionMeters = -1,
+      _lastMissionScore = -1,
+      _lastMissionCollected = -1,
+      _lastMissionGround = -1,
+      _lastMissionCeiling = -1,
+      _lastMissionPassed = -1;
+  DailyMission? _lastLiveMission;
+  int _lastLiveValue = -1;
   final _activePointers = <int>{};
   final _resumeIgnoredKeys = <LogicalKeyboardKey>{};
   final _playFocus = FocusNode(debugLabel: 'runner-stage');
@@ -238,6 +251,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   bool _paused = false;
   int _resumeCountdown = 0;
   Timer? _countdownTimer;
+  // Staggered idle pre-warming of Web GPU decoration textures while on the
+  // intro menu, eliminating the synchronous first-frame bake spike on Start.
+  Timer? _prewarmTimer;
+  Size? _prewarmSize;
+  double _prewarmRatio = 0;
+  int _prewarmStep = 0;
 
   AppController get controller => widget.controller;
   bool get _ranked => leaderboardAvailable(controller);
@@ -442,7 +461,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     final reduced = MediaQuery.disableAnimationsOf(context);
     if (_systemReducedMotion != reduced) {
       _systemReducedMotion = reduced;
-      _frame.value++;
+      _frame.tick();
     }
   }
 
@@ -455,7 +474,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     if (ghosts != null && ghosts.mode != _menu.ghostMode) {
       ghosts.mode = _menu.ghostMode;
       _ghostSkins?.want(ghosts.wanted, _art);
-      _frame.value++;
+      _frame.tick();
     }
   }
 
@@ -464,7 +483,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeFocusStart());
     // The painter is kept across builds; a paused stage needs a repaint too.
-    _frame.value++;
+    _frame.tick();
   }
 
   Future<void> _showSettings() async {
@@ -774,6 +793,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
   @override
   void dispose() {
     _countdownTimer?.cancel();
+    _prewarmTimer?.cancel();
     _outbox.removeListener(_outboxChanged);
     // Left during a run: the rest of the app gets the usual bar back. Only
     // Android has that bar; in browsers the call would only drop the
@@ -937,7 +957,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     if (ghosts != null && ghosts.ghosts.isNotEmpty) {
       // The named ones first: they show from the start. With the ghosts
       // off nothing loads until they are turned on.
-      _ghostSkins = GhostSkins(controller, onLoaded: () => _frame.value++)
+      _ghostSkins = GhostSkins(controller, onLoaded: _frame.tick)
         ..want(ghosts.wanted, _art);
     }
     final perf = _perf = RunnerPerf(
@@ -947,11 +967,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     );
     final fx = _fx = RunnerFx(
       // Training counts for no list: no record to break.
-      best: weekly == null
-          ? _knownBest
-          : weekly.ranked
-          ? _knownWeeklyBest(weekly.challenge)
-          : null,
+      best: _runBest(weekly),
       onSound: (sfx) {
         perf.played();
         _sound.play(sfx);
@@ -962,7 +978,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     _progress = null;
     _watch = _missionsOn ? MissionWatch(_missions) : null;
     _missionBanner.value = null;
-    _liveMission.value = _computeLiveMission(game);
+    _resetMissionCache();
+    _updateLiveMission(game);
     game.onPickup = (kind, x, y) {
       perf.pickup();
       fx.pickup(kind, x - game.distance, y);
@@ -973,12 +990,16 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       ..startMusic();
     perf.start();
     widget.onRun?.call(_game);
+    _lastHudScore = 0;
+    _lastHudMeters = 0;
     _hud.value = (0, 0);
     _activePointers.clear();
     _resumeIgnoredKeys.clear();
     _heldOver.clear();
     _countdownTimer?.cancel();
     _countdownTimer = null;
+    _prewarmTimer?.cancel();
+    _prewarmTimer = null;
     _resumeCountdown = 0;
     _saveError = null;
     _unrankedOffline = false;
@@ -1025,24 +1046,76 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     LogicalKeyboardKey.keyW,
   };
 
-  /// Compact live progress text for the most relevant open mission during a
-  /// run, or null when no live-tracked mission is open.
-  String? _computeLiveMission(StageRunner game) {
+  void _resetMissionCache() {
+    _lastMissionMeters = -1;
+    _lastMissionScore = -1;
+    _lastMissionCollected = -1;
+    _lastMissionGround = -1;
+    _lastMissionCeiling = -1;
+    _lastMissionPassed = -1;
+    _lastLiveMission = null;
+    _lastLiveValue = -1;
     final list = _missions?.missions;
-    if (!_missionsOn || list == null || list.isEmpty) return null;
+    if (!_missionsOn || list == null || list.isEmpty) {
+      _missionUnits = const {};
+      return;
+    }
     final names = _pickupNames;
+    _missionUnits = {
+      for (final m in list)
+        if (!m.done && (m.type == 'collect' || m.type == 'pass'))
+          m: m.unitFor(names),
+    };
+  }
+
+  /// Updates [_liveMission] only when at least one mission counter changed,
+  /// avoiding per-frame string/RegExp allocations during a run.
+  void _updateLiveMission(StageRunner game) {
+    final list = _missions?.missions;
+    if (!_missionsOn || list == null || list.isEmpty) {
+      if (_liveMission.value != null) _liveMission.value = null;
+      return;
+    }
+    final meters = game.meters;
+    final score = game.score;
+    final collected = game.collected;
+    final ground = game.groundMeters;
+    final ceiling = game.ceilingMeters;
+    var passed = 0;
+    final passedBy = game.passedBy;
+    for (var i = 0; i < passedBy.length; i++) {
+      passed += passedBy[i];
+    }
+    if (meters == _lastMissionMeters &&
+        score == _lastMissionScore &&
+        collected == _lastMissionCollected &&
+        ground == _lastMissionGround &&
+        ceiling == _lastMissionCeiling &&
+        passed == _lastMissionPassed) {
+      return;
+    }
+    _lastMissionMeters = meters;
+    _lastMissionScore = score;
+    _lastMissionCollected = collected;
+    _lastMissionGround = ground;
+    _lastMissionCeiling = ceiling;
+    _lastMissionPassed = passed;
+
     DailyMission? best;
     double bestRatio = -1;
     int? bestLive;
-    for (final m in list) {
+    for (var i = 0; i < list.length; i++) {
+      final m = list[i];
       if (m.done || m.reachedBy(game)) continue;
       final live = m.live(game);
       if (live == null) continue;
       // Active noPickup mission gets top priority while no pickup was taken.
-      if (m.type == 'noPickup' && game.collected == 0) {
-        return 'Ohne Requisite: $live/${m.target} m';
+      if (m.type == 'noPickup' && collected == 0) {
+        best = m;
+        bestLive = live;
+        break;
       }
-      if (m.type == 'noPickup' && game.collected > 0) continue;
+      if (m.type == 'noPickup' && collected > 0) continue;
       final ratio = m.target > 0 ? live / m.target : 0.0;
       if (best == null || ratio > bestRatio) {
         best = m;
@@ -1050,33 +1123,69 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         bestLive = live;
       }
     }
-    if (best == null || bestLive == null) return null;
-    return switch (best.type) {
+    if (best == null || bestLive == null) {
+      _lastLiveMission = null;
+      _lastLiveValue = -1;
+      if (_liveMission.value != null) _liveMission.value = null;
+      return;
+    }
+    final displayValue = best.type == 'runs' && best.min > 0
+        ? meters
+        : bestLive;
+    if (identical(best, _lastLiveMission) && displayValue == _lastLiveValue) {
+      return;
+    }
+    _lastLiveMission = best;
+    _lastLiveValue = displayValue;
+    final text = switch (best.type) {
+      'noPickup' => 'Ohne Requisite: $bestLive/${best.target} m',
       'ground' => 'Boden: $bestLive/${best.target} m',
       'ceiling' => 'Oben: $bestLive/${best.target} m',
       'collect' || 'pass' =>
-        '${best.unitFor(names)}: $bestLive/${best.target}'.trim(),
+        '${_missionUnits[best] ?? best.unitFor(_pickupNames)}: $bestLive/${best.target}'
+            .trim(),
       'points' || 'debut' => 'Mission: $bestLive/${best.target} Pkt.',
       'runs' =>
         best.min > 0
-            ? 'Mission: ${game.meters}/${best.min} m'
+            ? 'Mission: $meters/${best.min} m'
             : 'Mission: $bestLive/${best.target}',
       _ => 'Mission: $bestLive/${best.target} m',
     };
+    if (text != _liveMission.value) _liveMission.value = text;
+  }
+
+  /// Checks touch pointers and hold keys without allocating a pressed-key Set.
+  bool _isHolding() {
+    final kb = HardwareKeyboard.instance;
+    if (_resumeIgnoredKeys.isNotEmpty) {
+      if (_resumeIgnoredKeys.contains(LogicalKeyboardKey.space) &&
+          !kb.isLogicalKeyPressed(LogicalKeyboardKey.space)) {
+        _resumeIgnoredKeys.remove(LogicalKeyboardKey.space);
+      }
+      if (_resumeIgnoredKeys.contains(LogicalKeyboardKey.arrowUp) &&
+          !kb.isLogicalKeyPressed(LogicalKeyboardKey.arrowUp)) {
+        _resumeIgnoredKeys.remove(LogicalKeyboardKey.arrowUp);
+      }
+      if (_resumeIgnoredKeys.contains(LogicalKeyboardKey.keyW) &&
+          !kb.isLogicalKeyPressed(LogicalKeyboardKey.keyW)) {
+        _resumeIgnoredKeys.remove(LogicalKeyboardKey.keyW);
+      }
+    }
+    if (_activePointers.isNotEmpty) return true;
+    return (kb.isLogicalKeyPressed(LogicalKeyboardKey.space) &&
+            !_resumeIgnoredKeys.contains(LogicalKeyboardKey.space)) ||
+        (kb.isLogicalKeyPressed(LogicalKeyboardKey.arrowUp) &&
+            !_resumeIgnoredKeys.contains(LogicalKeyboardKey.arrowUp)) ||
+        (kb.isLogicalKeyPressed(LogicalKeyboardKey.keyW) &&
+            !_resumeIgnoredKeys.contains(LogicalKeyboardKey.keyW));
   }
 
   void _tick(Duration elapsed) {
     final dt = (elapsed - _lastFrame).inMicroseconds / 1e6;
     _lastFrame = elapsed;
     _perf?.step(dt);
-    final keys = HardwareKeyboard.instance.logicalKeysPressed;
-    _resumeIgnoredKeys.removeWhere((k) => !keys.contains(k));
     _game
-      ..holding =
-          _activePointers.isNotEmpty ||
-          keys.any(
-            (k) => _holdKeys.contains(k) && !_resumeIgnoredKeys.contains(k),
-          )
+      ..holding = _isHolding()
       ..update(dt);
     _recorder?.record(_game);
     _fx.update(dt, _game);
@@ -1088,11 +1197,14 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     } else if (_missionBanner.value != null && _game.time > _bannerUntil) {
       _missionBanner.value = null;
     }
-    final liveText = _computeLiveMission(_game);
-    if (liveText != _liveMission.value) _liveMission.value = liveText;
-    _frame.value++;
-    final hud = (_game.score, _game.meters);
-    if (hud != _hud.value) _hud.value = hud;
+    _updateLiveMission(_game);
+    _frame.tick();
+    final score = _game.score, meters = _game.meters;
+    if (score != _lastHudScore || meters != _lastHudMeters) {
+      _lastHudScore = score;
+      _lastHudMeters = meters;
+      _hud.value = (score, meters);
+    }
     // Let the curtain close before showing the result.
     if (_game.over && _game.sinceOver >= _curtainEnd) {
       _ticker.stop();
@@ -1119,10 +1231,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     );
   }
 
-  /// The best score of this visit's normal runs that went to the server.
-  /// The list ([_board]) knows a run only once its result is back, which a
-  /// quick "Nochmal" does not wait for (and a result in the outbox may take
-  /// long): the next run would break the old record once more.
+  /// The best score of this visit's ranked runs (normal or weekly) that went
+  /// to the server. The list ([_board]) knows a run only once its result is
+  /// back, which a quick "Nochmal" does not wait for (and a result in the
+  /// outbox may take long): the next run would break the old record once more.
   int _localBest = 0;
 
   /// Likewise the best ranked run of a week of the Wochenprobe.
@@ -1141,6 +1253,18 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       week.best?.score ?? 0,
       local != null && local.week == week.week ? local.score : 0,
     );
+  }
+
+  /// The score threshold whose crossing celebrates a new record during a run:
+  /// all-time best for normal runs, null for weekly training, and the lower
+  /// positive best of weekly and all-time for a ranked weekly run.
+  int? _runBest(WeeklyPlay? weekly) {
+    if (weekly == null) return _knownBest;
+    if (!weekly.ranked) return null;
+    final weekBest = _knownWeeklyBest(weekly.challenge);
+    final allBest = _knownBest ?? 0;
+    if (weekBest > 0 && allBest > 0) return min(weekBest, allBest);
+    return weekBest > 0 ? weekBest : allBest;
   }
 
   /// Hold keys that were still down when the run ended. Their repeats must
@@ -1232,6 +1356,7 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       _localBest = max(_localBest, score.score);
     } else if (weekly.ranked) {
       final week = weekly.challenge.week;
+      _localBest = max(_localBest, score.score);
       _localWeeklyBest = (
         week: week,
         score: max(_knownWeeklyBest(weekly.challenge), score.score),
@@ -1244,14 +1369,21 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       if (run != _run) {
         // Counted while the next run plays: its list is the newest so far.
         if (_phase == _Phase.playing) _board = result.leaderboard;
+        if ((weekly == null || weekly.ranked) &&
+            monthlyBoardAvailable(controller)) {
+          unawaited(_loadMonthly());
+        }
         return;
       }
-      // A weekly run counts for its own ranking only.
-      final improved = weekly == null
-          ? result.improved
-          : weekly.ranked && (result.weekly?.improved ?? false);
+      // Ranked weekly runs count for both the weekly and normal rankings;
+      // training counts for neither.
+      final weeklyImproved =
+          weekly != null && weekly.ranked && (result.weekly?.improved ?? false);
+      final personalImproved =
+          (weekly == null || weekly.ranked) && result.improved;
+      final anyImproved = weeklyImproved || personalImproved;
       // The fanfare, unless it already played when the record fell.
-      if (improved && !_fx.recordBroken) {
+      if (anyImproved && !_fx.recordBroken) {
         _sound.play(RunnerSfx.record);
       } else if ((result.progress?.newCrates ?? 0) > 0) {
         _sound.play(RunnerSfx.reveal);
@@ -1260,18 +1392,18 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         _sound.play(RunnerSfx.jackpot);
       }
       setState(() {
-        _improved = improved;
+        _improved = personalImproved;
         _weeklyResult = result.weekly;
         _progress = result.progress;
         if (result.progress?.missions case final m?) _missions = m;
         _board = result.leaderboard;
         _boardError = null;
       });
-      // The run may have moved the own place in this month's list, or in
-      // this week's, and may have earned crates/progress for the wardrobe.
-      if (weekly != null) {
-        unawaited(_loadWeekly());
-      } else if (monthlyBoardAvailable(controller)) {
+      // The run may have moved the own place in this month's list, in this
+      // week's, or both, and may have earned crates/progress for the wardrobe.
+      if (weekly != null) unawaited(_loadWeekly());
+      if ((weekly == null || weekly.ranked) &&
+          monthlyBoardAvailable(controller)) {
         unawaited(_loadMonthly());
       }
       if (_dressable) unawaited(_refreshWardrobe());
@@ -1450,6 +1582,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
+        if (kIsWeb && _phase == _Phase.intro) {
+          _schedulePrewarm(
+            constraints.biggest,
+            MediaQuery.devicePixelRatioOf(context),
+          );
+        }
         if (constraints.maxWidth < _twoColumns) {
           return ListView(
             padding: pagePadding(context, maxWidth: 640, top: 16),
@@ -1847,6 +1985,9 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
         (_progress?.newCrates ?? 0) > 0 ||
         (_progress?.missions?.justCompletedAll ?? false);
     final outboxWaiting = _ranked ? _outbox.waiting : 0;
+    final weeklyImproved =
+        weekly != null && weekly.ranked && (_weeklyResult?.improved ?? false);
+    final anyImproved = _improved || weeklyImproved;
     final status = !_ranked
         ? null
         : weekly != null
@@ -1858,8 +1999,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
               ? 'Gerade keine Verbindung: Der Lauf wird nachgetragen, sobald der Server erreichbar ist.'
               : _saveError != null
               ? '${weekly.ranked ? 'Nicht gewertet' : 'Nicht eingetragen'}: $_saveError'
-              : _improved
+              : weeklyImproved && _improved
+              ? 'Neuer Wochen- und persönlicher Bestwert!'
+              : weeklyImproved
               ? 'Neuer Wochenbestwert!'
+              : _improved
+              ? 'Neuer persönlicher Bestwert!'
               : null
         : _saving
         ? 'Punkte werden eingetragen …'
@@ -1997,10 +2142,10 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: _saveError != null
                       ? theme.colorScheme.error
-                      : _improved
+                      : anyImproved
                       ? StageTheme.green
                       : null,
-                  fontWeight: _improved ? FontWeight.w700 : null,
+                  fontWeight: anyImproved ? FontWeight.w700 : null,
                 ),
               ),
             ],
@@ -2068,6 +2213,34 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
       size: 20,
     ),
   );
+
+  /// Incrementally pre-bakes Web GPU decoration textures across idle frames
+  /// while the user views the intro menu so "Vorhang auf" starts with zero
+  /// synchronous `toImageSync` spikes.
+  void _schedulePrewarm(Size size, double ratio) {
+    if (!kIsWeb || _phase != _Phase.intro || size.isEmpty || ratio <= 0) return;
+    if (_prewarmSize == size && _prewarmRatio == ratio) return;
+    _prewarmTimer?.cancel();
+    _prewarmSize = size;
+    _prewarmRatio = ratio;
+    _prewarmStep = 0;
+    _scheduleNextPrewarmStep(size, ratio);
+  }
+
+  void _scheduleNextPrewarmStep(Size size, double ratio) {
+    _prewarmTimer = Timer(const Duration(milliseconds: 24), () {
+      _prewarmTimer = null;
+      if (!mounted ||
+          _phase != _Phase.intro ||
+          _prewarmSize != size ||
+          _prewarmRatio != ratio) {
+        return;
+      }
+      final painter = _stagePainter(ratio);
+      final more = painter.prewarmStep(size, _prewarmStep++);
+      if (more) _scheduleNextPrewarmStep(size, ratio);
+    });
+  }
 
   /// The stage's painter, kept across rebuilds (its laid-out texts and
   /// shader stay); a new one only for another pixel ratio.
@@ -2182,10 +2355,17 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                       Expanded(
                         child: Text(
                           hud.$1 == 1 ? '1 Punkt' : '${hud.$1} Punkte',
+                          maxLines: 1,
+                          softWrap: false,
                           style: number,
                         ),
                       ),
-                      Text('${hud.$2} m', style: number),
+                      Text(
+                        '${hud.$2} m',
+                        maxLines: 1,
+                        softWrap: false,
+                        style: number,
+                      ),
                     ],
                   ),
                 ),
@@ -2248,7 +2428,18 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                           : ValueListenableBuilder(
                               key: const ValueKey('live-slot'),
                               valueListenable: _liveMission,
-                              builder: (context, live, _) => live == null
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.flag_outlined,
+                                    size: 14,
+                                    color: StageTheme.orange,
+                                  ),
+                                  SizedBox(width: 5),
+                                ],
+                              ),
+                              builder: (context, live, icon) => live == null
                                   ? const SizedBox.shrink()
                                   : Align(
                                       alignment:
@@ -2271,16 +2462,12 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
                                           child: Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              const Icon(
-                                                Icons.flag_outlined,
-                                                size: 14,
-                                                color: StageTheme.orange,
-                                              ),
-                                              const SizedBox(width: 5),
+                                              icon!,
                                               Flexible(
                                                 child: Text(
                                                   live,
                                                   maxLines: 1,
+                                                  softWrap: false,
                                                   overflow:
                                                       TextOverflow.ellipsis,
                                                   style: theme
@@ -2656,6 +2843,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     // Called while building: the pause shows in this very build.
     _countdownTimer?.cancel();
     _countdownTimer = null;
+    _prewarmTimer?.cancel();
+    _prewarmTimer = null;
     _resumeCountdown = 0;
     _paused = true;
     _activePointers.clear();
@@ -3010,6 +3199,7 @@ StageRunnerPainter stagePainterFor(
   bool reducedMotion = false,
   RunnerGhosts? ghosts,
   GhostSkins? ghostSkins,
+  @visibleForTesting bool rasterizeDecorations = kIsWeb,
 }) {
   final f = fx ?? RunnerFx(), t = trail ?? RunnerTrail();
   return StageRunnerPainter._(
@@ -3023,6 +3213,7 @@ StageRunnerPainter stagePainterFor(
     reducedMotion: () => reducedMotion,
     ghosts: ghosts == null ? null : () => ghosts,
     ghostSkins: ghostSkins == null ? null : () => ghostSkins,
+    rasterizeDecorations: rasterizeDecorations,
   );
 }
 
@@ -3060,7 +3251,9 @@ class StageRunnerPainter extends CustomPainter {
     required this.reducedMotion,
     this.ghosts,
     this.ghostSkins,
-  }) : super(repaint: repaint);
+    bool rasterizeDecorations = kIsWeb,
+  }) : _decoration = _DecorationCache(rasterize: rasterizeDecorations),
+       super(repaint: repaint);
   final StageRunner Function() game;
 
   /// The ghosts of a Wochenprobe run and their figures; null otherwise.
@@ -3123,6 +3316,17 @@ class StageRunnerPainter extends CustomPainter {
     _fill(const Color(0xFFFFF4C2)),
     _fill(const Color(0xFFBFA88A)),
   ];
+  static const _particleArgb = [0xFFE5486B, 0xFFFFC94A, 0xFFFFF4C2, 0xFFBFA88A];
+  static final _beamArgb = _beam.withValues(alpha: .07).toARGB32();
+  static const _sandbagShadowArgb = 0x8007090A;
+  static const _sandbagWarnShadowArgb = 0x66E96131;
+  static const _sandbagWarnFillArgb = 0xFFE96131;
+  static const _drumDustArgb = 0x55D9CBB0;
+  static const _goldArgb = 0xFFD9A441;
+  static const _velvetArgb = 0xFF8E2420;
+  static const _velvetDarkArgb = 0xFF5E1714;
+  static const _ropeArgb = 0xFFBDB29C;
+  static const _flyLineEdgeArgb = 0xFF4A3F33;
   // Ghosts: all alike and faint ([ghostAlpha]), in their figures or, until
   // those are loaded, as a plain silhouette. Their opacity changes every
   // frame, so its steps are made once: a frame only picks a colour.
@@ -3137,7 +3341,8 @@ class StageRunnerPainter extends CustomPainter {
       Color.fromRGBO(0, 0, 0, ghostOpacity * i / _ghostSteps),
   ];
   static final _ghostPaint = Paint();
-  static final _ghostSkinPaint = Paint()..filterQuality = FilterQuality.medium;
+  static final _ghostSkinPaint = Paint()
+    ..filterQuality = kIsWeb ? FilterQuality.low : FilterQuality.medium;
   static final _ghostMark = _stroke(const Color(0x40DCE6F0), 1.5)
     ..strokeCap = StrokeCap.round;
   static final _ghostMedalMarks = [
@@ -3153,8 +3358,6 @@ class StageRunnerPainter extends CustomPainter {
     ..strokeCap = StrokeCap.round;
   static final _sandbagWarnFill = _fill(const Color(0xFFE96131));
   static final _drumDustPaint = _fill(const Color(0x55D9CBB0));
-  static final _drumStreakPaint = _stroke(const Color(0x66FFF1D6), 1.5)
-    ..strokeCap = StrokeCap.round;
   static final _ghostTagLayer = Paint();
   static final _tagOpacities = [
     for (var i = 0; i <= _ghostSteps; i++)
@@ -3163,14 +3366,45 @@ class StageRunnerPainter extends CustomPainter {
   // The name tags of a frame (at most the three of [RunnerGhosts.named]).
   final _tagGhosts = List<RunnerGhost?>.filled(3, null);
   final _tagTops = Float64List(3);
+  final _tagPainters = List<TextPainter?>.filled(3, null);
+  final _tagPlacedTops = Float64List(3);
   final _glyphs = RunnerGlyphs();
   final _path = Path();
-  final _decoration = _DecorationPictures();
+  final _DecorationCache _decoration;
   final _rim = RunnerRimCache();
+  final _spriteBatch = _SpriteBatch();
+  final _discBatch = _DiscBatch();
+  ui.Image? _backdropImage;
+  double _backdropTile = 0, _backdropH = 0;
+  FilterQuality? _backdropQuality;
+  ui.ImageShader? _backdropShader;
+  final _backdropShaderPaint = Paint();
+
+  /// Pre-warms one slice of Web GPU decoration textures and shaders for [size]
+  /// so "Vorhang auf" starts without a first-frame `toImageSync` spike.
+  /// Returns true while more steps remain.
+  bool prewarmStep(Size size, int step) {
+    if (!_decoration.rasterize) return false;
+    final (:s, :top, view: _) = stageLayout(size, pixelRatio);
+    if (s <= 0) return false;
+    _decoration.resize(size, pixelRatio);
+    final w = size.width, below = size.height - top - s;
+    final floorY = s * StageRunner.floor;
+    if (step < 4) {
+      _decoration.prewarmStep(s, w, top, below, floorY, step);
+      return true;
+    }
+    final a = art();
+    if (a != null) _ensureBackdropShader(a, s, floorY);
+    return false;
+  }
 
   void dispose() {
     _decoration.dispose();
     _rim.dispose();
+    _backdropShader?.dispose();
+    _backdropShader = null;
+    _backdropImage = null;
   }
 
   @override
@@ -3182,10 +3416,13 @@ class StageRunnerPainter extends CustomPainter {
     // and starts [top] pixels down (see [stageLayout]).
     final (:s, :top, view: _) = stageLayout(size, pixelRatio);
     if (s <= 0) return;
-    _decoration.resize(size);
+    _decoration.resize(size, pixelRatio);
     final w = size.width, below = size.height - top - s;
     final floorY = s * StageRunner.floor;
     _glyphs.stage(s);
+
+    final (dx, dy) = movingScenery ? f.shake(g) : (0.0, 0.0);
+    final shaking = dx != 0 || dy != 0;
 
     // The set is drawn beyond the picture on purpose (tiles and wings from
     // off-screen, the crash nudge), and neither CustomPaint nor its
@@ -3193,9 +3430,15 @@ class StageRunnerPainter extends CustomPainter {
     // whatever lies next to it, e.g. the section rail on wide screens.
     canvas
       ..save()
-      ..clipRect(Offset.zero & size, doAntiAlias: false)
-      ..drawRect((Offset.zero & size).inflate(s * .05), _bg);
-    final (dx, dy) = movingScenery ? f.shake(g) : (0.0, 0.0);
+      ..clipRect(Offset.zero & size, doAntiAlias: false);
+    // Avoid full-screen overdraw when drapes and stalls cover the house area;
+    // keep 1 logical px of margin around the stage edges so fractional stage
+    // heights (e.g. s = 243.75) never leave a semi-transparent seam.
+    if (shaking) {
+      canvas.drawRect(Offset.zero & size, _bg);
+    } else {
+      canvas.drawRect(Rect.fromLTRB(0, top - 1, w, top + s + 1), _bg);
+    }
     canvas.save();
     canvas.translate(dx * s, dy * s + top);
 
@@ -3207,48 +3450,59 @@ class StageRunnerPainter extends CustomPainter {
     final sceneryScroll = movingScenery ? course : 0.0;
     // The house around a tall picture's playing field; the field itself
     // ends at its edges, as on a picture of its own shape.
-    if (top > 0) _drapes(canvas, s, w, top, sceneryScroll);
-    if (below > 0) _stalls(canvas, s, w, below, sceneryScroll);
+    if (top > 0) _drapes(canvas, s, w, top, sceneryScroll, shaking);
+    if (below > 0) _stalls(canvas, s, w, below, sceneryScroll, shaking);
+    final exactStageClip = (s * pixelRatio) == (s * pixelRatio).roundToDouble();
     canvas
       ..save()
-      ..clipRect(Rect.fromLTRB(-s, 0, w + s, s));
-    _backdrop(canvas, a, s, w, floorY, sceneryScroll);
+      ..clipRect(
+        Rect.fromLTRB(-s, 0, w + s, s),
+        doAntiAlias: !exactStageClip,
+      );
+    _backdrop(canvas, a, s, w, floorY, sceneryScroll, shaking);
     _spotlights(canvas, s, w, floorY, sceneryScroll);
     _wings(canvas, s, w, sceneryScroll);
-    _floor(canvas, s, w, floorY, sceneryScroll);
+    _floor(canvas, s, w, floorY, sceneryScroll, shaking);
     // Behind everything that matters for the run.
     if (ghosts?.call() case final gh?) {
       _ghostRuns(canvas, g, gh, ghostSkins?.call(), a, s, w, course);
     }
 
-    for (final o in g.obstacles) {
-      final rect = Rect.fromLTRB(
-        o.left * s - course,
-        o.top * s,
-        o.right * s - course,
-        o.bottom * s,
-      );
-      if (rect.right < -s * .1 || rect.left > w + s * .1) continue;
-      if (o.kind == ObstacleKind.sandbag) {
-        _sandbagShadow(canvas, g, o, rect, s, floorY);
-      }
-      if (a == null) {
-        _plainObstacle(canvas, o, rect, s, floorY);
-      } else {
-        _obstacle(canvas, a, o, rect, s, floorY);
-      }
-    }
-
-    _pickups(canvas, g, a, s, w, course, reduced);
-    if (!reduced) trail().paint(canvas, s, a?.effect);
-    if (a == null) {
-      _plainRunner(canvas, g, s);
+    if (_decoration.rasterize && a != null) {
+      _paintBatchedStage(canvas, g, f, a, s, w, floorY, course, reduced);
     } else {
-      _runner(canvas, g, f, a, s, reduced);
+      final obstacles = g.obstacles;
+      final margin = s * .1;
+      for (var i = 0, len = obstacles.length; i < len; i++) {
+        final o = obstacles[i];
+        final rect = Rect.fromLTRB(
+          o.left * s - course,
+          o.top * s,
+          o.right * s - course,
+          o.bottom * s,
+        );
+        if (rect.right < -margin || rect.left > w + margin) continue;
+        if (o.kind == ObstacleKind.sandbag) {
+          _sandbagShadow(canvas, g, o, rect, s, floorY);
+        }
+        if (a == null) {
+          _plainObstacle(canvas, o, rect, s, floorY);
+        } else {
+          _obstacle(canvas, a, o, rect, s, floorY);
+        }
+      }
+
+      _pickups(canvas, g, a, s, w, course, reduced);
+      if (!reduced) trail().paint(canvas, s, a?.effect);
+      if (a == null) {
+        _plainRunner(canvas, g, s);
+      } else {
+        _runner(canvas, g, f, a, s, reduced);
+      }
     }
     _particles(canvas, f, s, reduced);
-    _audience(canvas, s, w, sceneryScroll);
-    _bannerAndValance(canvas, f, s, w, sceneryScroll, movingScenery);
+    _audience(canvas, s, w, sceneryScroll, shaking);
+    _bannerAndValance(canvas, f, s, w, sceneryScroll, movingScenery, shaking);
     _sandbagWarnings(canvas, g, s, w, course, reduced);
     canvas
       ..restore()
@@ -3258,12 +3512,43 @@ class StageRunnerPainter extends CustomPainter {
     canvas.restore();
   }
 
+  /// Ensures [_backdropShader] matches [a.backdrop] and [s]/[floorY], returning
+  /// the tile width or 0 if invalid.
+  double _ensureBackdropShader(RunnerArt a, double s, double floorY) {
+    final image = a.backdrop, top = s * .04, h = floorY - top;
+    if (h <= 0 || image.width <= 0 || image.height <= 0) return 0;
+    final tile = max(
+      1 / pixelRatio,
+      (h * image.width / image.height * pixelRatio).round() / pixelRatio,
+    );
+    final quality = a.backdropPaint.filterQuality;
+    if (!identical(image, _backdropImage) ||
+        tile != _backdropTile ||
+        h != _backdropH ||
+        quality != _backdropQuality ||
+        _backdropShader == null) {
+      _backdropShader?.dispose();
+      _backdropImage = image;
+      _backdropTile = tile;
+      _backdropH = h;
+      _backdropQuality = quality;
+      _backdropShader = ui.ImageShader(
+        image,
+        TileMode.mirror,
+        TileMode.clamp,
+        _DecorationCache.scaleMatrix(tile / image.width, h / image.height),
+        filterQuality: quality,
+      );
+      _backdropShaderPaint.shader = _backdropShader;
+    }
+    _backdropShaderPaint.colorFilter = a.backdropPaint.colorFilter;
+    return tile;
+  }
+
   /// The painted backdrop passes [scroll] pixels to the left, tiled in turn
-  /// as painted and mirrored, so the seams match for any picture: no
-  /// backdrop needs edges that fit together. A tile is a whole number of
-  /// device pixels wide, so the seams fall on pixel edges and stay
-  /// invisible. Its paint samples with mipmaps ([FilterQuality.medium]):
-  /// smooth when scaled down, no stair steps when scaled up.
+  /// as painted and mirrored via a cached [ui.ImageShader] with
+  /// [TileMode.mirror], so the seams match in a single textured quad without
+  /// off-screen tile draws or mirrored canvas transforms.
   void _backdrop(
     Canvas canvas,
     RunnerArt? a,
@@ -3271,41 +3556,25 @@ class StageRunnerPainter extends CustomPainter {
     double w,
     double floorY,
     double scroll,
+    bool shaking,
   ) {
     if (a == null) {
       canvas.drawRect(Rect.fromLTRB(0, s * .1, w, floorY), _wallPaint);
       return;
     }
-    final image = a.backdrop, top = s * .04, h = floorY - top;
-    final tile = max(
-      1 / pixelRatio,
-      (h * image.width / image.height * pixelRatio).round() / pixelRatio,
-    );
-    final src = Rect.fromLTWH(
-      0,
-      0,
-      image.width.toDouble(),
-      image.height.toDouble(),
-    );
-    for (var x = -(scroll % (2 * tile)); x < w; x += 2 * tile) {
-      canvas.drawImageRect(
-        image,
-        src,
-        Rect.fromLTWH(x, top, tile, h),
-        a.backdropPaint,
-      );
-      canvas
-        ..save()
-        ..translate(x + 2 * tile, top)
-        ..scale(-1, 1)
-        ..drawImageRect(
-          image,
-          src,
-          Rect.fromLTWH(0, 0, tile, h),
-          a.backdropPaint,
-        )
-        ..restore();
-    }
+    final tile = _ensureBackdropShader(a, s, floorY);
+    if (tile <= 0) return;
+    final top = s * .04, h = floorY - top;
+    final shift = scroll % (2 * tile);
+    final pad = shaking ? s * .02 : 0.0;
+    canvas
+      ..save()
+      ..translate(-shift, top)
+      ..drawRect(
+        Rect.fromLTRB(shift - pad, 0, shift + w + pad, h),
+        _backdropShaderPaint,
+      )
+      ..restore();
   }
 
   /// Light cones hung every .72 stage heights, passing with the stage:
@@ -3316,59 +3585,660 @@ class StageRunnerPainter extends CustomPainter {
     double w,
     double floorY,
     double scroll,
-  ) {
-    final period = s * .72;
-    for (
-      var x = s * .48 - scroll % period - period;
-      x < w + s * .25;
-      x += period
-    ) {
-      _path
-        ..reset()
-        ..moveTo(x - s * .02, 0)
-        ..lineTo(x + s * .02, 0)
-        ..lineTo(x + s * .22, floorY)
-        ..lineTo(x - s * .22, floorY)
-        ..close();
-      canvas.drawPath(_path, _conePaint);
-      canvas.drawOval(
-        Rect.fromCenter(
-          center: Offset(x, floorY + s * .02),
-          width: s * .46,
-          height: s * .06,
-        ),
-        _poolPaint,
-      );
-    }
-  }
+  ) => _decoration.paintSpotlights(canvas, s, w, floorY, scroll);
 
   /// Velvet wings every .51 stage heights, passing with the stage.
-  void _wings(Canvas canvas, double s, double w, double scroll) {
-    const width = .07;
-    final period = s * .51;
-    for (var left = -(scroll % period); left < w; left += period) {
-      final top = s * .05, bottom = s * StageRunner.floor;
-      canvas.drawRect(
-        Rect.fromLTRB(left, top, left + s * width, bottom),
-        _velvetPaint,
-      );
-      for (final fold in const [.012, .042]) {
-        canvas.drawRect(
-          Rect.fromLTRB(left + s * fold, top, left + s * (fold + .012), bottom),
-          _foldPaint,
-        );
+  void _wings(Canvas canvas, double s, double w, double scroll) =>
+      _decoration.paintWings(canvas, s, w, scroll);
+
+  /// The floor; its planks pass exactly with the course.
+  void _floor(
+    Canvas canvas,
+    double s,
+    double w,
+    double floorY,
+    double scroll,
+    bool shaking,
+  ) {
+    if (_decoration.paintFloor(canvas, s, w, floorY, scroll, shaking)) return;
+    canvas.drawRect(Rect.fromLTRB(0, floorY, w, s), _floorPaint);
+    _decoration.paintFloorPlanks(canvas, s, w, floorY, scroll);
+    canvas.drawLine(Offset(0, floorY), Offset(w, floorY), _edgePaint);
+  }
+
+  /// Web-batched obstacle, pickup and runner pass:
+  /// 1. Background vectors (shadows, lamp beams, drum dust, velvet borders,
+  ///    ropes/fly lines) batched into [_discBatch] so no mid-run Circle/Oval
+  ///    shaders compile.
+  /// 2. Same-atlas obstacle sprites, pickup sprites and (when no trail/shine
+  ///    separates them) the runner sprite batched into `drawRawAtlas`.
+  void _paintBatchedStage(
+    Canvas canvas,
+    StageRunner g,
+    RunnerFx f,
+    RunnerArt a,
+    double s,
+    double w,
+    double floorY,
+    double course,
+    bool reduced,
+  ) {
+    final obstacles = g.obstacles;
+    final obsLen = obstacles.length;
+    final margin = s * .1;
+
+    // Pass 1: obstacle background vectors (shadows, beams, dust, ropes, borders).
+    for (var i = 0; i < obsLen; i++) {
+      final o = obstacles[i];
+      final left = o.left * s - course;
+      final right = o.right * s - course;
+      if (right < -margin || left > w + margin) continue;
+      final top = o.top * s, bottom = o.bottom * s;
+      final width = right - left;
+      final centerX = (left + right) * .5;
+      switch (o.kind) {
+        case ObstacleKind.sandbag:
+          final waiting = _sandbagTelegraphing(g, o);
+          final falling = o.falling && o.bottom < StageRunner.floor - .01;
+          if (waiting || falling) {
+            final progress = falling
+                ? ((o.bottom - StageRunner.ceiling) /
+                          (StageRunner.floor - StageRunner.ceiling))
+                      .clamp(0.0, 1.0)
+                : 0.35;
+            _discBatch.addOval(
+              canvas,
+              centerX,
+              floorY + s * .006,
+              width * (.7 + .65 * progress) * .5,
+              s * (.014 + .014 * progress) * .5,
+              waiting ? _sandbagWarnShadowArgb : _sandbagShadowArgb,
+            );
+          }
+          final bagW = width * 1.25;
+          final bagH =
+              bagW * RunnerSprite.sandbag.height / RunnerSprite.sandbag.width;
+          final bagTop = bottom - bagH;
+          _discBatch.addRect(
+            canvas,
+            centerX - .75,
+            0,
+            centerX + .75,
+            bagTop + bagH * .1,
+            _ropeArgb,
+          );
+        case ObstacleKind.lamp:
+          final lampW = width * 1.05;
+          final lampH =
+              lampW * RunnerSprite.lamp.height / RunnerSprite.lamp.width;
+          final bodyTop = bottom - lampH;
+          final lensY = bottom - lampH * .06;
+          _discBatch
+            ..addQuad(
+              canvas,
+              centerX - lampW * .3,
+              lensY,
+              centerX + lampW * .3,
+              lensY,
+              centerX + lampW * .9,
+              floorY,
+              centerX - lampW * .9,
+              floorY,
+              _beamArgb,
+            )
+            ..addRect(canvas, centerX - .75, 0, centerX + .75, bodyTop, _ropeArgb);
+        case ObstacleKind.truss:
+          final bar = a.ownTruss
+              ? RunnerSprite.trussAssembly
+              : RunnerSprite.truss;
+          final barH = width * bar.height / bar.width;
+          var suspensionY = bottom;
+          if (!a.ownTruss) {
+            final lampW = width * .19;
+            final lampH =
+                lampW * RunnerSprite.lamp.height / RunnerSprite.lamp.width;
+            suspensionY = bottom - lampH - barH * .5;
+            final lensY = bottom - lampH * .06;
+            for (var k = 0; k < 4; k++) {
+              final lx = left + lampW * .5 + k * (width - lampW) / 3;
+              _discBatch.addQuad(
+                canvas,
+                lx - lampW * .3,
+                lensY,
+                lx + lampW * .3,
+                lensY,
+                lx + lampW * .9,
+                floorY,
+                lx - lampW * .9,
+                floorY,
+                _beamArgb,
+              );
+            }
+          }
+          final leftRope = left + s * .012, rightRope = right - s * .012;
+          _discBatch
+            ..addRect(
+              canvas,
+              leftRope - .75,
+              0,
+              leftRope + .75,
+              suspensionY,
+              _ropeArgb,
+            )
+            ..addRect(
+              canvas,
+              rightRope - .75,
+              0,
+              rightRope + .75,
+              suspensionY,
+              _ropeArgb,
+            );
+        case ObstacleKind.drum:
+          if (o.falling) {
+            final baseY = bottom - s * .012;
+            _discBatch
+              ..addCircle(
+                canvas,
+                right + s * .022,
+                baseY - s * .004,
+                s * .012,
+                _drumDustArgb,
+              )
+              ..addCircle(
+                canvas,
+                right + s * .048,
+                baseY - s * .009,
+                s * .009,
+                _drumDustArgb,
+              )
+              ..addCircle(
+                canvas,
+                right + s * .072,
+                baseY - s * .005,
+                s * .006,
+                _drumDustArgb,
+              );
+          }
+        case ObstacleKind.drop:
+          final frameH = width * RunnerSprite.drop.height / RunnerSprite.drop.width;
+          final frameTop = bottom - frameH;
+          final inset = width * .18;
+          final lineBottom = frameTop + frameH * .04;
+          final lx = left + inset, rx = right - inset;
+          _discBatch
+            ..addRect(canvas, lx - 4, 0, lx + 4, lineBottom, _flyLineEdgeArgb)
+            ..addRect(canvas, lx - 2.5, 0, lx + 2.5, lineBottom, _ropeArgb)
+            ..addRect(canvas, rx - 4, 0, rx + 4, lineBottom, _flyLineEdgeArgb)
+            ..addRect(canvas, rx - 2.5, 0, rx + 2.5, lineBottom, _ropeArgb);
+        case ObstacleKind.border when !a.ownScenery:
+          _velvetPieceBatched(
+            canvas,
+            Rect.fromLTRB(left, top, right, bottom),
+            s,
+            a.border,
+          );
+        default:
       }
+    }
+    _discBatch.flush(canvas);
+
+    // Pass 2: all obstacle sprites + all pickup sprites batched via drawRawAtlas.
+    for (var i = 0; i < obsLen; i++) {
+      final o = obstacles[i];
+      final left = o.left * s - course;
+      final right = o.right * s - course;
+      if (right < -margin || left > w + margin) continue;
+      final rect = Rect.fromLTRB(left, o.top * s, right, o.bottom * s);
+      _obstacleSpritesBatched(canvas, a, o, rect, s);
+    }
+
+    final pickups = g.pickups;
+    final glyph = s * .075, pickupH = s * .085;
+    final pickupImg = a.pickupAtlas;
+    final pickupPaint = RunnerArt.pickupPaint;
+    for (var i = 0, len = pickups.length; i < len; i++) {
+      final p = pickups[i];
+      if (p.taken) continue;
+      final x = p.x * s - course;
+      if (x < -glyph || x > w + glyph) continue;
+      final y = reduced
+          ? p.y * s
+          : p.y * s + sin(g.time * 4 + p.x * 7) * s * .008;
+      final sprite = RunnerSprite.of(p.kind);
+      final scale = pickupH / max(sprite.width, sprite.height);
+      final pw = sprite.width * scale, ph = sprite.height * scale;
+      _spriteBatch.addRect(
+        canvas,
+        pickupImg,
+        sprite.rect,
+        Rect.fromLTWH(x - pw * .5, y - ph * .5, pw, ph),
+        pickupPaint,
+      );
+    }
+    _spriteBatch.flush(canvas);
+
+    if (!reduced) trail().paint(canvas, s, a.effect);
+    _runner(canvas, g, f, a, s, reduced, batched: true);
+  }
+
+  /// Like [_velvetPiece], but pushes the velvet panels, gold trim and 4 gold
+  /// tassels into [_discBatch] so borders compile zero Circle shaders and add
+  /// zero extra draw calls.
+  void _velvetPieceBatched(
+    Canvas canvas,
+    Rect rect,
+    double s, [
+    Color? color,
+  ]) {
+    final baseArgb = color == null ? _velvetArgb : color.toARGB32();
+    final foldArgb = color == null
+        ? _velvetDarkArgb
+        : Color.lerp(color, const Color(0xFF000000), .34)!.toARGB32();
+    final fold = rect.width / 5;
+    _discBatch
+      ..addRect(canvas, rect.left, rect.top, rect.right, rect.bottom, baseArgb)
+      ..addRect(
+        canvas,
+        rect.left + fold,
+        rect.top,
+        rect.left + fold * 1.7,
+        rect.bottom,
+        foldArgb,
+      )
+      ..addRect(
+        canvas,
+        rect.left + fold * 3,
+        rect.top,
+        rect.left + fold * 3.7,
+        rect.bottom,
+        foldArgb,
+      )
+      ..addRect(
+        canvas,
+        rect.left,
+        rect.bottom - s * .014,
+        rect.right,
+        rect.bottom,
+        _goldArgb,
+      );
+    final ty = rect.bottom + s * .006, tr = s * .006;
+    for (var i = 0; i < 4; i++) {
+      _discBatch.addCircle(
+        canvas,
+        rect.left + rect.width * (i + .5) / 4,
+        ty,
+        tr,
+        _goldArgb,
+      );
     }
   }
 
-  /// The floor; its planks pass exactly with the course.
-  void _floor(Canvas canvas, double s, double w, double floorY, double scroll) {
-    canvas.drawRect(Rect.fromLTRB(0, floorY, w, s), _floorPaint);
-    final period = s * .25;
-    for (var x = -(scroll % period); x < w + s * .04; x += period) {
-      canvas.drawLine(Offset(x, floorY), Offset(x - s * .04, s), _plankPaint);
+  void _addSprite(Canvas canvas, RunnerArt a, RunnerSprite sprite, Rect dst) =>
+      _spriteBatch.addRect(
+        canvas,
+        a.imageOf(sprite),
+        sprite.rect,
+        dst,
+        a.paintOf(sprite),
+      );
+
+  void _obstacleSpritesBatched(
+    Canvas canvas,
+    RunnerArt a,
+    Obstacle o,
+    Rect rect,
+    double s,
+  ) {
+    switch (o.kind) {
+      case ObstacleKind.crate when a.ownScenery && o.tall:
+        _addSprite(canvas, a, RunnerSprite.twoCrates, rect);
+      case ObstacleKind.crate when a.ownScenery:
+        final width = rect.width * 1.12;
+        _addSprite(
+          canvas,
+          a,
+          RunnerSprite.crate,
+          Rect.fromLTRB(
+            rect.center.dx - width / 2,
+            rect.top,
+            rect.center.dx + width / 2,
+            rect.bottom,
+          ),
+        );
+      case ObstacleKind.crate when a.ownTallCrate && o.tall:
+        _addSprite(canvas, a, RunnerSprite.tallCrate, rect);
+      case ObstacleKind.crate when a.ownTallCrate:
+        _spriteBatch.addRect(
+          canvas,
+          a.atlas,
+          RunnerSprite.crate.rect,
+          rect,
+          a.obstaclePaint,
+        );
+      case ObstacleKind.crate when a.ownPile && o.tall:
+        _addSprite(canvas, a, RunnerSprite.pile, rect);
+      case ObstacleKind.crate:
+        if (o.tall) {
+          final half = rect.height / 2;
+          _addSprite(
+            canvas,
+            a,
+            RunnerSprite.crate,
+            rect.topLeft & Size(rect.width, half),
+          );
+          _addSprite(
+            canvas,
+            a,
+            RunnerSprite.crate,
+            Rect.fromLTWH(rect.left, rect.top + half, rect.width, half),
+          );
+        } else {
+          _addSprite(canvas, a, RunnerSprite.crate, rect);
+        }
+      case ObstacleKind.flat when a.ownScenery && o.gap:
+        final width = rect.width * _guillotineWidth;
+        final left = rect.center.dx - width / 2;
+        _addSprite(
+          canvas,
+          a,
+          RunnerSprite.guillotine,
+          Rect.fromLTRB(left, rect.top, left + width, rect.bottom),
+        );
+        final block = RunnerSprite.guillotineBlock;
+        final height = width * block.height / block.width;
+        final shown = min(1.0, rect.height / height);
+        _spriteBatch.addRect(
+          canvas,
+          a.imageOf(block),
+          Rect.fromLTWH(block.x, block.y, block.width, block.height * shown),
+          Rect.fromLTWH(left, rect.top, width, height * shown),
+          a.paintOf(block),
+        );
+      case ObstacleKind.flat when a.ownScenery:
+        _shelvesBatched(canvas, a, rect);
+      case ObstacleKind.flat:
+        _flatBatched(canvas, a, rect);
+      case ObstacleKind.border when a.ownScenery:
+        final gap = (o.anchor - o.bottom) * s;
+        final width = rect.width * _guillotineWidth;
+        final left = rect.center.dx - width / 2;
+        final cell = RunnerSprite.guillotine;
+        final blade = RunnerSprite.guillotineBlade;
+        final height = width * blade.height / blade.width;
+        final back = rect.bottom - height * .75;
+        const upright = RunnerSprite.guillotineUpright;
+        if (back > rect.top) {
+          _addSprite(
+            canvas,
+            a,
+            cell,
+            Rect.fromLTRB(left, rect.top, left + width, back),
+          );
+          if (a.border != null) {
+            _spriteBatch.flush(canvas);
+            _velvetPieceBatched(
+              canvas,
+              Rect.fromLTRB(
+                left + width * upright,
+                rect.top,
+                left + width * (1 - upright),
+                back,
+              ),
+              s,
+              a.border,
+            );
+            _discBatch.flush(canvas);
+          }
+        }
+        const sides = [0.0, 1 - upright];
+        final cellImg = a.imageOf(cell), cellPaint = a.paintOf(cell);
+        final dstTop = max(rect.top, back), dstBottom = rect.bottom + max(0.0, gap);
+        for (final side in sides) {
+          _spriteBatch.addRect(
+            canvas,
+            cellImg,
+            Rect.fromLTWH(
+              cell.x + cell.width * side,
+              cell.y,
+              cell.width * upright,
+              cell.height,
+            ),
+            Rect.fromLTRB(
+              left + width * side,
+              dstTop,
+              left + width * (side + upright),
+              dstBottom,
+            ),
+            cellPaint,
+          );
+        }
+        _addSprite(
+          canvas,
+          a,
+          blade,
+          Rect.fromLTWH(left, rect.bottom - height, width, height),
+        );
+      case ObstacleKind.border:
+        break;
+      case ObstacleKind.lamp:
+        final width = rect.width * 1.05;
+        final height = width * RunnerSprite.lamp.height / RunnerSprite.lamp.width;
+        _addSprite(
+          canvas,
+          a,
+          RunnerSprite.lamp,
+          Rect.fromLTWH(
+            rect.center.dx - width / 2,
+            rect.bottom - height,
+            width,
+            height,
+          ),
+        );
+      case ObstacleKind.sandbag:
+        final sprite = RunnerSprite.sandbag;
+        final width = rect.width * 1.25;
+        final height = width * sprite.height / sprite.width;
+        _addSprite(
+          canvas,
+          a,
+          sprite,
+          Rect.fromLTWH(
+            rect.center.dx - width / 2,
+            rect.bottom - height,
+            width,
+            height,
+          ),
+        );
+      case ObstacleKind.drum:
+        final r = rect.width * .56;
+        final center = Offset(rect.center.dx, rect.bottom - r);
+        _spriteBatch.addRotated(
+          canvas,
+          a.imageOf(RunnerSprite.drum),
+          RunnerSprite.drum.rect,
+          center,
+          (2 * r) / RunnerSprite.drum.width,
+          o.left * s / r,
+          a.paintOf(RunnerSprite.drum),
+        );
+      case ObstacleKind.pile when a.ownPile || a.ownScenery:
+        if (o.bottom >= StageRunner.floor) {
+          _addSprite(
+            canvas,
+            a,
+            a.ownScenery ? RunnerSprite.threeCrates : RunnerSprite.pile,
+            Rect.fromLTRB(
+              rect.left,
+              rect.top - rect.height,
+              rect.right,
+              rect.bottom,
+            ),
+          );
+        }
+      case ObstacleKind.pile:
+        final count = max(1, (rect.width / rect.height).round());
+        final width = rect.width / count;
+        for (var i = 0; i < count; i++) {
+          _addSprite(
+            canvas,
+            a,
+            RunnerSprite.crate,
+            Rect.fromLTWH(rect.left + i * width, rect.top, width, rect.height),
+          );
+        }
+      case ObstacleKind.truss:
+        final bar = a.ownTruss
+            ? RunnerSprite.trussAssembly
+            : RunnerSprite.truss;
+        final barHeight = rect.width * bar.height / bar.width;
+        var barTop = rect.bottom - barHeight;
+        if (!a.ownTruss) {
+          final lampWidth = rect.width * .19;
+          final lampHeight =
+              lampWidth * RunnerSprite.lamp.height / RunnerSprite.lamp.width;
+          barTop = rect.bottom - lampHeight - barHeight * .5;
+          for (var i = 0; i < 4; i++) {
+            final x =
+                rect.left + lampWidth / 2 + i * (rect.width - lampWidth) / 3;
+            _addSprite(
+              canvas,
+              a,
+              RunnerSprite.lamp,
+              Rect.fromLTWH(
+                x - lampWidth / 2,
+                rect.bottom - lampHeight,
+                lampWidth,
+                lampHeight,
+              ),
+            );
+          }
+        }
+        _addSprite(
+          canvas,
+          a,
+          bar,
+          Rect.fromLTWH(rect.left, barTop, rect.width, barHeight),
+        );
+      case ObstacleKind.drop:
+        final sprite = RunnerSprite.drop;
+        final height = rect.width * sprite.height / sprite.width;
+        _addSprite(
+          canvas,
+          a,
+          sprite,
+          Rect.fromLTWH(rect.left, rect.bottom - height, rect.width, height),
+        );
     }
-    canvas.drawLine(Offset(0, floorY), Offset(w, floorY), _edgePaint);
+  }
+
+  void _flatBatched(Canvas canvas, RunnerArt a, Rect rect) {
+    final sprite = RunnerSprite.flat, src = sprite.rect;
+    final width = rect.width * 1.35, scale = width / sprite.width;
+    final left = rect.center.dx - width / 2;
+    const topCap = 36.0, footCap = 64.0;
+    final top = topCap * scale, foot = footCap * scale;
+    final image = a.imageOf(sprite), paint = a.paintOf(sprite);
+    if (rect.height <= top + foot) {
+      _spriteBatch.addRect(
+        canvas,
+        image,
+        src,
+        Rect.fromLTWH(left, rect.top, width, rect.height),
+        paint,
+      );
+      return;
+    }
+    _spriteBatch
+      ..addRect(
+        canvas,
+        image,
+        Rect.fromLTRB(src.left, src.top, src.right, src.top + topCap),
+        Rect.fromLTRB(left, rect.top, left + width, rect.top + top),
+        paint,
+      )
+      ..addRect(
+        canvas,
+        image,
+        Rect.fromLTRB(
+          src.left,
+          src.top + topCap,
+          src.right,
+          src.top + sprite.height - footCap,
+        ),
+        Rect.fromLTRB(left, rect.top + top, left + width, rect.bottom - foot),
+        paint,
+      )
+      ..addRect(
+        canvas,
+        image,
+        Rect.fromLTRB(
+          src.left,
+          src.top + sprite.height - footCap,
+          src.right,
+          src.bottom,
+        ),
+        Rect.fromLTRB(left, rect.bottom - foot, left + width, rect.bottom),
+        paint,
+      );
+  }
+
+  void _shelvesBatched(Canvas canvas, RunnerArt a, Rect rect) {
+    final sprite = RunnerSprite.flat, src = sprite.rect;
+    final width = rect.width * 1.35;
+    final scale = width / sprite.width * RunnerSprite.shelfStretch;
+    final left = rect.center.dx - width / 2;
+    const rows = RunnerSprite.shelves, rowHeight = RunnerSprite.shelfHeight;
+    const topCap = RunnerSprite.shelfTop, footCap = RunnerSprite.shelfFoot;
+    final top = topCap * scale, foot = footCap * scale;
+    final image = a.imageOf(sprite), paint = a.paintOf(sprite);
+    final middle = rect.height - top - foot;
+    if (middle <= 0) {
+      _spriteBatch.addRect(
+        canvas,
+        image,
+        src,
+        Rect.fromLTRB(left, rect.top, left + width, rect.bottom),
+        paint,
+      );
+      return;
+    }
+    final count = max(1, (middle / (rowHeight * scale)).round());
+    final row = middle / count;
+    _spriteBatch.addRect(
+      canvas,
+      image,
+      Rect.fromLTRB(src.left, src.top, src.right, src.top + topCap),
+      Rect.fromLTRB(left, rect.top, left + width, rect.top + top),
+      paint,
+    );
+    for (var i = 0; i < count; i++) {
+      final from = topCap + (i % rows) * rowHeight;
+      final y = rect.top + top + i * row;
+      _spriteBatch.addRect(
+        canvas,
+        image,
+        Rect.fromLTRB(
+          src.left,
+          src.top + from,
+          src.right,
+          src.top + from + rowHeight,
+        ),
+        Rect.fromLTRB(left, y, left + width, y + row),
+        paint,
+      );
+    }
+    _spriteBatch.addRect(
+      canvas,
+      image,
+      Rect.fromLTRB(
+        src.left,
+        src.top + sprite.height - footCap,
+        src.right,
+        src.bottom,
+      ),
+      Rect.fromLTRB(left, rect.bottom - foot, left + width, rect.bottom),
+      paint,
+    );
   }
 
   void _obstacle(
@@ -3536,9 +4406,10 @@ class StageRunnerPainter extends CustomPainter {
             _lamp(canvas, a, x, rect.bottom, lampWidth, floorY);
           }
         }
-        for (final x in [rect.left + s * .012, rect.right - s * .012]) {
-          canvas.drawLine(Offset(x, 0), Offset(x, suspensionY), _ropePaint);
-        }
+        final leftRope = rect.left + s * .012, rightRope = rect.right - s * .012;
+        canvas
+          ..drawLine(Offset(leftRope, 0), Offset(leftRope, suspensionY), _ropePaint)
+          ..drawLine(Offset(rightRope, 0), Offset(rightRope, suspensionY), _ropePaint);
         _sprite(
           canvas,
           a,
@@ -3557,12 +4428,13 @@ class StageRunnerPainter extends CustomPainter {
         // Heavy fly lines all the way up to the loft, like [_plainObstacle],
         // so the solid hitbox column above the painted frame is unmistakable.
         final inset = rect.width * .18;
-        for (final x in [frame.left + inset, frame.right - inset]) {
-          final top = Offset(x, 0), bottom = Offset(x, frame.top + height * .04);
-          canvas
-            ..drawLine(top, bottom, _flyLineEdge)
-            ..drawLine(top, bottom, _flyLinePaint);
-        }
+        final lineBottom = frame.top + height * .04;
+        final leftX = frame.left + inset, rightX = frame.right - inset;
+        canvas
+          ..drawLine(Offset(leftX, 0), Offset(leftX, lineBottom), _flyLineEdge)
+          ..drawLine(Offset(leftX, 0), Offset(leftX, lineBottom), _flyLinePaint)
+          ..drawLine(Offset(rightX, 0), Offset(rightX, lineBottom), _flyLineEdge)
+          ..drawLine(Offset(rightX, 0), Offset(rightX, lineBottom), _flyLinePaint);
         _sprite(canvas, a, sprite, frame);
     }
   }
@@ -3615,7 +4487,9 @@ class StageRunnerPainter extends CustomPainter {
     double course,
     bool reduced,
   ) {
-    for (final o in g.obstacles) {
+    final obstacles = g.obstacles;
+    for (var i = 0, len = obstacles.length; i < len; i++) {
+      final o = obstacles[i];
       if (o.kind != ObstacleKind.sandbag || !_sandbagTelegraphing(g, o)) {
         continue;
       }
@@ -3632,17 +4506,31 @@ class StageRunnerPainter extends CustomPainter {
       // Small downward pointer at the rope end below the valance.
       final tipX = cx + wobble;
       final r = s * .014;
-      _path
-        ..reset()
-        ..moveTo(tipX - r, endY - r * .3)
-        ..lineTo(tipX + r, endY - r * .3)
-        ..lineTo(tipX, endY + r * 1.1)
-        ..close();
-      canvas.drawPath(_path, _sandbagWarnFill);
+      if (_decoration.rasterize) {
+        _discBatch.addTriangle(
+          canvas,
+          tipX - r,
+          endY - r * .3,
+          tipX + r,
+          endY - r * .3,
+          tipX,
+          endY + r * 1.1,
+          _sandbagWarnFillArgb,
+        );
+      } else {
+        _path
+          ..reset()
+          ..moveTo(tipX - r, endY - r * .3)
+          ..lineTo(tipX + r, endY - r * .3)
+          ..lineTo(tipX, endY + r * 1.1)
+          ..close();
+        canvas.drawPath(_path, _sandbagWarnFill);
+      }
     }
+    if (_decoration.rasterize) _discBatch.flush(canvas);
   }
 
-  /// Subtle dust puffs and speed streaks trailing right of a rolling drum.
+  /// Subtle dust puffs trailing right of a rolling drum.
   void _drumTrail(Canvas canvas, Rect rect, double s) {
     final baseY = rect.bottom - s * .012;
     final baseX = rect.right;
@@ -3660,16 +4548,6 @@ class StageRunnerPainter extends CustomPainter {
       Offset(baseX + s * .072, baseY - s * .005),
       s * .006,
       _drumDustPaint,
-    );
-    canvas.drawLine(
-      Offset(baseX + s * .01, rect.center.dy),
-      Offset(baseX + s * .06, rect.center.dy),
-      _drumStreakPaint,
-    );
-    canvas.drawLine(
-      Offset(baseX + s * .018, rect.center.dy + s * .024),
-      Offset(baseX + s * .055, rect.center.dy + s * .024),
-      _drumStreakPaint,
     );
   }
 
@@ -3705,6 +4583,24 @@ class StageRunnerPainter extends CustomPainter {
     return body;
   }
 
+  static void _drawSlice(
+    Canvas canvas,
+    ui.Image image,
+    Paint paint,
+    Rect src,
+    double left,
+    double width,
+    double srcTop,
+    double srcBottom,
+    double dstTop,
+    double dstBottom,
+  ) => canvas.drawImageRect(
+    image,
+    Rect.fromLTRB(src.left, src.top + srcTop, src.right, src.top + srcBottom),
+    Rect.fromLTRB(left, dstTop, left + width, dstBottom),
+    paint,
+  );
+
   /// A painted flat in three slices: frame top and feet keep their shape,
   /// only the canvas in between stretches.
   void _flat(Canvas canvas, RunnerArt a, Rect rect) {
@@ -3722,20 +4618,27 @@ class StageRunnerPainter extends CustomPainter {
       );
       return;
     }
-    void slice(
-      double srcTop,
-      double srcBottom,
-      double dstTop,
-      double dstBottom,
-    ) => canvas.drawImageRect(
-      a.imageOf(sprite),
-      Rect.fromLTRB(src.left, src.top + srcTop, src.right, src.top + srcBottom),
-      Rect.fromLTRB(left, dstTop, left + width, dstBottom),
-      a.paintOf(sprite),
+    final image = a.imageOf(sprite), paint = a.paintOf(sprite);
+    _drawSlice(canvas, image, paint, src, left, width, 0, topCap, rect.top, rect.top + top);
+    _drawSlice(
+      canvas,
+      image,
+      paint,
+      src,
+      left,
+      width,
+      topCap,
+      sprite.height - footCap,
+      rect.top + top,
+      rect.bottom - foot,
     );
-    slice(0, topCap, rect.top, rect.top + top);
-    slice(topCap, sprite.height - footCap, rect.top + top, rect.bottom - foot);
-    slice(
+    _drawSlice(
+      canvas,
+      image,
+      paint,
+      src,
+      left,
+      width,
       sprite.height - footCap,
       sprite.height,
       rect.bottom - foot,
@@ -3754,32 +4657,27 @@ class StageRunnerPainter extends CustomPainter {
     const rows = RunnerSprite.shelves, rowHeight = RunnerSprite.shelfHeight;
     const topCap = RunnerSprite.shelfTop, footCap = RunnerSprite.shelfFoot;
     final top = topCap * scale, foot = footCap * scale;
-    void slice(double srcTop, double srcBottom, double dstTop, double dstEnd) =>
-        canvas.drawImageRect(
-          a.imageOf(sprite),
-          Rect.fromLTRB(
-            src.left,
-            src.top + srcTop,
-            src.right,
-            src.top + srcBottom,
-          ),
-          Rect.fromLTRB(left, dstTop, left + width, dstEnd),
-          a.paintOf(sprite),
-        );
+    final image = a.imageOf(sprite), paint = a.paintOf(sprite);
     final middle = rect.height - top - foot;
     if (middle <= 0) {
-      slice(0, sprite.height, rect.top, rect.bottom);
+      _drawSlice(canvas, image, paint, src, left, width, 0, sprite.height, rect.top, rect.bottom);
       return;
     }
     final count = max(1, (middle / (rowHeight * scale)).round());
     final row = middle / count;
-    slice(0, topCap, rect.top, rect.top + top);
+    _drawSlice(canvas, image, paint, src, left, width, 0, topCap, rect.top, rect.top + top);
     for (var i = 0; i < count; i++) {
       final from = topCap + (i % rows) * rowHeight;
       final y = rect.top + top + i * row;
-      slice(from, from + rowHeight, y, y + row);
+      _drawSlice(canvas, image, paint, src, left, width, from, from + rowHeight, y, y + row);
     }
-    slice(
+    _drawSlice(
+      canvas,
+      image,
+      paint,
+      src,
+      left,
+      width,
       sprite.height - footCap,
       sprite.height,
       rect.bottom - foot,
@@ -3831,9 +4729,12 @@ class StageRunnerPainter extends CustomPainter {
         );
       }
     }
-    for (final side in [0.0, 1 - upright]) {
+    const sides = [0.0, 1 - upright];
+    final cellImg = a.imageOf(cell), cellPaint = a.paintOf(cell);
+    final dstTop = max(rect.top, back), dstBottom = rect.bottom + max(0.0, gap);
+    for (final side in sides) {
       canvas.drawImageRect(
-        a.imageOf(cell),
+        cellImg,
         Rect.fromLTWH(
           cell.x + cell.width * side,
           cell.y,
@@ -3842,11 +4743,11 @@ class StageRunnerPainter extends CustomPainter {
         ),
         Rect.fromLTRB(
           left + width * side,
-          max(rect.top, back),
+          dstTop,
           left + width * (side + upright),
-          rect.bottom + max(0.0, gap),
+          dstBottom,
         ),
-        a.paintOf(cell),
+        cellPaint,
       );
     }
     _sprite(
@@ -3919,7 +4820,9 @@ class StageRunnerPainter extends CustomPainter {
     bool reduced,
   ) {
     final glyph = s * .075, height = s * .085;
-    for (final p in g.pickups) {
+    final pickups = g.pickups;
+    for (var i = 0, len = pickups.length; i < len; i++) {
+      final p = pickups[i];
       if (p.taken) continue;
       final x = p.x * s - course;
       if (x < -glyph || x > w + glyph) continue;
@@ -3954,8 +4857,9 @@ class StageRunnerPainter extends CustomPainter {
     RunnerFx f,
     RunnerArt a,
     double s,
-    bool reduced,
-  ) {
+    bool reduced, {
+    bool batched = false,
+  }) {
     final onFloor =
         g.y >= StageRunner.floor - StageRunner.runnerHeight / 2 - .001;
     final RunnerSprite sprite;
@@ -4003,6 +4907,32 @@ class StageRunnerPainter extends CustomPainter {
       );
     }
     final shine = !reduced && (a.effect?.shine ?? false);
+    if (batched && !shine) {
+      if (angle == 0) {
+        _spriteBatch
+          ..addRect(
+            canvas,
+            a.imageOf(sprite),
+            sprite.rect,
+            dst,
+            a.paintOf(sprite),
+          )
+          ..flush(canvas);
+      } else {
+        _spriteBatch
+          ..addRotated(
+            canvas,
+            a.imageOf(sprite),
+            sprite.rect,
+            dst.center,
+            scale,
+            angle,
+            a.paintOf(sprite),
+          )
+          ..flush(canvas);
+      }
+      return;
+    }
     if (angle == 0) {
       _figure(canvas, a, sprite, dst, shine);
     } else {
@@ -4036,25 +4966,44 @@ class StageRunnerPainter extends CustomPainter {
   }
 
   void _particles(Canvas canvas, RunnerFx f, double s, bool reduced) {
-    if (!reduced) {
-      for (var i = 0; i < RunnerFx.maxParticles; i++) {
-        final life = f.life[i];
-        if (life <= 0) continue;
-        canvas.drawCircle(
-          Offset(f.px[i] * s, f.py[i] * s),
-          f.size[i] * s * min(1, life * 3),
-          _particlePaints[f.tint[i]],
-        );
+    if (!reduced && f.hasParticles) {
+      if (_decoration.rasterize) {
+        for (var i = 0; i < RunnerFx.maxParticles; i++) {
+          final life = f.life[i];
+          if (life <= 0) continue;
+          _discBatch.addCircle(
+            canvas,
+            f.px[i] * s,
+            f.py[i] * s,
+            f.size[i] * s * min(1, life * 3),
+            _particleArgb[f.tint[i]],
+          );
+        }
+        _discBatch.flush(canvas);
+      } else {
+        for (var i = 0; i < RunnerFx.maxParticles; i++) {
+          final life = f.life[i];
+          if (life <= 0) continue;
+          canvas.drawCircle(
+            Offset(f.px[i] * s, f.py[i] * s),
+            f.size[i] * s * min(1, life * 3),
+            _particlePaints[f.tint[i]],
+          );
+        }
       }
     }
+    if (!f.hasPopups) return;
     final size = s * .045;
-    for (final p in f.popups) {
+    final popups = f.popups;
+    final shadowDelta = Offset(s * .003, s * .003);
+    for (var i = 0, len = popups.length; i < len; i++) {
+      final p = popups[i];
       if (!p.alive) continue;
       final at = Offset(p.x * s, (p.y - (reduced ? 0 : p.age * .12)) * s);
       _paintCentered(
         canvas,
         _glyphs.label(p.text, size, shadow: true),
-        at + Offset(s * .003, s * .003),
+        at + shadowDelta,
       );
       _paintCentered(canvas, _glyphs.label(p.text, size), at);
     }
@@ -4062,66 +5011,29 @@ class StageRunnerPainter extends CustomPainter {
 
   /// Heads in the front row, passing with the stage. They sit calmly, also
   /// while a banner celebrates.
-  void _audience(Canvas canvas, double s, double w, double scroll) {
-    final spacing = s * .11;
-    final first = (scroll / spacing).floor() - 1;
-    var count = 0;
-    while ((first + count) * spacing - scroll < w + spacing) {
-      count++;
-    }
-    _decoration.paint(
-      canvas,
-      ('audience', first % 13, count),
-      first * spacing - scroll,
-      (recording) {
-        for (var i = 0; i < count; i++) {
-          final h = ((first + i) * 7919) % 13;
-          final r = s * (.034 + (h % 3) * .004);
-          final x = i * spacing + (h % 5) * s * .004;
-          final y = s * (.985 - (h % 4) * .006);
-          recording.drawCircle(Offset(x, y - r * .6), r, _crowdPaint);
-          recording.drawRRect(
-            RRect.fromRectAndRadius(
-              Rect.fromCenter(
-                center: Offset(x, y + r * 1.2),
-                width: r * 3.2,
-                height: r * 2.2,
-              ),
-              Radius.circular(r),
-            ),
-            _crowdPaint,
-          );
-        }
-      },
-    );
-  }
+  void _audience(
+    Canvas canvas,
+    double s,
+    double w,
+    double scroll,
+    bool shaking,
+  ) => _decoration.paintAudience(canvas, s, w, scroll, shaking);
 
   /// Tall pictures: above the playing field the house's velvet drape,
   /// [top] pixels high, its folds passing with the stage, darker towards
   /// the top and hemmed in gold above the valance.
-  void _drapes(Canvas canvas, double s, double w, double top, double scroll) {
+  void _drapes(
+    Canvas canvas,
+    double s,
+    double w,
+    double top,
+    double scroll,
+    bool shaking,
+  ) {
     final from = -top - s * .05;
-    canvas.drawRect(Rect.fromLTRB(0, from, w, 0), _velvetPaint);
-    final period = s * .09;
-    final shift = -(scroll % period);
-    var count = 0;
-    for (var x = shift; x < w; x += period) {
-      count++;
+    if (_decoration.paintDrapes(canvas, s, w, top, from, scroll, shaking)) {
+      return;
     }
-    _decoration.paint(canvas, ('drapes', count), shift, (recording) {
-      for (var i = 0; i < count; i++) {
-        final x = i * period;
-        recording
-          ..drawRect(
-            Rect.fromLTRB(x + period * .12, from, x + period * .3, 0),
-            _sheenPaint,
-          )
-          ..drawRect(
-            Rect.fromLTRB(x + period * .55, from, x + period * .85, 0),
-            _foldPaint,
-          );
-      }
-    });
     // The drape fades into the dark of the fly loft; the shader is made
     // again only when the picture changes its size.
     if (_shadeTop != top) {
@@ -4141,57 +5053,14 @@ class StageRunnerPainter extends CustomPainter {
   /// Tall pictures: below the stage the stalls, [below] pixels high, rows
   /// of silhouettes behind red seat backs, a little larger the nearer they
   /// sit. They pass with the stage, exactly like the front row.
-  void _stalls(Canvas canvas, double s, double w, double below, double scroll) {
-    final bottom = s + below + s * .05, gap = s * .24;
-    canvas.drawRect(Rect.fromLTRB(0, s, w, bottom), _housePaint);
-    // The first row right below the stage's edge, so even a thin strip of
-    // stalls shows heads.
-    for (var row = 1; s + (row - 1) * gap < bottom; row++) {
-      final grow = 1 + row * .05, y = s + (row - .65) * gap;
-      final spacing = s * .16 * grow, shift = scroll + row * spacing * .5;
-      final first = (shift / spacing).floor() - 1;
-      var count = 0;
-      while ((first + count) * spacing - shift < w + spacing) {
-        count++;
-      }
-      _decoration.paint(
-        canvas,
-        ('stalls', row, first % 13, count),
-        first * spacing - shift,
-        (recording) {
-          for (var i = 0; i < count; i++) {
-            final h = ((first + i) * 7919 + row * 104729) % 13;
-            // Now and then a seat stays empty.
-            if (h == 4) continue;
-            final r = s * (.03 + (h % 3) * .004) * grow;
-            final x = i * spacing + (h % 5) * s * .006;
-            final head = y - r * (1.9 + (h % 4) * .1);
-            recording.drawCircle(Offset(x, head), r, _crowdPaint);
-            recording.drawRRect(
-              RRect.fromRectAndRadius(
-                Rect.fromCenter(
-                  center: Offset(x, head + r * 1.8),
-                  width: r * 3.1,
-                  height: r * 2.2,
-                ),
-                Radius.circular(r),
-              ),
-              _crowdPaint,
-            );
-          }
-        },
-      );
-      // The backs of the seats in front hide the shoulders.
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTRB(-s, y, w + s, y + gap * .32),
-          Radius.circular(s * .02),
-        ),
-        _seatPaint,
-      );
-      canvas.drawRect(Rect.fromLTRB(0, y, w, y + s * .006), _seatEdgePaint);
-    }
-  }
+  void _stalls(
+    Canvas canvas,
+    double s,
+    double w,
+    double below,
+    double scroll,
+    bool shaking,
+  ) => _decoration.paintStalls(canvas, s, w, below, scroll, shaking);
 
   /// The banner pops in below the valance and slides up behind it. The
   /// valance's scallops pass with the stage.
@@ -4202,6 +5071,7 @@ class StageRunnerPainter extends CustomPainter {
     double w,
     double scroll,
     bool movingScenery,
+    bool shaking,
   ) {
     final text = f.banner;
     if (text != null && f.showsBanner) {
@@ -4232,22 +5102,7 @@ class StageRunnerPainter extends CustomPainter {
       canvas.restore();
     }
     // Valance of the stage portal with a scalloped edge.
-    final bottom = s * StageRunner.ceiling * .7, r = s * .03;
-    canvas.drawRect(Rect.fromLTRB(0, 0, w, bottom), _velvetPaint);
-    final shift = r - scroll % (r * 2);
-    var count = 0;
-    for (var x = shift; x < w + r; x += r * 2) {
-      count++;
-    }
-    _decoration.paint(canvas, ('valance', count), shift, (recording) {
-      for (var i = 0; i < count; i++) {
-        recording.drawCircle(Offset(i * r * 2, bottom), r, _velvetPaint);
-      }
-    });
-    canvas.drawRect(
-      Rect.fromLTRB(0, bottom - s * .01, w, bottom - s * .004),
-      _goldPaint,
-    );
+    _decoration.paintValance(canvas, s, w, scroll, shaking);
   }
 
   /// The curtain closes from both sides after the crash, over the whole
@@ -4272,7 +5127,7 @@ class StageRunnerPainter extends CustomPainter {
         : 1.0;
     if (t == 0) return;
     final half = w * .5 * t, fold = s * .06;
-    for (final left in [true, false]) {
+    for (final left in const [true, false]) {
       final rect = left
           ? Rect.fromLTRB(0, 0, half, height)
           : Rect.fromLTRB(w - half, 0, w, height);
@@ -4350,18 +5205,18 @@ class StageRunnerPainter extends CustomPainter {
           rect.right,
           rect.bottom - s * .06,
         );
-        for (final x in [bar.left + 2, bar.right - 2]) {
-          canvas.drawLine(Offset(x, 0), Offset(x, bar.top), _ropePaint);
-        }
-        canvas.drawRect(bar, _metalPaint);
-        canvas.drawRect(
-          Rect.fromLTRB(rect.left, bar.bottom, rect.right, rect.bottom),
-          _metalPaint,
-        );
-        canvas.drawRect(
-          Rect.fromLTRB(rect.left, rect.bottom, rect.right, floorY),
-          _beamPaint,
-        );
+        canvas
+          ..drawLine(Offset(bar.left + 2, 0), Offset(bar.left + 2, bar.top), _ropePaint)
+          ..drawLine(Offset(bar.right - 2, 0), Offset(bar.right - 2, bar.top), _ropePaint)
+          ..drawRect(bar, _metalPaint)
+          ..drawRect(
+            Rect.fromLTRB(rect.left, bar.bottom, rect.right, rect.bottom),
+            _metalPaint,
+          )
+          ..drawRect(
+            Rect.fromLTRB(rect.left, rect.bottom, rect.right, floorY),
+            _beamPaint,
+          );
       case ObstacleKind.drop:
         final frame = Rect.fromLTRB(
           rect.left,
@@ -4372,14 +5227,14 @@ class StageRunnerPainter extends CustomPainter {
         // Two heavy fly lines at the frame's edges: the whole column up to
         // the loft is solid, so it reads as one that cannot be jumped over.
         final inset = rect.width * .16;
-        for (final x in [frame.left + inset, frame.right - inset]) {
-          final top = Offset(x, 0), bottom = Offset(x, frame.top);
-          canvas
-            ..drawLine(top, bottom, _flyLineEdge)
-            ..drawLine(top, bottom, _flyLinePaint);
-        }
-        canvas.drawRect(frame, _canvasPaint);
-        canvas.drawRect(frame.deflate(1), _canvasLine);
+        final leftX = frame.left + inset, rightX = frame.right - inset;
+        canvas
+          ..drawLine(Offset(leftX, 0), Offset(leftX, frame.top), _flyLineEdge)
+          ..drawLine(Offset(leftX, 0), Offset(leftX, frame.top), _flyLinePaint)
+          ..drawLine(Offset(rightX, 0), Offset(rightX, frame.top), _flyLineEdge)
+          ..drawLine(Offset(rightX, 0), Offset(rightX, frame.top), _flyLinePaint)
+          ..drawRect(frame, _canvasPaint)
+          ..drawRect(frame.deflate(1), _canvasLine);
     }
   }
 
@@ -4423,7 +5278,9 @@ class StageRunnerPainter extends CustomPainter {
     final shown = ghosts.shown, t = g.time, mark = s * .012;
     // Off ([GhostMode.off]): no ghost, no cross and no name.
     if (shown.isEmpty) return;
-    for (final ghost in shown) {
+    final shownLen = shown.length;
+    for (var i = 0; i < shownLen; i++) {
+      final ghost = shown[i];
       if (!ghost.crashed || t < ghost.end) continue;
       final x = ghost.endX * s - course;
       if (x < -mark || x > w + mark) continue;
@@ -4450,8 +5307,10 @@ class StageRunnerPainter extends CustomPainter {
       }
     }
     final cx = StageRunner.runnerX * s;
+    final stride = RunnerSprite.stride(g.distance);
+    final scale = RunnerSprite.stagePerPixel * s;
     // The best last, on top.
-    for (var i = shown.length - 1; i >= 0; i--) {
+    for (var i = shownLen - 1; i >= 0; i--) {
       final ghost = shown[i];
       if (t > ghost.end) continue;
       final y = ghost.yAt(t);
@@ -4470,7 +5329,7 @@ class StageRunnerPainter extends CustomPainter {
           ..restore();
       } else {
         _ghostSkinPaint.color = _ghostOpacities[step];
-        _ghostSprite(canvas, g, ghost, skin, y, s);
+        _ghostSprite(canvas, t, ghost, skin, y, s, cx, stride, scale);
       }
     }
     final tags = ghostTagAlpha(t);
@@ -4481,24 +5340,25 @@ class StageRunnerPainter extends CustomPainter {
   /// without tilting, so it stays calm.
   void _ghostSprite(
     Canvas canvas,
-    StageRunner g,
+    double t,
     RunnerGhost ghost,
     ui.Image skin,
     double y,
     double s,
+    double cx,
+    RunnerSprite stride,
+    double scale,
   ) {
-    final t = g.time;
-    final sprite = ghost.onFloorAt(t)
-        ? RunnerSprite.stride(g.distance)
-        : ghost.vyAt(t) < -.05
+    final sprite = RunnerGhost.isOnFloor(y)
+        ? stride
+        : ghost.vyAtWithY(t, y) < -.05
         ? RunnerSprite.fly
         : RunnerSprite.dangle;
-    final scale = RunnerSprite.stagePerPixel * s;
     final width = sprite.width * scale, height = sprite.height * scale;
     final feet = sprite == RunnerSprite.fly
         ? y + height / s / 2
         : y + StageRunner.runnerHeight / 2 + .006;
-    final cx = StageRunner.runnerX * s, bottom = feet * s;
+    final bottom = feet * s;
     canvas.drawImageRect(
       skin,
       sprite.rect,
@@ -4520,8 +5380,10 @@ class StageRunnerPainter extends CustomPainter {
     final size = s * .03, gap = StageRunner.runnerWidth * s * .7;
     final cx = StageRunner.runnerX * s;
     var n = 0;
-    for (final ghost in ghosts.shown) {
+    final shown = ghosts.shown;
+    for (var k = 0, len = shown.length; k < len; k++) {
       if (n == _tagGhosts.length) break;
+      final ghost = shown[k];
       if (t > ghost.end || !ghosts.named.contains(ghost)) continue;
       // Sorted by height as they come, the lowest first.
       final top =
@@ -4535,19 +5397,37 @@ class StageRunnerPainter extends CustomPainter {
       _tagGhosts[i] = ghost;
     }
     if (n == 0) return;
-    final fading = alpha < 1;
-    if (fading) {
-      _ghostTagLayer.color = _tagOpacities[(alpha * _ghostSteps).round()];
-      canvas.saveLayer(Rect.fromLTRB(0, 0, cx, s), _ghostTagLayer);
-    }
+    // Place all visible tags first so a fading saveLayer only allocates the
+    // tight bounding box around the 1–3 labels instead of the whole stage column.
     var below = double.infinity;
+    var minLeft = double.infinity, minTop = double.infinity;
+    var maxRight = 0.0, maxBottom = 0.0;
     for (var i = 0; i < n; i++) {
       final ghost = _tagGhosts[i]!;
       final tag = _glyphs.tag(ghost.tag, size, ghost.rank);
       final top = min(_tagTops[i], below - tag.height);
-      tag.paint(canvas, Offset(cx - gap - tag.width, top));
+      final left = cx - gap - tag.width;
+      _tagPainters[i] = tag;
+      _tagPlacedTops[i] = top;
       below = top;
+      if (left < minLeft) minLeft = left;
+      if (top < minTop) minTop = top;
+      if (left + tag.width > maxRight) maxRight = left + tag.width;
+      if (top + tag.height > maxBottom) maxBottom = top + tag.height;
       _tagGhosts[i] = null;
+    }
+    final fading = alpha < 1;
+    if (fading) {
+      _ghostTagLayer.color = _tagOpacities[(alpha * _ghostSteps).round()];
+      canvas.saveLayer(
+        Rect.fromLTRB(minLeft - 2, minTop - 2, maxRight + 2, maxBottom + 2),
+        _ghostTagLayer,
+      );
+    }
+    for (var i = 0; i < n; i++) {
+      final tag = _tagPainters[i]!;
+      tag.paint(canvas, Offset(cx - gap - tag.width, _tagPlacedTops[i]));
+      _tagPainters[i] = null;
     }
     if (fading) canvas.restore();
   }
@@ -4585,49 +5465,1376 @@ class StageRunnerPainter extends CustomPainter {
       old.reducedMotion() != reducedMotion();
 }
 
-/// Small recorded strips preserve the vector edges at every pixel ratio.
-/// Their thirteen audience variations repeat along the course. Only the
-/// strip's translation changes each frame; its paths and rounded rectangles
-/// are recorded again only for a new variation or a resized stage.
-class _DecorationPictures {
-  static const _limit = 256;
-  final _pictures = <Object, ui.Picture>{};
-  Size? _size;
+/// Lightweight signal that marks the stage painter dirty without boxing or
+/// comparing frame numbers every tick.
+class _FrameSignal extends ChangeNotifier {
+  void tick() => notifyListeners();
+}
 
-  void resize(Size size) {
-    if (_size == size) return;
-    dispose();
-    _size = size;
+/// Zero-allocation batcher that collapses same-atlas uniform-scale sprites
+/// (obstacles, pickups, rotated drums, runner poses) into a single
+/// `Canvas.drawRawAtlas` call on Web/CanvasKit, eliminating per-sprite
+/// `CkCanvas.drawImageRect` embind + `CkPaint.toSkPaint()` overhead.
+class _SpriteBatch {
+  static const _capacity = 64;
+
+  final _transforms = Float32List(_capacity * 4);
+  final _rects = Float32List(_capacity * 4);
+  ui.Image? _image;
+  Paint? _paint;
+  int _count = 0;
+
+  static bool _samePaint(Paint a, Paint b) =>
+      identical(a, b) ||
+      (a.colorFilter == b.colorFilter &&
+          a.color == b.color &&
+          a.filterQuality == b.filterQuality &&
+          a.blendMode == b.blendMode);
+
+  void addRect(
+    Canvas canvas,
+    ui.Image image,
+    Rect src,
+    Rect dst,
+    Paint paint,
+  ) {
+    final sw = src.width, sh = src.height, dw = dst.width, dh = dst.height;
+    if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
+    final sx = dw / sw, sy = dh / sh;
+    // RSTransform encodes uniform scale + rotation; stretched slices fall back
+    // to drawImageRect (which shares Skia's GrTextureOp GL shader).
+    if ((sx - sy).abs() > 1e-3 * max(sx, sy)) {
+      flush(canvas);
+      canvas.drawImageRect(image, src, dst, paint);
+      return;
+    }
+    if (_count > 0 &&
+        (!identical(_image, image) ||
+            !_samePaint(_paint!, paint) ||
+            _count == _capacity)) {
+      flush(canvas);
+    }
+    _image = image;
+    _paint = paint;
+    final o = _count * 4;
+    _transforms[o] = (sx + sy) * .5;
+    _transforms[o + 1] = 0;
+    _transforms[o + 2] = dst.left;
+    _transforms[o + 3] = dst.top;
+    _rects[o] = src.left;
+    _rects[o + 1] = src.top;
+    _rects[o + 2] = src.right;
+    _rects[o + 3] = src.bottom;
+    _count++;
   }
 
-  void paint(
+  void addRotated(
     Canvas canvas,
-    Object key,
-    double shift,
-    void Function(Canvas) record,
+    ui.Image image,
+    Rect src,
+    Offset center,
+    double scale,
+    double radians,
+    Paint paint,
   ) {
-    var picture = _pictures.remove(key);
-    if (picture == null) {
-      final recorder = ui.PictureRecorder();
-      record(Canvas(recorder));
-      picture = recorder.endRecording();
-      if (_pictures.length >= _limit) {
-        _pictures.remove(_pictures.keys.first)!.dispose();
+    if (src.width <= 0 || src.height <= 0 || scale <= 0) return;
+    if (_count > 0 &&
+        (!identical(_image, image) ||
+            !_samePaint(_paint!, paint) ||
+            _count == _capacity)) {
+      flush(canvas);
+    }
+    _image = image;
+    _paint = paint;
+    final scos = cos(radians) * scale;
+    final ssin = sin(radians) * scale;
+    final ax = src.width * .5;
+    final ay = src.height * .5;
+    final o = _count * 4;
+    _transforms[o] = scos;
+    _transforms[o + 1] = ssin;
+    _transforms[o + 2] = center.dx - scos * ax + ssin * ay;
+    _transforms[o + 3] = center.dy - ssin * ax - scos * ay;
+    _rects[o] = src.left;
+    _rects[o + 1] = src.top;
+    _rects[o + 2] = src.right;
+    _rects[o + 3] = src.bottom;
+    _count++;
+  }
+
+  void flush(Canvas canvas) {
+    final count = _count;
+    if (count == 0) return;
+    final n = count * 4;
+    canvas.drawRawAtlas(
+      _image!,
+      Float32List.sublistView(_transforms, 0, n),
+      Float32List.sublistView(_rects, 0, n),
+      null,
+      null,
+      null,
+      _paint!,
+    );
+    _count = 0;
+    _image = null;
+    _paint = null;
+  }
+}
+
+/// Zero-allocation vertex batcher for circles, ovals, quads, rects and
+/// triangles on Web/CanvasKit. Collapses pickup/crash particles, lamp beams,
+/// sandbag shadows, warning markers, drum dust, ropes and velvet borders into
+/// `Canvas.drawVertices` so mid-run bursts compile zero Circle/Oval shaders.
+class _DiscBatch {
+  static const _sides = 12;
+  static const _maxVerts = 1024;
+  static const _maxIndices = 3072;
+  static final _unitX = Float32List.fromList([
+    for (var i = 0; i < _sides; i++) cos(i * 2 * pi / _sides),
+  ]);
+  static final _unitY = Float32List.fromList([
+    for (var i = 0; i < _sides; i++) sin(i * 2 * pi / _sides),
+  ]);
+  static final _paint = Paint();
+
+  final _positions = Float32List(_maxVerts * 2);
+  final _colors = Int32List(_maxVerts);
+  final _indices = Uint16List(_maxIndices);
+  int _vertCount = 0;
+  int _indexCount = 0;
+
+  void _ensure(Canvas canvas, int verts, int indices) {
+    if (_vertCount + verts > _maxVerts || _indexCount + indices > _maxIndices) {
+      flush(canvas);
+    }
+  }
+
+  void addTriangle(
+    Canvas canvas,
+    double x0,
+    double y0,
+    double x1,
+    double y1,
+    double x2,
+    double y2,
+    int argb,
+  ) {
+    _ensure(canvas, 3, 3);
+    final v = _vertCount, p = v * 2, o = _indexCount;
+    _positions[p] = x0;
+    _positions[p + 1] = y0;
+    _positions[p + 2] = x1;
+    _positions[p + 3] = y1;
+    _positions[p + 4] = x2;
+    _positions[p + 5] = y2;
+    _colors[v] = argb;
+    _colors[v + 1] = argb;
+    _colors[v + 2] = argb;
+    _indices[o] = v;
+    _indices[o + 1] = v + 1;
+    _indices[o + 2] = v + 2;
+    _vertCount = v + 3;
+    _indexCount = o + 3;
+  }
+
+  void addQuad(
+    Canvas canvas,
+    double x0,
+    double y0,
+    double x1,
+    double y1,
+    double x2,
+    double y2,
+    double x3,
+    double y3,
+    int argb,
+  ) {
+    _ensure(canvas, 4, 6);
+    final v = _vertCount, p = v * 2, o = _indexCount;
+    _positions[p] = x0;
+    _positions[p + 1] = y0;
+    _positions[p + 2] = x1;
+    _positions[p + 3] = y1;
+    _positions[p + 4] = x2;
+    _positions[p + 5] = y2;
+    _positions[p + 6] = x3;
+    _positions[p + 7] = y3;
+    _colors[v] = argb;
+    _colors[v + 1] = argb;
+    _colors[v + 2] = argb;
+    _colors[v + 3] = argb;
+    _indices[o] = v;
+    _indices[o + 1] = v + 1;
+    _indices[o + 2] = v + 2;
+    _indices[o + 3] = v;
+    _indices[o + 4] = v + 2;
+    _indices[o + 5] = v + 3;
+    _vertCount = v + 4;
+    _indexCount = o + 6;
+  }
+
+  void addRect(
+    Canvas canvas,
+    double left,
+    double top,
+    double right,
+    double bottom,
+    int argb,
+  ) {
+    if (right <= left || bottom <= top) return;
+    addQuad(canvas, left, top, right, top, right, bottom, left, bottom, argb);
+  }
+
+  void addOval(
+    Canvas canvas,
+    double cx,
+    double cy,
+    double rx,
+    double ry,
+    int argb,
+  ) {
+    if (rx <= 0 || ry <= 0) return;
+    _ensure(canvas, _sides + 1, _sides * 3);
+    final base = _vertCount;
+    var p = base * 2;
+    _positions[p++] = cx;
+    _positions[p++] = cy;
+    _colors[base] = argb;
+    for (var i = 0; i < _sides; i++) {
+      _positions[p++] = cx + _unitX[i] * rx;
+      _positions[p++] = cy + _unitY[i] * ry;
+      _colors[base + 1 + i] = argb;
+    }
+    var o = _indexCount;
+    for (var i = 0; i < _sides; i++) {
+      _indices[o++] = base;
+      _indices[o++] = base + 1 + i;
+      _indices[o++] = base + 1 + (i + 1 == _sides ? 0 : i + 1);
+    }
+    _vertCount = base + _sides + 1;
+    _indexCount = o;
+  }
+
+  void addCircle(Canvas canvas, double cx, double cy, double r, int argb) =>
+      addOval(canvas, cx, cy, r, r, argb);
+
+  void flush(Canvas canvas) {
+    if (_indexCount == 0) return;
+    final verts = ui.Vertices.raw(
+      ui.VertexMode.triangles,
+      Float32List.sublistView(_positions, 0, _vertCount * 2),
+      colors: Int32List.sublistView(_colors, 0, _vertCount),
+      indices: Uint16List.sublistView(_indices, 0, _indexCount),
+    );
+    canvas.drawVertices(verts, BlendMode.dst, _paint);
+    verts.dispose();
+    _vertCount = 0;
+    _indexCount = 0;
+  }
+}
+
+/// Pre-baked repeating texture entry for a single periodic decoration strip.
+class _BakedStrip {
+  _BakedStrip(this.image, this.shader, this.paint, this.stripTop, this.stripH);
+  final ui.Image image;
+  final ui.ImageShader shader;
+  final Paint paint;
+  final double stripTop, stripH;
+
+  void dispose() {
+    shader.dispose();
+    image.dispose();
+  }
+}
+
+/// Layout metadata for one stall row packed inside [_DecorationCache._stallsAtlas].
+class _StallRowInfo {
+  const _StallRowInfo({
+    required this.spacing,
+    required this.period,
+    required this.rowOffset,
+    required this.stripTop,
+    required this.srcLeft,
+    required this.srcTop,
+    required this.srcRight,
+    required this.srcBottom,
+  });
+  final double spacing, period, rowOffset, stripTop;
+  final double srcLeft, srcTop, srcRight, srcBottom;
+}
+
+/// Caches repeating decorative layers with zero per-frame allocations.
+///
+/// On native/VM (`rasterize == false`), small recorded vector [ui.Picture]
+/// strips preserve exact vector edges at every pixel ratio without hash-map
+/// churn or record allocations.
+///
+/// On the web (`rasterize == true`), curve-heavy periodic strips (stalls with
+/// baked house bg/seat backs, front-row audience, valance scallops, drape folds
+/// with baked fly-loft shade & gold trim, and floor planks) are pre-rasterized
+/// once per viewport size into opaque GPU textures, while spotlight cones+pools
+/// and wings are packed into static [ui.Vertices] meshes so WebGL/CanvasKit
+/// renders the whole surround with zero overdraw and minimal GL program switches.
+class _DecorationCache {
+  _DecorationCache({required this.rasterize});
+  final bool rasterize;
+
+  static const _maxTexWidth = 2048;
+  static const _spotOvalSides = 24;
+  static final _spotCos = Float32List.fromList([
+    for (var i = 0; i < _spotOvalSides; i++) cos(i * 2 * pi / _spotOvalSides),
+  ]);
+  static final _spotSin = Float32List.fromList([
+    for (var i = 0; i < _spotOvalSides; i++) sin(i * 2 * pi / _spotOvalSides),
+  ]);
+  static final _tilePaint = Paint()..filterQuality = FilterQuality.low;
+  static final _vertexPaint = Paint();
+  static final _coneArgb = _beam.withValues(alpha: .045).toARGB32();
+  static final _poolArgb = _beam.withValues(alpha: .07).toARGB32();
+
+  Size? _size;
+  double _pixelRatio = 1;
+  double get _bakeScale => max(1.0, min(_pixelRatio, 2.0));
+
+  // Vector strip caches (zero-allocation fixed slots).
+  ui.Picture? _drapesPic;
+  ui.Picture? _valancePic;
+  ui.Picture? _spotlightsPic;
+  ui.Picture? _wingsPic;
+  ui.Picture? _floorPlanksPic;
+  final _audiencePics = List<ui.Picture?>.filled(13, null);
+  final _stallsPics = <List<ui.Picture?>>[];
+
+  // Rasterized texture and vertex caches (used when [rasterize] is true).
+  _BakedStrip? _drapesStrip;
+  _BakedStrip? _valanceStrip;
+  _BakedStrip? _audienceStrip;
+  _BakedStrip? _floorStrip;
+  ui.Image? _stallsAtlas;
+  double _stallsAtlasInvScale = 1;
+  List<_StallRowInfo> _stallRows = const [];
+  Float32List? _stallsTransforms;
+  Float32List? _stallsRects;
+  ui.Vertices? _spotConesVertices;
+  ui.Vertices? _wingsVertices;
+
+  static Float64List scaleMatrix(double sx, double sy) {
+    final m = Float64List(16);
+    m[0] = sx;
+    m[5] = sy;
+    m[10] = 1;
+    m[15] = 1;
+    return m;
+  }
+
+  /// Rasterizes [pic] into a GPU texture and always disposes [pic]. Returns
+  /// null (falling back to the vector strip path) if WebGL readback fails
+  /// transiently (e.g. Safari context loss).
+  static ui.Image? _tryToImageSync(ui.Picture pic, int width, int height) {
+    try {
+      return pic.toImageSync(width, height);
+    } catch (_) {
+      return null;
+    } finally {
+      pic.dispose();
+    }
+  }
+
+  bool _rasterFailed = false;
+  bool get _useRaster => rasterize && !_rasterFailed;
+
+  void resize(Size size, double pixelRatio) {
+    if (_size == size && _pixelRatio == pixelRatio) return;
+    dispose();
+    _size = size;
+    _pixelRatio = pixelRatio;
+  }
+
+  /// Pre-bakes one slice of GPU textures / static vertex meshes for the active
+  /// viewport size while the intro menu is idle.
+  void prewarmStep(
+    double s,
+    double w,
+    double top,
+    double below,
+    double floorY,
+    int step,
+  ) {
+    if (!_useRaster) return;
+    switch (step) {
+      case 0:
+        if (top > 0) _ensureDrapesStrip(s, top, -top - s * .05);
+        _ensureValanceStrip(s);
+      case 1:
+        _ensureFloorStrip(s, floorY);
+        _ensureWingsPic(s, w);
+        _ensureSpotlightsPic(s, w, floorY);
+      case 2:
+        _ensureAudienceStrip(s);
+      case 3:
+        if (below > 0 && _stallsAtlas == null) {
+          _bakeStallsAtlas(s, w, s + below + s * .05, s * .24);
+        }
+    }
+  }
+
+  _BakedStrip? _ensureDrapesStrip(double s, double top, double from) {
+    final existing = _drapesStrip;
+    if (existing != null) return existing;
+    final period = s * .09;
+    final drapeH = -from;
+    if (period <= 0 || drapeH <= 0) return null;
+    final scale = _bakeScale;
+    final pw = max(1, (period * scale).round());
+    final ph = min(_maxTexWidth, max(1, (drapeH * scale).ceil()));
+    final recorder = ui.PictureRecorder();
+    final c = Canvas(recorder)..scale(pw / period, ph / drapeH);
+    c
+      ..drawRect(
+        Rect.fromLTRB(0, 0, period, drapeH),
+        StageRunnerPainter._velvetPaint,
+      )
+      ..drawRect(
+        Rect.fromLTRB(period * .12, 0, period * .3, drapeH),
+        StageRunnerPainter._sheenPaint,
+      )
+      ..drawRect(
+        Rect.fromLTRB(period * .55, 0, period * .85, drapeH),
+        StageRunnerPainter._foldPaint,
+      );
+    if (top > s * .2) {
+      // Matches original shade gradient from y = -top to y = -top * .4 in
+      // strip-local coordinates (localY = y - from = y + top + s * .05).
+      final shadeTop = s * .05;
+      final shadeBottom = shadeTop + top * .6;
+      final shade = Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xCC000000), Color(0x00000000)],
+        ).createShader(Rect.fromLTRB(0, shadeTop, 1, shadeBottom));
+      c.drawRect(Rect.fromLTRB(0, 0, period, shadeBottom), shade);
+    }
+    c.drawRect(
+      Rect.fromLTRB(0, drapeH - s * .012, period, drapeH - s * .004),
+      StageRunnerPainter._goldPaint,
+    );
+    final img = _tryToImageSync(recorder.endRecording(), pw, ph);
+    if (img == null) {
+      _rasterFailed = true;
+      return null;
+    }
+    final shader = ui.ImageShader(
+      img,
+      TileMode.repeated,
+      TileMode.clamp,
+      scaleMatrix(period / pw, drapeH / ph),
+      filterQuality: FilterQuality.low,
+    );
+    return _drapesStrip = _BakedStrip(
+      img,
+      shader,
+      Paint()..shader = shader,
+      from,
+      drapeH,
+    );
+  }
+
+  /// Paints the upper house drapes; returns true when the rasterized strip
+  /// already includes the fly-loft shade gradient and gold hem trim.
+  bool paintDrapes(
+    Canvas canvas,
+    double s,
+    double w,
+    double top,
+    double from,
+    double scroll,
+    bool shaking,
+  ) {
+    final period = s * .09;
+    final shift = -(scroll % period);
+    if (_useRaster) {
+      final strip = _ensureDrapesStrip(s, top, from);
+      if (strip != null) {
+        final pad = shaking ? s * .02 : 0.0;
+        canvas
+          ..save()
+          ..translate(shift, strip.stripTop)
+          ..drawRect(
+            Rect.fromLTRB(-shift - pad, 0, w - shift + pad, strip.stripH),
+            strip.paint,
+          )
+          ..restore();
+        return true;
       }
     }
-    _pictures[key] = picture;
+    canvas.drawRect(
+      Rect.fromLTRB(0, from, w, 0),
+      StageRunnerPainter._velvetPaint,
+    );
+    var pic = _drapesPic;
+    if (pic == null) {
+      final count = (w / period).ceil() + 1;
+      final recorder = ui.PictureRecorder();
+      final c = Canvas(recorder);
+      for (var i = 0; i < count; i++) {
+        final x = i * period;
+        c
+          ..drawRect(
+            Rect.fromLTRB(x + period * .12, from, x + period * .3, 0),
+            StageRunnerPainter._sheenPaint,
+          )
+          ..drawRect(
+            Rect.fromLTRB(x + period * .55, from, x + period * .85, 0),
+            StageRunnerPainter._foldPaint,
+          );
+      }
+      pic = _drapesPic = recorder.endRecording();
+    }
     canvas
       ..save()
       ..translate(shift, 0)
-      ..drawPicture(picture)
+      ..drawPicture(pic)
+      ..restore();
+    return false;
+  }
+
+  _BakedStrip? _ensureValanceStrip(double s) {
+    final existing = _valanceStrip;
+    if (existing != null) return existing;
+    final bottom = s * StageRunner.ceiling * .7, r = s * .03;
+    final period = r * 2;
+    final scale = _bakeScale;
+    final pw = max(1, (period * scale).round());
+    final ph = max(1, ((bottom + r) * scale).ceil() + 1);
+    final actualH = ph / scale;
+    final recorder = ui.PictureRecorder();
+    final c = Canvas(recorder)..scale(pw / period, scale);
+    c
+      ..drawRect(
+        Rect.fromLTRB(0, 0, period, bottom),
+        StageRunnerPainter._velvetPaint,
+      )
+      ..drawCircle(Offset(0, bottom), r, StageRunnerPainter._velvetPaint)
+      ..drawCircle(
+        Offset(period, bottom),
+        r,
+        StageRunnerPainter._velvetPaint,
+      )
+      ..drawRect(
+        Rect.fromLTRB(0, bottom - s * .01, period, bottom - s * .004),
+        StageRunnerPainter._goldPaint,
+      );
+    final img = _tryToImageSync(recorder.endRecording(), pw, ph);
+    if (img == null) {
+      _rasterFailed = true;
+      return null;
+    }
+    final shader = ui.ImageShader(
+      img,
+      TileMode.repeated,
+      TileMode.clamp,
+      scaleMatrix(period / pw, actualH / ph),
+      filterQuality: FilterQuality.low,
+    );
+    return _valanceStrip = _BakedStrip(
+      img,
+      shader,
+      Paint()..shader = shader,
+      0,
+      actualH,
+    );
+  }
+
+  void paintValance(
+    Canvas canvas,
+    double s,
+    double w,
+    double scroll,
+    bool shaking,
+  ) {
+    final bottom = s * StageRunner.ceiling * .7, r = s * .03;
+    final period = r * 2;
+    final shift = r - scroll % period;
+    if (_useRaster) {
+      final strip = _ensureValanceStrip(s);
+      if (strip != null) {
+        final pad = shaking ? s * .02 : 0.0;
+        canvas
+          ..save()
+          ..translate(shift, 0)
+          ..drawRect(
+            Rect.fromLTRB(-shift - pad, 0, w - shift + pad, strip.stripH),
+            strip.paint,
+          )
+          ..restore();
+        return;
+      }
+    }
+    canvas.drawRect(
+      Rect.fromLTRB(0, 0, w, bottom),
+      StageRunnerPainter._velvetPaint,
+    );
+    var pic = _valancePic;
+    if (pic == null) {
+      final count = (w / period).ceil() + 2;
+      final recorder = ui.PictureRecorder();
+      final c = Canvas(recorder);
+      for (var i = 0; i < count; i++) {
+        c.drawCircle(
+          Offset(i * period, bottom),
+          r,
+          StageRunnerPainter._velvetPaint,
+        );
+      }
+      pic = _valancePic = recorder.endRecording();
+    }
+    canvas
+      ..save()
+      ..translate(shift, 0)
+      ..drawPicture(pic)
+      ..restore();
+    canvas.drawRect(
+      Rect.fromLTRB(0, bottom - s * .01, w, bottom - s * .004),
+      StageRunnerPainter._goldPaint,
+    );
+  }
+
+  _BakedStrip? _ensureAudienceStrip(double s) {
+    final existing = _audienceStrip;
+    if (existing != null) return existing;
+    final spacing = s * .11;
+    final period = 13 * spacing;
+    final stripTop = s * .89;
+    final stripH = s - stripTop;
+    final scale = _bakeScale;
+    final pw = min(_maxTexWidth, max(1, (period * scale).round()));
+    final ph = max(1, (stripH * scale).ceil());
+    final recorder = ui.PictureRecorder();
+    final c = Canvas(recorder)..scale(pw / period, ph / stripH);
+    // k = -1..13 wraps shoulders seamlessly across the 0 / period seam.
+    for (var k = -1; k <= 13; k++) {
+      final h = ((k % 13) * 7919) % 13;
+      final r = s * (.034 + (h % 3) * .004);
+      final x = k * spacing + (h % 5) * s * .004;
+      final y = s * (.985 - (h % 4) * .006) - stripTop;
+      c
+        ..drawCircle(
+          Offset(x, y - r * .6),
+          r,
+          StageRunnerPainter._crowdPaint,
+        )
+        ..drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(
+              center: Offset(x, y + r * 1.2),
+              width: r * 3.2,
+              height: r * 2.2,
+            ),
+            Radius.circular(r),
+          ),
+          StageRunnerPainter._crowdPaint,
+        );
+    }
+    final img = _tryToImageSync(recorder.endRecording(), pw, ph);
+    if (img == null) {
+      _rasterFailed = true;
+      return null;
+    }
+    final shader = ui.ImageShader(
+      img,
+      TileMode.repeated,
+      TileMode.clamp,
+      scaleMatrix(period / pw, stripH / ph),
+      filterQuality: FilterQuality.low,
+    );
+    return _audienceStrip = _BakedStrip(
+      img,
+      shader,
+      Paint()..shader = shader,
+      stripTop,
+      stripH,
+    );
+  }
+
+  void paintAudience(
+    Canvas canvas,
+    double s,
+    double w,
+    double scroll,
+    bool shaking,
+  ) {
+    final spacing = s * .11;
+    if (_useRaster) {
+      final strip = _ensureAudienceStrip(s);
+      if (strip != null) {
+        final period = 13 * spacing;
+        final shift = -(scroll % period);
+        final pad = shaking ? s * .02 : 0.0;
+        canvas
+          ..save()
+          ..translate(shift, strip.stripTop)
+          ..drawRect(
+            Rect.fromLTRB(-shift - pad, 0, w - shift + pad, strip.stripH),
+            strip.paint,
+          )
+          ..restore();
+        return;
+      }
+    }
+    final first = (scroll / spacing).floor() - 1;
+    final phase = first % 13;
+    var pic = _audiencePics[phase];
+    if (pic == null) {
+      final count = (w / spacing).ceil() + 3;
+      final recorder = ui.PictureRecorder();
+      final c = Canvas(recorder);
+      for (var i = 0; i < count; i++) {
+        final h = ((phase + i) * 7919) % 13;
+        final r = s * (.034 + (h % 3) * .004);
+        final x = i * spacing + (h % 5) * s * .004;
+        final y = s * (.985 - (h % 4) * .006);
+        c
+          ..drawCircle(Offset(x, y - r * .6), r, StageRunnerPainter._crowdPaint)
+          ..drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromCenter(
+                center: Offset(x, y + r * 1.2),
+                width: r * 3.2,
+                height: r * 2.2,
+              ),
+              Radius.circular(r),
+            ),
+            StageRunnerPainter._crowdPaint,
+          );
+      }
+      pic = _audiencePics[phase] = recorder.endRecording();
+    }
+    canvas
+      ..save()
+      ..translate(first * spacing - scroll, 0)
+      ..drawPicture(pic)
+      ..restore();
+  }
+
+  void paintStalls(
+    Canvas canvas,
+    double s,
+    double w,
+    double below,
+    double scroll,
+    bool shaking,
+  ) {
+    final bottom = s + below + s * .05, gap = s * .24;
+    if (_useRaster) {
+      if (_stallsAtlas == null) _bakeStallsAtlas(s, w, bottom, gap);
+      final atlas = _stallsAtlas;
+      final rows = _stallRows;
+      if (atlas != null && rows.isNotEmpty) {
+        final pad = shaking ? s * .02 : 0.0;
+        final invScale = _stallsAtlasInvScale;
+        final transforms = _stallsTransforms!;
+        final rects = _stallsRects!;
+        final maxSprites = transforms.length ~/ 4;
+        var count = 0;
+        for (var i = 0; i < rows.length; i++) {
+          final info = rows[i];
+          final period = info.period;
+          final start = -((scroll + info.rowOffset) % period);
+          for (var tx = start; tx < w + pad; tx += period) {
+            if (tx + period <= -pad) continue;
+            if (count >= maxSprites) break;
+            final o = count * 4;
+            transforms[o] = invScale;
+            transforms[o + 1] = 0;
+            transforms[o + 2] = tx;
+            transforms[o + 3] = info.stripTop;
+            rects[o] = info.srcLeft;
+            rects[o + 1] = info.srcTop;
+            rects[o + 2] = info.srcRight;
+            rects[o + 3] = info.srcBottom;
+            count++;
+          }
+        }
+        if (count > 0) {
+          canvas.drawRawAtlas(
+            atlas,
+            Float32List.sublistView(transforms, 0, count * 4),
+            Float32List.sublistView(rects, 0, count * 4),
+            null,
+            null,
+            null,
+            _tilePaint,
+          );
+        }
+        return;
+      }
+    }
+    canvas.drawRect(
+      Rect.fromLTRB(0, s, w, bottom),
+      StageRunnerPainter._housePaint,
+    );
+    // The first row right below the stage's edge, so even a thin strip of
+    // stalls shows heads.
+    for (var row = 1; s + (row - 1) * gap < bottom; row++) {
+      final grow = 1 + row * .05, y = s + (row - .65) * gap;
+      final spacing = s * .16 * grow, shift = scroll + row * spacing * .5;
+      final rowIdx = row - 1;
+      final first = (shift / spacing).floor() - 1;
+      final phase = first % 13;
+      while (_stallsPics.length <= rowIdx) {
+        _stallsPics.add(List<ui.Picture?>.filled(13, null));
+      }
+      final rowPics = _stallsPics[rowIdx];
+      var pic = rowPics[phase];
+      if (pic == null) {
+        final count = (w / spacing).ceil() + 3;
+        final recorder = ui.PictureRecorder();
+        final c = Canvas(recorder);
+        for (var i = 0; i < count; i++) {
+          final h = ((phase + i) * 7919 + row * 104729) % 13;
+          if (h == 4) continue;
+          final r = s * (.03 + (h % 3) * .004) * grow;
+          final x = i * spacing + (h % 5) * s * .006;
+          final head = y - r * (1.9 + (h % 4) * .1);
+          c
+            ..drawCircle(Offset(x, head), r, StageRunnerPainter._crowdPaint)
+            ..drawRRect(
+              RRect.fromRectAndRadius(
+                Rect.fromCenter(
+                  center: Offset(x, head + r * 1.8),
+                  width: r * 3.1,
+                  height: r * 2.2,
+                ),
+                Radius.circular(r),
+              ),
+              StageRunnerPainter._crowdPaint,
+            );
+        }
+        pic = rowPics[phase] = recorder.endRecording();
+      }
+      canvas
+        ..save()
+        ..translate(first * spacing - shift, 0)
+        ..drawPicture(pic)
+        ..restore();
+      // The backs of the seats in front hide the shoulders.
+      canvas
+        ..drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTRB(-s, y, w + s, y + gap * .32),
+            Radius.circular(s * .02),
+          ),
+          StageRunnerPainter._seatPaint,
+        )
+        ..drawRect(
+          Rect.fromLTRB(0, y, w, y + s * .006),
+          StageRunnerPainter._seatEdgePaint,
+        );
+    }
+  }
+
+  /// Packs all stall rows — including opaque house background, silhouettes,
+  /// seat backs and velvet trim — into contiguous non-overlapping bands in one
+  /// GPU atlas with 1 px wrapped gutters on every side so [paintStalls] draws
+  /// the entire lower house in one `drawRawAtlas` call with zero overdraw.
+  void _bakeStallsAtlas(double s, double w, double bottom, double gap) {
+    var rowCount = 0;
+    var maxPeriod = 0.0;
+    for (var row = 1; s + (row - 1) * gap < bottom; row++) {
+      rowCount++;
+      final period = 13 * s * .16 * (1 + row * .05);
+      if (period > maxPeriod) maxPeriod = period;
+    }
+    if (rowCount == 0 || maxPeriod <= 0) {
+      _stallRows = const [];
+      return;
+    }
+    final lastSeatBottom = s + (rowCount - .33) * gap;
+    final totalH = max(1.0, max(bottom, lastSeatBottom) - s);
+    final atlasScale = min(
+      _bakeScale,
+      min(
+        (_maxTexWidth - 4) / maxPeriod,
+        (_maxTexWidth - rowCount * 4) / totalH,
+      ),
+    );
+    if (atlasScale <= 0) {
+      _stallRows = const [];
+      return;
+    }
+    _stallsAtlasInvScale = 1 / atlasScale;
+    final atlasW = min(_maxTexWidth, max(3, (maxPeriod * atlasScale).ceil() + 3));
+
+    final rows = <_StallRowInfo>[];
+    final rowSpecs = <(int, double, double, double, double, double, int, int)>[];
+    var cursorY = 0;
+    var minPeriod = double.infinity;
+    var prevRowBottom = s;
+    for (var row = 1; row <= rowCount; row++) {
+      final grow = 1 + row * .05, y = s + (row - .65) * gap;
+      final spacing = s * .16 * grow;
+      final period = 13 * spacing;
+      if (period < minPeriod) minPeriod = period;
+      final seatBottom = y + gap * .32;
+      final rowTop = row == 1 ? s : prevRowBottom;
+      final rowBottom = row == rowCount ? max(bottom, seatBottom) : seatBottom;
+      final rowH = max(1 / atlasScale, rowBottom - rowTop);
+      final rowPxH = max(1, (rowH * atlasScale).ceil());
+      rowSpecs.add((row, grow, y, spacing, rowTop, rowH, cursorY, rowPxH));
+      rows.add(
+        _StallRowInfo(
+          spacing: spacing,
+          period: period,
+          rowOffset: row * spacing * .5,
+          stripTop: rowTop,
+          srcLeft: 1.0,
+          srcTop: (cursorY + 1).toDouble(),
+          srcRight: 1.0 + period * atlasScale,
+          srcBottom: (cursorY + 1) + rowH * atlasScale,
+        ),
+      );
+      cursorY += rowPxH + 3;
+      prevRowBottom = rowBottom;
+    }
+    final atlasH = max(3, cursorY);
+
+    final recorder = ui.PictureRecorder();
+    final c = Canvas(recorder);
+    final padWorld = 2 / atlasScale;
+    for (final (row, grow, y, spacing, rowTop, rowH, yPx, hPx) in rowSpecs) {
+      final period = 13 * spacing;
+      final seatY = y - rowTop;
+      final seatBottomY = seatY + gap * .32;
+      final bandClipW = min(
+        atlasW.toDouble(),
+        (period * atlasScale).ceilToDouble() + 2,
+      );
+      // Clip to [0 .. bandClipW] × [yPx .. yPx + hPx + 2] so top/bottom/left/
+      // right 1 px bilinear gutters are filled with opaque band colors.
+      c
+        ..save()
+        ..clipRect(
+          Rect.fromLTWH(0, yPx.toDouble(), bandClipW, (hPx + 2).toDouble()),
+          doAntiAlias: false,
+        )
+        ..translate(1.0, (yPx + 1).toDouble())
+        ..scale(atlasScale, atlasScale)
+        ..drawRect(
+          Rect.fromLTRB(-padWorld, -padWorld, period + padWorld, rowH + padWorld),
+          StageRunnerPainter._housePaint,
+        );
+      for (var k = -1; k <= 13; k++) {
+        final h = ((k % 13) * 7919 + row * 104729) % 13;
+        if (h == 4) continue;
+        final r = s * (.03 + (h % 3) * .004) * grow;
+        final x = k * spacing + (h % 5) * s * .006;
+        final head = seatY - r * (1.9 + (h % 4) * .1);
+        c
+          ..drawCircle(Offset(x, head), r, StageRunnerPainter._crowdPaint)
+          ..drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromCenter(
+                center: Offset(x, head + r * 1.8),
+                width: r * 3.1,
+                height: r * 2.2,
+              ),
+              Radius.circular(r),
+            ),
+            StageRunnerPainter._crowdPaint,
+          );
+      }
+      // Extend the seat back into the bottom gutter when it sits at the row's
+      // bottom edge so bilinear sampling never pulls house bg across the seam.
+      final extSeatBottom = seatBottomY >= rowH - 1e-3
+          ? rowH + padWorld
+          : seatBottomY;
+      c
+        ..drawRect(
+          Rect.fromLTRB(-padWorld, seatY, period + padWorld, extSeatBottom),
+          StageRunnerPainter._seatPaint,
+        )
+        ..drawRect(
+          Rect.fromLTRB(-padWorld, seatY, period + padWorld, seatY + s * .006),
+          StageRunnerPainter._seatEdgePaint,
+        )
+        ..restore();
+    }
+    final img = _tryToImageSync(recorder.endRecording(), atlasW, atlasH);
+    if (img == null) {
+      _rasterFailed = true;
+      return;
+    }
+    _stallsAtlas = img;
+    _stallRows = rows;
+
+    final maxPerRow = (w / minPeriod).ceil() + 3;
+    final maxSprites = rowCount * maxPerRow;
+    _stallsTransforms = Float32List(maxSprites * 4);
+    _stallsRects = Float32List(maxSprites * 4);
+  }
+
+  ui.Picture _ensureSpotlightsPic(double s, double w, double floorY) {
+    final existing = _spotlightsPic;
+    if (existing != null) return existing;
+    final period = s * .72;
+    final startX = s * .48 - period;
+    final endX = w + s * .25 + period;
+    var count = 0;
+    for (var x = startX; x < endX; x += period) {
+      count++;
+    }
+    final recorder = ui.PictureRecorder();
+    final c = Canvas(recorder);
+    if (_useRaster && count > 0) {
+      // Pack both spotlight cones and 24-gon floor pools into a single
+      // vertex-colored mesh so spotlights emit 1 drawVertices call, zero
+      // textures, and share Skia's GrFillVerticesOp GL program with _wings.
+      const vertsPerSpot = 4 + _spotOvalSides + 1;
+      const idxPerSpot = 6 + _spotOvalSides * 3;
+      final pos = Float32List(count * vertsPerSpot * 2);
+      final colors = Int32List(count * vertsPerSpot);
+      final idx = Uint16List(count * idxPerSpot);
+      final rx = s * .23, ry = s * .03, cy = floorY + s * .02;
+      final coneColor = _coneArgb, poolColor = _poolArgb;
+      var v = 0, p = 0, o = 0;
+      for (var i = 0; i < count; i++) {
+        final x = startX + i * period;
+        // Cone trapezoid.
+        final cv = v;
+        pos[p++] = x - s * .02;
+        pos[p++] = 0;
+        pos[p++] = x + s * .02;
+        pos[p++] = 0;
+        pos[p++] = x + s * .22;
+        pos[p++] = floorY;
+        pos[p++] = x - s * .22;
+        pos[p++] = floorY;
+        colors[v++] = coneColor;
+        colors[v++] = coneColor;
+        colors[v++] = coneColor;
+        colors[v++] = coneColor;
+        idx[o++] = cv;
+        idx[o++] = cv + 1;
+        idx[o++] = cv + 2;
+        idx[o++] = cv;
+        idx[o++] = cv + 2;
+        idx[o++] = cv + 3;
+        // Floor oval fan.
+        final ov = v;
+        pos[p++] = x;
+        pos[p++] = cy;
+        colors[v++] = poolColor;
+        for (var k = 0; k < _spotOvalSides; k++) {
+          pos[p++] = x + _spotCos[k] * rx;
+          pos[p++] = cy + _spotSin[k] * ry;
+          colors[v++] = poolColor;
+        }
+        for (var k = 0; k < _spotOvalSides; k++) {
+          idx[o++] = ov;
+          idx[o++] = ov + 1 + k;
+          idx[o++] = ov + 1 + (k + 1 == _spotOvalSides ? 0 : k + 1);
+        }
+      }
+      _spotConesVertices?.dispose();
+      final verts = _spotConesVertices = ui.Vertices.raw(
+        ui.VertexMode.triangles,
+        pos,
+        colors: colors,
+        indices: idx,
+      );
+      c.drawVertices(verts, BlendMode.dst, _vertexPaint);
+    } else {
+      final path = Path();
+      for (var i = 0; i < count; i++) {
+        final x = startX + i * period;
+        path
+          ..reset()
+          ..moveTo(x - s * .02, 0)
+          ..lineTo(x + s * .02, 0)
+          ..lineTo(x + s * .22, floorY)
+          ..lineTo(x - s * .22, floorY)
+          ..close();
+        c
+          ..drawPath(path, StageRunnerPainter._conePaint)
+          ..drawOval(
+            Rect.fromCenter(
+              center: Offset(x, floorY + s * .02),
+              width: s * .46,
+              height: s * .06,
+            ),
+            StageRunnerPainter._poolPaint,
+          );
+      }
+    }
+    return _spotlightsPic = recorder.endRecording();
+  }
+
+  void paintSpotlights(
+    Canvas canvas,
+    double s,
+    double w,
+    double floorY,
+    double scroll,
+  ) {
+    final period = s * .72;
+    final shift = -(scroll % period);
+    final pic = _ensureSpotlightsPic(s, w, floorY);
+    canvas
+      ..save()
+      ..translate(shift, 0)
+      ..drawPicture(pic)
+      ..restore();
+  }
+
+  ui.Picture _ensureWingsPic(double s, double w) {
+    final existing = _wingsPic;
+    if (existing != null) return existing;
+    const width = .07;
+    final period = s * .51;
+    final top = s * .05, bottom = s * StageRunner.floor;
+    final recorder = ui.PictureRecorder();
+    final c = Canvas(recorder);
+    if (_useRaster) {
+      // Split each wing into 5 disjoint vertical bands in one static vertex
+      // mesh: zero overdraw, zero textures, same GL program as _spotlights.
+      var count = 0;
+      for (var left = 0.0; left < w + period; left += period) {
+        count++;
+      }
+      if (count > 0) {
+        const bands = 5;
+        const stops = [0.0, .012, .024, .042, .054, width];
+        const bandColors = [
+          StageRunnerPainter._velvetArgb,
+          StageRunnerPainter._velvetDarkArgb,
+          StageRunnerPainter._velvetArgb,
+          StageRunnerPainter._velvetDarkArgb,
+          StageRunnerPainter._velvetArgb,
+        ];
+        final pos = Float32List(count * bands * 8);
+        final colors = Int32List(count * bands * 4);
+        final idx = Uint16List(count * bands * 6);
+        var v = 0, p = 0, o = 0;
+        for (var i = 0; i < count; i++) {
+          final left = i * period;
+          for (var b = 0; b < bands; b++) {
+            final l = left + s * stops[b];
+            final r = left + s * stops[b + 1];
+            final col = bandColors[b];
+            final base = v;
+            pos[p++] = l;
+            pos[p++] = top;
+            pos[p++] = r;
+            pos[p++] = top;
+            pos[p++] = r;
+            pos[p++] = bottom;
+            pos[p++] = l;
+            pos[p++] = bottom;
+            colors[v++] = col;
+            colors[v++] = col;
+            colors[v++] = col;
+            colors[v++] = col;
+            idx[o++] = base;
+            idx[o++] = base + 1;
+            idx[o++] = base + 2;
+            idx[o++] = base;
+            idx[o++] = base + 2;
+            idx[o++] = base + 3;
+          }
+        }
+        _wingsVertices?.dispose();
+        final verts = _wingsVertices = ui.Vertices.raw(
+          ui.VertexMode.triangles,
+          pos,
+          colors: colors,
+          indices: idx,
+        );
+        c.drawVertices(verts, BlendMode.dst, _vertexPaint);
+      }
+    } else {
+      for (var left = 0.0; left < w + period; left += period) {
+        c
+          ..drawRect(
+            Rect.fromLTRB(left, top, left + s * width, bottom),
+            StageRunnerPainter._velvetPaint,
+          )
+          ..drawRect(
+            Rect.fromLTRB(left + s * .012, top, left + s * .024, bottom),
+            StageRunnerPainter._foldPaint,
+          )
+          ..drawRect(
+            Rect.fromLTRB(left + s * .042, top, left + s * .054, bottom),
+            StageRunnerPainter._foldPaint,
+          );
+      }
+    }
+    return _wingsPic = recorder.endRecording();
+  }
+
+  void paintWings(Canvas canvas, double s, double w, double scroll) {
+    final period = s * .51;
+    final shift = -(scroll % period);
+    final pic = _ensureWingsPic(s, w);
+    canvas
+      ..save()
+      ..translate(shift, 0)
+      ..drawPicture(pic)
+      ..restore();
+  }
+
+  _BakedStrip? _ensureFloorStrip(double s, double floorY) {
+    final existing = _floorStrip;
+    if (existing != null) return existing;
+    final period = s * .25;
+    final stripTop = floorY - 1.0;
+    final stripH = (s - floorY) + 2.0;
+    if (period <= 0 || stripH <= 0) return null;
+    final scale = _bakeScale;
+    final pw = max(1, (period * scale).round());
+    final ph = max(1, (stripH * scale).ceil());
+    final recorder = ui.PictureRecorder();
+    final c = Canvas(recorder)..scale(pw / period, ph / stripH);
+    final plankBottom = 1.0 + (s - floorY);
+    c
+      ..drawRect(
+        Rect.fromLTRB(0, 1.0, period, stripH),
+        StageRunnerPainter._floorPaint,
+      )
+      ..save()
+      ..clipRect(Rect.fromLTRB(0, 1.0, period, stripH), doAntiAlias: false)
+      ..drawLine(
+        const Offset(0, 1.0),
+        Offset(-s * .04, plankBottom),
+        StageRunnerPainter._plankPaint,
+      )
+      ..drawLine(
+        Offset(period, 1.0),
+        Offset(period - s * .04, plankBottom),
+        StageRunnerPainter._plankPaint,
+      )
+      ..restore()
+      ..drawLine(
+        const Offset(0, 1.0),
+        Offset(period, 1.0),
+        StageRunnerPainter._edgePaint,
+      );
+    final img = _tryToImageSync(recorder.endRecording(), pw, ph);
+    if (img == null) {
+      _rasterFailed = true;
+      return null;
+    }
+    final shader = ui.ImageShader(
+      img,
+      TileMode.repeated,
+      TileMode.clamp,
+      scaleMatrix(period / pw, stripH / ph),
+      filterQuality: FilterQuality.low,
+    );
+    return _floorStrip = _BakedStrip(
+      img,
+      shader,
+      Paint()..shader = shader,
+      stripTop,
+      stripH,
+    );
+  }
+
+  /// Paints the stage floor (fill + diagonal planks + top edge trim) in one
+  /// repeating textured quad on Web; returns false to fall back to vectors.
+  bool paintFloor(
+    Canvas canvas,
+    double s,
+    double w,
+    double floorY,
+    double scroll,
+    bool shaking,
+  ) {
+    if (!_useRaster) return false;
+    final strip = _ensureFloorStrip(s, floorY);
+    if (strip == null) return false;
+    final period = s * .25;
+    final shift = -(scroll % period);
+    final pad = shaking ? s * .02 : 0.0;
+    canvas
+      ..save()
+      ..translate(shift, strip.stripTop)
+      ..drawRect(
+        Rect.fromLTRB(-shift - pad, 0, w - shift + pad, strip.stripH),
+        strip.paint,
+      )
+      ..restore();
+    return true;
+  }
+
+  void paintFloorPlanks(
+    Canvas canvas,
+    double s,
+    double w,
+    double floorY,
+    double scroll,
+  ) {
+    final period = s * .25;
+    final shift = -(scroll % period);
+    var pic = _floorPlanksPic;
+    if (pic == null) {
+      final recorder = ui.PictureRecorder();
+      final c = Canvas(recorder);
+      for (var x = 0.0; x < w + s * .04 + period; x += period) {
+        c.drawLine(
+          Offset(x, floorY),
+          Offset(x - s * .04, s),
+          StageRunnerPainter._plankPaint,
+        );
+      }
+      pic = _floorPlanksPic = recorder.endRecording();
+    }
+    canvas
+      ..save()
+      ..translate(shift, 0)
+      ..drawPicture(pic)
       ..restore();
   }
 
   void dispose() {
-    for (final picture in _pictures.values) {
-      picture.dispose();
+    _drapesPic?.dispose();
+    _drapesPic = null;
+    _valancePic?.dispose();
+    _valancePic = null;
+    _spotlightsPic?.dispose();
+    _spotlightsPic = null;
+    _wingsPic?.dispose();
+    _wingsPic = null;
+    _floorPlanksPic?.dispose();
+    _floorPlanksPic = null;
+    for (var i = 0; i < _audiencePics.length; i++) {
+      _audiencePics[i]?.dispose();
+      _audiencePics[i] = null;
     }
-    _pictures.clear();
+    for (final row in _stallsPics) {
+      for (final pic in row) {
+        pic?.dispose();
+      }
+    }
+    _stallsPics.clear();
+    _drapesStrip?.dispose();
+    _drapesStrip = null;
+    _valanceStrip?.dispose();
+    _valanceStrip = null;
+    _audienceStrip?.dispose();
+    _audienceStrip = null;
+    _floorStrip?.dispose();
+    _floorStrip = null;
+    _stallsAtlas?.dispose();
+    _stallsAtlas = null;
+    _stallRows = const [];
+    _stallsTransforms = null;
+    _stallsRects = null;
+    _spotConesVertices?.dispose();
+    _spotConesVertices = null;
+    _wingsVertices?.dispose();
+    _wingsVertices = null;
+    _rasterFailed = false;
     _size = null;
   }
 }

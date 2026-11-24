@@ -384,9 +384,21 @@ class _GalleryScreenState extends State<GalleryScreen> {
             ),
           )
         : null,
-    body: RefreshIndicator(
-      onRefresh: _pullToRefresh,
-      child: CustomScrollView(
+    body: LayoutBuilder(
+      builder: (context, constraints) {
+        final gridWidth = (constraints.maxWidth - 12).clamp(
+          0.0,
+          double.infinity,
+        );
+        final columns = (gridWidth / 170).floor().clamp(2, 6);
+        final tileWidth = (gridWidth - 6 * (columns - 1)) / columns;
+        final decodeWidth =
+            (tileWidth * MediaQuery.devicePixelRatioOf(context))
+                .round()
+                .clamp(180, 480);
+        return RefreshIndicator(
+          onRefresh: _pullToRefresh,
+          child: CustomScrollView(
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
@@ -453,58 +465,55 @@ class _GalleryScreenState extends State<GalleryScreen> {
           ),
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 6),
-            sliver: SliverLayoutBuilder(
-              builder: (context, constraints) => SliverGrid.builder(
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: (constraints.crossAxisExtent / 170)
-                      .floor()
-                      .clamp(2, 6),
-                  mainAxisSpacing: 6,
-                  crossAxisSpacing: 6,
-                ),
-                itemCount: _assets.length,
-                itemBuilder: (context, index) {
-                  final asset = _assets[index];
-                  return Semantics(
-                    button: true,
-                    label: 'Aufnahme ${index + 1} öffnen',
-                    child: InkWell(
-                      onTap: () => _open(index),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            ProtectedImage(
-                              controller: widget.controller,
-                              path: textValue(asset['path']),
+            sliver: SliverGrid.builder(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: columns,
+                mainAxisSpacing: 6,
+                crossAxisSpacing: 6,
+              ),
+              itemCount: _assets.length,
+              itemBuilder: (context, index) {
+                final asset = _assets[index];
+                return Semantics(
+                  button: true,
+                  label: 'Aufnahme ${index + 1} öffnen',
+                  child: InkWell(
+                    onTap: () => _open(index),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          ProtectedImage(
+                            controller: widget.controller,
+                            path: textValue(asset['path']),
+                            decodeWidth: decodeWidth,
+                          ),
+                          if (asset['type'] == 'VIDEO')
+                            const Center(
+                              child: Icon(
+                                Icons.play_circle_fill,
+                                color: Colors.white,
+                                size: 38,
+                              ),
                             ),
-                            if (asset['type'] == 'VIDEO')
-                              const Center(
+                          if (asset['hidden'] == true)
+                            const Align(
+                              alignment: Alignment.topRight,
+                              child: Padding(
+                                padding: EdgeInsets.all(8),
                                 child: Icon(
-                                  Icons.play_circle_fill,
+                                  Icons.visibility_off,
                                   color: Colors.white,
-                                  size: 38,
                                 ),
                               ),
-                            if (asset['hidden'] == true)
-                              const Align(
-                                alignment: Alignment.topRight,
-                                child: Padding(
-                                  padding: EdgeInsets.all(8),
-                                  child: Icon(
-                                    Icons.visibility_off,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
+                            ),
+                        ],
                       ),
                     ),
-                  );
-                },
-              ),
+                  ),
+                );
+              },
             ),
           ),
           SliverToBoxAdapter(
@@ -533,6 +542,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
           ),
         ],
       ),
+        );
+      },
     ),
   );
 }

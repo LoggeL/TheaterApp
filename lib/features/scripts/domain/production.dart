@@ -48,6 +48,8 @@ class Production {
   /// Cast, directors and crew added by hand; computed by the server.
   final List<int> ensemble;
 
+  static final _yearPattern = RegExp(r'(?:^|\D)((?:19|20)\d{2})(?=\D|$)');
+
   /// When the production ran, as far as known: the premiere, else the
   /// season in the title or id ("Winterstück 2026" is December 2026).
   /// Null when neither says anything; mirrors `productionSeasonTime` on
@@ -55,9 +57,10 @@ class Production {
   DateTime? get seasonDate {
     if (premiereAt != null) return premiereAt!.toUtc();
     final label = '$title $id'.toLowerCase();
-    final years = RegExp(
-      r'(?:^|\D)((?:19|20)\d{2})(?=\D|$)',
-    ).allMatches(label).map((match) => int.parse(match.group(1)!)).toList();
+    final years = _yearPattern
+        .allMatches(label)
+        .map((match) => int.parse(match.group(1)!))
+        .toList();
     if (years.isNotEmpty) {
       years.sort();
       final month = label.contains('winter')
@@ -97,7 +100,7 @@ class Production {
     ensemble: jsonList(json['ensemble']).map(intValue).toList(),
     roles: jsonList(
       json['roles'],
-    ).map((e) => ScriptRole.fromJson(jsonMap(e))).toList(),
+    ).map((e) => ScriptRole.fromJson(readJsonMap(e))).toList(),
   );
   Production withScript(ScriptDocument doc) => Production(
     id: id,

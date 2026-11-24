@@ -177,9 +177,12 @@ enum RunnerSprite {
 enum RunnerLayer { runner, obstacles, pickups }
 
 /// Sprites are scaled down from the atlas; mipmapped sampling keeps them
-/// smooth without any blur filter.
+/// smooth on native, while bilinear sampling on the web avoids WebGL mipmap
+/// generation stalls and extra texture memory on iOS Safari.
+const _spriteFilterQuality = kIsWeb ? FilterQuality.low : FilterQuality.medium;
+
 Paint _paint([ColorFilter? filter]) => Paint()
-  ..filterQuality = FilterQuality.medium
+  ..filterQuality = _spriteFilterQuality
   ..colorFilter = filter;
 
 /// The decoded pictures of the game. They are loaded when the game opens,
@@ -373,10 +376,25 @@ class RunnerArt {
     final r = cell.intersect(
       ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
     );
-    for (var y = r.top.toInt(); y < r.bottom; y++) {
-      for (var x = r.left.toInt(); x < r.right; x++) {
+    final left = r.left.toInt();
+    final right = r.right.ceil().clamp(0, image.width);
+    final top = r.top.toInt();
+    final bottom = r.bottom.ceil().clamp(0, image.height);
+    if (left >= right || top >= bottom) return false;
+    final data = bytes.buffer.asUint8List(
+      bytes.offsetInBytes,
+      bytes.lengthInBytes,
+    );
+    final rowStride = image.width * 4;
+    for (var y = top; y < bottom; y++) {
+      final base = y * rowStride;
+      for (
+        var i = base + left * 4 + 3, end = base + right * 4;
+        i < end;
+        i += 4
+      ) {
         // Alpha of the straight RGBA; a faint veil does not count.
-        if (bytes.getUint8((y * image.width + x) * 4 + 3) > 32) return true;
+        if (data[i] > 32) return true;
       }
     }
     return false;

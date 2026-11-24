@@ -1,5 +1,4 @@
 import 'dart:js_interop';
-import 'dart:js_interop_unsafe';
 
 import 'package:flutter/foundation.dart';
 import 'package:web/web.dart' as web;
@@ -33,26 +32,41 @@ extension type _Entry(JSObject _) implements JSObject {
   external JSNumber? get startTime;
 }
 
+extension type _MemoryBuffer(JSObject _) implements JSObject {
+  external JSNumber? get byteLength;
+}
+
+extension type _MemoryView(JSObject _) implements JSObject {
+  external _MemoryBuffer? get buffer;
+}
+
+extension type _CanvasKit(JSObject _) implements JSObject {
+  // ignore: non_constant_identifier_names
+  external _MemoryView? get HEAPU8;
+}
+
+extension type _Skwasm(JSObject _) implements JSObject {
+  external _MemoryView? get wasmMemory;
+}
+
 _Navigator get _navigator => _Navigator(web.window.navigator);
 
 /// Milliseconds since the page started loading (`performance.now()`).
 double? pageClockMs() => web.window.performance.now();
 
 @JS('window.flutterCanvasKit')
-external JSObject? get _canvasKit;
+external _CanvasKit? get _canvasKit;
 
 @JS('window._flutter_skwasmInstance')
-external JSObject? get _skwasm;
+external _Skwasm? get _skwasm;
 
 /// The size of the renderer's WebAssembly memory in bytes (CanvasKit's heap
 /// or Skwasm's), null where it cannot be read. It only ever grows, and in
 /// Safari on iOS growing may copy all of it.
 int? rendererHeapBytes() {
   try {
-    final heap = _canvasKit?.getProperty<JSObject?>('HEAPU8'.toJS);
-    final memory = heap ?? _skwasm?.getProperty<JSObject?>('wasmMemory'.toJS);
-    final buffer = memory?.getProperty<JSObject?>('buffer'.toJS);
-    return buffer?.getProperty<JSNumber?>('byteLength'.toJS)?.toDartInt;
+    final memory = _canvasKit?.HEAPU8 ?? _skwasm?.wasmMemory;
+    return memory?.buffer?.byteLength?.toDartInt;
   } catch (_) {
     return null;
   }
@@ -95,6 +109,8 @@ Map<String, Object> currentContext() {
   return {'pwa': _standalone(), 'net': ?net};
 }
 
+final _mainBundlePattern = RegExp(r'/main(\.[a-f0-9]+)?\.dart\.(wasm|js)$');
+
 /// How the page was loaded: the navigation type, whether the page was
 /// visible and whether the app code came from a cache (HTTP cache or
 /// service worker) instead of the network.
@@ -108,7 +124,7 @@ Map<String, Object> startInfo() {
     if (type != null) out['nav'] = type.toDart;
     for (final entry in performance.getEntriesByType('resource').toDart) {
       final e = _Entry(entry), name = e.name?.toDart ?? '';
-      if (!RegExp(r'/main(\.[a-f0-9]+)?\.dart\.(wasm|js)$').hasMatch(name)) {
+      if (!_mainBundlePattern.hasMatch(name)) {
         continue;
       }
       final transferred = e.transferSize?.toDartDouble;

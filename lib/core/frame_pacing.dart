@@ -117,6 +117,7 @@ class FramePacer {
   /// stamps' clock, in microseconds.
   double _clock = 0, _ahead = 0;
   final List<int> _intervals = [];
+  final List<int> _sorted = List<int>.filled(_learned, 0);
   int _misfits = 0;
 
   /// The stamp to begin the frame of [raw] with. With [enabled] false the
@@ -190,17 +191,26 @@ class FramePacer {
     }
     _intervals.add(d);
     if (_intervals.length < _learned) return;
-    final sorted = [..._intervals]..sort();
-    final median = sorted[sorted.length ~/ 2];
-    final alike = [
-      for (final i in _intervals)
-        if ((i - median).abs() <= max(median * _spread, _rounding)) i,
-    ];
-    if (alike.length < _alike) {
+    for (var i = 0; i < _learned; i++) {
+      _sorted[i] = _intervals[i];
+    }
+    _sorted.sort();
+    final median = _sorted[_learned ~/ 2];
+    final limit = max(median * _spread, _rounding);
+    var alikeCount = 0;
+    var alikeSum = 0;
+    for (var i = 0; i < _learned; i++) {
+      final v = _intervals[i];
+      if ((v - median).abs() <= limit) {
+        alikeCount++;
+        alikeSum += v;
+      }
+    }
+    if (alikeCount < _alike) {
       _intervals.removeAt(0);
       return;
     }
-    _period = _learnedPeriod = alike.reduce((a, b) => a + b) / alike.length;
+    _period = _learnedPeriod = alikeSum / alikeCount;
     _intervals.clear();
   }
 }

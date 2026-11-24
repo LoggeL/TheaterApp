@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -19,6 +20,7 @@ import 'stage_runner_sound.dart';
 /// a gala. What was won is frozen on the server.
 
 final _number = NumberFormat.decimalPattern('de');
+final _monthFormat = DateFormat('MMMM y', 'de');
 
 /// "1 Gala-Kiste", "3 Gala-Kisten".
 String galaCratesText(int crates) =>
@@ -30,7 +32,7 @@ String galaMonthText(String month) {
   final year = parts.length == 2 ? int.tryParse(parts[0]) : null;
   final index = parts.length == 2 ? int.tryParse(parts[1]) : null;
   if (year == null || index == null) return month;
-  return DateFormat('MMMM y', 'de').format(DateTime(year, index));
+  return _monthFormat.format(DateTime(year, index));
 }
 
 /// The line under the podium: what the gala brought the member.
@@ -118,7 +120,9 @@ class _GalaMaskState extends State<GalaMask> {
                 width: widget.size,
                 height: widget.size,
                 fit: BoxFit.contain,
-                filterQuality: FilterQuality.medium,
+                filterQuality: kIsWeb
+                    ? FilterQuality.low
+                    : FilterQuality.medium,
               ),
       ),
     );
@@ -263,7 +267,20 @@ class _GalaCelebrationState extends State<GalaCelebration>
   late final AnimationController _burst = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1800),
-  )..forward();
+  );
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      _burst.value = 1;
+    } else {
+      _burst.forward();
+    }
+  }
 
   @override
   void dispose() {
@@ -305,10 +322,8 @@ class _GalaCelebrationState extends State<GalaCelebration>
         children: [
           Positioned.fill(
             child: IgnorePointer(
-              child: AnimatedBuilder(
-                animation: _burst,
-                builder: (context, _) =>
-                    CustomPaint(painter: _GoldBurstPainter(_burst.value)),
+              child: RepaintBoundary(
+                child: CustomPaint(painter: _GoldBurstPainter(_burst)),
               ),
             ),
           ),
@@ -349,14 +364,9 @@ class _GalaCelebrationState extends State<GalaCelebration>
                       // The curtain opens on the podium.
                       Positioned.fill(
                         child: IgnorePointer(
-                          child: AnimatedBuilder(
-                            animation: _burst,
-                            builder: (context, _) => CustomPaint(
-                              painter: CurtainPainter(
-                                open: Curves.easeInOut.transform(
-                                  (_burst.value / .6).clamp(0.0, 1.0),
-                                ),
-                              ),
+                          child: RepaintBoundary(
+                            child: CustomPaint(
+                              painter: CurtainPainter(progress: _burst),
                             ),
                           ),
                         ),
@@ -479,31 +489,56 @@ class _Pedestal extends StatelessWidget {
 
 /// Golden glints flying out of the middle once.
 class _GoldBurstPainter extends CustomPainter {
-  _GoldBurstPainter(this.t);
-  final double t;
+  _GoldBurstPainter(this.animation) : super(repaint: animation);
+  final Animation<double> animation;
+
+  static final _paint = Paint();
+  static const _colors = [
+    Color(0xFFFFD86B),
+    Color(0xFFE4AE39),
+    Color(0xFFFFFFFF),
+  ];
+  static final _glints = () {
+    final random = Random(9);
+    return [
+      for (var i = 0; i < 40; i++)
+        () {
+          final a = random.nextDouble() * 2 * pi;
+          return (
+            cos(a),
+            sin(a),
+            .2 + random.nextDouble() * .6,
+            3.0 + random.nextDouble() * 6.0,
+          );
+        }(),
+    ];
+  }();
 
   @override
   void paint(Canvas canvas, Size size) {
+    final t = animation.value;
     if (t <= 0 || t >= 1) return;
-    final c = Offset(size.width / 2, size.height * .2);
-    final random = Random(9);
-    final paint = Paint();
-    const colors = [Color(0xFFFFD86B), Color(0xFFE4AE39), Color(0xFFFFFFFF)];
-    for (var i = 0; i < 40; i++) {
-      final a = random.nextDouble() * 2 * pi;
-      final d = size.shortestSide * (.2 + random.nextDouble() * .6) * t;
-      paint.color = colors[i % colors.length].withValues(alpha: (1 - t) * .9);
-      paintGlint(
-        canvas,
-        c + Offset(cos(a) * d, sin(a) * d + 80 * t * t),
-        3 + random.nextDouble() * 6,
-        paint,
-      );
+    final cx = size.width / 2, cy = size.height * .2;
+    final shortest = size.shortestSide;
+    final dropY = 80 * t * t;
+    final alpha = (1 - t) * .9;
+    final c0 = _colors[0].withValues(alpha: alpha);
+    final c1 = _colors[1].withValues(alpha: alpha);
+    final c2 = _colors[2].withValues(alpha: alpha);
+    for (var i = 0; i < _glints.length; i++) {
+      final (ca, sa, spread, radius) = _glints[i];
+      final d = shortest * spread * t;
+      _paint.color = switch (i % 3) {
+        0 => c0,
+        1 => c1,
+        _ => c2,
+      };
+      paintGlintAt(canvas, cx + ca * d, cy + sa * d + dropY, radius, _paint);
     }
   }
 
   @override
-  bool shouldRepaint(_GoldBurstPainter old) => old.t != t;
+  bool shouldRepaint(_GoldBurstPainter old) => old.animation != animation;
 }
 
 /// The celebration, if the gala's month was not shown yet; once, as the

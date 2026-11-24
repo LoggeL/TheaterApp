@@ -33,12 +33,15 @@ abstract interface class PerfStore {
 }
 
 class PreferencesPerfStore implements PerfStore {
+  SharedPreferences? _preferences;
+  Future<SharedPreferences> _prefs() async =>
+      _preferences ??= await SharedPreferences.getInstance();
+
   @override
-  Future<String?> read(String key) async =>
-      (await SharedPreferences.getInstance()).getString(key);
+  Future<String?> read(String key) async => (await _prefs()).getString(key);
   @override
   Future<void> write(String key, String? value) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefs();
     value == null ? await prefs.remove(key) : await prefs.setString(key, value);
   }
 }
@@ -732,15 +735,30 @@ class PerfTelemetry {
   /// The renderer's memory as of the last frame, in bytes; tests can
   /// replace where it comes from.
   int? _heapBytes;
+  int _lastHeapCheckUs = -1;
+  static const _heapCheckIntervalUs = 500000;
   @visibleForTesting
   int? Function()? heapClock;
 
   /// Marks `grow` when the renderer's WebAssembly memory grew since the
-  /// last frame: a slow frame then lists it. Where the browser cannot grow
+  /// last check: a slow frame then lists it. Where the browser cannot grow
   /// that memory in place (Safari on iOS), growing copies all of it.
-  void _watchHeap(int nowUs) {
-    final heap =
-        heapClock?.call() ?? (_testing ? null : platform.rendererHeapBytes());
+  ///
+  /// In production we only cross JS interop on slow frames or periodically
+  /// every 500 ms so smooth 60 Hz frames pay zero JS interop overhead.
+  void _watchHeap(int nowUs, {bool force = false}) {
+    final custom = heapClock;
+    if (custom == null) {
+      if (_testing) return;
+      if (!force &&
+          _heapBytes != null &&
+          _lastHeapCheckUs >= 0 &&
+          nowUs - _lastHeapCheckUs < _heapCheckIntervalUs) {
+        return;
+      }
+      _lastHeapCheckUs = nowUs;
+    }
+    final heap = custom?.call() ?? platform.rendererHeapBytes();
     if (heap == null) return;
     final last = _heapBytes;
     _heapBytes = heap;
@@ -751,7 +769,14 @@ class PerfTelemetry {
   /// whether it was busy or waited for the browser ([ThreadProbe]). Only on
   /// the web: elsewhere the engine draws on a thread of its own, and build
   /// and raster times tell it all.
-  final _probe = ThreadProbe();
+  ///
+  /// On live web builds we use a 24 ms interval (> one 60 Hz frame) so smooth
+  /// frames never wake the JS timer mid-frame, and pause the timer completely
+  /// while a stage runner run is active (which records its own timings).
+  static const _webProbeIntervalUs = 24000;
+  final _probe = ThreadProbe(
+    intervalUs: kIsWeb ? _webProbeIntervalUs : ThreadProbe.delayUs,
+  );
   Timer? _probeTimer;
   @visibleForTesting
   ThreadProbe get threadProbe => _probe;
@@ -759,6 +784,7 @@ class PerfTelemetry {
   void _watchThread(int nowUs, {required bool nextScheduled}) {
     _stopProbe();
     if (!nextScheduled || _suspended || !(kIsWeb || _testing)) return;
+    if (!_testing && _run != null) return;
     _probe.start(nowUs);
     if (_testing) return;
     _setProbe();
@@ -771,7 +797,7 @@ class PerfTelemetry {
   }
 
   void _setProbe() => _probeTimer = Timer(
-    const Duration(microseconds: ThreadProbe.delayUs),
+    Duration(microseconds: _probe.intervalUs),
     _probeFired,
   );
 
@@ -825,7 +851,6 @@ class PerfTelemetry {
   /// the input. Other frames (after idle pauses) are not sampled.
   @visibleForTesting
   void frameEnded(int nowUs, {required bool nextScheduled}) {
-    _watchHeap(nowUs);
     _noteStamp();
     _watchDrag(nowUs);
     final gap = _probe.take();
@@ -841,6 +866,7 @@ class PerfTelemetry {
         input = _lastInput;
       }
     }
+    _watchHeap(nowUs, force: sample != null && sample > 25);
     _lastFrameUs = nowUs;
     _inputAt = -1;
     _continuous = nextScheduled;

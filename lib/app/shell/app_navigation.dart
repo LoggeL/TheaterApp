@@ -75,14 +75,72 @@ NavigationDestination _destination(
   );
 }
 
-/// The shell sections in [AppSection] order. Admin is left out where
-/// [includeAdmin] is false: phones reach it from the app bar instead.
-List<NavigationDestination> appNavigationDestinations(
-  AppController controller, {
-  bool includeAdmin = true,
-}) {
-  final unanswered = unansweredSoon(controller, controller.now);
-  final slots = slotPoolsAwaitingChoice(controller);
+class _NavBadgeCache {
+  const _NavBadgeCache({
+    required this.version,
+    required this.validFrom,
+    required this.validUntil,
+    required this.eventCount,
+    required this.eventText,
+    required this.messageCount,
+    required this.messageText,
+    required this.registrations,
+  });
+  final int version;
+  final DateTime validFrom;
+  final DateTime? validUntil;
+  final int eventCount, messageCount, registrations;
+  final String eventText, messageText;
+
+  bool matches(int currentVersion, DateTime now) =>
+      version == currentVersion &&
+      !now.isBefore(validFrom) &&
+      (validUntil == null || now.isBefore(validUntil!));
+}
+
+final _navBadgeCache = Expando<_NavBadgeCache>('navBadgeCache');
+
+_NavBadgeCache _navBadges(AppController controller) {
+  final now = controller.now;
+  final version = controller.dataVersion;
+  final cached = _navBadgeCache[controller];
+  if (cached != null && cached.matches(version, now)) return cached;
+
+  DateTime? nextBoundary;
+  void consider(DateTime? t) {
+    if (t == null || !t.isAfter(now)) return;
+    if (nextBoundary == null || t.isBefore(nextBoundary!)) nextBoundary = t;
+  }
+
+  final soon = now.add(responseBadgeWindow);
+  var unanswered = 0;
+  for (final event in controller.events) {
+    if (!event.needsResponse) continue;
+    final start = event.startsAt;
+    if (start == null) {
+      unanswered++;
+      continue;
+    }
+    final end = event.endsAt ?? start;
+    consider(end);
+    consider(start.subtract(responseBadgeWindow));
+    if (end.isAfter(now) && start.isBefore(soon)) unanswered++;
+  }
+
+  final allPools = slotPoolsOf(controller);
+  var slots = 0;
+  for (final pool in allPools) {
+    for (final slot in pool.slots) {
+      consider(slot.startsAt);
+    }
+    if (!pool.closed &&
+        pool.myBooking == null &&
+        invitedToSlotPool(controller, pool) &&
+        pool.hasFreeSlotAt(now)) {
+      slots++;
+    }
+  }
+
   final eventText = [
     if (unanswered > 0)
       _count(
@@ -94,29 +152,62 @@ List<NavigationDestination> appNavigationDestinations(
       _count(slots, '1 Terminfinder wartet', 'Terminfinder warten'),
   ].join(' · ');
 
-  final unread = unreadMessageCount(controller);
-  final forms = openForms(controller).toList();
-  // Avoid double-counting messages that are both unread and carry an open form.
-  final extraForms = forms
-      .where((m) => !messageUnreadFor(controller.user, m))
-      .length;
-  final polls = pollsToVote(controller).length;
+  final user = controller.user;
+  var unread = 0;
+  var formCount = 0;
+  var extraForms = 0;
+  for (final m in controller.messages) {
+    final isUnread = messageUnreadFor(user, m);
+    if (isUnread) unread++;
+    if (messageHasOpenFormFor(user, m)) {
+      formCount++;
+      if (!isUnread) extraForms++;
+    }
+  }
+
+  var polls = 0;
+  for (final p in controller.polls) {
+    consider(p.closesAt);
+    if (!p.isClosedAt(now) && !p.hasVoted && pollAddressesUser(controller, p)) {
+      polls++;
+    }
+  }
+
   final messageText = [
     if (unread > 0) '$unread ungelesen',
-    if (forms.isNotEmpty)
-      _count(forms.length, '1 Formular offen', 'Formulare offen'),
+    if (formCount > 0) _count(formCount, '1 Formular offen', 'Formulare offen'),
     if (polls > 0) _count(polls, '1 Abstimmung offen', 'Abstimmungen offen'),
   ].join(' · ');
 
-  final registrations = controller.openRegistrationCount;
+  final result = _NavBadgeCache(
+    version: version,
+    validFrom: now,
+    validUntil: nextBoundary,
+    eventCount: unanswered + slots,
+    eventText: eventText,
+    messageCount: unread + extraForms + polls,
+    messageText: messageText,
+    registrations: controller.openRegistrationCount,
+  );
+  _navBadgeCache[controller] = result;
+  return result;
+}
+
+/// The shell sections in [AppSection] order. Admin is left out where
+/// [includeAdmin] is false: phones reach it from the app bar instead.
+List<NavigationDestination> appNavigationDestinations(
+  AppController controller, {
+  bool includeAdmin = true,
+}) {
+  final badges = _navBadges(controller);
   return [
     _destination(Icons.wb_sunny_outlined, Icons.wb_sunny, label: 'Heute'),
     _destination(
       Icons.calendar_month_outlined,
       Icons.calendar_month,
       label: 'Termine',
-      count: unanswered + slots,
-      status: eventText,
+      count: badges.eventCount,
+      status: badges.eventText,
     ),
     _destination(
       Icons.auto_stories_outlined,
@@ -129,8 +220,8 @@ List<NavigationDestination> appNavigationDestinations(
       Icons.mail,
       label: 'Post',
       name: 'Mitteilungen',
-      count: unread + extraForms + polls,
-      status: messageText,
+      count: badges.messageCount,
+      status: badges.messageText,
     ),
     _destination(
       Icons.person_outline,
@@ -143,9 +234,9 @@ List<NavigationDestination> appNavigationDestinations(
         Icons.admin_panel_settings_outlined,
         Icons.admin_panel_settings,
         label: 'Admin',
-        count: registrations,
+        count: badges.registrations,
         status: _count(
-          registrations,
+          badges.registrations,
           '1 neue Registrierung wartet auf Zuordnung',
           'neue Registrierungen warten auf Zuordnung',
         ),
@@ -425,17 +516,18 @@ class _DesktopRouteFrameState extends State<DesktopRouteFrame> {
       _outer!._hide(this, !widget.enabled);
       return widget.child;
     }
-    final selection = AppNavigationScope.maybeOf(context);
+    final wide = MediaQuery.sizeOf(context).width >= Breakpoints.rail;
+    final selection = wide ? AppNavigationScope.maybeOf(context) : null;
     final rail =
+        wide &&
         widget.enabled &&
         _hiddenBy.isEmpty &&
         selection != null &&
         widget.controller.hasAccess &&
-        MediaQuery.sizeOf(context).width >= Breakpoints.rail &&
         MediaQuery.textScalerOf(context).scale(14) <= 21;
-    // Depends on the route, so a change of its place rebuilds the mark.
-    ModalRoute.of(context);
-    final navigator = Navigator.maybeOf(context);
+    // Only depend on the route when the rail is actually shown (wide screens).
+    if (rail) ModalRoute.of(context);
+    final navigator = rail ? Navigator.maybeOf(context) : null;
     final inGame = rail && _inGame(navigator);
     // The page keeps its place in the tree when the rail comes or goes, so
     // its state survives resizing and the reader's stage mode.

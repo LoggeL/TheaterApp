@@ -935,7 +935,7 @@ void main() {
         reason: 'Sandbag warning pointer should be drawn below the valance',
       );
 
-      // 3. Rolling drum draws dust puffs and speed streaks when falling == true.
+      // 3. Rolling drum draws dust puffs without speed lines when falling == true.
       final stillDrum = StageRunner(random: Random(3));
       stillDrum.obstacles
         ..clear()
@@ -979,8 +979,8 @@ void main() {
       );
       expect(
         rollingCanvas.lines.length,
-        greaterThan(stillCanvas.lines.length),
-        reason: 'Rolling drum should draw trailing speed streaks',
+        stillCanvas.lines.length,
+        reason: 'Rolling drum should not draw trailing speed lines',
       );
     });
   });

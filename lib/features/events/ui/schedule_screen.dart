@@ -61,19 +61,17 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             )
           : null,
       body: LayoutBuilder(
-        builder: (context, constraints) => _buildSchedule(
-          context,
-          constraints.maxWidth >= 1000 &&
-              MediaQuery.textScalerOf(context).scale(14) <= 21,
-        ),
+        builder: (context, constraints) =>
+            _buildSchedule(context, constraints.maxWidth),
       ),
     ),
   );
 
   static const _filters = ['Kommend', 'Offen', 'Zugesagt', 'Vergangen'];
 
-  /// Shared by the month headings of every list item.
+  /// Shared by the month headings and calendar day headers.
   static final _monthFormat = DateFormat.yMMMM('de');
+  static final _selectedDayFormat = DateFormat.yMMMMEEEEd('de');
 
   /// Why a filter is empty, in the words of that filter.
   static const _emptyMessages = [
@@ -92,28 +90,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     _month = DateTime(day.year, day.month);
   }
 
-  bool _matches(TheaterEvent e, int filter, DateTime now) {
-    final future = e.startsAt == null || (e.endsAt ?? e.startsAt!).isAfter(now);
-    return switch (filter) {
-      // Auto-accepted events owe no answer; their implicit yes is a yes.
-      1 =>
-        future &&
-            e.response == 'open' &&
-            e.addressedToMe &&
-            !e.autoAccept &&
-            widget.controller.canRespondTo(e),
-      2 => future && e.attending,
-      3 => !future,
-      _ => future,
-    };
-  }
-
-  int _count(int filter, DateTime now) =>
-      widget.controller.events.where((e) => _matches(e, filter, now)).length;
-
-  /// Filter chips with counts: one swipeable line on phones, wrapping with
-  /// large text so every option stays reachable.
-  Widget _filterChips(BuildContext context, DateTime now, {bool wrap = false}) {
+  /// Filter chips with precomputed counts: one swipeable line on phones,
+  /// wrapping with large text so every option stays reachable.
+  Widget _filterChips(
+    BuildContext context,
+    List<int> counts, {
+    bool wrap = false,
+  }) {
+    final theme = Theme.of(context);
     final chips = [
       for (var i = 0; i < _filters.length; i++)
         ChoiceChip(
@@ -123,7 +107,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               Flexible(
                 child: Text(_filters[i], overflow: TextOverflow.ellipsis),
               ),
-              if (i < 3 && _count(i, now) > 0) ...[
+              if (i < 3 && counts[i] > 0) ...[
                 const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -131,15 +115,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     vertical: 1,
                   ),
                   decoration: BoxDecoration(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.primary.withValues(alpha: .14),
+                    color: theme.colorScheme.primary.withValues(alpha: .14),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    '${_count(i, now)}',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
+                    '${counts[i]}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.primary,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
@@ -297,26 +279,58 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   int _byStart(TheaterEvent a, TheaterEvent b) =>
       (a.startsAt ?? DateTime(9999)).compareTo(b.startsAt ?? DateTime(9999));
 
-  Widget _buildSchedule(BuildContext context, bool desktop) {
+  Widget _buildSchedule(BuildContext context, double maxWidth) {
+    final desktop =
+        maxWidth >= 1000 && MediaQuery.textScalerOf(context).scale(14) <= 21;
+    // Outer horizontal SliverPadding is 44px; EventCard inner padding is 34px.
+    final showBadgeLabel = maxWidth - 44 - 34 >= 270;
     final now = widget.controller.now;
+    final allEvents = widget.controller.events;
     final pastFirst = !_calendar && _filter == 3;
-    final events =
-        widget.controller.events.where((e) {
-            return _calendar ? eventOnDay(e, _day) : _matches(e, _filter, now);
-          }).toList()
-          // The most recent past events come first.
-          ..sort((a, b) => pastFirst ? _byStart(b, a) : _byStart(a, b));
-    final nextId = widget.controller.events
-        .where(
-          (e) => e.startsAt != null && e.addressedToMe && !eventIsPast(e, now),
-        )
-        .fold<TheaterEvent?>(
-          null,
-          (next, e) =>
-              next == null || e.startsAt!.isBefore(next.startsAt!) ? e : next,
-        )
-        ?.id;
-    if (desktop) return _desktop(context, events, nextId);
+    // Compute chip counts, filtered events and nextId in a single pass over
+    // the already-sorted event list.
+    final counts = [0, 0, 0];
+    final events = <TheaterEvent>[];
+    TheaterEvent? nextEvent;
+    for (final e in allEvents) {
+      final start = e.startsAt;
+      final future = start == null || (e.endsAt ?? start).isAfter(now);
+      if (future) {
+        counts[0]++;
+        final isOpen =
+            e.response == 'open' &&
+            e.addressedToMe &&
+            !e.autoAccept &&
+            e.acceptsResponsesAt(now);
+        if (isOpen) counts[1]++;
+        if (e.attending) counts[2]++;
+        if (start != null && e.addressedToMe && !eventIsPast(e, now)) {
+          if (nextEvent == null || start.isBefore(nextEvent.startsAt!)) {
+            nextEvent = e;
+          }
+        }
+      }
+      final match = _calendar
+          ? eventOnDay(e, _day)
+          : switch (_filter) {
+              1 =>
+                future &&
+                    e.response == 'open' &&
+                    e.addressedToMe &&
+                    !e.autoAccept &&
+                    e.acceptsResponsesAt(now),
+              2 => future && e.attending,
+              3 => !future,
+              _ => future,
+            };
+      if (match) events.add(e);
+    }
+    if (pastFirst) {
+      // The most recent past events come first.
+      events.sort((a, b) => _byStart(b, a));
+    }
+    final nextId = nextEvent?.id;
+    if (desktop) return _desktop(context, events, nextId, counts);
     final banner = _slotBanner(context);
     final manager = widget.controller.user?.canManageEvents == true;
     return RefreshIndicator(
@@ -338,17 +352,17 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       displayedMonth: _month,
                       onMonthChanged: (month) => setState(() => _month = month),
                       onSelected: (day) => setState(() => _showDay(day)),
-                      events: widget.controller.events,
+                      events: allEvents,
                       today: now,
                     ),
                     Text(
-                      DateFormat.yMMMMEEEEd('de').format(_day),
+                      _selectedDayFormat.format(_day),
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ] else
                     _filterChips(
                       context,
-                      now,
+                      counts,
                       wrap: MediaQuery.textScalerOf(context).scale(14) > 20,
                     ),
                 ],
@@ -370,20 +384,28 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 itemCount: events.length,
                 itemBuilder: (context, index) {
                   final event = events[index];
-                  final month = event.startsAt == null
-                      ? 'Datum offen'
-                      : _monthFormat.format(event.startsAt!);
-                  final previousMonth =
-                      index == 0 || events[index - 1].startsAt == null
-                      ? ''
-                      : _monthFormat.format(events[index - 1].startsAt!);
+                  final start = event.startsAt;
+                  final prevStart = index == 0
+                      ? null
+                      : events[index - 1].startsAt;
+                  final sameMonth =
+                      index > 0 &&
+                      ((start == null && prevStart == null) ||
+                          (start != null &&
+                              prevStart != null &&
+                              start.year == prevStart.year &&
+                              start.month == prevStart.month));
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (index == 0 || month != previousMonth)
+                      if (!sameMonth)
                         Padding(
                           padding: const EdgeInsets.fromLTRB(3, 12, 0, 14),
-                          child: Eyebrow(month),
+                          child: Eyebrow(
+                            start == null
+                                ? 'Datum offen'
+                                : _monthFormat.format(start),
+                          ),
                         ),
                       Padding(
                         padding: const EdgeInsets.only(bottom: 13),
@@ -391,6 +413,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           event: event,
                           controller: widget.controller,
                           isNext: event.id == nextId,
+                          showBadgeLabel: showBadgeLabel,
                         ),
                       ),
                     ],
@@ -409,6 +432,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     BuildContext context,
     List<TheaterEvent> events,
     String? nextId,
+    List<int> counts,
   ) {
     final selected =
         events.where((event) => event.id == _selectedEventId).firstOrNull ??
@@ -443,60 +467,78 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     child: RefreshIndicator(
                       onRefresh: () =>
                           refreshWithFeedback(context, widget.controller),
-                      child: ListView(
+                      child: CustomScrollView(
                         key: const PageStorageKey('schedule-agenda'),
                         primary: false,
                         physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.all(14),
-                        children: [
-                          RehearsalCalendar(
-                            selected: _day,
-                            displayedMonth: _month,
-                            onMonthChanged: (month) =>
-                                setState(() => _month = month),
-                            onSelected: (day) => setState(() {
-                              _showDay(day);
-                              _calendar = true;
-                              _selectedEventId = null;
-                            }),
-                            events: widget.controller.events,
-                            today: widget.controller.now,
-                          ),
-                          const Divider(height: 24),
-                          _filterChips(
-                            context,
-                            widget.controller.now,
-                            wrap: true,
-                          ),
-                          const SizedBox(height: 18),
-                          Text(
-                            _calendar
-                                ? DateFormat.yMMMMEEEEd('de').format(_day)
-                                : 'Termine · ${events.length}',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 12),
-                          if (events.isEmpty)
-                            EmptyState(
-                              icon: Icons.event_available_outlined,
-                              title: 'Hier ist alles ruhig.',
-                              message: _emptyMessage,
+                        slivers: [
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+                            sliver: SliverToBoxAdapter(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  RehearsalCalendar(
+                                    selected: _day,
+                                    displayedMonth: _month,
+                                    onMonthChanged: (month) =>
+                                        setState(() => _month = month),
+                                    onSelected: (day) => setState(() {
+                                      _showDay(day);
+                                      _calendar = true;
+                                      _selectedEventId = null;
+                                    }),
+                                    events: widget.controller.events,
+                                    today: widget.controller.now,
+                                  ),
+                                  const Divider(height: 24),
+                                  _filterChips(context, counts, wrap: true),
+                                  const SizedBox(height: 18),
+                                  Text(
+                                    _calendar
+                                        ? _selectedDayFormat.format(_day)
+                                        : 'Termine · ${events.length}',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleSmall,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  if (events.isEmpty)
+                                    EmptyState(
+                                      icon: Icons.event_available_outlined,
+                                      title: 'Hier ist alles ruhig.',
+                                      message: _emptyMessage,
+                                    ),
+                                ],
+                              ),
                             ),
-                          for (final event in events)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: _AgendaTile(
-                                key: ValueKey('schedule-event-${event.id}'),
-                                event: event,
-                                controller: widget.controller,
-                                selected: selected?.id == event.id,
-                                isNext: event.id == nextId,
-                                onTap: () => setState(() {
-                                  _selectedEventId = event.id;
-                                  if (event.startsAt != null) {
-                                    _showDay(event.startsAt!.toLocal());
-                                  }
-                                }),
+                          ),
+                          if (events.isNotEmpty)
+                            SliverPadding(
+                              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                              sliver: SliverList.builder(
+                                itemCount: events.length,
+                                itemBuilder: (context, index) {
+                                  final event = events[index];
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: _AgendaTile(
+                                      key: ValueKey(
+                                        'schedule-event-${event.id}',
+                                      ),
+                                      event: event,
+                                      controller: widget.controller,
+                                      selected: selected?.id == event.id,
+                                      isNext: event.id == nextId,
+                                      onTap: () => setState(() {
+                                        _selectedEventId = event.id;
+                                        if (event.startsAt != null) {
+                                          _showDay(event.startsAt!.toLocal());
+                                        }
+                                      }),
+                                    ),
+                                  );
+                                },
                               ),
                             ),
                         ],

@@ -37,19 +37,17 @@ Map<String, String> effectiveResponses(
 Map<String, String> plannedResponses(
   AppController controller,
   TheaterEvent event,
-) => effectiveResponses(
-  event,
-  jsonMap(controller.memberAttendanceByEvent[event.id]),
-  controller.members
-      .where(
-        (m) =>
-            m.active &&
-            m.inAudience(
-              event.roleIds,
-              event.personIds,
-              controller.ensemblesOf(event.productionIds),
-            ),
-      )
-      .map((m) => m.id),
-  implicitAttendees(controller, event),
-);
+) {
+  final ensembles = controller.ensemblesOf(event.productionIds);
+  return effectiveResponses(
+    event,
+    readJsonMap(controller.memberAttendanceByEvent[event.id]),
+    [
+      for (final m in controller.members)
+        if (m.active &&
+            m.inAudience(event.roleIds, event.personIds, ensembles))
+          m.id,
+    ],
+    implicitAttendees(controller, event),
+  );
+}

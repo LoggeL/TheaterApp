@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -23,11 +24,25 @@ Future<T?> openPage<T>(
 }) {
   Widget builder(BuildContext _) =>
       _RoutePage(screen: screen, fullscreen: fullscreen);
-  final route = animate
-      ? MaterialPageRoute<T>(builder: builder)
-      : _InstantPageRoute<T>(builder: builder);
+  final route = !animate
+      ? _InstantPageRoute<T>(builder: builder)
+      : kIsWeb
+      ? _WebPageRoute<T>(builder: builder)
+      : MaterialPageRoute<T>(builder: builder);
   PerfTelemetry.nameRoute(route, screen);
   return Navigator.push<T>(context, route);
+}
+
+/// Snappier route timing on web (especially iOS Safari where 500 ms Cupertino
+/// transitions feel sluggish and spend extra frames compositing two pages).
+class _WebPageRoute<T> extends MaterialPageRoute<T> {
+  _WebPageRoute({required super.builder});
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 180);
+
+  @override
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 150);
 }
 
 /// A page route without an entrance transition. The way back keeps the
@@ -131,7 +146,9 @@ class _RoutePageState extends State<_RoutePage> {
 
   @override
   Widget build(BuildContext context) {
-    final page = KeyedSubtree(key: _page, child: widget.screen);
+    final page = RepaintBoundary(
+      child: KeyedSubtree(key: _page, child: widget.screen),
+    );
     final controller = _controller;
     final selection = AppNavigationScope.maybeOf(context);
     if (widget.fullscreen || controller == null || selection == null) {

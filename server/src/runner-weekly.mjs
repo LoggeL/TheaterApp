@@ -217,11 +217,16 @@ function trophyCounts(t) {
 /** The weekly trophies of [personId]: `{ gold, silver, bronze }`. */
 export const weeklyTrophiesOf = (t, personId) => trophyCounts(t).get(personId) ?? noTrophies();
 
-/** The latest closed week's result for [personId] while not seen, else null. */
+/** The latest closed week [personId] placed in while not seen yet, else null. */
 function lastWeekOf(t, personId) {
-  const awards = t.store.all(weekAwardsKind).at(-1), mine = awards?.placements.find(x => x.personId === personId);
-  if (!mine || t.store.get(weekRunsKind, key(awards.week, personId))?.rewardSeen) return null;
-  return { week: awards.week, rank: mine.rank, score: mine.score, gage: mine.gage, trophy: mine.trophy ?? null, crates: mine.crates ?? 0 };
+  const all = t.store.all(weekAwardsKind);
+  for (let i = all.length - 1; i >= 0; i--) {
+    const awards = all[i], mine = awards.placements.find(x => x.personId === personId);
+    if (!mine) continue;
+    if (t.store.get(weekRunsKind, key(awards.week, personId))?.rewardSeen) return null;
+    return { week: awards.week, rank: mine.rank, score: mine.score, gage: mine.gage, trophy: mine.trophy ?? null, crates: mine.crates ?? 0 };
+  }
+  return null;
 }
 
 const ownPrizes = (t, personId) => t.store.all(weekPrizesKind).filter(x => x.personId === personId);

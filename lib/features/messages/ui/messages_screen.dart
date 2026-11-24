@@ -17,20 +17,23 @@ import 'message_composer_screen.dart';
 import 'message_detail_screen.dart';
 import 'widgets/message_audience.dart';
 
+final _msgTimeFormat = DateFormat('HH:mm', 'de');
+final _msgWeekdayFormat = DateFormat('EEEE', 'de');
+final _msgDayMonthFormat = DateFormat('d. MMMM', 'de');
+final _msgDayMonthYearFormat = DateFormat('d. MMMM y', 'de');
+
 /// Short, relative time of a message or push, e.g. "Heute, 18:30".
 String messageTime(DateTime date, DateTime now) {
   final local = date.toLocal(), today = DateUtils.dateOnly(now.toLocal());
   final days = today.difference(DateUtils.dateOnly(local)).inDays;
-  final time = DateFormat('HH:mm', 'de').format(local);
+  final time = _msgTimeFormat.format(local);
   if (days == 0) return 'Heute, $time';
   if (days == 1) return 'Gestern, $time';
   if (days > 1 && days < 7) {
-    return '${DateFormat('EEEE', 'de').format(local)}, $time';
+    return '${_msgWeekdayFormat.format(local)}, $time';
   }
-  return DateFormat(
-    local.year == today.year ? 'd. MMMM' : 'd. MMMM y',
-    'de',
-  ).format(local);
+  return (local.year == today.year ? _msgDayMonthFormat : _msgDayMonthYearFormat)
+      .format(local);
 }
 
 class MessagesScreen extends StatefulWidget {
@@ -72,15 +75,23 @@ class _MessagesScreenState extends State<MessagesScreen> {
   Widget build(BuildContext context) => VisibleListenableBuilder(
     listenable: widget.controller,
     builder: (context, _) {
-      final c = widget.controller, admin = c.user?.isAdmin == true;
+      final c = widget.controller, user = c.user, admin = user?.isAdmin == true;
       final all = c.messages;
-      final unread = unreadMessageCount(c);
-      final forms = openFormCount(c);
-      final shown = switch (_filter) {
-        _MessageFilter.all => all,
-        _MessageFilter.unread => unreadMessages(c).toList(),
-        _MessageFilter.openForms => openForms(c).toList(),
-      };
+      var unread = 0;
+      var forms = 0;
+      final shown = <JsonMap>[];
+      for (final m in all) {
+        final isUnread = messageUnreadFor(user, m);
+        final hasOpenForm = messageHasOpenFormFor(user, m);
+        if (isUnread) unread++;
+        if (hasOpenForm) forms++;
+        final include = switch (_filter) {
+          _MessageFilter.all => true,
+          _MessageFilter.unread => isUnread,
+          _MessageFilter.openForms => hasOpenForm,
+        };
+        if (include) shown.add(m);
+      }
       final today = DateUtils.dateOnly(c.now.toLocal());
       String section(JsonMap m) {
         final date = dateValue(m['createdAt'])?.toLocal();
@@ -93,28 +104,21 @@ class _MessagesScreenState extends State<MessagesScreen> {
             : 'Früher';
       }
 
-      final children = <Widget>[];
+      // Build lightweight entry descriptors so message cards are lazily
+      // inflated by SliverList.builder as the user scrolls.
+      final entries = <({String? header, bool firstHeader, JsonMap? message})>[];
       String? current;
       for (final m in shown) {
         final label = section(m);
         if (label != current) {
+          entries.add((
+            header: label,
+            firstHeader: entries.isEmpty,
+            message: null,
+          ));
           current = label;
-          children.add(
-            Padding(
-              padding: EdgeInsets.only(
-                top: children.isEmpty ? 4 : 18,
-                bottom: 10,
-              ),
-              child: Eyebrow(label),
-            ),
-          );
         }
-        children.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _MessageCard(controller: c, message: m, admin: admin),
-          ),
-        );
+        entries.add((header: null, firstHeader: false, message: m));
       }
       final readAll = IconButton(
         tooltip: 'Alle als gelesen markieren',
@@ -144,85 +148,127 @@ class _MessagesScreenState extends State<MessagesScreen> {
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 760),
-              child: ListView(
+              child: CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: EdgeInsets.fromLTRB(
-                  20,
-                  widget.embedded ? 20 : 14,
-                  20,
-                  96,
-                ),
-                children: [
-                  if (widget.embedded)
-                    PageHeader(
-                      'Mitteilungen.',
-                      subtitle: unread > 0
-                          ? (unread == 1
-                                ? '1 ungelesene Mitteilung'
-                                : '$unread ungelesene Mitteilungen')
-                          : forms > 0
-                          ? (forms == 1
-                                ? '1 offenes Formular'
-                                : '$forms offene Formulare')
-                          : 'Nachrichten der Theaterleitung',
-                      trailing: unread > 0 ? readAll : null,
+                slivers: [
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
+                      20,
+                      widget.embedded ? 20 : 14,
+                      20,
+                      0,
                     ),
-                  if (widget.switcher != null) ...[
-                    widget.switcher!,
-                    const SizedBox(height: 14),
-                  ],
-                  if (all.isNotEmpty) ...[
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: OneLineSegmentedButton<_MessageFilter>(
-                        segments: [
-                          const ButtonSegment(
-                            value: _MessageFilter.all,
-                            label: Text('Alle'),
-                          ),
-                          ButtonSegment(
-                            value: _MessageFilter.unread,
-                            label: Text(
-                              unread == 0 ? 'Ungelesen' : 'Ungelesen · $unread',
+                    sliver: SliverToBoxAdapter(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (widget.embedded)
+                            PageHeader(
+                              'Mitteilungen.',
+                              subtitle: unread > 0
+                                  ? (unread == 1
+                                        ? '1 ungelesene Mitteilung'
+                                        : '$unread ungelesene Mitteilungen')
+                                  : forms > 0
+                                  ? (forms == 1
+                                        ? '1 offenes Formular'
+                                        : '$forms offene Formulare')
+                                  : 'Nachrichten der Theaterleitung',
+                              trailing: unread > 0 ? readAll : null,
                             ),
-                          ),
-                          ButtonSegment(
-                            value: _MessageFilter.openForms,
-                            tooltip: 'Offene Formulare',
-                            label: Text(
-                              forms == 0 ? 'Formulare' : 'Formulare · $forms',
+                          if (widget.switcher != null) ...[
+                            widget.switcher!,
+                            const SizedBox(height: 14),
+                          ],
+                          if (all.isNotEmpty) ...[
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: OneLineSegmentedButton<_MessageFilter>(
+                                segments: [
+                                  const ButtonSegment(
+                                    value: _MessageFilter.all,
+                                    label: Text('Alle'),
+                                  ),
+                                  ButtonSegment(
+                                    value: _MessageFilter.unread,
+                                    label: Text(
+                                      unread == 0
+                                          ? 'Ungelesen'
+                                          : 'Ungelesen · $unread',
+                                    ),
+                                  ),
+                                  ButtonSegment(
+                                    value: _MessageFilter.openForms,
+                                    tooltip: 'Offene Formulare',
+                                    label: Text(
+                                      forms == 0
+                                          ? 'Formulare'
+                                          : 'Formulare · $forms',
+                                    ),
+                                  ),
+                                ],
+                                selected: {_filter},
+                                showSelectedIcon: false,
+                                onSelectionChanged: (s) =>
+                                    setState(() => _filter = s.single),
+                              ),
                             ),
-                          ),
+                            const SizedBox(height: 14),
+                          ],
+                          if (all.isEmpty)
+                            EmptyState(
+                              icon: Icons.chat_bubble_outline,
+                              title: 'Noch keine Mitteilungen',
+                              message: admin
+                                  ? 'Schreib dem Ensemble eine Nachricht. Sie bleibt hier zum Nachlesen.'
+                                  : 'Nachrichten der Theaterleitung findest du hier.',
+                            )
+                          else if (shown.isEmpty)
+                            _filter == _MessageFilter.openForms
+                                ? const EmptyState(
+                                    icon: Icons.description_outlined,
+                                    title: 'Keine offenen Formulare',
+                                    message:
+                                        'Du hast alle Formulare abgegeben.',
+                                  )
+                                : const EmptyState(
+                                    icon: Icons.mark_email_read_outlined,
+                                    title: 'Alles gelesen',
+                                    message: 'Du bist auf dem neuesten Stand.',
+                                  ),
                         ],
-                        selected: {_filter},
-                        showSelectedIcon: false,
-                        onSelectionChanged: (s) =>
-                            setState(() => _filter = s.single),
                       ),
                     ),
-                    const SizedBox(height: 14),
-                  ],
-                  if (all.isEmpty)
-                    EmptyState(
-                      icon: Icons.chat_bubble_outline,
-                      title: 'Noch keine Mitteilungen',
-                      message: admin
-                          ? 'Schreib dem Ensemble eine Nachricht. Sie bleibt hier zum Nachlesen.'
-                          : 'Nachrichten der Theaterleitung findest du hier.',
+                  ),
+                  if (entries.isNotEmpty)
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 96),
+                      sliver: SliverList.builder(
+                        itemCount: entries.length,
+                        itemBuilder: (context, index) {
+                          final entry = entries[index];
+                          if (entry.header != null) {
+                            return Padding(
+                              padding: EdgeInsets.only(
+                                top: entry.firstHeader ? 4 : 18,
+                                bottom: 10,
+                              ),
+                              child: Eyebrow(entry.header!),
+                            );
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _MessageCard(
+                              controller: c,
+                              message: entry.message!,
+                              admin: admin,
+                            ),
+                          );
+                        },
+                      ),
                     )
-                  else if (shown.isEmpty)
-                    _filter == _MessageFilter.openForms
-                        ? const EmptyState(
-                            icon: Icons.description_outlined,
-                            title: 'Keine offenen Formulare',
-                            message: 'Du hast alle Formulare abgegeben.',
-                          )
-                        : const EmptyState(
-                            icon: Icons.mark_email_read_outlined,
-                            title: 'Alles gelesen',
-                            message: 'Du bist auf dem neuesten Stand.',
-                          ),
-                  ...children,
+                  else
+                    const SliverToBoxAdapter(child: SizedBox(height: 96)),
                 ],
               ),
             ),
@@ -249,9 +295,7 @@ class _MessageCard extends StatelessWidget {
     final date = dateValue(m['createdAt']);
     // Admins also see messages to others; those stay in the background.
     final forOthers = !messageAddressedTo(controller.user, m);
-    final author = controller.members
-        .where((x) => x.id == intValue(m['authorId']))
-        .firstOrNull;
+    final author = controller.memberById(intValue(m['authorId']));
     final recipients = jsonList(m['recipientIds']).length;
     final readers = jsonList(m['readerIds']).length;
     final card = Card(
@@ -344,7 +388,7 @@ class _MessageCard extends StatelessWidget {
                             semanticLabel: 'Mit Link',
                             color: theme.colorScheme.outline,
                           ),
-                        if (jsonMap(m['form']).isNotEmpty)
+                        if (readJsonMap(m['form']).isNotEmpty)
                           StatePill(
                             m['formClosed'] == true
                                 ? 'Formular geschlossen'

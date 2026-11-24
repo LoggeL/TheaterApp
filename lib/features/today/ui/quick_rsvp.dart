@@ -7,6 +7,8 @@ import '../../../core/models.dart';
 import '../../../shared/feedback.dart';
 import '../../events/ui/rsvp/rsvp_actions.dart';
 
+final _hmFormat = DateFormat.Hm('de');
+
 /// Asks for the expected arrival of a late member; see [pickLateArrival].
 typedef ArrivalPicker =
     Future<LateArrival?> Function(BuildContext context, TheaterEvent event);
@@ -82,12 +84,11 @@ class _QuickRsvpState extends State<QuickRsvp> {
       arrival = picked.arrival;
       if (arrival != null &&
           (!arrival.isAfter(start) || !arrival.isBefore(end))) {
-        final hm = DateFormat.Hm('de');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Die Ankunft muss zwischen ${hm.format(start)} und '
-              '${hm.format(end)} Uhr liegen.',
+              'Die Ankunft muss zwischen ${_hmFormat.format(start)} und '
+              '${_hmFormat.format(end)} Uhr liegen.',
             ),
           ),
         );
@@ -351,40 +352,38 @@ class _RsvpOption extends StatelessWidget {
         ),
       ),
     ];
+    final button = Material(
+      color: primary ? Colors.white : Colors.white.withValues(alpha: .06),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: primary
+            ? BorderSide.none
+            : BorderSide(color: Colors.white.withValues(alpha: .28)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: column ? 14 : 13,
+          ),
+          child: column
+              ? Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: content,
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: content,
+                ),
+        ),
+      ),
+    );
     return Semantics(
       button: true,
       enabled: enabled,
-      child: Opacity(
-        opacity: enabled ? 1 : .45,
-        child: Material(
-          color: primary ? Colors.white : Colors.white.withValues(alpha: .06),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: primary
-                ? BorderSide.none
-                : BorderSide(color: Colors.white.withValues(alpha: .28)),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: column ? 14 : 13,
-              ),
-              child: column
-                  ? Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: content,
-                    )
-                  : Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: content,
-                    ),
-            ),
-          ),
-        ),
-      ),
+      child: enabled ? button : Opacity(opacity: .45, child: button),
     );
   }
 }

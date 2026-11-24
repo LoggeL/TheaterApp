@@ -22,6 +22,10 @@ class EventsAdminScreen extends StatefulWidget {
 }
 
 class _EventsAdminScreenState extends State<EventsAdminScreen> {
+  static final _monthFormat = DateFormat('MMMM yyyy', 'de');
+  static final _dayButtonFormat = DateFormat('d. MMMM', 'de');
+  static final _selectedDayFormat = DateFormat.yMMMMEEEEd('de');
+
   bool _calendar = false, _showPast = false;
   late DateTime _day = DateUtils.dateOnly(widget.controller.now);
 
@@ -54,7 +58,7 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
 
   String _monthLabel(TheaterEvent e) => e.startsAt == null
       ? 'Ohne Datum'
-      : DateFormat('MMMM yyyy', 'de').format(e.startsAt!.toLocal());
+      : _monthFormat.format(e.startsAt!.toLocal());
 
   Widget _event(BuildContext context, TheaterEvent e) => Padding(
     padding: const EdgeInsets.only(bottom: 10),
@@ -111,7 +115,7 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
             icon: const Icon(Icons.add),
             label: Text(
               _calendar
-                  ? 'Termin am ${DateFormat('d. MMMM', 'de').format(_day)} anlegen'
+                  ? 'Termin am ${_dayButtonFormat.format(_day)} anlegen'
                   : 'Termin anlegen',
             ),
           )
@@ -162,7 +166,7 @@ class _EventsAdminScreenState extends State<EventsAdminScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              DateFormat.yMMMMEEEEd('de').format(_day),
+              _selectedDayFormat.format(_day),
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 12),

@@ -142,12 +142,22 @@ JsonMap _ghost(int rank, int person, String name, int score, double seconds) =>
 
 /// The Wochenprobe on a test server: its week, the calls and their bodies.
 class _Weekly {
-  _Weekly({this.used = 1, this.lastWeek, this.figures = false});
+  _Weekly({
+    this.used = 1,
+    this.lastWeek,
+    this.figures = false,
+    this.personalImproved = false,
+    this.weeklyImproved,
+    this.allTimeBest,
+  });
   int used;
   JsonMap? lastWeek;
 
   /// Whether every ghost names a figure of its own to load.
   final bool figures;
+  bool personalImproved;
+  bool? weeklyImproved;
+  int? allTimeBest;
   bool offline = false, startOffline = false, scoresRejected = false;
 
   /// The ranked start counts on the server, but its answer never comes.
@@ -193,12 +203,31 @@ class _Weekly {
   Future<http.Response>? handle(http.Request request) {
     final path = request.url.path.replaceFirst(RegExp(r'/$'), '');
     if (!path.contains('/games/runner/')) return null;
-    final name = '${request.method} ${path.split('/games/runner/').last}';
+    final period = request.url.queryParameters['period'];
+    final name =
+        '${request.method} ${path.split('/games/runner/').last}'
+        '${period == null ? '' : '?period=$period'}';
     calls.add(name);
     final body = request.body.isEmpty
         ? const <String, Object?>{}
         : jsonMap(jsonDecode(request.body));
     (bodies[name] ??= []).add(body);
+    JsonMap board() {
+      final own = allTimeBest == null
+          ? null
+          : {
+              'rank': 1,
+              'personId': 3,
+              'name': 'Testmitglied',
+              'score': allTimeBest,
+            };
+      return {
+        'players': own == null ? 0 : 1,
+        'top': [?own],
+        'own': own,
+      };
+    }
+
     switch (name) {
       case 'GET weekly':
         if (offline) return Future.error(http.ClientException('offline'));
@@ -207,8 +236,16 @@ class _Weekly {
         lastWeek = null;
         return Future.value(jsonResponse({'ok': true}));
       case 'GET leaderboard':
+        return Future.value(jsonResponse(board()));
+      case 'GET leaderboard?period=month':
         return Future.value(
-          jsonResponse({'players': 0, 'top': <JsonMap>[], 'own': null}),
+          jsonResponse({
+            'period': 'month',
+            'month': '2026-09',
+            'startsAt': '2026-08-31T22:00:00.000Z',
+            'endsAt': '2026-09-30T22:00:00.000Z',
+            ...board(),
+          }),
         );
       case 'POST rounds':
         final weekly = body['weekly'];
@@ -252,12 +289,15 @@ class _Weekly {
           );
         }
         final ranked = body['ghost'] != null;
+        if (ranked && personalImproved && body['score'] is int) {
+          allTimeBest = body['score'] as int;
+        }
         return Future.value(
           jsonResponse({
-            'improved': false,
-            'leaderboard': {'players': 0, 'top': <JsonMap>[], 'own': null},
+            'improved': ranked && personalImproved,
+            'leaderboard': board(),
             'weekly': {
-              'improved': ranked,
+              'improved': weeklyImproved ?? ranked,
               'best': {'score': 150, 'meters': 130},
               'rank': 2,
               'attempts': {'used': used, 'max': 3},
@@ -750,6 +790,86 @@ void main() {
       // Another attempt only through the page, which asks again.
       await _tapKey(tester, 'runner-to-weekly');
       expect(find.text('Versuch 3 von 3'), findsOneWidget);
+    });
+
+    testWidgets('a ranked weekly run that beats the personal best announces '
+        'both records and refreshes the monthly leaderboard', (tester) async {
+      final weekly = _Weekly(used: 1, personalImproved: true);
+      final controller = await _controller(
+        weekly,
+        features: const [
+          'stageRunner',
+          'runnerWeekly',
+          'runnerMonthlyLeaderboard',
+        ],
+      );
+      await pumpGame(tester, controller);
+      final monthlyBefore = weekly.calls
+          .where((c) => c == 'GET leaderboard?period=month')
+          .length;
+      await _tapKey(tester, 'runner-weekly');
+      await _tapKey(tester, 'weekly-ranked');
+      await tester.tap(find.byKey(const ValueKey('weekly-confirm-start')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await untilCurtain(tester);
+
+      expect(
+        find.text('Neuer Wochen- und persönlicher Bestwert!'),
+        findsOneWidget,
+      );
+      expect(
+        weekly.calls.where((c) => c == 'GET leaderboard?period=month').length,
+        monthlyBefore + 1,
+      );
+
+      // A training run does not refresh the monthly leaderboard or claim a record.
+      await _tapKey(tester, 'runner-weekly-train');
+      await untilCurtain(tester);
+      expect(
+        weekly.calls.where((c) => c == 'GET leaderboard?period=month').length,
+        monthlyBefore + 1,
+      );
+      expect(find.text('Neuer persönlicher Bestwert!'), findsNothing);
+      expect(find.text('Neuer Wochen- und persönlicher Bestwert!'), findsNothing);
+    });
+
+    testWidgets('a ranked weekly run that beats only the personal best '
+        'announces the personal best', (tester) async {
+      final weekly = _Weekly(
+        used: 1,
+        personalImproved: true,
+        weeklyImproved: false,
+      );
+      final controller = await _controller(weekly);
+      await pumpGame(tester, controller);
+      await _tapKey(tester, 'runner-weekly');
+      await _tapKey(tester, 'weekly-ranked');
+      await tester.tap(find.byKey(const ValueKey('weekly-confirm-start')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await untilCurtain(tester);
+
+      expect(find.text('Neuer persönlicher Bestwert!'), findsOneWidget);
+    });
+
+    testWidgets('a ranked weekly run celebrates passing the all-time best '
+        'even before any weekly best exists', (tester) async {
+      final weekly = _Weekly(used: 0, allTimeBest: 50, personalImproved: true);
+      final controller = await _controller(weekly);
+      final sound = _QuietSound();
+      final games = await pumpGame(tester, controller, sound: sound);
+      await _tapKey(tester, 'runner-weekly');
+      await _tapKey(tester, 'weekly-ranked');
+      await tester.tap(find.byKey(const ValueKey('weekly-confirm-start')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      final game = games.single..invincible = true;
+      for (var i = 0; i < 60 * 20 && game.score <= 60; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(game.score, greaterThan(60));
+      expect(sound.played, contains(RunnerSfx.record));
     });
 
     testWidgets('training starts its own round, without a ghost, as often as '

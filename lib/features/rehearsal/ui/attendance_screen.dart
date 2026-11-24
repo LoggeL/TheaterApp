@@ -7,6 +7,7 @@ import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/admin_page.dart';
 import '../../../shared/widgets/member_avatar.dart';
+import '../../../shared/widgets/visible_listenable_builder.dart';
 import '../../events/domain/event_format.dart';
 import '../domain/implicit_attendance.dart';
 import 'responses_screen.dart';
@@ -41,10 +42,11 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
   }
 
   /// The attendance as last saved or queued, without unsaved changes.
-  bool? _saved(int id) =>
-      jsonMap(widget.controller.checkinsByEvent[widget.event.id])[id.toString()]
-          as bool?;
-  bool? present(int id) => _changes.containsKey(id) ? _changes[id] : _saved(id);
+  bool? _saved(int id, [JsonMap? savedMap]) =>
+      (savedMap ?? readJsonMap(widget.controller.checkinsByEvent[widget.event.id]))[
+          id.toString()] as bool?;
+  bool? present(int id, [JsonMap? savedMap]) =>
+      _changes.containsKey(id) ? _changes[id] : _saved(id, savedMap);
 
   void _set(int id, bool? value) {
     if (value == _saved(id)) {
@@ -118,8 +120,8 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
   @override
   Widget build(BuildContext context) => DiscardGuard(
     dirty: _changes.isNotEmpty,
-    child: AnimatedBuilder(
-      animation: widget.controller,
+    child: VisibleListenableBuilder(
+      listenable: widget.controller,
       builder: (context, _) {
         final controller = widget.controller, event = widget.event;
         final allowed = controller.user?.can(eventsPermission) == true;
@@ -134,12 +136,16 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
             controller: controller,
             permission: eventsPermission,
             title: 'Anwesenheit',
-            children: (context) {
+            slivers: (context) {
+              final savedMap = readJsonMap(
+                controller.checkinsByEvent[event.id],
+              );
               // Implicit attendees of an auto-accepted event count as confirmed.
               final responses = plannedResponses(controller, event);
+              final ensembles = controller.ensemblesOf(event.productionIds);
               int unrecordedFirst(TheaterMember a, TheaterMember b) {
-                final open = (_saved(a.id) == null ? 0 : 1).compareTo(
-                  _saved(b.id) == null ? 0 : 1,
+                final open = (_saved(a.id, savedMap) == null ? 0 : 1).compareTo(
+                  _saved(b.id, savedMap) == null ? 0 : 1,
                 );
                 return open != 0
                     ? open
@@ -147,173 +153,207 @@ class _AttendanceEditorScreenState extends State<AttendanceEditorScreen> {
               }
 
               // Sorted by the saved state, so rows stay in place while marking.
-              final members =
-                  controller.members
-                      .where(
-                        (m) =>
-                            m.active &&
-                            m.inAudience(
-                              event.roleIds,
-                              event.personIds,
-                              controller.ensemblesOf(event.productionIds),
-                            ),
-                      )
-                      .toList()
-                    ..sort(unrecordedFirst);
-              final here = members.where((m) => present(m.id) == true).length,
-                  away = members.where((m) => present(m.id) == false).length,
-                  unrecorded = members.length - here - away;
-              final confirmed = members
-                  .where(
-                    (m) =>
-                        responses[m.id.toString()] == 'yes' &&
-                        present(m.id) != true,
-                  )
-                  .toList();
-              final theme = Theme.of(context);
-              final auto = controller.autoCheckins(event.id);
-              final query = _search.trim().toLowerCase();
-              final filtered = [
-                for (final m in members)
-                  if ((query.isEmpty ||
-                          '${m.name} ${controller.roleNames(m.roleIds)}'
-                              .toLowerCase()
-                              .contains(query)) &&
-                      switch (_filter) {
-                        _AttendanceFilter.all => true,
-                        _AttendanceFilter.unrecorded => present(m.id) == null,
-                        _AttendanceFilter.present => present(m.id) == true,
-                        _AttendanceFilter.absent => present(m.id) == false,
-                      })
+              final members = [
+                for (final m in controller.members)
+                  if (m.active &&
+                      m.inAudience(event.roleIds, event.personIds, ensembles))
                     m,
-              ];
+              ]..sort(unrecordedFirst);
+              var here = 0, away = 0;
+              final confirmed = <TheaterMember>[];
+              final auto = controller.autoCheckins(event.id);
+              var hasAutoSaved = false;
+              final query = _search.trim().toLowerCase();
+              final filtered = <TheaterMember>[];
+              for (final m in members) {
+                final p = present(m.id, savedMap);
+                if (p == true) {
+                  here++;
+                } else if (p == false) {
+                  away++;
+                }
+                if (responses[m.id.toString()] == 'yes' && p != true) {
+                  confirmed.add(m);
+                }
+                if (!hasAutoSaved &&
+                    auto.contains(m.id) &&
+                    _saved(m.id, savedMap) == true) {
+                  hasAutoSaved = true;
+                }
+                if ((query.isEmpty ||
+                        '${m.name} ${controller.roleNames(m.roleIds)}'
+                            .toLowerCase()
+                            .contains(query)) &&
+                    switch (_filter) {
+                      _AttendanceFilter.all => true,
+                      _AttendanceFilter.unrecorded => p == null,
+                      _AttendanceFilter.present => p == true,
+                      _AttendanceFilter.absent => p == false,
+                    }) {
+                  filtered.add(m);
+                }
+              }
+              final unrecorded = members.length - here - away;
+              final theme = Theme.of(context);
               return [
-                Text('${event.title} · ${eventDate(event)}'),
-                const SizedBox(height: 20),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(22, 14, 22, 0),
+                  sliver: SliverToBoxAdapter(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text('Vor Ort', style: theme.textTheme.titleLarge),
-                        const SizedBox(height: 8),
-                        Text(
-                          '$here da · ${away == 1 ? '1 fehlt' : '$away fehlen'} · '
-                          '$unrecorded nicht erfasst',
+                        Text('${event.title} · ${eventDate(event)}'),
+                        const SizedBox(height: 20),
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Vor Ort',
+                                  style: theme.textTheme.titleLarge,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  '$here da · ${away == 1 ? '1 fehlt' : '$away fehlen'} · '
+                                  '$unrecorded nicht erfasst',
+                                ),
+                                if (hasAutoSaved)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      'Niemand hat erfasst: Die Zusagen wurden automatisch als da übernommen. Korrigieren geht jederzeit.',
+                                      key: const ValueKey('attendance-auto'),
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
                         ),
-                        if (members.any(
-                          (m) => auto.contains(m.id) && _saved(m.id) == true,
-                        ))
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: TextButton.icon(
+                            onPressed: _busy || confirmed.isEmpty
+                                ? null
+                                : () => setState(() {
+                                    for (final m in confirmed) {
+                                      _set(m.id, true);
+                                    }
+                                  }),
+                            icon: const Icon(Icons.done_all),
+                            label: const Text(
+                              'Alle Zugesagten als da markieren',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _searchController,
+                          decoration: InputDecoration(
+                            prefixIcon: const Icon(Icons.search),
+                            hintText: 'Name oder Rolle suchen',
+                            suffixIcon: _search.isEmpty
+                                ? null
+                                : IconButton(
+                                    tooltip: 'Suche leeren',
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      setState(() => _search = '');
+                                    },
+                                    icon: const Icon(Icons.close),
+                                  ),
+                          ),
+                          onChanged: (s) => setState(() => _search = s),
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final (value, label) in [
+                              (_AttendanceFilter.all, 'Alle (${members.length})'),
+                              (
+                                _AttendanceFilter.unrecorded,
+                                'Nicht erfasst ($unrecorded)',
+                              ),
+                              (_AttendanceFilter.present, 'Da ($here)'),
+                              (_AttendanceFilter.absent, 'Fehlt ($away)'),
+                            ])
+                              ChoiceChip(
+                                label: Text(label),
+                                selected: _filter == value,
+                                onSelected: (_) =>
+                                    setState(() => _filter = value),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        if (members.isNotEmpty && filtered.isEmpty)
                           Padding(
-                            padding: const EdgeInsets.only(top: 4),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
                             child: Text(
-                              'Niemand hat erfasst: Die Zusagen wurden automatisch als da übernommen. Korrigieren geht jederzeit.',
-                              key: const ValueKey('attendance-auto'),
-                              style: theme.textTheme.bodySmall,
+                              query.isNotEmpty
+                                  ? 'Keine Treffer für „${_search.trim()}“.'
+                                  : 'Niemand in diesem Filter.',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
                             ),
                           ),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: TextButton.icon(
-                    onPressed: _busy || confirmed.isEmpty
-                        ? null
-                        : () => setState(() {
-                            for (final m in confirmed) {
-                              _set(m.id, true);
-                            }
-                          }),
-                    icon: const Icon(Icons.done_all),
-                    label: const Text('Alle Zugesagten als da markieren'),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.search),
-                    hintText: 'Name oder Rolle suchen',
-                    suffixIcon: _search.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: 'Suche leeren',
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() => _search = '');
-                            },
-                            icon: const Icon(Icons.close),
+                if (filtered.isNotEmpty)
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 22),
+                    sliver: SliverList.builder(
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) {
+                        final m = filtered[index];
+                        final baseLabel = memberResponseLabel(
+                          controller,
+                          event,
+                          m.id,
+                        );
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _AttendanceRow(
+                            controller: controller,
+                            member: m,
+                            // Adopted from the own commitment after the deadline
+                            // (Termin-Kisten): an admin can still correct it.
+                            response:
+                                !_changes.containsKey(m.id) &&
+                                    _saved(m.id, savedMap) == true &&
+                                    auto.contains(m.id)
+                                ? '$baseLabel · automatisch übernommen'
+                                : baseLabel,
+                            present: present(m.id, savedMap),
+                            changed: _changes.containsKey(m.id),
+                            onChanged: _busy
+                                ? null
+                                : (value) => setState(() => _set(m.id, value)),
                           ),
-                  ),
-                  onChanged: (s) => setState(() => _search = s),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final (value, label) in [
-                      (_AttendanceFilter.all, 'Alle (${members.length})'),
-                      (
-                        _AttendanceFilter.unrecorded,
-                        'Nicht erfasst ($unrecorded)',
-                      ),
-                      (_AttendanceFilter.present, 'Da ($here)'),
-                      (_AttendanceFilter.absent, 'Fehlt ($away)'),
-                    ])
-                      ChoiceChip(
-                        label: Text(label),
-                        selected: _filter == value,
-                        onSelected: (_) => setState(() => _filter = value),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                if (members.isNotEmpty && filtered.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    child: Text(
-                      query.isNotEmpty
-                          ? 'Keine Treffer für „${_search.trim()}“.'
-                          : 'Niemand in diesem Filter.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
+                        );
+                      },
                     ),
                   ),
-                for (final m in filtered)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _AttendanceRow(
-                      controller: controller,
-                      member: m,
-                      // Adopted from the own commitment after the deadline
-                      // (Termin-Kisten): an admin can still correct it.
-                      response:
-                          !_changes.containsKey(m.id) &&
-                              _saved(m.id) == true &&
-                              auto.contains(m.id)
-                          ? '${memberResponseLabel(controller, event, m.id)} · automatisch übernommen'
-                          : memberResponseLabel(controller, event, m.id),
-                      present: present(m.id),
-                      changed: _changes.containsKey(m.id),
-                      onChanged: _busy
-                          ? null
-                          : (value) => setState(() => _set(m.id, value)),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(22, 12, 22, 32),
+                  sliver: SliverToBoxAdapter(
+                    child: OutlinedButton.icon(
+                      onPressed: _busy ? null : () => _save(openScenes: true),
+                      icon: const Icon(Icons.playlist_add_check),
+                      label: Text(
+                        _changes.isEmpty
+                            ? 'Spielbare Szenen ansehen'
+                            : 'Speichern und Szenen ansehen',
+                      ),
                     ),
-                  ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _save(openScenes: true),
-                  icon: const Icon(Icons.playlist_add_check),
-                  label: Text(
-                    _changes.isEmpty
-                        ? 'Spielbare Szenen ansehen'
-                        : 'Speichern und Szenen ansehen',
                   ),
                 ),
               ];

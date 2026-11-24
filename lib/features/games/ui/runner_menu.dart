@@ -384,13 +384,11 @@ class RunnerStandCard extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 6),
-                      ClipRRect(
+                      LinearProgressIndicator(
+                        value: (have / total).clamp(0, 1).toDouble(),
+                        minHeight: 8,
                         borderRadius: BorderRadius.circular(5),
-                        child: LinearProgressIndicator(
-                          value: (have / total).clamp(0, 1).toDouble(),
-                          minHeight: 8,
-                          color: StageTheme.orange,
-                        ),
+                        color: StageTheme.orange,
                       ),
                     ],
                   ),
@@ -419,12 +417,10 @@ class RunnerStandCard extends StatelessWidget {
                     if (nextCrateFraction != null)
                       SizedBox(
                         width: 56,
-                        child: ClipRRect(
+                        child: LinearProgressIndicator(
+                          value: nextCrateFraction,
+                          minHeight: 5,
                           borderRadius: BorderRadius.circular(3),
-                          child: LinearProgressIndicator(
-                            value: nextCrateFraction,
-                            minHeight: 5,
-                          ),
                         ),
                       ),
                   ],
@@ -470,11 +466,14 @@ Duration _berlinOffset(DateTime utc) {
 DateTime berlinWallClock(DateTime time) =>
     time.toUtc().add(_berlinOffset(time));
 
+final _monthRe = RegExp(r'^(\d{4})-(\d{2})$');
+final _weekRe = RegExp(r'W(\d{1,2})$');
+
 /// The headline of a month list: "Oktober 2026 · noch 3 Tage", today
 /// included, counted in German time; "· letzter Tag" on the last one.
 /// [month] is `YYYY-MM`; once [endsAt] has passed only the month shows.
 String? monthHeadline(String? month, DateTime? endsAt, DateTime now) {
-  final m = RegExp(r'^(\d{4})-(\d{2})$').firstMatch(month ?? '');
+  final m = _monthRe.firstMatch(month ?? '');
   if (m == null) return null;
   final year = int.parse(m[1]!), index = int.parse(m[2]!);
   if (index < 1 || index > 12) return null;
@@ -495,7 +494,7 @@ String? monthHeadline(String? month, DateTime? endsAt, DateTime now) {
 /// "Woche 46 · 9.–15. November": the ISO week of the Wochenprobe and its
 /// days in Berlin; [startsAt] and [endsAt] are Monday 00:00 there.
 String weeklyHeadline(String week, DateTime startsAt, DateTime endsAt) {
-  final number = RegExp(r'W(\d{1,2})$').firstMatch(week)?[1];
+  final number = _weekRe.firstMatch(week)?[1];
   final first = berlinWallClock(startsAt);
   final last = berlinWallClock(endsAt).subtract(const Duration(days: 1));
   final days = first.month == last.month
@@ -838,15 +837,29 @@ class _RunnerRankingCardState extends State<RunnerRankingCard> {
     bool Function(T) own,
     Widget Function(T) row,
   ) {
-    final shown = _all || entries.length <= RunnerRankingCard.shortList
-        ? entries
-        : entries.take(RunnerRankingCard.shortList).toList();
-    final mine = entries.where(own).firstOrNull;
+    final limit = _all || entries.length <= RunnerRankingCard.shortList
+        ? entries.length
+        : RunnerRankingCard.shortList;
+    var mineIndex = -1;
+    for (var i = 0; i < entries.length; i++) {
+      if (own(entries[i])) {
+        mineIndex = i;
+        break;
+      }
+    }
+    final mine = mineIndex >= 0 ? entries[mineIndex] : null;
+    final mineInShown = mineIndex >= 0 && mineIndex < limit;
     // Only when more than the own row lies beyond the first ones.
-    final more = entries.any((e) => !shown.contains(e) && !own(e));
+    var more = false;
+    for (var i = limit; i < entries.length; i++) {
+      if (!own(entries[i])) {
+        more = true;
+        break;
+      }
+    }
     return [
-      for (final e in shown) row(e),
-      if (mine != null && !shown.contains(mine)) ...[
+      for (var i = 0; i < limit; i++) row(entries[i]),
+      if (mine != null && !mineInShown) ...[
         const Divider(height: 12),
         row(mine),
       ],
@@ -1082,18 +1095,25 @@ class RunnerRankRow extends StatelessWidget {
                 // The mark beside the name may take at most 60 % of the row
                 // and shrinks to fit there (several Pokale at a large font
                 // on a small phone), so the name always keeps some room.
-                LayoutBuilder(
-                  builder: (context, constraints) => Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          name,
-                          style: style,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                if (mask == null)
+                  Text(
+                    name,
+                    style: style,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  )
+                else
+                  LayoutBuilder(
+                    builder: (context, constraints) => Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            name,
+                            style: style,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                      if (mask != null) ...[
                         const SizedBox(width: 6),
                         ConstrainedBox(
                           constraints: BoxConstraints(
@@ -1108,19 +1128,16 @@ class RunnerRankRow extends StatelessWidget {
                           ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
-                ),
                 if (fraction != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 3, right: 12),
-                    child: ClipRRect(
+                    child: LinearProgressIndicator(
+                      value: fraction,
+                      minHeight: 4,
                       borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: fraction,
-                        minHeight: 4,
-                        color: own ? StageTheme.orange : null,
-                      ),
+                      color: own ? StageTheme.orange : null,
                     ),
                   ),
               ],

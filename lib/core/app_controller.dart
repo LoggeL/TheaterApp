@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
 
@@ -85,49 +86,61 @@ class AppController extends ChangeNotifier {
   IdentityService? get identity => _identity;
   bool get usesFirebase => _identity != null;
   bool get hasAccess => _user?.isApproved == true;
-  List<JsonMap> get messages =>
-      jsonList(_view['messages']).map(jsonMap).toList();
+
+  /// Monotonic counter incremented whenever projected data changes, so
+  /// selectors and screens can memoize derived views cheaply.
+  int get dataVersion => _dataVersion;
+  int _dataVersion = 0;
+
+  List<JsonMap> get messages => _messagesView;
+  List<JsonMap> _messagesView = const [];
 
   /// Slot pools ("Terminfinder"), newest first; includes queued bookings.
   List<JsonMap> get slotPools => _slotPools;
   List<JsonMap> _slotPools = const [];
-  List<JsonMap> get pendingAccounts =>
-      jsonList(_view['pendingAccounts']).map(jsonMap).toList();
+  List<JsonMap> get pendingAccounts => _pendingAccountsView;
+  List<JsonMap> _pendingAccountsView = const [];
 
   /// Registrations an admin can link now (confirmed identity). A missing
   /// self-supplied name does not block linking; the provider name is shown.
-  int get openRegistrationCount => pendingAccounts
-      .where((a) => a['status'] == 'pending' && a['identityReady'] == true)
-      .length;
-  JsonMap get memberAttendanceByEvent =>
-      jsonMap(_baseSnapshot['memberAttendanceByEvent']);
+  int get openRegistrationCount => _openRegistrationCount;
+  int _openRegistrationCount = 0;
+
+  JsonMap get memberAttendanceByEvent => _memberAttendanceByEventView;
+  JsonMap _memberAttendanceByEventView = const {};
 
   /// Leaders only: per auto-accepted event the people who attend implicitly
   /// (no own yes, late or no and no covering absence). Kept apart from
   /// [memberAttendanceByEvent], which only holds real answers.
-  JsonMap get implicitAttendanceByEvent =>
-      jsonMap(_baseSnapshot['implicitAttendanceByEvent']);
-  JsonMap get arrivalsByEvent => jsonMap(_baseSnapshot['arrivalsByEvent']);
-  JsonMap get checkinVersions => cloneJson(_checkinVersions);
+  JsonMap get implicitAttendanceByEvent => _implicitAttendanceByEventView;
+  JsonMap _implicitAttendanceByEventView = const {};
+
+  JsonMap get arrivalsByEvent => _arrivalsByEventView;
+  JsonMap _arrivalsByEventView = const {};
+
+  JsonMap get checkinVersions => _checkinVersionsView;
+  JsonMap _checkinVersionsView = const {};
   JsonMap _checkinVersions = {};
 
   /// Leaders only: the people of [eventId] whose attendance was adopted from
   /// their own commitment (Termin-Kisten) instead of recorded by hand.
-  Set<int> autoCheckins(String eventId) => {
-    for (final id in jsonList(jsonMap(_view['autoCheckinsByEvent'])[eventId]))
-      intValue(id),
-  };
-  List<JsonMap> get productionRecords =>
-      jsonList(_view['productions']).map(jsonMap).toList()..sort(
-        (left, right) => Production.compareNewestFirst(
-          Production.fromJson(left),
-          Production.fromJson(right),
-        ),
-      );
-  List<JsonMap> get memberRecords =>
-      jsonList(_view['members']).map(jsonMap).toList();
-  List<JsonMap> get personRoles =>
-      jsonList(_view['personRoles']).map(jsonMap).toList();
+  Set<int> autoCheckins(String eventId) =>
+      _autoCheckinsByEvent[eventId] ?? const {};
+  Map<String, Set<int>> _autoCheckinsByEvent = const {};
+
+  List<JsonMap> get productionRecords => _productionRecordsView;
+  List<JsonMap> _productionRecordsView = const [];
+
+  List<JsonMap> get memberRecords => _memberRecordsView;
+  List<JsonMap> _memberRecordsView = const [];
+
+  List<JsonMap> get personRoles => _personRolesView;
+  List<JsonMap> _personRolesView = const [];
+
+  /// Fast O(1) lookups built alongside the projected lists.
+  TheaterMember? memberById(int id) => _memberById[id];
+  TheaterEvent? eventById(String id) => _eventById[id];
+  Production? productionById(String id) => _productionById[id];
 
   /// Readable target audience; no roles, productions or people = everyone.
   String audienceLabel(
@@ -139,12 +152,18 @@ class AppController extends ChangeNotifier {
       return 'Alle';
     }
     final names = roleNames(roleIds);
-    return [
+    final parts = <String>[
       if (roleIds.isNotEmpty) names.isEmpty ? 'Gelöschte Rolle' : names,
       for (final id in productionIds)
-        'Ensemble ${_productions.where((p) => p.id == id).firstOrNull?.title ?? 'Gelöschtes Stück'}',
-      ..._members.where((m) => personIds.contains(m.id)).map((m) => m.name),
-    ].join(' · ');
+        'Ensemble ${_productionById[id]?.title ?? 'Gelöschtes Stück'}',
+    ];
+    if (personIds.isNotEmpty) {
+      final wanted = personIds is Set<int> ? personIds : personIds.toSet();
+      for (final m in _members) {
+        if (wanted.contains(m.id)) parts.add(m.name);
+      }
+    }
+    return parts.join(' · ');
   }
 
   /// Active members reached by roles, production ensembles and named people;
@@ -155,29 +174,47 @@ class AppController extends ChangeNotifier {
     Iterable<String> productionIds, {
     bool everyone = false,
   }) {
-    final ensembles = ensemblesOf(productionIds).expand((e) => e).toSet();
-    return _members
-        .where(
-          (m) =>
-              m.active &&
-              (everyone ||
-                  roleIds.any(m.roleIds.contains) ||
-                  personIds.contains(m.id) ||
-                  ensembles.contains(m.id)),
-        )
-        .toList();
+    final roleSet = roleIds.isEmpty
+        ? const <String>{}
+        : (roleIds is Set<String> ? roleIds : roleIds.toSet());
+    final personSet = personIds.isEmpty
+        ? const <int>{}
+        : (personIds is Set<int> ? personIds : personIds.toSet());
+    final ensembles = productionIds.isEmpty
+        ? const <int>{}
+        : {
+            for (final id in productionIds)
+              ...?_productionById[id]?.ensemble,
+          };
+    return [
+      for (final m in _members)
+        if (m.active &&
+            (everyone ||
+                (roleSet.isNotEmpty && m.roleIds.any(roleSet.contains)) ||
+                personSet.contains(m.id) ||
+                ensembles.contains(m.id)))
+          m,
+    ];
   }
 
   /// The ensembles of the given productions, one list per production.
-  List<List<int>> ensemblesOf(Iterable<String> productionIds) => [
-    for (final id in productionIds)
-      _productions.where((p) => p.id == id).firstOrNull?.ensemble ?? const [],
-  ];
+  List<List<int>> ensemblesOf(Iterable<String> productionIds) =>
+      productionIds.isEmpty
+      ? const []
+      : [
+          for (final id in productionIds)
+            _productionById[id]?.ensemble ?? const [],
+        ];
 
-  String roleNames(Iterable<String> ids) => personRoles
-      .where((r) => ids.contains(r['id']))
-      .map((r) => textValue(r['name']))
-      .join(' · ');
+  String roleNames(Iterable<String> ids) {
+    if (ids.isEmpty || _personRolesView.isEmpty) return '';
+    final wanted = ids is Set<String> ? ids : ids.toSet();
+    final parts = <String>[];
+    for (final r in _personRolesView) {
+      if (wanted.contains(r['id'])) parts.add(textValue(r['name']));
+    }
+    return parts.join(' · ');
+  }
   final DateTime Function() _clock;
   Future<void> _writeTail = Future.value();
   Future<void>? _refreshTask, _drainTask;
@@ -208,15 +245,23 @@ class AppController extends ChangeNotifier {
   /// cache-first start shows it until the server answers.
   JsonMap? _storedUser;
   JsonMap _baseSnapshot = {};
-
-  /// [_baseSnapshot] with the queued changes applied; set by `_rebuild`.
-  JsonMap _view = {};
   List<TheaterEvent> _events = [];
   List<Absence> _absences = [];
   List<Poll> _polls = [];
   List<Production> _productions = [];
   List<TheaterMember> _members = [];
-  List<PendingAction> _outbox = [];
+  final List<PendingAction> _outbox = [];
+  List<TheaterEvent> _eventsView = const [];
+  List<Absence> _absencesView = const [];
+  List<Poll> _pollsView = const [];
+  List<Production> _productionsView = const [];
+  List<Production> _activeProductionsView = const [];
+  List<Production> _archivedProductionsView = const [];
+  List<TheaterMember> _membersView = const [];
+  Map<int, TheaterMember> _memberById = const {};
+  Map<String, TheaterEvent> _eventById = const {};
+  Map<String, Production> _productionById = const {};
+  late final List<PendingAction> _outboxView = UnmodifiableListView(_outbox);
 
   /// Server replies of confirmed changes, by outbox id, until they are read.
   final Map<String, JsonMap> _results = {};
@@ -225,9 +270,18 @@ class AppController extends ChangeNotifier {
   /// it again cannot help, by outbox id, until they are read.
   final Map<String, ApiException> _rejections = {};
   final Map<String, ScriptDocument> _scripts = {};
+  late final Map<String, ScriptDocument> _scriptsView = UnmodifiableMapView(
+    _scripts,
+  );
   final Map<String, FocusState> _demoFocus = {};
   final Set<String> _loadingScripts = {};
-  JsonMap _preferences = {};
+  late final Set<String> _loadingScriptsView = UnmodifiableSetView(
+    _loadingScripts,
+  );
+  final JsonMap _preferences = {};
+  late final Map<String, dynamic> _preferencesView = UnmodifiableMapView(
+    _preferences,
+  );
   Future<void> _identityTransition = Future<void>.value();
 
   /// Bot check state of this device, see `controller/bot_check.dart`.
@@ -239,10 +293,13 @@ class AppController extends ChangeNotifier {
   DateTime get now => _clock();
 
   Map<String, bool> _reminders = {..._defaultReminders};
+  Map<String, bool> _remindersView = _defaultReminders;
 
   /// Personal reminder lead time in minutes; null when switched off.
   int? _customReminderMinutes;
   JsonMap _checkinsByEvent = {}, _capabilities = {};
+  JsonMap _checkinsByEventView = const {}, _capabilitiesView = const {};
+  Set<String> _features = const {};
 
   bool get initialized => _initialized;
   int get sessionEpoch => _generation;
@@ -263,25 +320,39 @@ class AppController extends ChangeNotifier {
   String? get error => _error;
   DateTime? get lastSync => _lastSync;
   DateTime? get expiresAt => _expiresAt;
-  List<TheaterEvent> get events => List.unmodifiable(_events);
-  List<Absence> get absences => List.unmodifiable(_absences);
-  List<Poll> get polls => List.unmodifiable(_polls);
-  List<Production> get productions => List.unmodifiable(_productions);
-  List<Production> get activeProductions =>
-      _productions.where((p) => !p.archived).toList();
-  List<Production> get archivedProductions =>
-      _productions.where((p) => p.archived).toList();
-  List<TheaterMember> get members => List.unmodifiable(_members);
-  List<PendingAction> get outbox => List.unmodifiable(_outbox);
-  Map<String, ScriptDocument> get scripts => Map.unmodifiable(_scripts);
-  Map<String, dynamic> get preferences => Map.unmodifiable(_preferences);
-  Map<String, bool> get reminders => Map.unmodifiable(_reminders);
+  List<TheaterEvent> get events => _eventsView;
+  List<Absence> get absences => _absencesView;
+  List<Poll> get polls => _pollsView;
+  List<Production> get productions => _productionsView;
+  List<Production> get activeProductions => _activeProductionsView;
+  List<Production> get archivedProductions => _archivedProductionsView;
+  List<TheaterMember> get members => _membersView;
+  List<PendingAction> get outbox => _outboxView;
+  Map<String, ScriptDocument> get scripts => _scriptsView;
+  Map<String, dynamic> get preferences => _preferencesView;
+  Map<String, bool> get reminders => _remindersView;
   int? get customReminderMinutes => _customReminderMinutes;
-  JsonMap get checkinsByEvent => cloneJson(_checkinsByEvent);
-  JsonMap get capabilities => Map.unmodifiable(_capabilities);
-  Set<String> get loadingScripts => Set.unmodifiable(_loadingScripts);
-  int get pendingCount => _outbox.where((e) => !e.failed).length;
-  int get failedCount => _outbox.where((e) => e.failed).length;
+  JsonMap get checkinsByEvent => _checkinsByEventView;
+  JsonMap get capabilities => _capabilitiesView;
+  Set<String> get loadingScripts => _loadingScriptsView;
+  int get pendingCount {
+    if (_outbox.isEmpty) return 0;
+    var count = 0;
+    for (final e in _outbox) {
+      if (!e.failed) count++;
+    }
+    return count;
+  }
+
+  int get failedCount {
+    if (_outbox.isEmpty) return 0;
+    var count = 0;
+    for (final e in _outbox) {
+      if (e.failed) count++;
+    }
+    return count;
+  }
+
   bool get pushConfigured =>
       _capabilities['pushConfigured'] == true ||
       _capabilities['pushEnabled'] == true ||
@@ -291,8 +362,14 @@ class AppController extends ChangeNotifier {
 
   /// Whether the server announced [feature] in `capabilities.features`.
   /// Older servers announce nothing, so new options stay hidden there.
-  bool supports(String feature) =>
-      jsonList(_capabilities['features']).contains(feature);
+  bool supports(String feature) => _features.contains(feature);
+
+  void _replaceOutbox(Iterable<PendingAction> items) {
+    final next = items.toList();
+    _outbox
+      ..clear()
+      ..addAll(next);
+  }
 
   void _notify() {
     if (!_disposed) notifyListeners();
@@ -369,12 +446,17 @@ class AppController extends ChangeNotifier {
   }
 
   final _mediaCache = <String, MediaData>{};
+  int _mediaCacheBytes = 0;
   final _mediaLoading = <String, Future<MediaData>>{};
 
   /// The already loaded media at [path], so images can show it in their
-  /// first frame instead of a placeholder.
-  MediaData? cachedMedia(String path) =>
-      _isDemo || !hasAccess || _token == null ? null : _mediaCache[path];
+  /// first frame instead of a placeholder. Bumps LRU order synchronously.
+  MediaData? cachedMedia(String path) {
+    if (_isDemo || !hasAccess || _token == null) return null;
+    final value = _mediaCache.remove(path);
+    if (value != null) _mediaCache[path] = value;
+    return value;
+  }
 
   Future<MediaData> mediaBytes(String path, {bool cache = true}) async {
     if (_isDemo || !hasAccess || _token == null) {
@@ -382,10 +464,9 @@ class AppController extends ChangeNotifier {
         'Bitte mit einem freigegebenen Theaterkonto anmelden.',
       );
     }
-    if (cache && _mediaCache.containsKey(path)) {
-      final value = _mediaCache.remove(path)!;
-      _mediaCache[path] = value;
-      return value;
+    if (cache) {
+      final hit = cachedMedia(path);
+      if (hit != null) return hit;
     }
     if (cache && _mediaLoading.containsKey(path)) return _mediaLoading[path]!;
     final generation = _generation;
@@ -398,11 +479,13 @@ class AppController extends ChangeNotifier {
         );
       }
       if (cache) {
+        final previous = _mediaCache.remove(path);
+        if (previous != null) _mediaCacheBytes -= previous.bytes.length;
         _mediaCache[path] = result;
-        while (_mediaCache.length > 60 ||
-            _mediaCache.values.fold<int>(0, (n, v) => n + v.bytes.length) >
-                32 * 1024 * 1024) {
-          _mediaCache.remove(_mediaCache.keys.first);
+        _mediaCacheBytes += result.bytes.length;
+        while (_mediaCache.length > 60 || _mediaCacheBytes > 32 * 1024 * 1024) {
+          final evicted = _mediaCache.remove(_mediaCache.keys.first);
+          if (evicted != null) _mediaCacheBytes -= evicted.bytes.length;
         }
       }
       return result;
@@ -474,6 +557,7 @@ class AppController extends ChangeNotifier {
     _deviceToken = token;
     _deviceRegisteredAt = _clock();
     _capabilities['pushConfigured'] = response['pushEnabled'] == true;
+    _capabilitiesView = Map.unmodifiable(_capabilities);
     await _persistCore(generation);
     _notify();
   }

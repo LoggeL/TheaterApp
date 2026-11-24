@@ -172,15 +172,21 @@ class RunnerGhost {
 
   /// How fast the height changes at [time], in stage heights per second
   /// (negative: rising), over the sample it lies in.
-  double vyAt(double time) {
+  double vyAt(double time) => vyAtWithY(time, yAt(time));
+
+  /// [vyAt] reusing an already sampled [y] = [yAt]([time]).
+  double vyAtWithY(double time, double y) {
     final step = 1 / hz;
-    return (yAt(time) - yAt(time - step)) / step;
+    return (y - yAt(time - step)) / step;
   }
 
-  /// Whether the ghost runs on the floor at [time]. The samples hold the
-  /// height to a 255th of the stage, so a little more slack than the game's.
-  bool onFloorAt(double time) =>
-      yAt(time) >= StageRunner.floor - StageRunner.runnerHeight / 2 - .005;
+  /// Whether [y] is on the floor. The samples hold the height to a 255th of
+  /// the stage, so a little more slack than the game's.
+  static bool isOnFloor(double y) =>
+      y >= StageRunner.floor - StageRunner.runnerHeight / 2 - .005;
+
+  /// Whether the ghost runs on the floor at [time].
+  bool onFloorAt(double time) => isOnFloor(yAt(time));
 
   /// A ghost from the weekly view, or null when its samples cannot be read.
   static RunnerGhost? fromJson(Map<String, Object?> json, {int? me}) {

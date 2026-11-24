@@ -208,13 +208,14 @@ class _CrateUnboxingState extends State<CrateUnboxing>
   late final AnimationController _idle = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 520),
-  )..repeat();
+  );
   late final AnimationController _open = AnimationController(
     vsync: this,
     duration: Duration(
       milliseconds: (_motion.millis * (widget.quick ? .33 : 1)).round(),
     ),
   );
+  late final Listenable _merged = Listenable.merge([_idle, _open]);
   late List<_Particle> _particles = _Particle.many(
     _motion,
     Random(widget.target.id.hashCode),
@@ -225,7 +226,11 @@ class _CrateUnboxingState extends State<CrateUnboxing>
   void initState() {
     super.initState();
     _loadFx();
-    if (widget.opening) _start();
+    if (widget.opening) {
+      _start();
+    } else if (!widget.quick) {
+      _idle.repeat();
+    }
   }
 
   void _loadFx() {
@@ -246,19 +251,27 @@ class _CrateUnboxingState extends State<CrateUnboxing>
     // Another crate in the same place: its own motion, particles and fx.
     if (widget.target.id != old.target.id ||
         widget.target.animation != old.target.animation ||
-        widget.target.fxImage != old.target.fxImage) {
+        widget.target.fxImage != old.target.fxImage ||
+        widget.quick != old.quick) {
       _motion = CrateMotion.of(widget.target.animation);
       _particles = _Particle.many(_motion, Random(widget.target.id.hashCode));
       _open.duration = Duration(
         milliseconds: (_motion.millis * (widget.quick ? .33 : 1)).round(),
       );
-      _loadFx();
+      if (widget.target.fxImage != old.target.fxImage) _loadFx();
+      if (!widget.opening) {
+        if (widget.quick) {
+          _idle.stop();
+        } else if (!_idle.isAnimating) {
+          _idle.repeat();
+        }
+      }
     }
     if (widget.opening && !old.opening) _start();
     // Closed again (the next crate): back to waiting.
     if (!widget.opening && old.opening) {
       _open.reset();
-      _idle.repeat();
+      if (!widget.quick) _idle.repeat();
     }
   }
 
@@ -279,94 +292,118 @@ class _CrateUnboxingState extends State<CrateUnboxing>
   @override
   Widget build(BuildContext context) {
     final size = widget.size;
-    final closed = CratePicture(
-      target: widget.target,
-      controller: widget.controller,
-      art: widget.art,
+    final closed = SizedBox.square(
+      dimension: size,
+      child: CratePicture(
+        target: widget.target,
+        controller: widget.controller,
+        art: widget.art,
+      ),
     );
     final open = widget.target.openImage == null
         ? closed
-        : CratePicture(
-            target: widget.target,
-            controller: widget.controller,
-            art: widget.art,
-            open: true,
+        : SizedBox.square(
+            dimension: size,
+            child: CratePicture(
+              target: widget.target,
+              controller: widget.controller,
+              art: widget.art,
+              open: true,
+            ),
           );
-    return SizedBox(
-      width: size * 1.8,
-      height: size * 1.8,
-      child: AnimatedBuilder(
-        animation: Listenable.merge([_idle, _open]),
-        builder: (context, _) {
-          final t = _open.value, idle = _idle.value;
-          final pose = _CratePose.of(
-            _motion,
-            t,
-            idle,
-            widget.opening,
-            quick: widget.quick,
-          );
-          Widget layer(
-            Widget child,
-            double opacity,
-            Offset shift,
-            double sx,
-            double sy,
-          ) => opacity <= 0
-              ? const SizedBox.shrink()
-              : Opacity(
-                  opacity: opacity.clamp(0, 1).toDouble(),
-                  child: Transform.translate(
-                    offset: shift * size,
-                    child: Transform(
+    return RepaintBoundary(
+      child: SizedBox(
+        width: size * 1.8,
+        height: size * 1.8,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // Glow and flash behind, driven by repaint without widget rebuilds.
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _BackPainter(
+                  _motion,
+                  _idle,
+                  _open,
+                  _merged,
+                  widget.opening,
+                  widget.quick,
+                ),
+              ),
+            ),
+            AnimatedBuilder(
+              animation: _merged,
+              builder: (context, _) {
+                final pose = _CratePose.of(
+                  _motion,
+                  _open.value,
+                  _idle.value,
+                  widget.opening,
+                  quick: widget.quick,
+                );
+                Widget layer(
+                  Widget child,
+                  double opacity,
+                  Offset shift,
+                  double sx,
+                  double sy,
+                ) {
+                  if (opacity <= 0) return const SizedBox.shrink();
+                  Widget box = child;
+                  if (sx != 1 || sy != 1) {
+                    box = Transform(
                       alignment: Alignment.bottomCenter,
                       transform: Matrix4.diagonal3Values(sx, sy, 1),
-                      child: SizedBox.square(dimension: size, child: child),
-                    ),
+                      child: box,
+                    );
+                  }
+                  if (shift != Offset.zero) {
+                    box = Transform.translate(offset: shift * size, child: box);
+                  }
+                  // Avoid Opacity saveLayer whenever fully opaque (idle & post-swap).
+                  if (opacity < .999) {
+                    box = Opacity(opacity: opacity.clamp(0, 1), child: box);
+                  }
+                  return box;
+                }
+
+                return Transform.rotate(
+                  angle: pose.angle,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      layer(closed, pose.closed, pose.shift, pose.sx, pose.sy),
+                      layer(
+                        open,
+                        pose.open,
+                        pose.openShift,
+                        pose.openSx,
+                        pose.openSy,
+                      ),
+                    ],
                   ),
                 );
-          return Stack(
-            alignment: Alignment.center,
-            children: [
-              // Glow and flash behind, particles in front: one painter each.
-              Positioned.fill(
+              },
+            ),
+            Positioned.fill(
+              child: IgnorePointer(
                 child: CustomPaint(
-                  painter: _BackPainter(_motion, t, pose.flash, pose.glow),
-                ),
-              ),
-              Transform.rotate(
-                angle: pose.angle,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    layer(closed, pose.closed, pose.shift, pose.sx, pose.sy),
-                    layer(
-                      open,
-                      pose.open,
-                      pose.openShift,
-                      pose.openSx,
-                      pose.openSy,
-                    ),
-                  ],
-                ),
-              ),
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: CustomPaint(
-                    painter: _ParticlePainter(
-                      _motion,
-                      _particles,
-                      t,
-                      size,
-                      _fx,
-                      pose.flash,
-                    ),
+                  painter: _ParticlePainter(
+                    _motion,
+                    _particles,
+                    _idle,
+                    _open,
+                    _merged,
+                    widget.opening,
+                    widget.quick,
+                    size,
+                    _fx,
                   ),
                 ),
               ),
-            ],
-          );
-        },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -450,8 +487,7 @@ class _CratePose {
         );
       case CrateLid.snap:
         // Shut – open – shut – open, each bite a squash.
-        final bites = [(.12, .22), (.32, .4)];
-        final bite = bites.any((b) => t >= b.$1 && t < b.$2);
+        final bite = (t >= .12 && t < .22) || (t >= .32 && t < .4);
         final open = t >= .45 || bite;
         final chew = sin(t * pi * 10).abs() * .04 * (1 - span(t, .45, .6));
         return _CratePose(
@@ -597,43 +633,50 @@ double _burstAt(CrateLid lid) => switch (lid) {
 
 /// The glow behind the crate and the flash of an opening; plain circles.
 class _BackPainter extends CustomPainter {
-  _BackPainter(this.motion, this.t, this.flash, this.smoulder);
+  _BackPainter(
+    this.motion,
+    this.idle,
+    this.open,
+    Listenable repaint,
+    this.opening,
+    this.quick,
+  ) : super(repaint: repaint);
   final CrateMotion motion;
-  final double t, flash, smoulder;
+  final Animation<double> idle, open;
+  final bool opening, quick;
+
+  static final _paint = Paint();
 
   @override
   void paint(Canvas canvas, Size size) {
+    final t = open.value;
+    final pose = _CratePose.of(motion, t, idle.value, opening, quick: quick);
+    final flash = pose.flash, smoulder = pose.glow;
     final c = size.center(Offset.zero), r = size.shortestSide / 2;
     final glow =
         .18 + .3 * _CratePose.span(t, _burstAt(motion.lid), 1) + smoulder;
     for (var i = 3; i >= 1; i--) {
-      canvas.drawCircle(
-        c,
-        r * (.3 + .2 * i),
-        Paint()..color = motion.accent.withValues(alpha: glow / (i + 1)),
-      );
+      _paint.color = motion.accent.withValues(alpha: glow / (i + 1));
+      canvas.drawCircle(c, r * (.3 + .2 * i), _paint);
     }
     if (flash > 0) {
-      canvas.drawCircle(
-        c,
-        r * (.5 + .4 * flash),
-        Paint()..color = motion.flashColor.withValues(alpha: .4 * flash),
-      );
+      _paint.color = motion.flashColor.withValues(alpha: .4 * flash);
+      canvas.drawCircle(c, r * (.5 + .4 * flash), _paint);
     }
     if (motion.scanlines && t > .1 && t < .75) {
-      final paint = Paint()..color = motion.accent.withValues(alpha: .14);
+      _paint.color = motion.accent.withValues(alpha: .14);
       final step = size.height / 18, drift = (t * 40 % 1) * step;
       // Over the crate only, not the whole stage.
       final left = size.width * .2, width = size.width * .6;
       for (var y = size.height * .2 + drift; y < size.height * .8; y += step) {
-        canvas.drawRect(Rect.fromLTWH(left, y, width, step * .3), paint);
+        canvas.drawRect(Rect.fromLTWH(left, y, width, step * .3), _paint);
       }
     }
   }
 
   @override
   bool shouldRepaint(_BackPainter old) =>
-      old.t != t || old.flash != flash || old.smoulder != smoulder;
+      old.motion != motion || old.opening != opening || old.quick != quick;
 }
 
 /// The particles: the crate's fx sprite if it has one, else simple shapes.
@@ -641,38 +684,45 @@ class _ParticlePainter extends CustomPainter {
   _ParticlePainter(
     this.motion,
     this.particles,
-    this.t,
+    this.idle,
+    this.open,
+    Listenable repaint,
+    this.opening,
+    this.quick,
     this.crate,
     this.fx,
-    this.flash,
-  );
+  ) : super(repaint: repaint);
   final CrateMotion motion;
   final List<_Particle> particles;
-  final double t, crate, flash;
+  final Animation<double> idle, open;
+  final bool opening, quick;
+  final double crate;
   final ui.Image? fx;
+
+  static final _paint = Paint()..filterQuality = FilterQuality.low;
 
   @override
   void paint(Canvas canvas, Size size) {
+    final t = open.value;
+    final flash = opening
+        ? _CratePose.of(motion, t, idle.value, true, quick: quick).flash
+        : 0.0;
+    final paint = _paint..style = PaintingStyle.fill;
     if (flash > 0) {
       // Fainter than behind: enough to hide the swap of the two pictures.
       final c = size.center(Offset(0, crate * .1));
-      canvas.drawCircle(
-        c,
-        crate * (.3 + .25 * flash),
-        Paint()
-          ..color = motion.flashColor.withValues(alpha: .35 * flash * flash),
-      );
-      canvas.drawCircle(
-        c,
-        crate * (.5 + .2 * flash),
-        Paint()..color = motion.accent.withValues(alpha: .18 * flash),
-      );
+      paint.color = motion.flashColor.withValues(alpha: .35 * flash * flash);
+      canvas.drawCircle(c, crate * (.3 + .25 * flash), paint);
+      paint.color = motion.accent.withValues(alpha: .18 * flash);
+      canvas.drawCircle(c, crate * (.5 + .2 * flash), paint);
     }
     final start = _burstAt(motion.lid);
     if (t <= start) return;
     final origin = size.center(Offset(0, -crate * .1));
     final reach = size.shortestSide * .55;
-    final paint = Paint()..filterQuality = FilterQuality.low;
+    final fxSrc = fx == null
+        ? null
+        : Rect.fromLTWH(0, 0, fx!.width.toDouble(), fx!.height.toDouble());
     for (final p in particles) {
       final u = ((t - start - p.delay) / (1 - start)).clamp(0, 1).toDouble();
       if (u <= 0 || u >= 1) continue;
@@ -699,12 +749,7 @@ class _ParticlePainter extends CustomPainter {
         paint.color = Colors.white.withValues(alpha: alpha);
         canvas.drawImageRect(
           sprite,
-          Rect.fromLTWH(
-            0,
-            0,
-            sprite.width.toDouble(),
-            sprite.height.toDouble(),
-          ),
+          fxSrc!,
           Rect.fromCenter(center: Offset.zero, width: s * 3, height: s * 3),
           paint,
         );
@@ -775,5 +820,10 @@ class _ParticlePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ParticlePainter old) =>
-      old.t != t || old.fx != fx || old.flash != flash;
+      old.motion != motion ||
+      old.particles != particles ||
+      old.opening != opening ||
+      old.quick != quick ||
+      old.crate != crate ||
+      old.fx != fx;
 }

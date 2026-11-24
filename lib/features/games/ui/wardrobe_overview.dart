@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../../../app/theme/stage_theme.dart';
 import '../data/wardrobe_api.dart';
+import 'wardrobe_cards.dart' show legibleColor;
 
 final _number = NumberFormat.decimalPattern('de');
 
@@ -158,20 +159,43 @@ class WardrobeOverview {
   factory WardrobeOverview.of(Wardrobe w, {bool unique = true}) {
     final catalog = w.catalog;
     // Only what the server counts too: no items without a picture, none a
-    // release gives everybody ([Wardrobe.counts]).
-    final collectible = catalog.collectible.where(w.counts).toList();
+    // release gives everybody ([Wardrobe.counts]). Single-pass aggregation.
+    var allOwned = 0, allTotal = 0;
+    final kindOwned = <WardrobeKind, int>{};
+    final kindTotal = <WardrobeKind, int>{};
+    final rarityOwned = <String, int>{};
+    final rarityTotal = <String, int>{};
+    final byPlay = <String, List<WardrobeItem>>{};
+    final technicians = <WardrobeItem>[];
+    for (final i in catalog.collectible) {
+      if (!w.counts(i)) continue;
+      final owned = w.owns(i);
+      allTotal++;
+      if (owned) allOwned++;
+      kindTotal[i.kind] = (kindTotal[i.kind] ?? 0) + 1;
+      if (owned) kindOwned[i.kind] = (kindOwned[i.kind] ?? 0) + 1;
+      rarityTotal[i.rarity] = (rarityTotal[i.rarity] ?? 0) + 1;
+      if (owned) rarityOwned[i.rarity] = (rarityOwned[i.rarity] ?? 0) + 1;
+      if (i.kind == WardrobeKind.character && i.role != null) {
+        final production = i.role!.production;
+        if (production == null) {
+          technicians.add(i);
+        } else {
+          (byPlay[production] ??= []).add(i);
+        }
+      }
+    }
     final kinds = {
       for (final kind in WardrobeKind.values)
-        if (collectible.any((i) => i.kind == kind))
-          kind: Tally.of(collectible.where((i) => i.kind == kind), w),
+        if (kindTotal[kind] case final total? when total > 0)
+          kind: Tally(kindOwned[kind] ?? 0, total),
     };
     final rarities = [
       for (final r in catalog.rarities.reversed)
-        if (collectible.where((i) => i.rarity == r.id) case final items
-            when items.isNotEmpty)
+        if (rarityTotal[r.id] case final total? when total > 0)
           RarityTally(
             r,
-            Tally.of(items, w),
+            Tally(rarityOwned[r.id] ?? 0, total),
             locked: w.lockedRarities.contains(r.id),
             lockProgress: w.lockProgress(r),
           ),
@@ -179,55 +203,49 @@ class WardrobeOverview {
     final progress = unique
         ? w.uniqueFigures?.plays ?? const <UniqueFigureProgress>[]
         : const <UniqueFigureProgress>[];
-    List<(WardrobeRarity, int)> missing(List<WardrobeItem> items) => [
-      for (final r in catalog.rarities.reversed)
-        if (items.where((i) => i.rarity == r.id && !w.owns(i)).length
-            case final n when n > 0)
-          (r, n),
-    ];
-    final figures = [
-      for (final i in collectible)
-        if (i.kind == WardrobeKind.character && i.role != null) i,
-    ];
-    final byPlay = <String, List<WardrobeItem>>{};
-    final technicians = <WardrobeItem>[];
-    for (final i in figures) {
-      final production = i.role!.production;
-      if (production == null) {
-        technicians.add(i);
-      } else {
-        (byPlay[production] ??= []).add(i);
+    (Tally, List<(WardrobeRarity, int)>) summarize(List<WardrobeItem> items) {
+      var owned = 0;
+      final missingByRarity = <String, int>{};
+      for (final i in items) {
+        if (w.owns(i)) {
+          owned++;
+        } else {
+          missingByRarity[i.rarity] = (missingByRarity[i.rarity] ?? 0) + 1;
+        }
       }
+      final missing = <(WardrobeRarity, int)>[
+        for (final r in catalog.rarities.reversed)
+          if (missingByRarity[r.id] case final n? when n > 0) (r, n),
+      ];
+      return (Tally(owned, items.length), missing);
     }
+
     final plays =
         [
           for (final MapEntry(key: title, value: items) in byPlay.entries)
             () {
               final playName = items.first.role?.play;
               final playYear = items.first.role?.year;
-              final ownUnique = playName == null
-                  ? null
-                  : progress
-                        .where(
-                          (p) =>
-                              !p.several &&
-                              !p.allTechnicians &&
-                              !p.itemSet &&
-                              p.involvesPlay(playName, playYear),
-                        )
-                        .firstOrNull;
-              final multiUniques = playName == null
-                  ? const <UniqueFigureProgress>[]
-                  : [
-                      for (final p in progress)
-                        if (p.several && p.involvesPlay(playName, playYear)) p,
-                    ];
+              UniqueFigureProgress? ownUnique;
+              final multiUniques = <UniqueFigureProgress>[];
+              if (playName != null) {
+                for (final p in progress) {
+                  if (p.allTechnicians || p.itemSet) continue;
+                  if (!p.involvesPlay(playName, playYear)) continue;
+                  if (p.several) {
+                    multiUniques.add(p);
+                  } else {
+                    ownUnique ??= p;
+                  }
+                }
+              }
+              final (tally, missing) = summarize(items);
               return PlayTally(
                 title: title,
                 play: playName,
                 year: playYear,
-                tally: Tally.of(items, w),
-                missing: missing(items),
+                tally: tally,
+                missing: missing,
                 unique: ownUnique ?? multiUniques.firstOrNull,
                 extraUniques: ownUnique == null
                     ? multiUniques.skip(1).toList()
@@ -239,12 +257,13 @@ class WardrobeOverview {
           return year != 0 ? year : a.title.compareTo(b.title);
         });
     if (technicians.isNotEmpty) {
+      final (tally, missing) = summarize(technicians);
       plays.add(
         PlayTally(
           title: 'Technik',
           technicians: true,
-          tally: Tally.of(technicians, w),
-          missing: missing(technicians),
+          tally: tally,
+          missing: missing,
           unique: progress.where((p) => p.allTechnicians).firstOrNull,
         ),
       );
@@ -253,7 +272,7 @@ class WardrobeOverview {
     return WardrobeOverview(
       all: switch (w.collection) {
         final c? => Tally(c.owned, c.total),
-        null => Tally.of(collectible, w),
+        null => Tally(allOwned, allTotal),
       },
       kinds: kinds,
       rarities: rarities,
@@ -275,15 +294,13 @@ class TallyBar extends StatelessWidget {
   final double height;
 
   @override
-  Widget build(BuildContext context) => ClipRRect(
+  Widget build(BuildContext context) => LinearProgressIndicator(
+    value: fraction,
+    minHeight: height,
     borderRadius: BorderRadius.circular(height),
-    child: LinearProgressIndicator(
-      value: fraction,
-      minHeight: height,
-      color: color,
-      backgroundColor: (color ?? Theme.of(context).colorScheme.primary)
-          .withValues(alpha: .16),
-    ),
+    color: color,
+    backgroundColor: (color ?? Theme.of(context).colorScheme.primary)
+        .withValues(alpha: .16),
   );
 }
 
@@ -588,7 +605,7 @@ class CollectionSummaryCard extends StatelessWidget {
                               const SizedBox(height: 4),
                               TallyBar(
                                 r.tally.fraction,
-                                color: StageTheme.legible(
+                                color: legibleColor(
                                   r.rarity.color,
                                   surface,
                                   minimum: 3,

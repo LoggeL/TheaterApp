@@ -1,9 +1,11 @@
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
 import '../data/wardrobe_api.dart';
 import '../domain/stage_runner.dart';
@@ -12,6 +14,43 @@ import 'stage_runner_look.dart';
 
 /// Dark card ground, like the stage.
 const wardrobeInk = Color(0xFF151A17);
+
+final _legibleCache = <(int, int, int), Color>{};
+
+/// Memoized [StageTheme.legible]: contrast search loops up to 100 HSL steps,
+/// which adds up across grids of cards and status chips on Web JS/WASM.
+Color legibleColor(
+  Color foreground,
+  Color background, {
+  double minimum = 4.5,
+}) {
+  final key = (
+    foreground.toARGB32(),
+    background.toARGB32(),
+    (minimum * 100).round(),
+  );
+  final cached = _legibleCache[key];
+  if (cached != null) return cached;
+  if (_legibleCache.length >= 256) _legibleCache.clear();
+  return _legibleCache[key] = StageTheme.legible(
+    foreground,
+    background,
+    minimum: minimum,
+  );
+}
+
+final _tintCache = <(double, double, double), ColorFilter?>{};
+
+ColorFilter? _cachedTintFilter(WardrobeTint? tint) {
+  if (tint == null) return null;
+  if (tint.hue == 0 && tint.saturation == 1 && tint.brightness == 1) {
+    return null;
+  }
+  final key = (tint.hue, tint.saturation, tint.brightness);
+  if (_tintCache.containsKey(key)) return _tintCache[key];
+  if (_tintCache.length >= 128) _tintCache.clear();
+  return _tintCache[key] = tintFilter(tint);
+}
 
 /// The rarity colours of [item], rarest first; a hybrid has several.
 List<Color> rarityColors(WardrobeCatalog catalog, WardrobeItem item) {
@@ -70,6 +109,11 @@ bool hasOwnPictures(WardrobeItem item) =>
     (item.image != null && item.kind != WardrobeKind.fx);
 
 final _placeholder = Paint()..color = const Color(0x14FFFFFF);
+final _emptyFxPaint = Paint()
+  ..color = const Color(0x66FFFFFF)
+  ..strokeWidth = 3
+  ..strokeCap = StrokeCap.round;
+final _fallbackCirclePaint = Paint()..color = const Color(0xFF39413B);
 
 /// Draws the picture of [item] into [rect]: its [portrait] if loaded, else
 /// the cheer pose (or crate and lamp) of its [own] atlas, else the default
@@ -88,14 +132,22 @@ void paintItemArt(
   bool antique = false,
   ui.Image? portrait,
   ui.Image? own,
+  double opacity = 1,
+  bool lowQuality = false,
 }) {
+  final alpha = opacity.clamp(0.0, 1.0);
   final paint = Paint()
-    ..filterQuality = FilterQuality.medium
+    ..filterQuality = (lowQuality || kIsWeb)
+        ? FilterQuality.low
+        : FilterQuality.medium
     ..colorFilter = hidden
         ? _silhouette
         : antique
         ? antiqueFilter
-        : tintFilter(item.tint);
+        : _cachedTintFilter(item.tint);
+  if (alpha < 1) {
+    paint.color = Color.fromRGBO(0, 0, 0, alpha);
+  }
   void fit(ui.Image image, Rect src, Rect into, {bool cover = false}) {
     final scale = cover
         ? max(into.width / src.width, into.height / src.height)
@@ -115,15 +167,18 @@ void paintItemArt(
           : WardrobePictures.cached(item.portrait) ??
                 WardrobePictures.cached(item.thumb));
   if (preview != null) {
-    canvas.save();
-    canvas.clipRect(rect);
+    final cover = item.kind == WardrobeKind.backdrop;
+    if (cover) {
+      canvas.save();
+      canvas.clipRect(rect);
+    }
     fit(
       preview,
       Rect.fromLTWH(0, 0, preview.width.toDouble(), preview.height.toDouble()),
       rect,
-      cover: item.kind == WardrobeKind.backdrop,
+      cover: cover,
     );
-    canvas.restore();
+    if (cover) canvas.restore();
     return;
   }
   final mine = item.kind == WardrobeKind.fx
@@ -193,15 +248,13 @@ void paintItemArt(
         canvas.drawLine(
           rect.center - Offset(rect.width * .18, 0),
           rect.center + Offset(rect.width * .18, 0),
-          Paint()
-            ..color = const Color(0x66FFFFFF)
-            ..strokeWidth = 3
-            ..strokeCap = StrokeCap.round,
+          _emptyFxPaint,
         );
         return;
       }
       // A trail across the card, thinning out to the left.
       final random = Random(item.id.hashCode);
+      final dotPaint = Paint();
       for (var i = 0; i < 26; i++) {
         final u = i / 25;
         final p = Offset(
@@ -210,17 +263,19 @@ void paintItemArt(
               sin(u * pi * 1.4) * rect.height * .18 +
               (random.nextDouble() - .5) * rect.height * .16,
         );
+        final c = colors[i % colors.length];
+        dotPaint.color = alpha < 1 ? c.withValues(alpha: c.a * alpha) : c;
         canvas.drawCircle(
           p,
           rect.shortestSide * (.015 + .05 * u * random.nextDouble()),
-          Paint()..color = colors[i % colors.length],
+          dotPaint,
         );
       }
     default:
       canvas.drawCircle(
         rect.center,
         rect.shortestSide * .25,
-        Paint()..color = const Color(0xFF39413B),
+        _fallbackCirclePaint,
       );
   }
 }
@@ -246,6 +301,7 @@ class WardrobeItemArt extends StatefulWidget {
     this.hidden = false,
     this.antique = false,
     this.small = false,
+    this.opacity = 1,
   });
   final WardrobeItem item;
   final AppController controller;
@@ -255,6 +311,9 @@ class WardrobeItemArt extends StatefulWidget {
   /// A small card (up to about 130 pt, as in the grid): the thumbnail is
   /// enough, if there is one. So is it for a silhouette.
   final bool small;
+
+  /// Direct alpha applied to the draw [Paint], avoiding [Opacity] saveLayers.
+  final double opacity;
 
   @override
   State<WardrobeItemArt> createState() => _WardrobeItemArtState();
@@ -331,6 +390,7 @@ class _WardrobeItemArtState extends State<WardrobeItemArt> {
       // must not land on this card.
       if (!mounted ||
           item.portrait != widget.item.portrait ||
+          item.thumb != widget.item.thumb ||
           item.image != widget.item.image) {
         return;
       }
@@ -353,6 +413,8 @@ class _WardrobeItemArtState extends State<WardrobeItemArt> {
       widget.antique,
       _portrait,
       _own,
+      widget.opacity,
+      widget.small && kIsWeb,
     ),
   );
 }
@@ -365,11 +427,14 @@ class _ArtPainter extends CustomPainter {
     this.antique,
     this.portrait,
     this.own,
+    this.opacity,
+    this.lowQuality,
   );
   final WardrobeItem item;
   final RunnerArt? art;
-  final bool hidden, antique;
+  final bool hidden, antique, lowQuality;
   final ui.Image? portrait, own;
+  final double opacity;
 
   @override
   void paint(Canvas canvas, Size size) => paintItemArt(
@@ -381,6 +446,8 @@ class _ArtPainter extends CustomPainter {
     antique: antique,
     portrait: portrait,
     own: own,
+    opacity: opacity,
+    lowQuality: lowQuality,
   );
 
   @override
@@ -390,7 +457,9 @@ class _ArtPainter extends CustomPainter {
       old.hidden != hidden ||
       old.antique != antique ||
       old.portrait != portrait ||
-      old.own != own;
+      old.own != own ||
+      old.opacity != opacity ||
+      old.lowQuality != lowQuality;
 }
 
 /// A card of the wardrobe: picture, name, the role ("als Lucy · Creepshow
@@ -455,13 +524,18 @@ class WardrobeCard extends StatelessWidget {
     final look = owned ? item.inRole(variant) : item;
     final playing = !owned
         ? null
-        : role != null
-        ? role!.role
-        : wardrobe.roleOf(item);
+        : variant != null
+        ? variant.role
+        : item.role;
+    final uniqueProgress = item.unique ? uniqueProgressOf(wardrobe, item) : null;
     final hint =
         wardrobe.lockHint(item) ??
         rewardHint(wardrobe, item) ??
-        uniqueHint(wardrobe, item);
+        (item.unique && !owned
+            ? (uniqueProgress != null && !uniqueProgress.unlocked
+                  ? uniqueProgress.line
+                  : 'Unique-Figur')
+            : null);
     final label = catalog.labelOf(item);
     final department = item.departments.isEmpty
         ? null
@@ -480,7 +554,7 @@ class WardrobeCard extends StatelessWidget {
     final roleLine = playing == null
         ? null
         : item.unique
-        ? uniqueRoleLine(playing, uniqueProgressOf(wardrobe, item))
+        ? uniqueRoleLine(playing, uniqueProgress)
         : playing.line;
     // A missing figure keeps its secret, but says where it belongs: the
     // play filter shows as much.
@@ -808,12 +882,18 @@ class WardrobeCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                Container(
-                  height: 5,
-                  decoration: BoxDecoration(
-                    gradient: holo ? holoGradient : rarityGradient(colors),
+                if (!holo && colors.length == 1)
+                  SizedBox(
+                    height: 5,
+                    child: ColoredBox(color: colors.first),
+                  )
+                else
+                  Container(
+                    height: 5,
+                    decoration: BoxDecoration(
+                      gradient: holo ? holoGradient : rarityGradient(colors),
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -910,31 +990,54 @@ class HoloOverlay extends StatefulWidget {
 
 class _HoloOverlayState extends State<HoloOverlay>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _drift = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 4200),
-    value: .3,
-  );
+  static const _still = AlwaysStoppedAnimation<double>(.3);
+  AnimationController? _drift;
+  bool _animating = false;
 
   @override
-  void initState() {
-    super.initState();
-    if (widget.animate) _drift.repeat();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(HoloOverlay old) {
+    super.didUpdateWidget(old);
+    if (old.animate != widget.animate) _sync();
+  }
+
+  void _sync() {
+    final shouldRun =
+        widget.animate && !(MediaQuery.maybeDisableAnimationsOf(context) ?? false);
+    if (shouldRun) {
+      final ctrl = _drift ??= AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 4200),
+        value: .3,
+      );
+      if (!ctrl.isAnimating) ctrl.repeat();
+    } else {
+      _drift?.stop();
+    }
+    _animating = shouldRun;
   }
 
   @override
   void dispose() {
-    _drift.dispose();
+    _drift?.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => RepaintBoundary(
-    child: CustomPaint(
+  Widget build(BuildContext context) {
+    final paint = CustomPaint(
       size: Size.infinite,
-      painter: _HoloPainter(_drift, widget.strength),
-    ),
-  );
+      painter: _HoloPainter(_drift ?? _still, widget.strength),
+    );
+    // Only allocate a separate RepaintBoundary layer while actually animating;
+    // static grid cards already live inside SliverGrid's own RepaintBoundary.
+    return _animating ? RepaintBoundary(child: paint) : paint;
+  }
 }
 
 class _HoloPainter extends CustomPainter {
@@ -942,54 +1045,68 @@ class _HoloPainter extends CustomPainter {
   final Animation<double> t;
   final double strength;
 
+  static final _diffractionCache = <Size, Path>{};
+  static final _foilPaint = Paint()..blendMode = BlendMode.plus;
+  static final _linesPaint = Paint()..strokeWidth = 1;
+  static final _bandPaint = Paint()..blendMode = BlendMode.plus;
+
+  static Path _diffractionLines(Size size) {
+    final cached = _diffractionCache[size];
+    if (cached != null) return cached;
+    if (_diffractionCache.length >= 16) _diffractionCache.clear();
+    final path = Path();
+    final step = kIsWeb ? 8.0 : 6.0;
+    for (var x = -size.height; x < size.width; x += step) {
+      path
+        ..moveTo(x, size.height)
+        ..lineTo(x + size.height, 0);
+    }
+    return _diffractionCache[size] = path;
+  }
+
+  double? _cachedAlpha;
+  List<Color>? _foilColors;
+  List<Color>? _bandColors;
+
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size, u = t.value;
     final alpha = (.22 * strength).clamp(0.0, 1.0);
-    // The rainbow foil, drifting diagonally.
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..blendMode = BlendMode.plus
-        ..shader = LinearGradient(
-          begin: Alignment(-1 + u * 2, -1),
-          end: Alignment(1 + u * 2, 1),
-          colors: [for (final c in holoColors) c.withValues(alpha: alpha)],
-          tileMode: TileMode.mirror,
-        ).createShader(rect),
-    );
-    // Fine diffraction lines.
-    final lines = Paint()
-      ..color = Colors.white.withValues(alpha: .05 * strength)
-      ..strokeWidth = 1;
-    for (var x = -size.height; x < size.width; x += 6) {
-      canvas.drawLine(
-        Offset(x, size.height),
-        Offset(x + size.height, 0),
-        lines,
-      );
+    if (_cachedAlpha != alpha) {
+      _cachedAlpha = alpha;
+      _foilColors = [for (final c in holoColors) c.withValues(alpha: alpha)];
+      _bandColors = [
+        const Color(0x00FFFFFF),
+        Colors.white.withValues(alpha: .28 * strength),
+        const Color(0x00FFFFFF),
+      ];
     }
+    // The rainbow foil, drifting diagonally.
+    _foilPaint.shader = LinearGradient(
+      begin: Alignment(-1 + u * 2, -1),
+      end: Alignment(1 + u * 2, 1),
+      colors: _foilColors!,
+      tileMode: TileMode.mirror,
+    ).createShader(rect);
+    canvas.drawRect(rect, _foilPaint);
+    // Fine diffraction lines batched into a single cached path (1 draw call).
+    _linesPaint
+      ..color = Colors.white.withValues(alpha: .05 * strength)
+      ..style = PaintingStyle.stroke;
+    canvas.drawPath(_diffractionLines(size), _linesPaint);
     // A light band crossing the other way.
     final at = 1.3 - u * 1.6;
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..blendMode = BlendMode.plus
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0x00FFFFFF),
-            Colors.white.withValues(alpha: .28 * strength),
-            const Color(0x00FFFFFF),
-          ],
-          stops: [
-            (at - .15).clamp(0, 1),
-            at.clamp(0, 1),
-            (at + .15).clamp(0, 1),
-          ],
-        ).createShader(rect),
-    );
+    _bandPaint.shader = LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: _bandColors!,
+      stops: [
+        (at - .15).clamp(0, 1),
+        at.clamp(0, 1),
+        (at + .15).clamp(0, 1),
+      ],
+    ).createShader(rect);
+    canvas.drawRect(rect, _bandPaint);
   }
 
   @override
@@ -1014,72 +1131,103 @@ class ShineOverlay extends StatefulWidget {
 
 class _ShineOverlayState extends State<ShineOverlay>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _sweep = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 2600),
-    value: .35,
-  );
+  static const _still = AlwaysStoppedAnimation<double>(.35);
+  AnimationController? _sweep;
+  bool _animating = false;
 
   @override
-  void initState() {
-    super.initState();
-    if (widget.animate) _sweep.repeat();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(ShineOverlay old) {
+    super.didUpdateWidget(old);
+    if (old.animate != widget.animate) _sync();
+  }
+
+  void _sync() {
+    final shouldRun =
+        widget.animate && !(MediaQuery.maybeDisableAnimationsOf(context) ?? false);
+    if (shouldRun) {
+      final ctrl = _sweep ??= AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 2600),
+        value: .35,
+      );
+      if (!ctrl.isAnimating) ctrl.repeat();
+    } else {
+      _sweep?.stop();
+    }
+    _animating = shouldRun;
   }
 
   @override
   void dispose() {
-    _sweep.dispose();
+    _sweep?.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => RepaintBoundary(
-    child: CustomPaint(size: Size.infinite, painter: _ShinePainter(_sweep)),
-  );
+  Widget build(BuildContext context) {
+    final paint = CustomPaint(
+      size: Size.infinite,
+      painter: _ShinePainter(_sweep ?? _still),
+    );
+    return _animating ? RepaintBoundary(child: paint) : paint;
+  }
 }
 
 class _ShinePainter extends CustomPainter {
   _ShinePainter(this.t) : super(repaint: t);
   final Animation<double> t;
 
+  static final _bandPaint = Paint()..blendMode = BlendMode.plus;
+  static final _glintPaint = Paint();
+  static final _glints = () {
+    final random = Random(11);
+    return [
+      for (var i = 0; i < 9; i++)
+        (.08 + random.nextDouble() * .84, .06 + random.nextDouble() * .7),
+    ];
+  }();
+
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size, u = t.value;
     // The band runs from the lower left to the upper right corner.
     final at = -.4 + u * 1.8;
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..blendMode = BlendMode.plus
-        ..shader = LinearGradient(
-          begin: Alignment.bottomLeft,
-          end: Alignment.topRight,
-          colors: const [
-            Color(0x00FFFFFF),
-            Color(0x40FFF4C2),
-            Color(0x30B8F1FF),
-            Color(0x00FFFFFF),
-          ],
-          stops: [
-            (at - .18).clamp(0, 1),
-            at.clamp(0, 1),
-            (at + .08).clamp(0, 1),
-            (at + .22).clamp(0, 1),
-          ],
-        ).createShader(rect),
-    );
-    final random = Random(11);
-    final paint = Paint();
-    for (var i = 0; i < 9; i++) {
-      final p = Offset(
-        size.width * (.08 + random.nextDouble() * .84),
-        size.height * (.06 + random.nextDouble() * .7),
+    _bandPaint.shader = LinearGradient(
+      begin: Alignment.bottomLeft,
+      end: Alignment.topRight,
+      colors: const [
+        Color(0x00FFFFFF),
+        Color(0x40FFF4C2),
+        Color(0x30B8F1FF),
+        Color(0x00FFFFFF),
+      ],
+      stops: [
+        (at - .18).clamp(0, 1),
+        at.clamp(0, 1),
+        (at + .08).clamp(0, 1),
+        (at + .22).clamp(0, 1),
+      ],
+    ).createShader(rect);
+    canvas.drawRect(rect, _bandPaint);
+    final shortest = size.shortestSide;
+    final phase = u * 4 * pi;
+    for (var i = 0; i < _glints.length; i++) {
+      final (nx, ny) = _glints[i];
+      final twinkle = (sin(phase + i * 1.3) + 1) / 2;
+      _glintPaint.color = shineColor(i, .35 + .65 * twinkle);
+      paintGlintAt(
+        canvas,
+        size.width * nx,
+        size.height * ny,
+        shortest * (.025 + .04 * twinkle),
+        _glintPaint,
       );
-      final twinkle = (sin(u * 2 * pi * 2 + i * 1.3) + 1) / 2;
-      paint.color = shineColors[i % shineColors.length].withValues(
-        alpha: .35 + .65 * twinkle,
-      );
-      paintGlint(canvas, p, size.shortestSide * (.025 + .04 * twinkle), paint);
     }
   }
 
@@ -1104,12 +1252,16 @@ class _ObstaclePainter extends CustomPainter {
   final ObstacleKind kind;
   final RunnerArt? art;
 
+  static final _inkPaint = Paint()..color = wardrobeInk;
+  static final _fringePaint = Paint()..color = const Color(0xFFD9A441);
+  static final _borderPaint = Paint();
+
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     canvas.drawRRect(
       RRect.fromRectAndRadius(rect, Radius.circular(size.width * .2)),
-      Paint()..color = wardrobeInk,
+      _inkPaint,
     );
     final inner = rect.deflate(size.width * .14);
     final a = art;
@@ -1127,13 +1279,11 @@ class _ObstaclePainter extends CustomPainter {
         inner.width * .6,
         inner.height * .8,
       );
-      canvas.drawRect(
-        cloth,
-        Paint()..color = a?.border ?? const Color(0xFF8E2420),
-      );
+      _borderPaint.color = a?.border ?? const Color(0xFF8E2420);
+      canvas.drawRect(cloth, _borderPaint);
       canvas.drawRect(
         Rect.fromLTWH(cloth.left, cloth.bottom - 3, cloth.width, 3),
-        Paint()..color = const Color(0xFFD9A441),
+        _fringePaint,
       );
       return;
     }

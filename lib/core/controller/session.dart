@@ -330,25 +330,40 @@ extension SessionController on AppController {
 
   Future<void> _hydrate(int generation, {JsonMap? state}) async {
     final account = _account!;
-    state ??= await _store.read(account, 'state');
-    final prefs = await _store.read(account, 'preferences');
-    final scriptIndex = await _store.read(account, 'script_index');
+    final results = await Future.wait<JsonMap?>([
+      state == null ? _store.read(account, 'state') : Future.value(state),
+      _store.read(account, 'preferences'),
+      _store.read(account, 'script_index'),
+    ]);
+    state = results[0];
+    final prefs = results[1];
+    final scriptIndex = results[2];
     if (!_current(generation)) return;
     _baseSnapshot = jsonMap(state?['snapshot']);
     // The login response is newer than cached account roles/password flags.
     if (_user != null) _baseSnapshot['user'] = _user!.toJson();
-    _outbox = jsonList(
-      state?['outbox'],
-    ).map((e) => PendingAction.fromJson(jsonMap(e))).toList();
+    _replaceOutbox(
+      jsonList(
+        state?['outbox'],
+      ).map((e) => PendingAction.fromJson(readJsonMap(e))),
+    );
     _lastSync = dateValue(state?['lastSync']);
     _deviceToken = state?['deviceToken'] as String?;
     _deviceRegisteredAt = dateValue(state?['deviceRegisteredAt']);
-    _preferences = prefs ?? {};
-    for (final id in jsonList(scriptIndex?['ids'])) {
-      final cached = await _store.read(account, 'script:$id');
+    _preferences
+      ..clear()
+      ..addAll(prefs ?? const {});
+    final scriptIds = [for (final id in jsonList(scriptIndex?['ids'])) '$id'];
+    if (scriptIds.isNotEmpty) {
+      final cachedScripts = await Future.wait<JsonMap?>([
+        for (final id in scriptIds) _store.read(account, 'script:$id'),
+      ]);
       if (!_current(generation)) return;
-      if (cached != null) {
-        _scripts[id.toString()] = ScriptDocument.fromJson(cached);
+      for (var i = 0; i < scriptIds.length; i++) {
+        final cached = cachedScripts[i];
+        if (cached != null) {
+          _scripts[scriptIds[i]] = ScriptDocument.fromJson(cached);
+        }
       }
     }
     _rebuild();
@@ -843,6 +858,7 @@ extension SessionController on AppController {
 
   void _resetMemory() {
     _mediaCache.clear();
+    _mediaCacheBytes = 0;
     _mediaLoading.clear();
     _token = null;
     _account = null;
@@ -857,16 +873,35 @@ extension SessionController on AppController {
     _startSync = null;
     _firstSyncPending.value = false;
     _baseSnapshot = {};
-    _view = {};
     _events = [];
     _absences = [];
     _polls = [];
     _slotPools = const [];
     _productions = [];
     _members = [];
-    _outbox = [];
+    _eventsView = const [];
+    _absencesView = const [];
+    _pollsView = const [];
+    _productionsView = const [];
+    _activeProductionsView = const [];
+    _archivedProductionsView = const [];
+    _membersView = const [];
+    _memberById = const {};
+    _eventById = const {};
+    _productionById = const {};
+    _messagesView = const [];
+    _pendingAccountsView = const [];
+    _openRegistrationCount = 0;
+    _memberAttendanceByEventView = const {};
+    _implicitAttendanceByEventView = const {};
+    _arrivalsByEventView = const {};
+    _autoCheckinsByEvent = const {};
+    _productionRecordsView = const [];
+    _memberRecordsView = const [];
+    _personRolesView = const [];
+    _outbox.clear();
     _scripts.clear();
-    _preferences = {};
+    _preferences.clear();
     _demoFocus.clear();
     _loadingScripts.clear();
     _lastSync = null;
@@ -877,11 +912,17 @@ extension SessionController on AppController {
     _refreshTask = null;
     _drainTask = null;
     _checkinsByEvent = {};
+    _checkinsByEventView = const {};
     _checkinVersions = {};
+    _checkinVersionsView = const {};
     _capabilities = {};
+    _capabilitiesView = const {};
+    _features = const {};
     _mutationVersion = 0;
     _reminders = {..._defaultReminders};
+    _remindersView = _defaultReminders;
     _customReminderMinutes = null;
+    _dataVersion++;
   }
 
   /// [cause] is the failed request's error; a session Firebase ended

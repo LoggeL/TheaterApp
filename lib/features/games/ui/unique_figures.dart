@@ -6,7 +6,7 @@ import '../../../core/app_controller.dart';
 import '../data/wardrobe_api.dart';
 import 'ensemble_card.dart' show CurtainPainter;
 import 'stage_runner_art.dart';
-import 'stage_runner_look.dart' show paintGlint;
+import 'stage_runner_look.dart' show paintGlintAt;
 import 'wardrobe_cards.dart';
 
 /// The cards of the unique figures (`runnerUniqueFigures`), one per play in
@@ -45,7 +45,20 @@ class _UniqueCelebrationState extends State<UniqueCelebration>
   late final AnimationController _burst = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1800),
-  )..forward();
+  );
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      _burst.value = 1;
+    } else {
+      _burst.forward();
+    }
+  }
 
   @override
   void dispose() {
@@ -66,10 +79,8 @@ class _UniqueCelebrationState extends State<UniqueCelebration>
         children: [
           Positioned.fill(
             child: IgnorePointer(
-              child: AnimatedBuilder(
-                animation: _burst,
-                builder: (context, _) =>
-                    CustomPaint(painter: _HoloBurstPainter(_burst.value)),
+              child: RepaintBoundary(
+                child: CustomPaint(painter: _HoloBurstPainter(_burst)),
               ),
             ),
           ),
@@ -123,16 +134,10 @@ class _UniqueCelebrationState extends State<UniqueCelebration>
                                     // The curtain opens on what was a
                                     // secret until now.
                                     IgnorePointer(
-                                      child: AnimatedBuilder(
-                                        animation: _burst,
-                                        builder: (context, _) => CustomPaint(
+                                      child: RepaintBoundary(
+                                        child: CustomPaint(
                                           painter: CurtainPainter(
-                                            open: Curves.easeInOut.transform(
-                                              (_burst.value / .6).clamp(
-                                                0.0,
-                                                1.0,
-                                              ),
-                                            ),
+                                            progress: _burst,
                                           ),
                                         ),
                                       ),
@@ -202,30 +207,42 @@ class _UniqueCelebrationState extends State<UniqueCelebration>
 
 /// Rainbow glints flying out of the middle once.
 class _HoloBurstPainter extends CustomPainter {
-  _HoloBurstPainter(this.t);
-  final double t;
+  _HoloBurstPainter(this.animation) : super(repaint: animation);
+  final Animation<double> animation;
+
+  static final _paint = Paint();
+  static final _glints = () {
+    final random = Random(7);
+    return [
+      for (var i = 0; i < 44; i++)
+        () {
+          final a = random.nextDouble() * 2 * pi;
+          return (
+            cos(a),
+            sin(a),
+            .2 + random.nextDouble() * .6,
+            3.0 + random.nextDouble() * 6.0,
+          );
+        }(),
+    ];
+  }();
 
   @override
   void paint(Canvas canvas, Size size) {
+    final t = animation.value;
     if (t <= 0 || t >= 1) return;
-    final c = Offset(size.width / 2, size.height * .2);
-    final random = Random(7);
-    final paint = Paint();
-    for (var i = 0; i < 44; i++) {
-      final a = random.nextDouble() * 2 * pi;
-      final d = size.shortestSide * (.2 + random.nextDouble() * .6) * t;
-      paint.color = holoColors[i % holoColors.length].withValues(
-        alpha: (1 - t) * .9,
-      );
-      paintGlint(
-        canvas,
-        c + Offset(cos(a) * d, sin(a) * d + 80 * t * t),
-        3 + random.nextDouble() * 6,
-        paint,
-      );
+    final cx = size.width / 2, cy = size.height * .2;
+    final shortest = size.shortestSide;
+    final dropY = 80 * t * t;
+    final alpha = (1 - t) * .9;
+    for (var i = 0; i < _glints.length; i++) {
+      final (ca, sa, spread, radius) = _glints[i];
+      final d = shortest * spread * t;
+      _paint.color = holoColors[i % holoColors.length].withValues(alpha: alpha);
+      paintGlintAt(canvas, cx + ca * d, cy + sa * d + dropY, radius, _paint);
     }
   }
 
   @override
-  bool shouldRepaint(_HoloBurstPainter old) => old.t != t;
+  bool shouldRepaint(_HoloBurstPainter old) => old.animation != animation;
 }

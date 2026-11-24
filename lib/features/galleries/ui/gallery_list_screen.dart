@@ -194,10 +194,16 @@ class _GalleryCard extends StatelessWidget {
             AspectRatio(
               aspectRatio: 1.9,
               child: gallery['coverPath'] != null
-                  ? ProtectedImage(
-                      controller: controller,
-                      path: textValue(gallery['coverPath']),
-                      decodeWidth: 1200,
+                  ? LayoutBuilder(
+                      builder: (context, constraints) => ProtectedImage(
+                        controller: controller,
+                        path: textValue(gallery['coverPath']),
+                        decodeWidth:
+                            (constraints.maxWidth *
+                                    MediaQuery.devicePixelRatioOf(context))
+                                .round()
+                                .clamp(360, 1200),
+                      ),
                     )
                   : ColoredBox(
                       color: theme.colorScheme.surfaceContainerHighest,

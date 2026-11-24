@@ -62,6 +62,9 @@ class OneLineSegmentedButton<T> extends StatelessWidget {
     },
   );
 
+  static final _widthCache =
+      <(String, double?, FontWeight?, String?, double, TextDirection), double>{};
+
   bool _iconsFit(BuildContext context, double maxWidth) {
     if (!maxWidth.isFinite) return true;
     final style =
@@ -70,19 +73,35 @@ class OneLineSegmentedButton<T> extends StatelessWidget {
         const TextStyle();
     final scaler = MediaQuery.textScalerOf(context);
     final direction = Directionality.of(context);
+    final scaledSample = scaler.scale(14);
     var widest = 0.0;
     for (final segment in segments) {
       final label = segment.label;
       if (label is! Text || label.data == null) continue;
       if (segment.icon == null && !showSelectedIcon) continue;
-      final painter = TextPainter(
-        text: TextSpan(text: label.data, style: style.merge(label.style)),
-        textDirection: direction,
-        textScaler: scaler,
-        maxLines: 1,
-      )..layout();
-      widest = math.max(widest, painter.width);
-      painter.dispose();
+      final effective = style.merge(label.style);
+      final key = (
+        label.data!,
+        effective.fontSize,
+        effective.fontWeight,
+        effective.fontFamily,
+        scaledSample,
+        direction,
+      );
+      var width = _widthCache[key];
+      if (width == null) {
+        final painter = TextPainter(
+          text: TextSpan(text: label.data, style: effective),
+          textDirection: direction,
+          textScaler: scaler,
+          maxLines: 1,
+        )..layout();
+        width = painter.width;
+        painter.dispose();
+        if (_widthCache.length >= 256) _widthCache.clear();
+        _widthCache[key] = width;
+      }
+      widest = math.max(widest, width);
     }
     return (widest + _iconSegmentChrome) * segments.length <= maxWidth;
   }

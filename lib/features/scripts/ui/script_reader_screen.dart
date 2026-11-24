@@ -95,13 +95,15 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   Set<String> _bookmarks = {};
   String _role = '';
   Set<String> _roles = {};
+  Set<String> _normalizedRoles = const {};
   final Set<String> _revealed = {};
   Set<String> _categories = {'direction'};
   Map<String, int> _categoryContext = {};
   JsonMap _notes = {};
   bool _assignedRoles = true;
   // Shared cues ("ROMEO & JULIA") are own text for every role speaking them.
-  bool _own(ScriptCue cue) => cue.kind == 'dialogue' && cue.spokenByAny(_roles);
+  bool _own(ScriptCue cue) =>
+      cue.kind == 'dialogue' && cue.spokenByNormalized(_normalizedRoles);
   bool get _hasRoles => _roles.isNotEmpty;
   ReaderMode _mode = ReaderMode.read;
   String? _activeCueId;
@@ -124,12 +126,9 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   bool _hintDismissed = false;
 
   bool get _stage => _mode == ReaderMode.stage;
-  String get _title {
-    for (final production in widget.controller.productions) {
-      if (production.id == widget.productionId) return production.title;
-    }
-    return 'Drehbuch';
-  }
+  String get _title =>
+      widget.controller.productionById(widget.productionId)?.title ??
+      'Drehbuch';
 
   /// False once another account took over; the reader closes shortly after.
   bool get _sameMember => widget.controller.user?.id == _readerId;
@@ -328,6 +327,9 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   }
 
   void _rebuildEntries() {
+    _normalizedRoles = _roles.isEmpty
+        ? const {}
+        : {for (final r in _roles) r.trim().toUpperCase()};
     final doc = _document;
     if (doc == null) return;
     final cues = visibleScriptCues(
@@ -350,19 +352,32 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
   }
 
   void _onPositionsChanged() {
-    final positions =
-        _positions.itemPositions.value
-            .where(
-              (position) =>
-                  position.itemTrailingEdge > 0 && position.itemLeadingEdge < 1,
-            )
-            .toList()
-          ..sort((a, b) => a.index.compareTo(b.index));
-    final visible = [
-      for (final position in positions)
-        if (position.index < _entries.length) _entries[position.index],
-    ];
-    final cue = visible.map((entry) => entry.cue).nonNulls.firstOrNull;
+    // Runs on every scroll frame: find the first visible cue and whether the
+    // pinned scene is still visible in a single allocation-free pass.
+    var minCueIndex = -1;
+    ScriptCue? firstCue;
+    var pinnedVisible = false;
+    final pinned = _pinnedSceneId;
+    final count = _entries.length;
+    for (final position in _positions.itemPositions.value) {
+      if (position.itemTrailingEdge <= 0 || position.itemLeadingEdge >= 1) {
+        continue;
+      }
+      final idx = position.index;
+      if (idx < 0 || idx >= count) continue;
+      final entry = _entries[idx];
+      if (pinned != null &&
+          !pinnedVisible &&
+          (entry.cue?.sceneId ?? entry.scene?.id) == pinned) {
+        pinnedVisible = true;
+      }
+      final entryCue = entry.cue;
+      if (entryCue != null && (minCueIndex < 0 || idx < minCueIndex)) {
+        minCueIndex = idx;
+        firstCue = entryCue;
+      }
+    }
+    final cue = firstCue;
     if (cue == null || _firstVisibleCueId == cue.id) return;
     _firstVisibleCueId = cue.id;
     // After a jump the target scene stays highlighted, even when the list
@@ -370,12 +385,7 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
     if (_pinnedSceneId != null && !_autoScrolling && cue.id != _pinnedAtCueId) {
       _pinnedSceneId = null;
     }
-    final sceneId =
-        _pinnedSceneId != null &&
-            visible.any(
-              (entry) =>
-                  (entry.cue?.sceneId ?? entry.scene?.id) == _pinnedSceneId,
-            )
+    final sceneId = _pinnedSceneId != null && pinnedVisible
         ? _pinnedSceneId!
         : cue.sceneId;
     final label = sceneTitle(_document!, sceneId);
@@ -865,13 +875,14 @@ class _ScriptReaderScreenState extends State<ScriptReaderScreen>
           );
         }
         final cue = entry.cue!;
+        final own = _own(cue);
         return CueCard(
           key: ValueKey(cue.id),
           cue: cue,
-          own: _own(cue),
+          own: own,
           hidden:
               _mode == ReaderMode.practice &&
-              _own(cue) &&
+              own &&
               !_revealed.contains(cue.id),
           hasNote: _notes.containsKey(cue.id),
           commentCount: _comments.countFor(cue.id),

@@ -7,6 +7,8 @@ import '../../../../core/models.dart';
 import '../../domain/event_format.dart';
 import '../event_style.dart';
 
+final _hmFormat = DateFormat.Hm('de');
+
 Color statusColor(String status) => responseColor(status);
 
 class RsvpStatusBadge extends StatelessWidget {
@@ -36,7 +38,7 @@ class RsvpStatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final arrival = status == 'late' && expectedArrivalAt != null
-        ? DateFormat.Hm('de').format(expectedArrivalAt!.toLocal())
+        ? _hmFormat.format(expectedArrivalAt!.toLocal())
         : null;
     final short =
         arrival ??

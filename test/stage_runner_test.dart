@@ -27,7 +27,7 @@ import 'package:theater_app/features/games/ui/stage_runner_fx.dart';
 import 'package:theater_app/features/games/ui/stage_runner_look.dart'
     show RunnerTrail;
 import 'package:theater_app/features/games/ui/stage_runner_screen.dart'
-    show RunnerGlyphs, stageLayout, stagePainterFor;
+    show RunnerGlyphs, StageRunnerPainter, stageLayout, stagePainterFor;
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
 import 'package:theater_app/features/me/me.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -3890,6 +3890,277 @@ void main() {
       expect(largest, greaterThan(0));
       expect(largest, lessThanOrEqualTo(.01));
     });
+
+    testWidgets(
+      'rasterized web decoration mode matches vector layout with opaque fill across scroll, resize and shake',
+      (tester) async {
+        await tester.runAsync(() async {
+          final game = StageRunner(random: Random(43))
+            ..obstacles.clear()
+            ..pickups.clear();
+          final fx = RunnerFx(random: Random(17));
+          Future<Uint8List> snap(
+            CustomPainter painter,
+            Size size,
+            double ratio,
+          ) async {
+            final rec = ui.PictureRecorder();
+            final canvas = Canvas(rec)..scale(ratio);
+            painter.paint(canvas, size);
+            final pic = rec.endRecording();
+            final img = await pic.toImage(
+              (size.width * ratio).round(),
+              (size.height * ratio).round(),
+            );
+            final data = (await img.toByteData(
+              format: ui.ImageByteFormat.rawRgba,
+            ))!.buffer.asUint8List();
+            img.dispose();
+            pic.dispose();
+            return data;
+          }
+
+          for (final ratio in [2.0, 3.0]) {
+            final raster = stagePainterFor(
+              game,
+              null,
+              fx: fx,
+              pixelRatio: ratio,
+              rasterizeDecorations: true,
+            );
+            final vector = stagePainterFor(
+              game,
+              null,
+              fx: fx,
+              pixelRatio: ratio,
+              rasterizeDecorations: false,
+            );
+            try {
+              for (final size in [
+                const Size(390, 700),
+                const Size(800, 400),
+                const Size(390, 700),
+              ]) {
+                for (final (distance, crash) in [
+                  (0.0, 0.0),
+                  (1.43, 0.0),
+                  (13.7, 0.0),
+                  (13.7, .13),
+                ]) {
+                  game
+                    ..distance = distance
+                    ..time = 4
+                    ..over = crash > 0
+                    ..sinceOver = crash;
+                  final rBytes = await snap(raster, size, ratio);
+                  final vBytes = await snap(vector, size, ratio);
+                  expect(rBytes.length, vBytes.length);
+                  var transparent = 0;
+                  var totalDiff = 0;
+                  final pixels = rBytes.length ~/ 4;
+                  for (var i = 0; i < rBytes.length; i += 4) {
+                    if (rBytes[i + 3] != 255) transparent++;
+                    totalDiff +=
+                        (rBytes[i] - vBytes[i]).abs() +
+                        (rBytes[i + 1] - vBytes[i + 1]).abs() +
+                        (rBytes[i + 2] - vBytes[i + 2]).abs();
+                  }
+                  expect(
+                    transparent,
+                    0,
+                    reason: 'Opaque fill $size d=$distance c=$crash dpr=$ratio',
+                  );
+                  expect(
+                    totalDiff / (pixels * 3),
+                    lessThan(2.0),
+                    reason:
+                        'Visual match $size d=$distance c=$crash dpr=$ratio',
+                  );
+                }
+              }
+            } finally {
+              raster.dispose();
+              vector.dispose();
+            }
+          }
+        });
+      },
+    );
+
+    testWidgets('batched trail styles render confetti, stars, smoke and glints', (
+      tester,
+    ) async {
+      await tester.runAsync(() async {
+        for (final style in const [
+          RunnerEffectStyle('confetti', [Color(0xFFE5486B), Color(0xFFFFC94A)]),
+          RunnerEffectStyle('stars', [Color(0xFFFFF4C2)], shine: true),
+          RunnerEffectStyle('smoke', [Color(0xFFCCCCCC)]),
+          RunnerEffectStyle('sparkle', [Color(0xFFFFD86B)]),
+        ]) {
+          final game = StageRunner(random: Random(5))..invincible = true;
+          final trail = RunnerTrail(random: Random(9));
+          for (var i = 0; i < 30; i++) {
+            game.holding = i.isEven;
+            game.update(1 / 60);
+            trail.update(1 / 60, game, style);
+          }
+          final rec = ui.PictureRecorder();
+          final canvas = Canvas(rec);
+          trail.paint(canvas, 400, style);
+          if (style.shine) {
+            trail.paintGlints(canvas, const Rect.fromLTWH(140, 200, 60, 80), 400);
+          }
+          final pic = rec.endRecording();
+          final img = await pic.toImage(400, 400);
+          final data = (await img.toByteData(
+            format: ui.ImageByteFormat.rawRgba,
+          ))!.buffer.asUint8List();
+          img.dispose();
+          pic.dispose();
+          var drawn = 0;
+          for (var i = 3; i < data.length; i += 4) {
+            if (data[i] > 0) drawn++;
+          }
+          expect(drawn, greaterThan(20), reason: style.trail);
+        }
+      });
+    });
+
+    testWidgets(
+      'web batched stage, prewarm slices and disc batch match vector rendering across all obstacles and bursts',
+      (tester) async {
+        await tester.runAsync(() async {
+          Future<ui.Image> decode(String name) async {
+            final data = await rootBundle.load('assets/games/stage_runner/$name');
+            final codec = await ui.instantiateImageCodec(
+              data.buffer.asUint8List(),
+            );
+            return (await codec.getNextFrame()).image;
+          }
+
+          final art = RunnerArt.test(
+            await decode('atlas.webp'),
+            await decode('backdrop.webp'),
+          );
+          final game = StageRunner(random: Random(7))
+            ..distance = 2.5
+            ..time = 3.2
+            ..y = .45
+            ..vy = -.35;
+          Obstacle obs(
+            ObstacleKind kind,
+            double left,
+            double top,
+            double width,
+            double bottom, {
+            bool falling = false,
+          }) => Obstacle()
+            ..kind = kind
+            ..left = left
+            ..top = top
+            ..width = width
+            ..bottom = bottom
+            ..falling = falling;
+          Pickup pick(PickupKind kind, double x, double y) => Pickup()
+            ..kind = kind
+            ..x = x
+            ..y = y;
+
+          final wx = game.distance;
+          game.obstacles
+            ..clear()
+            ..addAll([
+              obs(ObstacleKind.crate, wx + .12, .72, .08, .84),
+              obs(ObstacleKind.crate, wx + .24, .60, .08, .84),
+              obs(ObstacleKind.flat, wx + .36, .48, .08, .84),
+              obs(ObstacleKind.border, wx + .48, 0.0, .14, .28),
+              obs(ObstacleKind.lamp, wx + .66, 0.0, .10, .32),
+              obs(ObstacleKind.sandbag, wx + .82, 0.0, .09, .14),
+              obs(ObstacleKind.drum, wx + .98, .72, .12, .84, falling: true),
+              obs(ObstacleKind.pile, wx + 1.15, .74, .18, .84),
+              obs(ObstacleKind.truss, wx + 1.38, 0.0, .36, .28),
+              obs(ObstacleKind.drop, wx + 1.80, 0.0, .12, .42),
+            ]);
+          game.pickups
+            ..clear()
+            ..addAll([
+              pick(PickupKind.rose, wx + .18, .42),
+              pick(PickupKind.mask, wx + .55, .52),
+              pick(PickupKind.star, wx + 1.05, .36),
+            ]);
+          final fx = RunnerFx(random: Random(19))
+            ..pickup(PickupKind.rose, .3, .4)
+            ..pickup(PickupKind.star, .45, .35);
+          for (var i = 0; i < 6; i++) {
+            fx.update(1 / 60, game);
+          }
+
+          Future<Uint8List> snap(
+            StageRunnerPainter painter,
+            Size size,
+            double ratio,
+          ) async {
+            final rec = ui.PictureRecorder();
+            final canvas = Canvas(rec)..scale(ratio);
+            painter.paint(canvas, size);
+            final pic = rec.endRecording();
+            final img = await pic.toImage(
+              (size.width * ratio).round(),
+              (size.height * ratio).round(),
+            );
+            final data = (await img.toByteData(
+              format: ui.ImageByteFormat.rawRgba,
+            ))!.buffer.asUint8List();
+            img.dispose();
+            pic.dispose();
+            return data;
+          }
+
+          const size = Size(390, 780);
+          const ratio = 2.0;
+          final batched = stagePainterFor(
+            game,
+            art,
+            fx: fx,
+            pixelRatio: ratio,
+            rasterizeDecorations: true,
+          );
+          final vector = stagePainterFor(
+            game,
+            art,
+            fx: fx,
+            pixelRatio: ratio,
+            rasterizeDecorations: false,
+          );
+          try {
+            // Prewarm steps 0..3 return true, step 4 finishes and returns false.
+            for (var step = 0; step < 4; step++) {
+              expect(batched.prewarmStep(size, step), isTrue);
+            }
+            expect(batched.prewarmStep(size, 4), isFalse);
+
+            final bBytes = await snap(batched, size, ratio);
+            final vBytes = await snap(vector, size, ratio);
+            expect(bBytes.length, vBytes.length);
+            var transparent = 0;
+            var totalDiff = 0;
+            final pixels = bBytes.length ~/ 4;
+            for (var i = 0; i < bBytes.length; i += 4) {
+              if (bBytes[i + 3] != 255) transparent++;
+              totalDiff +=
+                  (bBytes[i] - vBytes[i]).abs() +
+                  (bBytes[i + 1] - vBytes[i + 1]).abs() +
+                  (bBytes[i + 2] - vBytes[i + 2]).abs();
+            }
+            expect(transparent, 0);
+            expect(totalDiff / (pixels * 3), lessThan(2.5));
+          } finally {
+            batched.dispose();
+            vector.dispose();
+          }
+        });
+      },
+    );
   });
 }
 

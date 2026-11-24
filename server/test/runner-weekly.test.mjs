@@ -4,7 +4,8 @@ import { Store } from '../src/store.mjs';
 import { Theater, apiFeatures, runnerMaxMeters, stageRunner } from '../src/theater.mjs';
 import { createHttpServer } from '../src/http.mjs';
 import { berlinWeek, checkGhost, settleWeeks, weekAwardsKind, weekBounds, weekRunsKind, weeklyRules, weeksKind } from '../src/runner-weekly.mjs';
-import { monthScoresKind } from '../src/runner-monthly.mjs';
+import { monthAwardsKind, monthScoresKind } from '../src/runner-monthly.mjs';
+import { settleGala } from '../src/runner-gala.mjs';
 
 // Wochenprobe: one course a week, three ranked runs per person, unlimited training.
 
@@ -204,6 +205,7 @@ for (const [begin, cutoff, week] of [
     const result = s.app.runnerScore('sam', body);
     assert.equal(result.weekly.ranked, false);
     assert.equal(result.weekly.improved, false);
+    assert.equal(result.improved, false);
     settleWeeks(s.app);
     const awards = s.store.get(weekAwardsKind, week);
     assert.deepEqual(awards.placements.map(x => [x.personId, x.rank, x.gage]), [[s.kim, 1, 100], [s.sam, 2, 50]]);
@@ -221,46 +223,97 @@ test('the best ranked run counts, ties go to the earlier one; training and norma
   const { app, store, sam, kim, lou, play, tick } = setup(t);
   const first = play('sam', { seconds: 60, pickups: 50 });
   assert.deepEqual(first.weekly, { week: '2026-W45', ranked: true, improved: true, best: { score: 560, meters: 510 }, rank: 1, attempts: { used: 1, max: 3 } });
-  // The answer of a normal run as well: the all-time list stays as it was.
-  assert.equal(first.improved, false);
-  assert.deepEqual(first.leaderboard, { players: 0, top: [], own: null });
+  // Ranked weekly runs also count for the all-time and monthly leaderboards.
+  assert.equal(first.improved, true);
+  assert.equal(first.leaderboard.players, 1);
+  assert.equal(first.leaderboard.own.score, 560);
   assert.equal(first.progress.gained, 510);
   const worse = play('sam', { seconds: 40 });
   assert.equal(worse.weekly.improved, false);
+  assert.equal(worse.improved, false);
   assert.deepEqual(worse.weekly.best, { score: 560, meters: 510 });
-  // A better training run is only training.
+  // A better training run is only training — neither weekly nor normal leaderboards.
   const training = play('sam', { ranked: false, seconds: 120 });
   assert.deepEqual([training.weekly.ranked, training.weekly.improved, training.weekly.best.score], [false, false, 560]);
+  assert.equal(training.improved, false);
+  assert.equal(store.get('runnerScores', sam).best, 560);
+  assert.equal(store.get(monthScoresKind, `2026-11:${sam}`).best, 560);
   // The same score later ranks behind.
   tick();
   play('kim', { seconds: 60, pickups: 50 });
   play('lou', { seconds: 30 });
+  // A person who only runs weekly training stays off all leaderboards.
+  const adminId = store.account('admin').personId;
+  const adminTraining = play('admin', { ranked: false, seconds: 90 });
+  assert.equal(adminTraining.improved, false);
+  assert.deepEqual([store.get('runnerScores', adminId).best, store.get('runnerScores', adminId).bestAt], [0, null]);
+  assert.equal(store.get(monthScoresKind, `2026-11:${adminId}`), null);
   const view = app.runnerWeekly('kim');
   assert.deepEqual(view.leaderboard.map(x => [x.rank, x.name, x.score, x.meters, x.me]), [[1, 'Sam Beispiel', 560, 510, false], [2, 'Kim Muster', 560, 510, true], [3, 'Lou Probe', 210, 210, false]]);
   assert.equal(view.leaderboard[0].personId, sam);
   assert.equal(view.leaderboard[0].at, store.get(weekRunsKind, `2026-W45:${sam}`).bestAt);
   assert.deepEqual(view.best, { score: 560, meters: 510 });
   assert.ok(!JSON.stringify(view).includes('example.invalid') && !JSON.stringify(view).includes('Login'));
-  // Weekly runs never enter the all-time list, the month list or the Monatsgala; they count as runs
-  // (beside the deaths of the progress, for the wardrobe's statistics).
-  for (const id of [sam, kim, lou]) assert.deepEqual([store.get('runnerScores', id).best, store.get('runnerScores', id).bestAt], [0, null]);
+  // Ranked weekly runs enter the all-time and month lists; training runs only count as rounds.
+  assert.deepEqual(app.runnerLeaderboard('sam').top.map(x => [x.rank, x.personId, x.score]), [[1, sam, 560], [1, kim, 560], [3, lou, 210]]);
+  assert.deepEqual(app.runnerLeaderboard('sam', { period: 'month' }).top.map(x => [x.rank, x.personId, x.score]), [[1, sam, 560], [1, kim, 560], [3, lou, 210]]);
   assert.equal(store.get('runnerScores', kim).rounds, 1);
   assert.ok(store.get('runnerScores', kim).lastPlayedAt);
   assert.deepEqual([app.runnerWardrobe('sam').stats.rounds, app.runnerWardrobe('sam').stats.untracked], [3, 0]);
-  assert.deepEqual(app.runnerLeaderboard('sam').top, []);
-  assert.deepEqual(store.all(monthScoresKind), []);
-  assert.deepEqual(app.runnerLeaderboard('sam', { period: 'month' }).top, []);
-  // A normal run does, and leaves the week alone.
+  // A normal run updates all-time and monthly, and leaves the week alone.
   const { roundId } = app.runnerStart('lou');
   tick(60000);
   const normal = app.runnerScore('lou', { roundId, score: 900, meters: 510 });
   assert.equal(normal.improved, true);
   assert.equal(normal.weekly, undefined);
   assert.equal(app.runnerWeekly('lou').best.score, 210);
+  assert.equal(store.get('runnerScores', lou).best, 900);
   assert.equal(store.get(monthScoresKind, `2026-11:${lou}`).best, 900);
   // They count for the progress like any run: metres, crate points, missions.
   assert.equal(store.get('runnerProgress', sam).meters, 510 + Math.floor(runnerMaxMeters(40)) + Math.floor(runnerMaxMeters(120)));
   assert.ok(store.get('runnerMissions', sam).runs >= 3);
+});
+
+test('ranked weekly runs count for all-time, monthly and Monatsgala; training does not', t => {
+  const { app, store, sam, kim, lou, at, tick, play } = setup(t, '2026-10-15T10:00:00Z');
+  // Sam sets a 900 all-time best in October via a normal run.
+  const oct = app.runnerStart('sam');
+  tick(90000);
+  assert.equal(app.runnerScore('sam', { roundId: oct.roundId, score: 900, meters: 800 }).improved, true);
+  // In November: Sam's first ranked weekly run (560) does not beat all-time (900),
+  // but still counts as Sam's November monthly best.
+  at('2026-11-04T10:00:00Z');
+  const nov1 = play('sam', { seconds: 60, pickups: 50 });
+  assert.equal(nov1.improved, false);
+  assert.equal(nov1.weekly.improved, true);
+  assert.equal(store.get('runnerScores', sam).best, 900);
+  assert.equal(store.get(monthScoresKind, `2026-11:${sam}`).best, 560);
+  assert.equal(app.runnerLeaderboard('sam', { period: 'month', month: '2026-10' }).own.score, 900);
+  // Sam's second ranked weekly run beats all-time (1050): updates both all-time and November,
+  // while keeping October's 900 intact.
+  const nov2 = play('sam', { seconds: 100, pickups: 50 });
+  assert.equal(nov2.improved, true);
+  assert.equal(nov2.weekly.improved, true);
+  assert.equal(store.get('runnerScores', sam).best, nov2.score);
+  assert.equal(store.get(monthScoresKind, `2026-11:${sam}`).best, nov2.score);
+  assert.equal(app.runnerLeaderboard('sam', { period: 'month', month: '2026-10' }).own.score, 900);
+  // Kim plays only a ranked weekly run in November; Lou plays only weekly training.
+  const kimRun = play('kim', { seconds: 70 });
+  assert.equal(kimRun.improved, true);
+  const louTrain = play('lou', { ranked: false, seconds: 120 });
+  assert.equal(louTrain.improved, false);
+  assert.deepEqual(
+    app.runnerLeaderboard('sam', { period: 'month' }).top.map(x => [x.personId, x.score]),
+    [[sam, nov2.score], [kim, kimRun.score]],
+  );
+  // At December's Monatsgala for November, Sam and Kim place; Lou (training only) does not.
+  at('2026-12-01T09:00:00Z'); // 10:00 Europe/Berlin
+  settleGala(app);
+  const gala = store.get(monthAwardsKind, '2026-11');
+  assert.deepEqual(
+    gala.placements.map(x => [x.rank, x.personId, x.score, x.trophy]),
+    [[1, sam, nov2.score, 'gold'], [2, kim, kimRun.score, 'silver']],
+  );
 });
 
 test('a result sent again gets its first answer and counts once; the mode cannot change', t => {
@@ -270,6 +323,8 @@ test('a result sent again gets its first answer and counts once; the mode cannot
   const body = { roundId: started.roundId, score: 530, meters: 510, ghost: ghostOf(60) };
   const first = app.runnerScore('sam', body);
   const again = app.runnerScore('sam', body);
+  assert.equal(first.improved, true);
+  assert.equal(again.improved, true);
   assert.deepEqual(again.weekly, first.weekly);
   assert.deepEqual(again.progress, first.progress);
   assert.equal(store.get(weekRunsKind, `2026-W45:${sam}`).ranked, 1);
@@ -278,9 +333,10 @@ test('a result sent again gets its first answer and counts once; the mode cannot
   // A normal run stays normal, whatever its result says.
   const { roundId } = app.runnerStart('sam');
   tick(60000);
-  const normal = app.runnerScore('sam', { roundId, score: 520, meters: 510, weekly: { week: '2026-W45', ranked: true }, ghost: ghostOf(60) });
+  const normal = app.runnerScore('sam', { roundId, score: 550, meters: 510, weekly: { week: '2026-W45', ranked: true }, ghost: ghostOf(60) });
   assert.equal(normal.weekly, undefined);
-  assert.equal(store.get('runnerScores', sam).best, 520);
+  assert.equal(normal.improved, true);
+  assert.equal(store.get('runnerScores', sam).best, 550);
   assert.equal(store.get(weekRunsKind, `2026-W45:${sam}`).best, 530);
   // A weekly run needs its metres.
   const other = start('sam', false);
@@ -376,10 +432,13 @@ test('after the week the places get their rewards exactly once, the banner shows
   assert.throws(() => app.runnerWeeklySeen('sam', {}), { status: 400 });
   // Late results cannot alter a closed ranking, even while their round TTL is still valid.
   // The next week closes on its own, also when nobody played it.
+  // An unseen reward from the week before is not swallowed by a skipped week.
   at('2026-11-23T08:00:00Z');
   app.runnerWeekly('kim');
   assert.deepEqual(store.get(weekAwardsKind, '2026-W46').placements, []);
-  assert.equal(app.runnerWeekly('kim').lastWeek, null);
+  assert.equal(app.runnerWeekly('sam').lastWeek, null);
+  assert.equal(app.runnerWeekly('kim').lastWeek.week, '2026-W45');
+  assert.equal(app.runnerWeeklySeen('kim', { week: '2026-W45' }).lastWeek, null);
   // Nothing of it is ever pushed.
   assert.deepEqual(store.all('pushJobs'), []);
 });

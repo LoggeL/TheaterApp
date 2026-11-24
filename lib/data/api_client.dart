@@ -72,12 +72,16 @@ class ApiClient {
   @visibleForTesting
   static Stopwatch Function() stopwatch = Stopwatch.new;
 
+  static final _serverTimingPattern = RegExp(
+    r'(?:^|,)\s*app\s*;(?:[^,]*;)?\s*dur=([0-9]+(?:\.[0-9]+)?)',
+  );
+  static final _trailingSlashPattern = RegExp(r'/$');
+  static final _errorCodePattern = RegExp(r'^[a-z_]{1,40}$');
+
   /// The server's own time from `Server-Timing` (`app;dur=1.2`), or null.
   static double? serverTimeOf(String? header) {
     if (header == null) return null;
-    final match = RegExp(
-      r'(?:^|,)\s*app\s*;(?:[^,]*;)?\s*dur=([0-9]+(?:\.[0-9]+)?)',
-    ).firstMatch(header);
+    final match = _serverTimingPattern.firstMatch(header);
     return match == null ? null : double.tryParse(match.group(1)!);
   }
 
@@ -119,7 +123,10 @@ class ApiClient {
         'Die Serveradresse muss HTTPS verwenden. Lokales HTTP ist nur im ausdrücklich aktivierten Debug-Modus erlaubt.',
       );
     }
-    return uri.replace(path: '').toString().replaceFirst(RegExp(r'/$'), '');
+    return uri
+        .replace(path: '')
+        .toString()
+        .replaceFirst(_trailingSlashPattern, '');
   }
 
   Future<JsonMap> request(
@@ -177,7 +184,7 @@ class ApiClient {
       }
       JsonMap decoded;
       try {
-        decoded = response.body.isEmpty
+        decoded = response.bodyBytes.isEmpty
             ? <String, dynamic>{}
             : jsonMap(jsonDecode(utf8.decode(response.bodyBytes)));
       } on FormatException {
@@ -351,9 +358,7 @@ class ApiClient {
 
   /// A short machine-readable error code; anything else is ignored.
   static String? _errorCode(Object? value) =>
-      value is String && RegExp(r'^[a-z_]{1,40}$').hasMatch(value)
-      ? value
-      : null;
+      value is String && _errorCodePattern.hasMatch(value) ? value : null;
 }
 
 class MediaData {

@@ -27,123 +27,122 @@ class ProductionsScreen extends StatelessWidget {
       final failed =
           productions.isEmpty && archived.isEmpty && controller.error != null;
       Future<void> refresh() => refreshWithFeedback(context, controller);
-      return RefreshIndicator(
-        onRefresh: refresh,
-        child: CustomScrollView(
-          key: const PageStorageKey('productions'),
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(24, 26, 24, 24),
-              sliver: SliverToBoxAdapter(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const PageHeader(
-                      'Drehbücher.',
-                      eyebrow: 'Deine Bühne',
-                      subtitle: 'Aktuelle Produktionen',
-                    ),
-                    if (!failed)
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          StatePill(
-                            '${productions.length} ${productions.length == 1 ? 'Produktion' : 'Produktionen'}',
-                            icon: Icons.menu_book_rounded,
-                            color: StageTheme.violet,
-                          ),
-                          StatePill(
-                            '${productions.where((p) => controller.scripts.containsKey(p.id)).length} offline verfügbar',
-                            icon: Icons.offline_pin_outlined,
-                          ),
-                        ],
-                      ),
-                  ],
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          // Two equal-height cards per row on wide screens; SliverPadding takes 40px.
+          final columns =
+              constraints.maxWidth - 40 >= Breakpoints.productionsTwoColumn &&
+                  MediaQuery.textScalerOf(context).scale(14) <= 21
+              ? 2
+              : 1;
+          Widget card(int index) {
+            final production = productions[index];
+            return ProductionCard(
+              key: ValueKey('production.${production.id}'),
+              production: production,
+              number: index + 1,
+              cached: controller.scripts.containsKey(production.id),
+              roles: cardRoleNames(
+                production,
+                controller.preferences,
+                controller.user?.personId,
+              ),
+              onTap: () => openPage(
+                context,
+                ScriptReaderScreen(
+                  controller: controller,
+                  productionId: production.id,
                 ),
               ),
-            ),
-            if (failed)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(
-                  child: EmptyState(
-                    icon: Icons.cloud_off_rounded,
-                    title: 'Drehbücher konnten nicht geladen werden.',
-                    message: controller.error!,
-                    action: FilledButton.icon(
-                      onPressed: refresh,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Erneut versuchen'),
+              onLearn: () => openPage(
+                context,
+                LineLearningScreen(
+                  controller: controller,
+                  productionId: production.id,
+                ),
+              ),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: refresh,
+            child: CustomScrollView(
+              key: const PageStorageKey('productions'),
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(24, 26, 24, 24),
+                  sliver: SliverToBoxAdapter(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const PageHeader(
+                          'Drehbücher.',
+                          eyebrow: 'Deine Bühne',
+                          subtitle: 'Aktuelle Produktionen',
+                        ),
+                        if (!failed)
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              StatePill(
+                                '${productions.length} ${productions.length == 1 ? 'Produktion' : 'Produktionen'}',
+                                icon: Icons.menu_book_rounded,
+                                color: StageTheme.violet,
+                              ),
+                              StatePill(
+                                '${productions.where((p) => controller.scripts.containsKey(p.id)).length} offline verfügbar',
+                                icon: Icons.offline_pin_outlined,
+                              ),
+                            ],
+                          ),
+                      ],
                     ),
                   ),
                 ),
-              )
-            else if (productions.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(
-                  child: EmptyState(
-                    icon: Icons.theater_comedy_outlined,
-                    title: 'Kein aktuelles Stück.',
-                    message: archived.isNotEmpty
-                        ? 'Ältere Drehbücher findest du im Archiv.'
-                        : 'Sobald eine Produktion freigegeben ist, findest du hier dein Drehbuch.',
-                    action: archived.isEmpty
-                        ? null
-                        : ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 480),
-                            child: _ArchiveLink(
-                              controller: controller,
-                              count: archived.length,
-                            ),
-                          ),
-                  ),
-                ),
-              )
-            else ...[
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-                sliver: SliverLayoutBuilder(
-                  builder: (context, constraints) {
-                    Widget card(int index) {
-                      final production = productions[index];
-                      return ProductionCard(
-                        key: ValueKey('production.${production.id}'),
-                        production: production,
-                        number: index + 1,
-                        cached: controller.scripts.containsKey(production.id),
-                        roles: cardRoleNames(
-                          production,
-                          controller.preferences,
-                          controller.user?.personId,
+                if (failed)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(
+                      child: EmptyState(
+                        icon: Icons.cloud_off_rounded,
+                        title: 'Drehbücher konnten nicht geladen werden.',
+                        message: controller.error!,
+                        action: FilledButton.icon(
+                          onPressed: refresh,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Erneut versuchen'),
                         ),
-                        onTap: () => openPage(
-                          context,
-                          ScriptReaderScreen(
-                            controller: controller,
-                            productionId: production.id,
-                          ),
-                        ),
-                        onLearn: () => openPage(
-                          context,
-                          LineLearningScreen(
-                            controller: controller,
-                            productionId: production.id,
-                          ),
-                        ),
-                      );
-                    }
-
-                    // Two equal-height cards per row on wide screens.
-                    final columns =
-                        constraints.crossAxisExtent >=
-                                Breakpoints.productionsTwoColumn &&
-                            MediaQuery.textScalerOf(context).scale(14) <= 21
-                        ? 2
-                        : 1;
-                    return SliverList.builder(
+                      ),
+                    ),
+                  )
+                else if (productions.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(
+                      child: EmptyState(
+                        icon: Icons.theater_comedy_outlined,
+                        title: 'Kein aktuelles Stück.',
+                        message: archived.isNotEmpty
+                            ? 'Ältere Drehbücher findest du im Archiv.'
+                            : 'Sobald eine Produktion freigegeben ist, findest du hier dein Drehbuch.',
+                        action: archived.isEmpty
+                            ? null
+                            : ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 480),
+                                child: _ArchiveLink(
+                                  controller: controller,
+                                  count: archived.length,
+                                ),
+                              ),
+                      ),
+                    ),
+                  )
+                else ...[
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                    sliver: SliverList.builder(
                       itemCount: (productions.length / columns).ceil(),
                       itemBuilder: (context, row) => Padding(
                         padding: const EdgeInsets.only(bottom: 16),
@@ -168,24 +167,24 @@ class ProductionsScreen extends StatelessWidget {
                                 ),
                               ),
                       ),
-                    );
-                  },
-                ),
-              ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 110),
-                sliver: SliverToBoxAdapter(
-                  child: archived.isEmpty
-                      ? const SizedBox.shrink()
-                      : _ArchiveLink(
-                          controller: controller,
-                          count: archived.length,
-                        ),
-                ),
-              ),
-            ],
-          ],
-        ),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 110),
+                    sliver: SliverToBoxAdapter(
+                      child: archived.isEmpty
+                          ? const SizedBox.shrink()
+                          : _ArchiveLink(
+                              controller: controller,
+                              count: archived.length,
+                            ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
       );
     },
   );
@@ -220,8 +219,8 @@ class ProductionArchiveScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Drehbucharchiv')),
-    body: AnimatedBuilder(
-      animation: controller,
+    body: VisibleListenableBuilder(
+      listenable: controller,
       builder: (context, _) {
         final productions = controller.archivedProductions;
         return CustomScrollView(

@@ -15,6 +15,8 @@ import 'poll_detail_screen.dart';
 import 'poll_editor_screen.dart';
 import 'widgets/poll_updates.dart';
 
+final _pollCloseFormat = DateFormat('d. MMMM · HH:mm', 'de');
+
 class PollsScreen extends StatelessWidget {
   const PollsScreen({
     super.key,
@@ -48,43 +50,87 @@ class PollsScreen extends StatelessWidget {
   Widget build(BuildContext context) => PollUpdates(
     controller: controller,
     builder: (context, _) {
-      final c = controller, admin = c.user?.isAdmin == true;
-      final open = c.polls.where((p) => !p.isClosedAt(c.now)).toList()
-        ..sort((a, b) => _byUrgency(c, a, b));
-      final closed = c.polls.where((p) => p.isClosedAt(c.now)).toList();
-      final waiting = pollsToVote(c).length;
-      Widget list(EdgeInsets padding) => ListView(
-        padding: padding,
+      final c = controller, admin = c.user?.isAdmin == true, now = c.now;
+      final open = <Poll>[], closed = <Poll>[];
+      var waiting = 0;
+      for (final p in c.polls) {
+        if (p.isClosedAt(now)) {
+          closed.add(p);
+        } else {
+          open.add(p);
+          if (!p.hasVoted && pollAddressesUser(c, p)) waiting++;
+        }
+      }
+      open.sort((a, b) => _byUrgency(c, a, b));
+      final entries = <({String? section, Poll? poll})>[
+        if (open.isNotEmpty) ...[
+          (section: 'Offen', poll: null),
+          for (final p in open) (section: null, poll: p),
+        ],
+        if (closed.isNotEmpty) ...[
+          (section: 'Abgeschlossen', poll: null),
+          for (final p in closed) (section: null, poll: p),
+        ],
+      ];
+      Widget list(EdgeInsets padding) => CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        children: [
-          if (embedded)
-            PageHeader(
-              'Mitteilungen.',
-              subtitle: waiting == 0
-                  ? 'Fragen an das Ensemble'
-                  : waiting == 1
-                  ? '1 offene Abstimmung für dich'
-                  : '$waiting offene Abstimmungen für dich',
+        slivers: [
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(
+              padding.left,
+              padding.top,
+              padding.right,
+              0,
             ),
-          if (switcher != null) ...[switcher!, const SizedBox(height: 14)],
-          if (c.polls.isEmpty)
-            const EmptyState(
-              icon: Icons.poll_outlined,
-              title: 'Noch keine Abstimmungen',
-              message: 'Offene Fragen an euer Ensemble erscheinen hier.',
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (embedded)
+                    PageHeader(
+                      'Mitteilungen.',
+                      subtitle: waiting == 0
+                          ? 'Fragen an das Ensemble'
+                          : waiting == 1
+                          ? '1 offene Abstimmung für dich'
+                          : '$waiting offene Abstimmungen für dich',
+                    ),
+                  if (switcher != null) ...[
+                    switcher!,
+                    const SizedBox(height: 14),
+                  ],
+                  if (c.polls.isEmpty)
+                    const EmptyState(
+                      icon: Icons.poll_outlined,
+                      title: 'Noch keine Abstimmungen',
+                      message: 'Offene Fragen an euer Ensemble erscheinen hier.',
+                    ),
+                ],
+              ),
             ),
-          for (final (title, polls) in [
-            ('Offen', open),
-            ('Abgeschlossen', closed),
-          ])
-            if (polls.isNotEmpty) ...[
-              SectionTitle(title),
-              for (final p in polls)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: _PollCard(controller: c, poll: p),
-                ),
-            ],
+          ),
+          if (entries.isNotEmpty)
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                padding.left,
+                0,
+                padding.right,
+                padding.bottom,
+              ),
+              sliver: SliverList.builder(
+                itemCount: entries.length,
+                itemBuilder: (context, index) {
+                  final entry = entries[index];
+                  if (entry.section != null) return SectionTitle(entry.section!);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: _PollCard(controller: c, poll: entry.poll!),
+                  );
+                },
+              ),
+            )
+          else
+            SliverToBoxAdapter(child: SizedBox(height: padding.bottom)),
         ],
       );
 
@@ -152,7 +198,7 @@ class _PollCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '${p.privacyLabel} · ${p.voteCountLabel}${p.closesAt == null ? '' : '\nBis ${DateFormat('d. MMMM · HH:mm', 'de').format(p.closesAt!.toLocal())}'}',
+                '${p.privacyLabel} · ${p.voteCountLabel}${p.closesAt == null ? '' : '\nBis ${_pollCloseFormat.format(p.closesAt!.toLocal())}'}',
               ),
               if (pill != null) ...[const SizedBox(height: 10), pill],
             ],

@@ -14,7 +14,8 @@ import 'leaderboard_api.dart';
 /// anyone likes on it, its own ranking with the runs as ghosts, and once the
 /// week is over a Wochenkiste for everyone who ran a ranked attempt, plus a
 /// Pokal and Gage for the places 1 to 3. Its runs count for the crates,
-/// missions and Gage like any other, but not for the other lists.
+/// missions and Gage like any other; ranked runs also count for the
+/// all-time and monthly leaderboards, training does not.
 bool weeklyAvailable(AppController controller) =>
     leaderboardAvailable(controller) && controller.supports('runnerWeekly');
 

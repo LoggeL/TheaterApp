@@ -16,6 +16,7 @@ import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/privacy_links.dart';
 import '../../../shared/widgets/state_pill.dart';
 import '../../../shared/widgets/tile_group.dart';
+import '../../../shared/widgets/visible_listenable_builder.dart';
 import '../../absences/ui/absences_screen.dart';
 import '../../auth/ui/account_providers_screen.dart';
 import '../../auth/ui/password_screen.dart';
@@ -50,6 +51,7 @@ class MyAreaScreen extends StatefulWidget {
 
 class _MyAreaScreenState extends State<MyAreaScreen> {
   late final PwaInstallation _installation;
+  late Listenable _updates;
 
   AppController get controller => widget.controller;
 
@@ -57,6 +59,15 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
   void initState() {
     super.initState();
     _installation = widget.installation ?? PwaInstallation.create();
+    _updates = Listenable.merge([_installation, widget.controller]);
+  }
+
+  @override
+  void didUpdateWidget(MyAreaScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      _updates = Listenable.merge([_installation, widget.controller]);
+    }
   }
 
   @override
@@ -183,8 +194,8 @@ class _MyAreaScreenState extends State<MyAreaScreen> {
           ],
           _ProfileCard(controller: controller),
           const SizedBox(height: 28),
-          ListenableBuilder(
-            listenable: Listenable.merge([_installation, controller]),
+          VisibleListenableBuilder(
+            listenable: _updates,
             builder: (context, _) => ResponsiveGroups(
               children: [
                 TileGroup(

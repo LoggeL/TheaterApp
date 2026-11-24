@@ -5,6 +5,30 @@ import '../../messages/domain/message_selectors.dart' as messages;
 import '../../polls/domain/poll_selectors.dart' as polls;
 import '../../slots/domain/slot_pool.dart';
 
+class _TodayDigestCache {
+  const _TodayDigestCache({
+    required this.version,
+    required this.outboxLength,
+    required this.userId,
+    required this.validFrom,
+    required this.validUntil,
+    required this.digest,
+  });
+  final int version, outboxLength;
+  final String? userId;
+  final DateTime validFrom, validUntil;
+  final TodayDigest digest;
+
+  bool matches(AppController controller, DateTime now) =>
+      version == controller.dataVersion &&
+      outboxLength == controller.outbox.length &&
+      userId == controller.user?.id &&
+      !now.isBefore(validFrom) &&
+      now.isBefore(validUntil);
+}
+
+final _todayDigestCache = Expando<_TodayDigestCache>('todayDigestCache');
+
 /// Everything the start page shows, picked and ordered once so the screen
 /// only lays it out.
 class TodayDigest {
@@ -34,66 +58,116 @@ class TodayDigest {
 
   factory TodayDigest.from(AppController controller) {
     final now = controller.now;
+    final cached = _todayDigestCache[controller];
+    if (cached != null && cached.matches(controller, now)) return cached.digest;
+
+    final localNow = now.toLocal();
+    var validUntil = DateTime(localNow.year, localNow.month, localNow.day + 1);
+    void consider(DateTime? t) {
+      if (t == null || !t.isAfter(now)) return;
+      if (t.isBefore(validUntil)) validUntil = t;
+    }
+
+    for (final e in controller.events) {
+      final start = e.startsAt;
+      if (start != null) {
+        consider(start);
+        consider(start.subtract(responseBadgeWindow));
+        consider(start.subtract(TheaterEvent.declineCutoff));
+      }
+      consider(e.endsAt);
+    }
+    for (final p in controller.polls) {
+      consider(p.closesAt);
+    }
+    for (final pool in slotPoolsOf(controller)) {
+      for (final slot in pool.slots) {
+        consider(slot.startsAt);
+      }
+    }
+
     final upcoming = upcomingEvents(controller, now);
     // Admins also receive events they are not invited to; those are never
     // "Dein nächster Termin" but still appear among the later events. The
     // same goes for events the person declined or misses for an absence, and
     // for events an admin's queued deletion cancels.
     final deleting = _deleting(controller);
-    final next = upcoming
-        .where(
-          (e) =>
-              e.addressedToMe &&
-              !deleting.contains(e.id) &&
-              _attends(e, controller.absences),
-        )
-        .firstOrNull;
+    final absences = controller.absences;
+    TheaterEvent? next;
+    for (final e in upcoming) {
+      if (e.addressedToMe && !deleting.contains(e.id) && _attends(e, absences)) {
+        next = e;
+        break;
+      }
+    }
     final soon = now.add(responseBadgeWindow);
-    final open = upcoming
-        .where((e) => e != next)
-        .where(
-          (e) =>
-              e.needsResponse &&
-              controller.canRespondTo(e) &&
-              (e.startsAt == null || e.startsAt!.isBefore(soon)),
-        )
-        .toList();
-    final shownOpen = open.take(maxOpenResponses).toList();
+    final open = <TheaterEvent>[];
+    for (final e in upcoming) {
+      if (e != next &&
+          e.needsResponse &&
+          e.acceptsResponsesAt(now) &&
+          (e.startsAt == null || e.startsAt!.isBefore(soon))) {
+        open.add(e);
+      }
+    }
+    final shownOpen = open.length <= maxOpenResponses
+        ? open
+        : open.sublist(0, maxOpenResponses);
     final shownIds = {for (final e in shownOpen) e.id};
+    final later = <TheaterEvent>[];
+    for (final e in upcoming) {
+      if (e != next && !shownIds.contains(e.id)) {
+        later.add(e);
+        if (later.length == maxLaterEvents) break;
+      }
+    }
     final toVote = polls.pollsToVote(controller);
     final (production, scriptEvent) = _script(controller, next);
     final scene = scriptEvent?.sceneIds.firstOrNull;
-    return TodayDigest(
+    final user = controller.user;
+    final unread = <JsonMap>[];
+    final openForms = <JsonMap>[];
+    for (final m in controller.messages) {
+      if (messages.messageUnreadFor(user, m)) unread.add(m);
+      if (messages.messageHasOpenFormFor(user, m)) openForms.add(m);
+    }
+    final digest = TodayDigest(
       now: now,
       next: next,
       nextOpen:
-          next != null && next.needsResponse && controller.canRespondTo(next),
+          next != null && next.needsResponse && next.acceptsResponsesAt(now),
       openResponses: shownOpen,
       moreOpenResponses: open.length - shownOpen.length,
       // Events answerable above are not repeated in the preview.
-      laterEvents: upcoming
-          .where((e) => e != next && !shownIds.contains(e.id))
-          .take(maxLaterEvents)
-          .toList(),
-      unread: messages.unreadMessages(controller).toList(),
-      openForms: messages.openForms(controller).toList(),
+      laterEvents: later,
+      unread: unread,
+      openForms: openForms,
       pollsToVote: toVote,
       // Only a poll the member actually voted in counts as done; admins
       // also receive polls they were never asked to vote in (newer servers
       // mark those with `addressedToMe`).
       votedPoll: toVote.isEmpty
           ? controller.polls
-                .where((p) => !p.isClosedAt(controller.now) && p.hasVoted)
+                .where((p) => !p.isClosedAt(now) && p.hasVoted)
                 .firstOrNull
           : null,
       slotPools: slotPoolsToChoose(controller),
-      registrations: controller.user?.isAdmin == true
+      registrations: user?.isAdmin == true
           ? controller.openRegistrationCount
           : 0,
       scriptProduction: production,
       scriptEvent: scriptEvent,
       scriptSceneId: scene,
     );
+    _todayDigestCache[controller] = _TodayDigestCache(
+      version: controller.dataVersion,
+      outboxLength: controller.outbox.length,
+      userId: user?.id,
+      validFrom: now,
+      validUntil: validUntil,
+      digest: digest,
+    );
+    return digest;
   }
 
   /// Whether the person still plans to come: not declined, and not left
@@ -110,6 +184,7 @@ class TodayDigest {
   /// Ids of the events a queued, not yet confirmed `event.delete` removes;
   /// deletions are not projected, so the events still show until the sync.
   static Set<String> _deleting(AppController controller) {
+    if (controller.outbox.isEmpty) return const {};
     final ids = <String>{};
     for (final action in controller.outbox) {
       final body = action.payload;
@@ -118,44 +193,38 @@ class TodayDigest {
       if (body['action'] == 'event.save' &&
           body['series'] == 'all' &&
           body['until'] is String) {
-        final edited = controller.events
-            .where((e) => e.id == textValue(body['id']))
-            .firstOrNull;
-        ids.addAll(
-          controller.events
-              .where(
-                (e) =>
-                    edited?.seriesId != null &&
-                    e.seriesId == edited!.seriesId &&
-                    !e.fromSlotPool &&
-                    e.startsAt != null &&
-                    dateOnly(e.startsAt!).compareTo(body['until'] as String) >
-                        0,
-              )
-              .map((e) => e.id),
-        );
+        final edited = controller.eventById(textValue(body['id']));
+        final seriesId = edited?.seriesId;
+        if (seriesId != null) {
+          final until = body['until'] as String;
+          for (final e in controller.events) {
+            if (e.seriesId == seriesId &&
+                !e.fromSlotPool &&
+                e.startsAt != null &&
+                dateOnly(e.startsAt!).compareTo(until) > 0) {
+              ids.add(e.id);
+            }
+          }
+        }
         continue;
       }
       if (body['action'] != 'event.delete') continue;
       final id = textValue(body['id']);
       ids.add(id);
-      final first = controller.events.where((e) => e.id == id).firstOrNull;
+      final first = controller.eventById(id);
       final series = first?.seriesId, start = first?.startsAt;
       if (body['series'] != 'following' || series == null || start == null) {
         continue;
       }
       // "This and all following" mirrors the server's choice of occurrences.
-      ids.addAll(
-        controller.events
-            .where(
-              (e) =>
-                  e.seriesId == series &&
-                  !e.fromSlotPool &&
-                  e.startsAt != null &&
-                  !e.startsAt!.isBefore(start),
-            )
-            .map((e) => e.id),
-      );
+      for (final e in controller.events) {
+        if (e.seriesId == series &&
+            !e.fromSlotPool &&
+            e.startsAt != null &&
+            !e.startsAt!.isBefore(start)) {
+          ids.add(e.id);
+        }
+      }
     }
     return ids;
   }
@@ -169,9 +238,7 @@ class TodayDigest {
   ) {
     final linked = next?.productionId == null
         ? null
-        : controller.productions
-              .where((p) => p.id == next!.productionId)
-              .firstOrNull;
+        : controller.productionById(next!.productionId!);
     if (linked != null) return (linked, next);
     final active = controller.activeProductions;
     final personId = controller.user?.personId;

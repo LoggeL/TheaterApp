@@ -354,3 +354,26 @@ test('the routes give the weekly fields and open a Wochenkiste once per key', as
   assert.equal(wardrobe.weekly.crates, 0);
   assert.equal(wardrobe.progress.weeklyCrates, 0);
 });
+
+test('skipping a week preserves an earlier unseen weekly reward until marked seen', t => {
+  const s = setup(t);
+  // Week 45: both Kim and Sam participate.
+  s.runs({ kim: 90, sam: 80 });
+  // Week 46: only Kim participates; Sam skips the week without having seen W45.
+  s.at('2026-11-12T12:00:00Z');
+  s.runs({ kim: 70 });
+  // Week 47: both W45 and W46 are closed.
+  s.at('2026-11-18T12:00:00Z');
+  // Sam still sees W45's unseen reward despite skipping W46.
+  const samView = s.app.runnerWeekly('sam');
+  assert.equal(samView.lastWeek?.week, '2026-W45');
+  assert.equal(samView.lastWeek?.rank, 2);
+  assert.equal(samView.lastWeek?.crates, 1);
+  // Marking W45 seen clears it.
+  assert.equal(s.app.runnerWeeklySeen('sam', { week: '2026-W45' }).lastWeek, null);
+  assert.equal(s.app.runnerWeekly('sam').lastWeek, null);
+  // Kim sees the newest participated week (W46), and once W46 is marked seen does not dig up older W45.
+  assert.equal(s.app.runnerWeekly('kim').lastWeek?.week, '2026-W46');
+  assert.equal(s.app.runnerWeeklySeen('kim', { week: '2026-W46' }).lastWeek, null);
+  assert.equal(s.app.runnerWeekly('kim').lastWeek, null);
+});

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -83,7 +84,6 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
   bool _busy = false;
   bool _loading = false;
   String? _error;
-  Timer? _clock;
 
   DailyMissions? get _missions => widget.missions ?? _loaded;
 
@@ -95,9 +95,6 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
     super.initState();
     _preferences.addListener(_preferencesChanged);
     if (widget.missions == null) _load();
-    _clock = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (mounted) setState(() {});
-    });
   }
 
   void _preferencesChanged() {
@@ -106,7 +103,6 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
 
   @override
   void dispose() {
-    _clock?.cancel();
     _preferences.removeListener(_preferencesChanged);
     if (widget.preferences == null) _preferences.dispose();
     super.dispose();
@@ -201,9 +197,8 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Tagesmissionen', style: theme.textTheme.titleMedium),
-                      Text(
-                        'Reset: ${missionResetCountdown(widget.controller.now)}',
-                        key: const ValueKey('missions-reset'),
+                      _MissionResetText(
+                        controller: widget.controller,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.hintColor,
                         ),
@@ -405,12 +400,10 @@ class _MissionRow extends StatelessWidget {
               children: [
                 Text('${m.slotLabel} · ${m.textFor(names)}'),
                 const SizedBox(height: 4),
-                ClipRRect(
+                LinearProgressIndicator(
+                  value: m.fraction,
+                  minHeight: 5,
                   borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: m.fraction,
-                    minHeight: 5,
-                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -480,7 +473,9 @@ class MissionRunNote extends StatelessWidget {
           TweenAnimationBuilder<double>(
             key: const ValueKey('runner-missions-all'),
             tween: Tween(begin: .6, end: 1),
-            duration: const Duration(milliseconds: 600),
+            duration: (MediaQuery.maybeDisableAnimationsOf(context) ?? false)
+                ? Duration.zero
+                : const Duration(milliseconds: 600),
             curve: Curves.elasticOut,
             builder: (context, scale, child) =>
                 Transform.scale(scale: scale, child: child),
@@ -503,6 +498,59 @@ class MissionRunNote extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Isolated countdown line so the 1-minute refresh never rebuilds the whole
+/// missions card and pauses completely while the route is covered.
+class _MissionResetText extends StatefulWidget {
+  const _MissionResetText({required this.controller, this.style});
+  final AppController controller;
+  final TextStyle? style;
+
+  @override
+  State<_MissionResetText> createState() => _MissionResetTextState();
+}
+
+class _MissionResetTextState extends State<_MissionResetText> {
+  Timer? _clock;
+  ValueListenable<TickerModeData>? _ticking;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final ticking = TickerMode.getValuesNotifier(context);
+    if (!identical(ticking, _ticking)) {
+      _ticking?.removeListener(_sync);
+      _ticking = ticking..addListener(_sync);
+    }
+    _sync();
+  }
+
+  void _sync() {
+    final enabled = _ticking?.value.enabled ?? true;
+    if (!enabled) {
+      _clock?.cancel();
+      _clock = null;
+      return;
+    }
+    _clock ??= Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _clock?.cancel();
+    _ticking?.removeListener(_sync);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Text(
+    'Reset: ${missionResetCountdown(widget.controller.now)}',
+    key: const ValueKey('missions-reset'),
+    style: widget.style,
+  );
 }
 
 /// The short banner while running, when a mission is made.

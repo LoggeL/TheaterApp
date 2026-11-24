@@ -53,8 +53,23 @@ class ScriptCue {
 
   /// Whether one of [roleIds] speaks this cue (case-insensitive).
   bool spokenByAny(Iterable<String> roleIds) {
+    if (roleIds.isEmpty) return false;
     final wanted = {for (final id in roleIds) id.trim().toUpperCase()};
-    return roles.any((r) => wanted.contains(r.trim().toUpperCase()));
+    return spokenByNormalized(wanted);
+  }
+
+  /// Faster variant of [spokenByAny] when [upperRoleIds] are already trimmed
+  /// and upper-cased.
+  bool spokenByNormalized(Set<String> upperRoleIds) {
+    if (upperRoleIds.isEmpty) return false;
+    final list = _roles;
+    if (list == null) {
+      return role.isNotEmpty && upperRoleIds.contains(role.trim().toUpperCase());
+    }
+    for (final r in list) {
+      if (upperRoleIds.contains(r.trim().toUpperCase())) return true;
+    }
+    return false;
   }
 
   bool get isTechnical => const {
@@ -115,41 +130,50 @@ class ScriptDocument {
   final DateTime? fetchedAt;
   final bool stale;
   factory ScriptDocument.fromJson(JsonMap json) {
-    final cues =
-        jsonList(
-            json['cues'],
-          ).map((e) => ScriptCue.fromJson(jsonMap(e))).toList()
-          ..sort((a, b) => a.ordinal.compareTo(b.ordinal));
-    final scenes = jsonList(json['scenes']).map((e) {
-      final scene = ScriptScene.fromJson(jsonMap(e));
-      return ScriptScene(
-        id: scene.id,
-        title: scene.title,
-        ordinal: scene.ordinal,
-        roles: scene.roles.isNotEmpty
-            ? scene.roles
-            : cues
-                  .where(
-                    (c) =>
-                        c.sceneId == scene.id &&
-                        c.kind == 'dialogue' &&
-                        c.roles.isNotEmpty,
-                  )
-                  .expand((c) => c.roles)
-                  .toSet()
-                  .toList(),
-      );
-    }).toList()..sort((a, b) => a.ordinal.compareTo(b.ordinal));
+    final cues = [
+      for (final e in jsonList(json['cues'])) ScriptCue.fromJson(readJsonMap(e)),
+    ]..sort((a, b) => a.ordinal.compareTo(b.ordinal));
+    // Collect dialogue speakers per scene in one pass for scenes whose JSON
+    // does not list roles explicitly.
+    Map<String, Set<String>>? sceneSpeakers;
+    List<String> inferredRoles(String sceneId) {
+      if (sceneSpeakers == null) {
+        sceneSpeakers = <String, Set<String>>{};
+        for (final c in cues) {
+          if (c.kind != 'dialogue' || c.roles.isEmpty) continue;
+          (sceneSpeakers![c.sceneId] ??= <String>{}).addAll(c.roles);
+        }
+      }
+      final set = sceneSpeakers![sceneId];
+      return set == null ? const [] : set.toList();
+    }
+
+    final scenes = [
+      for (final e in jsonList(json['scenes']))
+        () {
+          final scene = ScriptScene.fromJson(readJsonMap(e));
+          return scene.roles.isNotEmpty
+              ? scene
+              : ScriptScene(
+                  id: scene.id,
+                  title: scene.title,
+                  ordinal: scene.ordinal,
+                  roles: inferredRoles(scene.id),
+                );
+        }(),
+    ]..sort((a, b) => a.ordinal.compareTo(b.ordinal));
+    final cache = readJsonMap(json['cache']);
     return ScriptDocument(
       productionId: textValue(json['productionId']),
       revision: textValue(json['revision']),
       cues: cues,
       scenes: scenes,
-      roles: jsonList(
-        json['roles'],
-      ).map((e) => ScriptRole.fromJson(jsonMap(e))).toList(),
-      fetchedAt: dateValue(jsonMap(json['cache'])['fetchedAt']),
-      stale: jsonMap(json['cache'])['stale'] == true,
+      roles: [
+        for (final e in jsonList(json['roles']))
+          ScriptRole.fromJson(readJsonMap(e)),
+      ],
+      fetchedAt: dateValue(cache['fetchedAt']),
+      stale: cache['stale'] == true,
     );
   }
   List<ScriptCue> cuesForScene(String sceneId) =>

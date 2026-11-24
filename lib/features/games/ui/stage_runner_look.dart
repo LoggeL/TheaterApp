@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -728,10 +729,11 @@ class RunnerTrail {
   final life = Float32List(size), radius = Float32List(size);
   final spin = Float32List(size), tint = Uint8List(size);
   int _next = 0;
+  int _activeTrail = 0;
   double _carry = 0;
 
   RunnerEffectStyle? _style;
-  List<Paint> _paints = const [];
+  List<int> _colorValues = const [0xFFFFF4C2];
 
   /// Particles per second and how long they last, by trail.
   static (double, double) _rate(String trail) => switch (trail) {
@@ -756,19 +758,157 @@ class RunnerTrail {
   final glintSize = Float32List(glints);
   final glintTint = Uint8List(glints), glintLeft = Uint8List(glints);
   int _nextGlint = 0;
+  int _activeGlints = 0;
   double _glintCarry = 0;
+
+  // Lazily allocated vertex buffers so glints and all trail styles (confetti,
+  // stars, smoke, sparkle) batch into a single drawVertices call (avoiding
+  // concave Path triangulation, per-particle save/rotate/restore, and mid-run
+  // Circle shader compiles in CanvasKit WebGL).
+  Float32List? _glintPos;
+  Int32List? _glintCol;
+  Float32List? _trailPos;
+  Int32List? _trailCol;
+  static const _discSegs = 12;
+  static const _discVerts = _discSegs + 1;
+  static final _discCos = Float32List.fromList([
+    for (var i = 0; i < _discSegs; i++) cos(i * 2 * pi / _discSegs),
+  ]);
+  static final _discSin = Float32List.fromList([
+    for (var i = 0; i < _discSegs; i++) sin(i * 2 * pi / _discSegs),
+  ]);
+  static final _starIdx = _buildStarIndices(max(size, glints));
+  static final _quadIdx = _buildQuadIndices(size);
+  static final _discIdx = _buildDiscIndices(size);
+  static final _vertexPaint = Paint();
+
+  static Uint16List _buildDiscIndices(int count) {
+    final idx = Uint16List(count * _discSegs * 3);
+    for (var k = 0; k < count; k++) {
+      final center = k * _discVerts;
+      var o = k * _discSegs * 3;
+      for (var s = 0; s < _discSegs; s++) {
+        idx[o++] = center;
+        idx[o++] = center + 1 + s;
+        idx[o++] = center + 1 + ((s + 1) % _discSegs);
+      }
+    }
+    return idx;
+  }
+
+  static void _writeDisc(
+    Float32List pos,
+    Int32List col,
+    int slot,
+    double cx,
+    double cy,
+    double r,
+    int argb,
+  ) {
+    var p = slot * _discVerts * 2;
+    var c = slot * _discVerts;
+    pos[p++] = cx;
+    pos[p++] = cy;
+    col[c++] = argb;
+    for (var s = 0; s < _discSegs; s++) {
+      pos[p++] = cx + _discCos[s] * r;
+      pos[p++] = cy + _discSin[s] * r;
+      col[c++] = argb;
+    }
+  }
+
+  static Uint16List _buildStarIndices(int count) {
+    final idx = Uint16List(count * 18);
+    for (var k = 0; k < count; k++) {
+      final v = k * 8, o = k * 18;
+      // Inner square (0:tl, 1:tr, 2:br, 3:bl) + 4 outer tips (4:t, 5:r, 6:b, 7:l).
+      idx[o] = v;
+      idx[o + 1] = v + 1;
+      idx[o + 2] = v + 2;
+      idx[o + 3] = v;
+      idx[o + 4] = v + 2;
+      idx[o + 5] = v + 3;
+      idx[o + 6] = v + 4;
+      idx[o + 7] = v + 1;
+      idx[o + 8] = v;
+      idx[o + 9] = v + 1;
+      idx[o + 10] = v + 5;
+      idx[o + 11] = v + 2;
+      idx[o + 12] = v + 2;
+      idx[o + 13] = v + 6;
+      idx[o + 14] = v + 3;
+      idx[o + 15] = v + 3;
+      idx[o + 16] = v + 7;
+      idx[o + 17] = v;
+    }
+    return idx;
+  }
+
+  static Uint16List _buildQuadIndices(int count) {
+    final idx = Uint16List(count * 6);
+    for (var k = 0; k < count; k++) {
+      final v = k * 4, o = k * 6;
+      idx[o] = v;
+      idx[o + 1] = v + 1;
+      idx[o + 2] = v + 2;
+      idx[o + 3] = v;
+      idx[o + 4] = v + 2;
+      idx[o + 5] = v + 3;
+    }
+    return idx;
+  }
+
+  static void _writeStar(
+    Float32List pos,
+    Int32List col,
+    int slot,
+    double cx,
+    double cy,
+    double r,
+    double w,
+    int argb,
+  ) {
+    final p = slot * 16;
+    pos[p] = cx - w;
+    pos[p + 1] = cy - w;
+    pos[p + 2] = cx + w;
+    pos[p + 3] = cy - w;
+    pos[p + 4] = cx + w;
+    pos[p + 5] = cy + w;
+    pos[p + 6] = cx - w;
+    pos[p + 7] = cy + w;
+    pos[p + 8] = cx;
+    pos[p + 9] = cy - r;
+    pos[p + 10] = cx + r;
+    pos[p + 11] = cy;
+    pos[p + 12] = cx;
+    pos[p + 13] = cy + r;
+    pos[p + 14] = cx - r;
+    pos[p + 15] = cy;
+    final c = slot * 8;
+    for (var j = 0; j < 8; j++) {
+      col[c + j] = argb;
+    }
+  }
 
   void update(double dt, StageRunner game, RunnerEffectStyle? style) {
     dt = dt.clamp(0, .05).toDouble();
     _time += dt;
     // The trail stays where it was left: the stage moves on under it.
-    final drift = game.over ? 0.0 : game.speed * dt;
-    for (var i = 0; i < size; i++) {
-      if (life[i] <= 0) continue;
-      life[i] -= dt;
-      x[i] += vx[i] * dt - drift;
-      y[i] += vy[i] * dt;
-      spin[i] += dt * 6;
+    if (_activeTrail > 0) {
+      final drift = game.over ? 0.0 : game.speed * dt;
+      var active = 0;
+      for (var i = 0; i < size; i++) {
+        final remaining = life[i];
+        if (remaining <= 0) continue;
+        final next = remaining - dt;
+        life[i] = next;
+        x[i] += vx[i] * dt - drift;
+        y[i] += vy[i] * dt;
+        spin[i] += dt * 6;
+        if (next > 0) active++;
+      }
+      _activeTrail = active;
     }
     _updateGlints(dt, game, style);
     if (style == null || style.trail.isEmpty || game.over) return;
@@ -778,6 +918,7 @@ class RunnerTrail {
       _carry -= 1;
       final i = _next;
       _next = (_next + 1) % size;
+      if (life[i] <= 0) _activeTrail++;
       x[i] = StageRunner.runnerX - .03 + _random.nextDouble() * .02;
       y[i] =
           game.y + (_random.nextDouble() - .5) * StageRunner.runnerHeight * .6;
@@ -799,15 +940,22 @@ class RunnerTrail {
   }
 
   void _updateGlints(double dt, StageRunner game, RunnerEffectStyle? style) {
-    for (var i = 0; i < glints; i++) {
-      if (glintLife[i] <= 0) continue;
-      glintLife[i] -= dt;
-      // Left behind, they fall back at their own pace whatever the speed
-      // of the run: the trail stays short.
-      if (glintLeft[i] == 1) {
-        glintX[i] -= .3 * dt;
-        glintY[i] += .03 * dt;
+    if (_activeGlints > 0) {
+      var active = 0;
+      for (var i = 0; i < glints; i++) {
+        final remaining = glintLife[i];
+        if (remaining <= 0) continue;
+        final next = remaining - dt;
+        glintLife[i] = next;
+        // Left behind, they fall back at their own pace whatever the speed
+        // of the run: the trail stays short.
+        if (glintLeft[i] == 1) {
+          glintX[i] -= .3 * dt;
+          glintY[i] += .03 * dt;
+        }
+        if (next > 0) active++;
       }
+      _activeGlints = active;
     }
     if (style == null || !style.shine) return;
     final flying =
@@ -818,6 +966,7 @@ class RunnerTrail {
       _glintCarry -= 1;
       final i = _nextGlint;
       _nextGlint = (_nextGlint + 1) % glints;
+      if (glintLife[i] <= 0) _activeGlints++;
       final behind = flying && _random.nextDouble() < .55;
       glintLeft[i] = behind ? 1 : 0;
       if (behind) {
@@ -844,82 +993,185 @@ class RunnerTrail {
   /// [body]; [s] is the stage height in pixels. Nothing else: no light on
   /// the stage, so the shine belongs to the figure wherever it is.
   void paintGlints(Canvas canvas, Rect body, double s) {
+    if (_activeGlints == 0) return;
+    final pos = _glintPos ??= Float32List(glints * 16);
+    final col = _glintCol ??= Int32List(glints * 8);
     final cx = (body.left + body.right) / 2, hx = body.width / 2;
     final cy = (body.top + body.bottom) / 2, hy = body.height / 2;
+    var count = 0;
     for (var i = 0; i < glints; i++) {
       final l = glintLife[i];
       if (l <= 0) continue;
       // Each glint grows, flashes and fades again.
       final flash = sin(pi * l / glintSpan[i]);
       final behind = glintLeft[i] == 1;
-      _glint.color = shineColor(glintTint[i], flash);
-      paintGlintAt(
-        canvas,
+      final r = glintSize[i] * s * (.35 + .65 * flash);
+      _writeStar(
+        pos,
+        col,
+        count++,
         behind ? glintX[i] * s : cx + glintX[i] * hx,
         behind ? glintY[i] * s : cy + glintY[i] * hy,
-        glintSize[i] * s * (.35 + .65 * flash),
-        _glint,
+        r,
+        r * .22,
+        shineColor(glintTint[i], flash).toARGB32(),
       );
     }
+    if (count == 0) return;
+    final vertices = ui.Vertices.raw(
+      ui.VertexMode.triangles,
+      Float32List.sublistView(pos, 0, count * 16),
+      colors: Int32List.sublistView(col, 0, count * 8),
+      indices: Uint16List.sublistView(_starIdx, 0, count * 18),
+    );
+    canvas.drawVertices(vertices, BlendMode.dst, _vertexPaint);
+    vertices.dispose();
   }
 
-  final _path = Path();
-
   void paint(Canvas canvas, double s, RunnerEffectStyle? style) {
-    if (style == null) return;
-    if (style.trail.isEmpty) return;
+    if (style == null || style.trail.isEmpty || _activeTrail == 0) return;
     if (!identical(style, _style)) {
       _style = style;
       final colors = style.colors.isEmpty
           ? const [Color(0xFFFFF4C2)]
           : style.colors;
-      _paints = [
-        for (final c in colors)
-          Paint()
-            ..color = style.trail == 'smoke' ? c.withValues(alpha: .28) : c,
+      final smoke = style.trail == 'smoke';
+      _colorValues = [
+        for (final c in colors) (smoke ? c.withValues(alpha: .28) : c).toARGB32(),
       ];
     }
     final (_, lifetime) = _rate(style.trail);
-    for (var i = 0; i < size; i++) {
-      final l = life[i];
-      if (l <= 0) continue;
-      final paint = _paints[tint[i] % _paints.length];
-      final c = Offset(x[i] * s, y[i] * s);
-      final fade = min(1.0, l / lifetime * 2);
-      switch (style.trail) {
-        case 'smoke':
+    final invHalfLife = 2 / lifetime;
+    final colorCount = _colorValues.length;
+    switch (style.trail) {
+      case 'confetti':
+        final pos = _trailPos ??= Float32List(size * _discVerts * 2);
+        final col = _trailCol ??= Int32List(size * _discVerts);
+        var count = 0;
+        for (var i = 0; i < size; i++) {
+          final l = life[i];
+          if (l <= 0) continue;
+          final fade = min(1.0, l * invHalfLife);
+          final r = radius[i] * s * fade;
+          final h = r * .5;
+          final cx = x[i] * s, cy = y[i] * s;
+          final a = spin[i], cosA = cos(a), sinA = sin(a);
+          final dx1 = r * cosA, dy1 = r * sinA;
+          final dx2 = -h * sinA, dy2 = h * cosA;
+          final p = count * 8;
+          pos[p] = cx - dx1 - dx2;
+          pos[p + 1] = cy - dy1 - dy2;
+          pos[p + 2] = cx + dx1 - dx2;
+          pos[p + 3] = cy + dy1 - dy2;
+          pos[p + 4] = cx + dx1 + dx2;
+          pos[p + 5] = cy + dy1 + dy2;
+          pos[p + 6] = cx - dx1 + dx2;
+          pos[p + 7] = cy - dy1 + dy2;
+          final argb = _colorValues[tint[i] % colorCount];
+          final c = count * 4;
+          col[c] = argb;
+          col[c + 1] = argb;
+          col[c + 2] = argb;
+          col[c + 3] = argb;
+          count++;
+        }
+        if (count == 0) return;
+        final vertices = ui.Vertices.raw(
+          ui.VertexMode.triangles,
+          Float32List.sublistView(pos, 0, count * 8),
+          colors: Int32List.sublistView(col, 0, count * 4),
+          indices: Uint16List.sublistView(_quadIdx, 0, count * 6),
+        );
+        canvas.drawVertices(vertices, BlendMode.dst, _vertexPaint);
+        vertices.dispose();
+      case 'stars':
+        final pos = _trailPos ??= Float32List(size * _discVerts * 2);
+        final col = _trailCol ??= Int32List(size * _discVerts);
+        var count = 0;
+        for (var i = 0; i < size; i++) {
+          final l = life[i];
+          if (l <= 0) continue;
+          final fade = min(1.0, l * invHalfLife);
+          final r = radius[i] * s * fade;
+          _writeStar(
+            pos,
+            col,
+            count++,
+            x[i] * s,
+            y[i] * s,
+            r,
+            r * .3,
+            _colorValues[tint[i] % colorCount],
+          );
+        }
+        if (count == 0) return;
+        final vertices = ui.Vertices.raw(
+          ui.VertexMode.triangles,
+          Float32List.sublistView(pos, 0, count * 16),
+          colors: Int32List.sublistView(col, 0, count * 8),
+          indices: Uint16List.sublistView(_starIdx, 0, count * 18),
+        );
+        canvas.drawVertices(vertices, BlendMode.dst, _vertexPaint);
+        vertices.dispose();
+      case 'smoke':
+        final pos = _trailPos ??= Float32List(size * _discVerts * 2);
+        final col = _trailCol ??= Int32List(size * _discVerts);
+        var count = 0;
+        for (var i = 0; i < size; i++) {
+          final l = life[i];
+          if (l <= 0) continue;
+          final fade = min(1.0, l * invHalfLife);
           // Grows while it fades.
-          canvas.drawCircle(c, radius[i] * s * (2 - fade), paint);
-        case 'confetti':
-          final r = radius[i] * s * fade;
-          canvas
-            ..save()
-            ..translate(c.dx, c.dy)
-            ..rotate(spin[i])
-            ..drawRect(Rect.fromLTWH(-r, -r * .5, r * 2, r), paint)
-            ..restore();
-        case 'stars':
-          final r = radius[i] * s * fade;
-          _path
-            ..reset()
-            ..moveTo(c.dx, c.dy - r)
-            ..lineTo(c.dx + r * .3, c.dy - r * .3)
-            ..lineTo(c.dx + r, c.dy)
-            ..lineTo(c.dx + r * .3, c.dy + r * .3)
-            ..lineTo(c.dx, c.dy + r)
-            ..lineTo(c.dx - r * .3, c.dy + r * .3)
-            ..lineTo(c.dx - r, c.dy)
-            ..lineTo(c.dx - r * .3, c.dy - r * .3)
-            ..close();
-          canvas.drawPath(_path, paint);
-        default:
-          canvas.drawCircle(c, radius[i] * s * fade, paint);
-      }
+          _writeDisc(
+            pos,
+            col,
+            count++,
+            x[i] * s,
+            y[i] * s,
+            radius[i] * s * (2 - fade),
+            _colorValues[tint[i] % colorCount],
+          );
+        }
+        if (count == 0) return;
+        final vertices = ui.Vertices.raw(
+          ui.VertexMode.triangles,
+          Float32List.sublistView(pos, 0, count * _discVerts * 2),
+          colors: Int32List.sublistView(col, 0, count * _discVerts),
+          indices: Uint16List.sublistView(_discIdx, 0, count * _discSegs * 3),
+        );
+        canvas.drawVertices(vertices, BlendMode.dst, _vertexPaint);
+        vertices.dispose();
+      default:
+        final pos = _trailPos ??= Float32List(size * _discVerts * 2);
+        final col = _trailCol ??= Int32List(size * _discVerts);
+        var count = 0;
+        for (var i = 0; i < size; i++) {
+          final l = life[i];
+          if (l <= 0) continue;
+          final fade = min(1.0, l * invHalfLife);
+          _writeDisc(
+            pos,
+            col,
+            count++,
+            x[i] * s,
+            y[i] * s,
+            radius[i] * s * fade,
+            _colorValues[tint[i] % colorCount],
+          );
+        }
+        if (count == 0) return;
+        final vertices = ui.Vertices.raw(
+          ui.VertexMode.triangles,
+          Float32List.sublistView(pos, 0, count * _discVerts * 2),
+          colors: Int32List.sublistView(col, 0, count * _discVerts),
+          indices: Uint16List.sublistView(_discIdx, 0, count * _discSegs * 3),
+        );
+        canvas.drawVertices(vertices, BlendMode.dst, _vertexPaint);
+        vertices.dispose();
     }
   }
 }
 
-final _glint = Paint();
 final _glintPath = Path();
 
 /// Gold, white and a touch of colour: the glints of a shiny character.
@@ -973,11 +1225,12 @@ void paintGlintAt(
 /// The figure's own pixels in gold: the colour filter keeps only the shape
 /// of the picture. The paints are made once; per frame only their opacity
 /// changes, to one of a fixed set of colours.
+const _shineFilterQuality = kIsWeb ? FilterQuality.low : FilterQuality.medium;
 final _rimPaint = Paint()
-  ..filterQuality = FilterQuality.medium
+  ..filterQuality = _shineFilterQuality
   ..colorFilter = const ColorFilter.mode(Color(0xFFFFD86B), BlendMode.srcIn);
 final _sheenFill = Paint()
-  ..filterQuality = FilterQuality.medium
+  ..filterQuality = _shineFilterQuality
   ..colorFilter = const ColorFilter.mode(Color(0xFFFFF4C2), BlendMode.srcIn);
 final _sheenLayer = Paint()..blendMode = BlendMode.plus;
 

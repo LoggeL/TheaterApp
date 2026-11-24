@@ -153,6 +153,15 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
     vsync: this,
     duration: const Duration(milliseconds: 900),
   );
+  late final Listenable _revealAnim = Listenable.merge([_glow, _pop]);
+  late final CurvedAnimation _elasticPop = CurvedAnimation(
+    parent: _pop,
+    curve: Curves.elasticOut,
+  );
+  late final CurvedAnimation _easeOutBackPop = CurvedAnimation(
+    parent: _pop,
+    curve: Curves.easeOutBack,
+  );
   final _position = ValueNotifier<double>(0);
   _Phase _phase = _Phase.opening;
   CrateOpening? _result;
@@ -271,6 +280,8 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
   @override
   void dispose() {
     _ticker.dispose();
+    _elasticPop.dispose();
+    _easeOutBackPop.dispose();
     _glow.dispose();
     _pop.dispose();
     _position.dispose();
@@ -591,8 +602,7 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
         for (final t in w.trades)
           (
             price: t.cost,
-            label:
-                'Tauschvertrag (${w.catalog.rarities.where((r) => r.id == t.to).firstOrNull?.name ?? t.to})',
+            label: 'Tauschvertrag (${w.catalog.rarity(t.to)?.name ?? t.to})',
           ),
       ]..sort((a, b) => a.price.compareTo(b.price));
       if (offers.isNotEmpty) {
@@ -718,9 +728,15 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
 
   void _reveal() {
     widget.sound.play(_jackpot ? RunnerSfx.jackpot : RunnerSfx.reveal);
+    final reduced = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     setState(() => _phase = _Phase.revealed);
-    _pop.forward(from: 0);
-    _glow.repeat();
+    if (reduced) {
+      _pop.value = 1;
+      _glow.value = 0;
+    } else {
+      _pop.forward(from: 0);
+      _glow.repeat();
+    }
   }
 
   void _skip() {
@@ -1034,13 +1050,13 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
       children: [
         Positioned.fill(
           child: IgnorePointer(
-            child: AnimatedBuilder(
-              animation: Listenable.merge([_glow, _pop]),
-              builder: (context, _) => CustomPaint(
+            child: RepaintBoundary(
+              child: CustomPaint(
                 painter: _GlowPainter(
                   colors,
-                  _glow.value,
-                  _pop.value,
+                  _glow,
+                  _pop,
+                  _revealAnim,
                   jackpot: jackpot,
                 ),
               ),
@@ -1054,64 +1070,76 @@ class _CrateOpeningPageState extends State<CrateOpeningPage>
             children: [
               if (shine)
                 ScaleTransition(
-                  scale: CurvedAnimation(
-                    parent: _pop,
-                    curve: Curves.elasticOut,
-                  ),
-                  child: AnimatedBuilder(
-                    animation: _glow,
-                    builder: (context, child) => ShaderMask(
-                      blendMode: BlendMode.srcIn,
-                      shaderCallback: (bounds) => LinearGradient(
-                        colors: const [
-                          Color(0xFFFFD86B),
-                          Color(0xFFFFFFFF),
-                          Color(0xFFB8F1FF),
-                          Color(0xFFFFC2F0),
-                          Color(0xFFFFD86B),
-                        ],
-                        transform: GradientRotation(_glow.value * 2 * pi),
-                      ).createShader(bounds),
-                      child: child,
-                    ),
-                    child: const Text(
-                      'GLANZ!',
-                      key: ValueKey('crate-shine'),
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 44,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 6,
-                        shadows: [
-                          Shadow(color: Color(0xFFFFE7A3), blurRadius: 28),
-                        ],
-                      ),
+                  scale: _elasticPop,
+                  child: RepaintBoundary(
+                    child: AnimatedBuilder(
+                      animation: _glow,
+                      builder: (context, _) {
+                        // Direct foreground shader avoids ShaderMask's per-frame
+                        // offscreen saveLayer FBO on CanvasKit/iOS WebGL.
+                        final paint = Paint()
+                          ..shader = LinearGradient(
+                            colors: const [
+                              Color(0xFFFFD86B),
+                              Color(0xFFFFFFFF),
+                              Color(0xFFB8F1FF),
+                              Color(0xFFFFC2F0),
+                              Color(0xFFFFD86B),
+                            ],
+                            transform: GradientRotation(_glow.value * 2 * pi),
+                            tileMode: TileMode.mirror,
+                          ).createShader(const Rect.fromLTWH(0, 0, 260, 56));
+                        return Text(
+                          'GLANZ!',
+                          key: const ValueKey('crate-shine'),
+                          style: TextStyle(
+                            foreground: paint,
+                            fontSize: 44,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 6,
+                            shadows: kIsWeb
+                                ? const [
+                                    Shadow(
+                                      color: Color(0x88FFE7A3),
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ]
+                                : const [
+                                    Shadow(
+                                      color: Color(0xFFFFE7A3),
+                                      blurRadius: 28,
+                                    ),
+                                  ],
+                          ),
+                        );
+                      },
                     ),
                   ),
                 )
               else if (jackpot)
                 ScaleTransition(
-                  scale: CurvedAnimation(
-                    parent: _pop,
-                    curve: Curves.elasticOut,
-                  ),
-                  child: Text(
-                    '${rarity.name.toUpperCase()}!',
-                    style: TextStyle(
-                      color: rarity.color,
-                      fontSize: 40,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 4,
-                      shadows: [Shadow(color: rarity.color, blurRadius: 24)],
+                  scale: _elasticPop,
+                  child: RepaintBoundary(
+                    child: Text(
+                      '${rarity.name.toUpperCase()}!',
+                      style: TextStyle(
+                        color: rarity.color,
+                        fontSize: 40,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 4,
+                        shadows: [
+                          Shadow(
+                            color: rarity.color,
+                            blurRadius: kIsWeb ? 8 : 24,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               const SizedBox(height: 12),
               ScaleTransition(
-                scale: CurvedAnimation(
-                  parent: _pop,
-                  curve: jackpot ? Curves.elasticOut : Curves.easeOutBack,
-                ),
+                scale: jackpot ? _elasticPop : _easeOutBackPop,
                 child: SizedBox(
                   width: 200,
                   height: 250,
@@ -1320,7 +1348,17 @@ class _ShakingCrateState extends State<_ShakingCrate> {
   late final AnimationController _shake = AnimationController(
     vsync: widget.vsync,
     duration: const Duration(milliseconds: 420),
-  )..repeat();
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      _shake.stop();
+    } else if (!_shake.isAnimating) {
+      _shake.repeat();
+    }
+  }
 
   @override
   void dispose() {
@@ -1329,12 +1367,23 @@ class _ShakingCrateState extends State<_ShakingCrate> {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _shake,
-    builder: (context, child) =>
-        Transform.rotate(angle: sin(_shake.value * 2 * pi) * .08, child: child),
-    child: const Icon(Icons.inventory_2, size: 96, color: Color(0xFFB07A45)),
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: AnimatedBuilder(
+      animation: _shake,
+      builder: (context, child) => Transform.rotate(
+        angle: sin(_shake.value * 2 * pi) * .08,
+        child: child,
+      ),
+      child: const Icon(Icons.inventory_2, size: 96, color: Color(0xFFB07A45)),
+    ),
   );
+}
+
+class _ReelCardStyle {
+  _ReelCardStyle(this.antique, this.ground, this.bar, this.name);
+  final bool antique;
+  final Paint ground, bar;
+  final TextPainter name;
 }
 
 /// The reel: cards side by side, the marker in the middle. Everything is
@@ -1360,7 +1409,8 @@ class _ReelPainter extends CustomPainter {
   final bool dim;
 
   static const _gap = 8.0;
-  final _names = <String, TextPainter>{};
+  static const _cardRadius = Radius.circular(10);
+  final _styles = <String, _ReelCardStyle>{};
   final _bars = <String, Paint>{};
   final _grounds = <String, Paint>{};
   static final _ink = Paint()..color = wardrobeInk;
@@ -1369,22 +1419,46 @@ class _ReelPainter extends CustomPainter {
     ..color = const Color(0xFFFFE7A3)
     ..strokeWidth = 3;
   static final _shade = Paint()..color = const Color(0xD0000000);
+  static final _markerPath = Path();
 
-  TextPainter _name(WardrobeItem item) => _names[item.id] ??= TextPainter(
-    text: TextSpan(
-      text: item.name,
-      style: TextStyle(
-        // On the web the bundled font avoids loading fallback fonts.
-        fontFamily: kIsWeb ? 'Roboto' : null,
-        color: Colors.white,
-        fontSize: cardWidth * .11,
-        fontWeight: FontWeight.w700,
-      ),
-    ),
-    maxLines: 1,
-    ellipsis: '…',
-    textDirection: TextDirection.ltr,
-  )..layout(maxWidth: cardWidth - 12);
+  Size? _fadeSize;
+  late Rect _leftFadeRect, _rightFadeRect;
+  late Paint _leftFadePaint, _rightFadePaint;
+
+  _ReelCardStyle _styleFor(WardrobeItem item, double h) =>
+      _styles[item.id] ??= () {
+        final colors = rarityColors(catalog, item);
+        final antique = catalog.rarityOf(item).antique;
+        final key = colors.map((c) => c.toARGB32()).join(',');
+        final ground = _grounds[key] ??= Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.transparent, colors.first.withValues(alpha: .38)],
+          ).createShader(Rect.fromLTWH(0, 0, cardWidth, h));
+        final bar = _bars[key] ??= colors.length == 1
+            ? (Paint()..color = colors.first)
+            : (Paint()
+                ..shader = rarityGradient(
+                  colors,
+                ).createShader(Rect.fromLTWH(0, h - 7, cardWidth, 7)));
+        final name = TextPainter(
+          text: TextSpan(
+            text: item.name,
+            style: TextStyle(
+              // On the web the bundled font avoids loading fallback fonts.
+              fontFamily: kIsWeb ? 'Roboto' : null,
+              color: Colors.white,
+              fontSize: cardWidth * .11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          maxLines: 1,
+          ellipsis: '…',
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: cardWidth - 12);
+        return _ReelCardStyle(antique, ground, bar, name);
+      }();
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1393,83 +1467,76 @@ class _ReelPainter extends CustomPainter {
     final p = position.value;
     final first = max(0, (p - center / pitch - 1).floor());
     final last = min(items.length - 1, (p + center / pitch + 1).ceil());
+    final localCard = RRect.fromLTRBR(0, 0, cardWidth, h, _cardRadius);
+    final artRect = Rect.fromLTWH(8, 8, cardWidth - 16, h * .66);
+    final barRRect = RRect.fromRectAndCorners(
+      Rect.fromLTWH(0, h - 7, cardWidth, 7),
+      bottomLeft: _cardRadius,
+      bottomRight: _cardRadius,
+    );
+    final nameOffset = Offset(6, h * .72);
     for (var i = first; i <= last; i++) {
       final item = items[i];
+      final style = _styleFor(item, h);
       final left = center + (i - p) * pitch - cardWidth / 2;
-      final rect = Rect.fromLTWH(left, top, cardWidth, h);
-      final colors = rarityColors(catalog, item);
-      final antique = catalog.rarityOf(item).antique;
-      final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(10));
-      canvas.drawRRect(rrect, antique ? _antiqueInk : _ink);
       canvas.save();
-      canvas.clipRRect(rrect);
       canvas.translate(left, top);
-      final key = colors.map((c) => c.toARGB32()).join(',');
-      canvas.drawRect(
-        Rect.fromLTWH(0, 0, cardWidth, h),
-        _grounds[key] ??= Paint()
-          ..shader = LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.transparent, colors.first.withValues(alpha: .38)],
-          ).createShader(Rect.fromLTWH(0, 0, cardWidth, h)),
-      );
+      // Draw rounded card directly without per-card clipRRect stencil passes.
+      canvas.drawRRect(localCard, style.antique ? _antiqueInk : _ink);
+      canvas.drawRRect(localCard, style.ground);
       paintItemArt(
         canvas,
-        Rect.fromLTWH(8, 8, cardWidth - 16, h * .66),
+        artRect,
         item,
         art,
-        antique: antique,
+        antique: style.antique,
         portrait: pictures[item.thumb ?? item.portrait],
+        lowQuality: kIsWeb,
       );
-      final name = _name(item);
-      name.paint(canvas, Offset(6, h * .72));
-      canvas.drawRect(
-        Rect.fromLTWH(0, h - 7, cardWidth, 7),
-        _bars[key] ??= Paint()
-          ..shader = rarityGradient(
-            colors,
-          ).createShader(Rect.fromLTWH(0, 0, cardWidth, 7)),
-      );
+      style.name.paint(canvas, nameOffset);
+      canvas.drawRRect(barRRect, style.bar);
       canvas.restore();
     }
     // Edges fade into the dark, so the eye stays on the marker.
-    final fade = size.width * .18;
-    for (final leftSide in [true, false]) {
-      final r = leftSide
-          ? Rect.fromLTWH(0, 0, fade, size.height)
-          : Rect.fromLTWH(size.width - fade, 0, fade, size.height);
-      canvas.drawRect(
-        r,
-        Paint()
-          ..shader = LinearGradient(
-            begin: leftSide ? Alignment.centerLeft : Alignment.centerRight,
-            end: leftSide ? Alignment.centerRight : Alignment.centerLeft,
-            colors: const [Color(0xF2101412), Color(0x00101412)],
-          ).createShader(r),
-      );
+    if (_fadeSize != size) {
+      _fadeSize = size;
+      final fade = size.width * .18;
+      _leftFadeRect = Rect.fromLTWH(0, 0, fade, size.height);
+      _rightFadeRect = Rect.fromLTWH(size.width - fade, 0, fade, size.height);
+      _leftFadePaint = Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [Color(0xF2101412), Color(0x00101412)],
+        ).createShader(_leftFadeRect);
+      _rightFadePaint = Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.centerRight,
+          end: Alignment.centerLeft,
+          colors: [Color(0xF2101412), Color(0x00101412)],
+        ).createShader(_rightFadeRect);
     }
+    canvas.drawRect(_leftFadeRect, _leftFadePaint);
+    canvas.drawRect(_rightFadeRect, _rightFadePaint);
     // Behind the won card the reel only sets the scene: dark enough for the
     // title and rarity in front, and without the marker running through them.
     if (dim) {
       canvas.drawRect(Offset.zero & size, _shade);
       return;
     }
-    canvas.drawLine(
-      Offset(center, top - 14),
-      Offset(center, top + h + 14),
-      _marker,
-    );
-    for (final (y, dir) in [(top - 14, 1.0), (top + h + 14, -1.0)]) {
-      canvas.drawPath(
-        Path()
-          ..moveTo(center - 9, y)
-          ..lineTo(center + 9, y)
-          ..lineTo(center, y + 11 * dir)
-          ..close(),
-        _marker,
-      );
-    }
+    final topY = top - 14, bottomY = top + h + 14;
+    canvas.drawLine(Offset(center, topY), Offset(center, bottomY), _marker);
+    _markerPath
+      ..reset()
+      ..moveTo(center - 9, topY)
+      ..lineTo(center + 9, topY)
+      ..lineTo(center, topY + 11)
+      ..close()
+      ..moveTo(center - 9, bottomY)
+      ..lineTo(center + 9, bottomY)
+      ..lineTo(center, bottomY - 11)
+      ..close();
+    canvas.drawPath(_markerPath, _marker);
   }
 
   @override
@@ -1483,60 +1550,98 @@ class _ReelPainter extends CustomPainter {
 /// The shine behind the won card: turning rays in the rarity colours; the
 /// rarest rarity gets more of them and a burst of sparks.
 class _GlowPainter extends CustomPainter {
-  _GlowPainter(this.colors, this.turn, this.pop, {this.jackpot = false});
+  _GlowPainter(
+    this.colors,
+    this.turn,
+    this.pop,
+    Listenable repaint, {
+    this.jackpot = false,
+  }) : super(repaint: repaint);
   final List<Color> colors;
-  final double turn, pop;
+  final Animation<double> turn, pop;
   final bool jackpot;
+
+  static final _rayPath = Path();
+  static final _rayPaint = Paint();
+  static final _sparkPaint = Paint();
+  static final _sparks = () {
+    final random = Random(7);
+    return [
+      for (var i = 0; i < 60; i++)
+        () {
+          final a = random.nextDouble() * 2 * pi;
+          return (
+            cos(a),
+            sin(a),
+            .25 + random.nextDouble() * .55,
+            2.0 + random.nextDouble() * 3.0,
+          );
+        }(),
+    ];
+  }();
+
+  final _haloPaint = Paint();
+  Size? _haloSize;
+  double _haloRadius = -1;
+  Color? _haloColor;
 
   @override
   void paint(Canvas canvas, Size size) {
+    final p = pop.value;
     final c = Offset(size.width / 2, size.height * .42);
     final r =
-        size.longestSide * (jackpot ? .75 : .5) * Curves.easeOut.transform(pop);
+        size.longestSide * (jackpot ? .75 : .5) * Curves.easeOut.transform(p);
     if (r <= 0) return;
-    canvas.drawCircle(
-      c,
-      r,
-      Paint()
-        ..shader = RadialGradient(
-          colors: [
-            colors.first.withValues(alpha: jackpot ? .55 : .4),
-            colors.first.withValues(alpha: 0),
-          ],
-        ).createShader(Rect.fromCircle(center: c, radius: r)),
-    );
+    if (_haloSize != size ||
+        (_haloRadius - r).abs() > .5 ||
+        _haloColor != colors.first) {
+      _haloSize = size;
+      _haloRadius = r;
+      _haloColor = colors.first;
+      _haloPaint.shader = RadialGradient(
+        colors: [
+          colors.first.withValues(alpha: jackpot ? .55 : .4),
+          colors.first.withValues(alpha: 0),
+        ],
+      ).createShader(Rect.fromCircle(center: c, radius: r));
+    }
+    canvas.drawCircle(c, r, _haloPaint);
     final rays = jackpot ? 18 : 10;
+    final baseAngle = turn.value * 2 * pi;
+    final step = 2 * pi / rays;
     for (var i = 0; i < rays; i++) {
-      final a = turn * 2 * pi + i * 2 * pi / rays;
+      final a = baseAngle + i * step;
       final color = colors[i % colors.length];
-      final path = Path()
+      _rayPath
+        ..reset()
         ..moveTo(c.dx, c.dy)
         ..lineTo(c.dx + cos(a - .06) * r, c.dy + sin(a - .06) * r)
         ..lineTo(c.dx + cos(a + .06) * r, c.dy + sin(a + .06) * r)
         ..close();
-      canvas.drawPath(path, Paint()..color = color.withValues(alpha: .16));
+      _rayPaint.color = color.withValues(alpha: .16);
+      canvas.drawPath(_rayPath, _rayPaint);
     }
     if (!jackpot) return;
     // Sparks fly out once and fall.
-    final random = Random(7);
-    final t = pop;
-    for (var i = 0; i < 60; i++) {
-      final a = random.nextDouble() * 2 * pi;
-      final speed = .25 + random.nextDouble() * .55;
-      final d = size.shortestSide * speed * t;
-      final p = c + Offset(cos(a) * d, sin(a) * d + 120 * t * t);
+    final shortest = size.shortestSide;
+    final dropY = 120 * p * p;
+    final alpha = 1 - p * .7;
+    final primarySpark = colors.first.withValues(alpha: alpha);
+    final whiteSpark = Colors.white.withValues(alpha: alpha);
+    final radiusScale = 1 - p * .6;
+    for (var i = 0; i < _sparks.length; i++) {
+      final (ca, sa, speed, radius) = _sparks[i];
+      final d = shortest * speed * p;
+      _sparkPaint.color = i.isEven ? primarySpark : whiteSpark;
       canvas.drawCircle(
-        p,
-        (2 + random.nextDouble() * 3) * (1 - t * .6),
-        Paint()
-          ..color = (i.isEven ? colors.first : Colors.white).withValues(
-            alpha: 1 - t * .7,
-          ),
+        Offset(c.dx + ca * d, c.dy + sa * d + dropY),
+        radius * radiusScale,
+        _sparkPaint,
       );
     }
   }
 
   @override
   bool shouldRepaint(_GlowPainter old) =>
-      old.turn != turn || old.pop != pop || old.colors != colors;
+      old.colors != colors || old.jackpot != jackpot;
 }

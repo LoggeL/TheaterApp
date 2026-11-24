@@ -12,7 +12,16 @@ import 'event_style.dart';
 import 'rsvp/rsvp_status_badge.dart';
 
 // Created once: building a DateFormat parses its pattern.
-final _dayOfMonth = DateFormat('dd'), _weekday = DateFormat('EEE', 'de');
+final _weekday = DateFormat('EEE', 'de');
+final _weekdayUpperCache = List<String?>.filled(7, null);
+
+String _weekdayUpper(DateTime dt) =>
+    _weekdayUpperCache[dt.weekday - 1] ??= _weekday.format(dt).toUpperCase();
+
+String _dayTwoDigits(DateTime dt) {
+  final d = dt.day;
+  return d < 10 ? '0$d' : '$d';
+}
 
 void openEvent(BuildContext context, AppController controller, String id) =>
     openPage(context, EventDetailScreen(controller: controller, eventId: id));
@@ -23,12 +32,17 @@ class EventCard extends StatelessWidget {
     required this.event,
     required this.controller,
     this.isNext = false,
+    this.showBadgeLabel,
   });
   final TheaterEvent event;
   final AppController controller;
 
   /// Marks the chronologically next event of the whole plan.
   final bool isNext;
+
+  /// Optional precomputed badge label visibility so long lists avoid an extra
+  /// per-card [LayoutBuilder] build pass during scrolling.
+  final bool? showBadgeLabel;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -39,6 +53,103 @@ class EventCard extends StatelessWidget {
     final prominent = !past && isProminentKind(event.kind);
     final accent = past ? scheme.onSurfaceVariant : eventAccent(context, event);
     final surface = theme.cardTheme.color ?? scheme.surfaceContainerLow;
+    Widget buildRow(bool showLabel) => Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 48,
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: .1),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            children: [
+              Text(
+                event.startsAt == null
+                    ? '–'
+                    : _dayTwoDigits(event.startsAt!),
+                style: TextStyle(
+                  fontSize: 23,
+                  fontWeight: FontWeight.w800,
+                  color: accent,
+                ),
+              ),
+              Text(
+                event.startsAt == null
+                    ? 'OFFEN'
+                    : _weekdayUpper(event.startsAt!),
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (marker != null || prominent) ...[
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (marker != null) EventMarker(marker),
+                    if (prominent) EventKindPill(event.kind),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+              Text(
+                event.title,
+                style: cancelledTitle(
+                  event,
+                  prominent
+                      ? theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        )
+                      : theme.textTheme.titleMedium,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(eventKindIcon(event.kind), size: 14, color: accent),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      '${eventTypeLabel(event.kind)} · ${eventTime(event)}',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(event.place, style: theme.textTheme.bodySmall),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        if (event.cancelled)
+          const CancelledPill()
+        else if (!event.addressedToMe)
+          const NotInvitedPill()
+        else
+          RsvpStatusBadge(
+            status: displayResponse(event),
+            expectedArrivalAt: event.expectedArrivalAt,
+            locked: responsesClosed(controller, event),
+            emphasizeOpen: !past && !event.fromSlotPool,
+            // The words need room the title cannot spare on small
+            // phones.
+            showLabel: showLabel,
+          ),
+      ],
+    );
     final card = Card(
       color: prominent
           ? Color.alphaBlend(accent.withValues(alpha: .07), surface)
@@ -56,109 +167,12 @@ class EventCard extends StatelessWidget {
         onTap: () => openEvent(context, controller, event.id),
         child: Padding(
           padding: const EdgeInsets.all(17),
-          child: LayoutBuilder(
-            builder: (context, constraints) => Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 48,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: .1),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        event.startsAt == null
-                            ? '–'
-                            : _dayOfMonth.format(event.startsAt!),
-                        style: TextStyle(
-                          fontSize: 23,
-                          fontWeight: FontWeight.w800,
-                          color: accent,
-                        ),
-                      ),
-                      Text(
-                        event.startsAt == null
-                            ? 'OFFEN'
-                            : _weekday.format(event.startsAt!).toUpperCase(),
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
+          child: showBadgeLabel != null
+              ? buildRow(showBadgeLabel!)
+              : LayoutBuilder(
+                  builder: (context, constraints) =>
+                      buildRow(constraints.maxWidth >= 270),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (marker != null || prominent) ...[
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            if (marker != null) EventMarker(marker),
-                            if (prominent) EventKindPill(event.kind),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                      Text(
-                        event.title,
-                        style: cancelledTitle(
-                          event,
-                          prominent
-                              ? theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                )
-                              : theme.textTheme.titleMedium,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          Icon(
-                            eventKindIcon(event.kind),
-                            size: 14,
-                            color: accent,
-                          ),
-                          const SizedBox(width: 5),
-                          Expanded(
-                            child: Text(
-                              '${eventTypeLabel(event.kind)} · ${eventTime(event)}',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 3),
-                      Text(event.place, style: theme.textTheme.bodySmall),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                if (event.cancelled)
-                  const CancelledPill()
-                else if (!event.addressedToMe)
-                  const NotInvitedPill()
-                else
-                  RsvpStatusBadge(
-                    status: displayResponse(event),
-                    expectedArrivalAt: event.expectedArrivalAt,
-                    locked: responsesClosed(controller, event),
-                    emphasizeOpen: !past && !event.fromSlotPool,
-                    // The words need room the title cannot spare on small
-                    // phones.
-                    showLabel: constraints.maxWidth >= 270,
-                  ),
-              ],
-            ),
-          ),
         ),
       ),
     );

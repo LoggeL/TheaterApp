@@ -1,9 +1,10 @@
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
-import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
 import '../../../shared/feedback.dart';
 import '../../../shared/navigation.dart';
@@ -250,9 +251,15 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
   Future<AdminSkinCatalog>? _catalog;
   RunnerArt? _art = RunnerArt.loaded;
   final _search = TextEditingController();
+  String _query = '';
   _Category _category = _Category.all;
   AdminSkinStatus? _status;
   _Sort _sort = _Sort.play;
+
+  AdminSkinCatalog? _cachedCatalog;
+  Map<AdminSkinStatus, int>? _cachedCounts;
+  final _haystacks = <String, String>{};
+  static final _whitespaceRe = RegExp(r'\s+');
 
   bool get _allowed => adminSkinsAvailable(widget.controller);
 
@@ -267,11 +274,18 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
         });
       }
     }
-    _search.addListener(() => setState(() {}));
+    _search.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    final text = _search.text;
+    if (text == _query) return;
+    setState(() => _query = text);
   }
 
   @override
   void dispose() {
+    _search.removeListener(_onSearchChanged);
     _search.dispose();
     super.dispose();
   }
@@ -279,28 +293,53 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
   void _reload() =>
       setState(() => _catalog = loadAdminSkins(widget.controller));
 
-  bool _matches(AdminSkinCatalog data, AdminSkin skin) {
+  void _ensureCatalogCache(AdminSkinCatalog data) {
+    if (identical(_cachedCatalog, data)) return;
+    _cachedCatalog = data;
+    _haystacks.clear();
+    final counts = {for (final s in AdminSkinStatus.values) s: 0};
+    for (final skin in data.skins) {
+      for (final status in skin.statuses) {
+        counts[status] = counts[status]! + 1;
+      }
+    }
+    _cachedCounts = counts;
+  }
+
+  String _haystackOf(AdminSkinCatalog data, AdminSkin skin) =>
+      _haystacks[skin.item.id] ??= () {
+        final item = skin.item;
+        return [
+          item.id,
+          item.name,
+          item.role?.role,
+          item.role?.play,
+          item.role?.year?.toString(),
+          data.catalog.labelOf(item),
+          ...data.catalog.raritiesOf(item).map((r) => r.name),
+          skin.release?.name,
+          statusText(skin),
+          releaseText(skin),
+        ].whereType<String>().join(' ').toLowerCase();
+      }();
+
+  bool _matches(
+    AdminSkinCatalog data,
+    AdminSkin skin,
+    List<String> queryTokens,
+  ) {
     final item = skin.item;
     if (_category != _Category.all &&
         !_categoriesOf(data.catalog, item).contains(_category)) {
       return false;
     }
     if (_status != null && !skin.statuses.contains(_status)) return false;
-    final query = _search.text.trim().toLowerCase();
-    if (query.isEmpty) return true;
-    final haystack = [
-      item.id,
-      item.name,
-      item.role?.role,
-      item.role?.play,
-      item.role?.year?.toString(),
-      data.catalog.labelOf(item),
-      ...data.catalog.raritiesOf(item).map((r) => r.name),
-      skin.release?.name,
-      statusText(skin),
-      releaseText(skin),
-    ].whereType<String>().join(' ').toLowerCase();
-    return query.split(RegExp(r'\s+')).every(haystack.contains);
+    if (queryTokens.isEmpty) return true;
+    final haystack = _haystackOf(data, skin);
+    for (final token in queryTokens) {
+      if (!haystack.contains(token)) return false;
+    }
+    return true;
   }
 
   @override
@@ -365,7 +404,17 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
 
   Widget _list(BuildContext context, AdminSkinCatalog data) {
     final theme = Theme.of(context);
-    final shown = data.skins.where((s) => _matches(data, s)).toList();
+    _ensureCatalogCache(data);
+    final q = _query.trim().toLowerCase();
+    final queryTokens = q.isEmpty
+        ? const <String>[]
+        : [
+            for (final t in q.split(_whitespaceRe))
+              if (t.isNotEmpty) t,
+          ];
+    final shown = data.skins
+        .where((s) => _matches(data, s, queryTokens))
+        .toList();
     final groups =
         <String, ({(int, int, String) order, List<AdminSkin> skins})>{};
     for (final skin in shown) {
@@ -386,14 +435,12 @@ class _AdminSkinViewerScreenState extends State<AdminSkinViewerScreen> {
         return r != 0 ? r : a.item.name.compareTo(b.item.name);
       });
     }
-    final counts = {
-      for (final status in AdminSkinStatus.values)
-        status: data.skins.where((s) => s.statuses.contains(status)).length,
-    };
+    final counts = _cachedCounts!;
     final width = MediaQuery.sizeOf(context).width;
     final side = max(12.0, (width - 1200) / 2);
     return CustomScrollView(
       key: const PageStorageKey('admin-skins'),
+      scrollCacheExtent: kIsWeb ? const ScrollCacheExtent.pixels(300) : null,
       slivers: [
         SliverPadding(
           padding: EdgeInsets.fromLTRB(side, 12, side, 4),
@@ -667,15 +714,13 @@ class _SkinCard extends StatelessWidget {
                             item: item,
                           )
                         else
-                          Opacity(
+                          WardrobeItemArt(
+                            item: item,
+                            controller: controller,
+                            art: art,
+                            antique: catalog.rarityOf(item).antique,
+                            small: true,
                             opacity: dim ? .7 : 1,
-                            child: WardrobeItemArt(
-                              item: item,
-                              controller: controller,
-                              art: art,
-                              antique: catalog.rarityOf(item).antique,
-                              small: true,
-                            ),
                           ),
                         if (item.unique)
                           const IgnorePointer(
@@ -720,14 +765,17 @@ class _SkinCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                Container(
-                  height: 4,
-                  decoration: BoxDecoration(
-                    gradient: item.unique
-                        ? holoGradient
-                        : rarityGradient(colors),
+                if (!item.unique && colors.length == 1)
+                  SizedBox(height: 4, child: ColoredBox(color: colors.first))
+                else
+                  Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                      gradient: item.unique
+                          ? holoGradient
+                          : rarityGradient(colors),
+                    ),
                   ),
-                ),
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
@@ -761,7 +809,7 @@ class _SkinCard extends StatelessWidget {
                                 text: release,
                                 style: theme.textTheme.labelSmall?.copyWith(
                                   color: skin.waiting
-                                      ? StageTheme.legible(
+                                      ? legibleColor(
                                           _statusColor(AdminSkinStatus.waiting),
                                           theme.colorScheme.surface,
                                           minimum: 4.5,
@@ -778,7 +826,7 @@ class _SkinCard extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(
-                            color: StageTheme.legible(
+                            color: legibleColor(
                               colors.first,
                               theme.colorScheme.surface,
                               minimum: 3,
@@ -806,22 +854,36 @@ class _ReleaseLine extends StatelessWidget {
   final String text;
   final TextStyle? style;
 
+  static final _lineHeightCache = <(TextStyle, TextScaler, TextDirection), double>{};
+
+  static double _lineHeight(
+    TextStyle resolved,
+    TextScaler scaler,
+    TextDirection dir,
+  ) {
+    final key = (resolved, scaler, dir);
+    final cached = _lineHeightCache[key];
+    if (cached != null) return cached;
+    if (_lineHeightCache.length >= 32) _lineHeightCache.clear();
+    final painter = TextPainter(
+      text: TextSpan(text: 'Ag', style: resolved),
+      textDirection: dir,
+      textScaler: scaler,
+      maxLines: 1,
+    )..layout();
+    final h = painter.height;
+    painter.dispose();
+    return _lineHeightCache[key] = h;
+  }
+
   @override
   Widget build(BuildContext context) {
     final scaler = MediaQuery.textScalerOf(context);
+    final resolved = DefaultTextStyle.of(context).style.merge(style);
+    final dir = Directionality.of(context);
+    final lineHeight = _lineHeight(resolved, scaler, dir);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final painter = TextPainter(
-          text: TextSpan(
-            text: text,
-            style: DefaultTextStyle.of(context).style.merge(style),
-          ),
-          textDirection: Directionality.of(context),
-          textScaler: scaler,
-          maxLines: 1,
-        )..layout();
-        final lineHeight = painter.height;
-        painter.dispose();
         final lines = lineHeight <= 0 || !constraints.maxHeight.isFinite
             ? 2
             : (constraints.maxHeight / lineHeight).floor().clamp(1, 2);
@@ -1317,9 +1379,9 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
             children: [
               ExcludeSemantics(child: content),
               if (holo)
-                const Positioned.fill(
+                Positioned.fill(
                   child: IgnorePointer(
-                    child: HoloOverlay(animate: true, strength: .3),
+                    child: HoloOverlay(animate: _playing, strength: .3),
                   ),
                 ),
               if (_dressing)
@@ -1584,6 +1646,8 @@ class _FramePainter extends CustomPainter {
   final ui.Image? image;
   final ColorFilter? filter;
 
+  static final _wireDotPaint = Paint()..color = const Color(0xFFE0A23A);
+
   @override
   void paint(Canvas canvas, Size size) {
     final r = (Offset.zero & size).deflate(6);
@@ -1596,13 +1660,13 @@ class _FramePainter extends CustomPainter {
     final paint = image == null
         ? art.paintOf(sprite)
         : (Paint()
-            ..filterQuality = FilterQuality.medium
+            ..filterQuality = kIsWeb ? FilterQuality.low : FilterQuality.medium
             ..colorFilter = filter);
     canvas.drawImageRect(image ?? art.imageOf(sprite), sprite.rect, dst, paint);
     if (image == null && sprite.layer == RunnerLayer.runner) {
       // The wire point of this pose.
       final at = dst.topLeft + art.harnessOf(sprite) * scale;
-      canvas.drawCircle(at, 2.5, Paint()..color = const Color(0xFFE0A23A));
+      canvas.drawCircle(at, 2.5, _wireDotPaint);
     }
   }
 
@@ -1639,6 +1703,7 @@ class _MoveStageState extends State<_MoveStage>
     vsync: this,
     duration: const Duration(seconds: 4),
   );
+  final _bgCache = _MoveStageBgCache();
 
   @override
   void didChangeDependencies() {
@@ -1653,7 +1718,9 @@ class _MoveStageState extends State<_MoveStage>
   }
 
   void _run() {
-    if (!widget.playing || MediaQuery.disableAnimationsOf(context)) {
+    if (!widget.playing ||
+        widget.move == _Move.crash ||
+        MediaQuery.disableAnimationsOf(context)) {
       _loop.stop();
     } else if (!_loop.isAnimating) {
       _loop.repeat();
@@ -1663,6 +1730,7 @@ class _MoveStageState extends State<_MoveStage>
   @override
   void dispose() {
     _loop.dispose();
+    _bgCache.dispose();
     super.dispose();
   }
 
@@ -1670,29 +1738,26 @@ class _MoveStageState extends State<_MoveStage>
   Widget build(BuildContext context) => RepaintBoundary(
     child: CustomPaint(
       size: Size.infinite,
-      painter: _MovePainter(widget.art, widget.move, _loop, widget.glow),
+      painter: _MovePainter(widget.art, widget.move, _loop, widget.glow, _bgCache),
     ),
   );
 }
 
-class _MovePainter extends CustomPainter {
-  _MovePainter(this.art, this.move, this.loop, this.glow)
-    : super(repaint: loop);
-  final RunnerArt art;
-  final _Move move;
-  final Animation<double> loop;
-  final Color glow;
+class _MoveStageBgCache {
+  Size? _size;
+  Color? _glow;
+  ui.Picture? _picture;
 
-  static final _rope = Paint()
-    ..color = const Color(0xFFBDB29C)
-    ..strokeWidth = 1.5
-    ..style = PaintingStyle.stroke;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final time = loop.value * 4;
+  ui.Picture picture(Size size, Color glow) {
+    if (_size == size && _glow == glow && _picture != null) return _picture!;
+    dispose();
+    _size = size;
+    _glow = glow;
     final floor = size.height * .86;
     final rect = Offset.zero & size;
+    final cx = size.width / 2;
+    final rec = ui.PictureRecorder();
+    final canvas = Canvas(rec);
     canvas.drawRect(
       rect,
       Paint()
@@ -1702,7 +1767,6 @@ class _MovePainter extends CustomPainter {
           colors: [Color(0xFF151A17), Color(0xFF1D2420)],
         ).createShader(rect),
     );
-    final cx = size.width / 2;
     canvas.drawCircle(
       Offset(cx, floor - size.height * .3),
       size.height * .5,
@@ -1721,20 +1785,52 @@ class _MovePainter extends CustomPainter {
       Rect.fromLTRB(0, floor, size.width, size.height),
       Paint()..color = const Color(0xFF3B2A1E),
     );
+    return _picture = rec.endRecording();
+  }
+
+  void dispose() {
+    _picture?.dispose();
+    _picture = null;
+    _size = null;
+    _glow = null;
+  }
+}
+
+class _MovePainter extends CustomPainter {
+  _MovePainter(this.art, this.move, this.loop, this.glow, this.bgCache)
+    : super(repaint: loop);
+  final RunnerArt art;
+  final _Move move;
+  final Animation<double> loop;
+  final Color glow;
+  final _MoveStageBgCache bgCache;
+
+  static final _rope = Paint()
+    ..color = const Color(0xFFBDB29C)
+    ..strokeWidth = 1.5
+    ..style = PaintingStyle.stroke;
+  static final _plank = Paint()
+    ..color = const Color(0xFF2C1F16)
+    ..strokeWidth = 2;
+  static final _floorEdge = Paint()..color = const Color(0xFF6B4A30);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final time = loop.value * 4;
+    final floor = size.height * .86;
+    final cx = size.width / 2;
+    canvas.drawPicture(bgCache.picture(size, glow));
     if (move == _Move.run) {
       // The planks pass by as on the moving stage.
       final spacing = size.height * .22;
       final shift = (time * size.height * .55) % spacing;
-      final plank = Paint()
-        ..color = const Color(0xFF2C1F16)
-        ..strokeWidth = 2;
       for (var x = -shift; x < size.width; x += spacing) {
-        canvas.drawLine(Offset(x, floor), Offset(x, size.height), plank);
+        canvas.drawLine(Offset(x, floor), Offset(x, size.height), _plank);
       }
     }
     canvas.drawRect(
       Rect.fromLTWH(0, floor - 1, size.width, 3),
-      Paint()..color = const Color(0xFF6B4A30),
+      _floorEdge,
     );
     final (sprite, lift, angle, wire) = switch (move) {
       _Move.run => (RunnerSprite.stride(time * .6), 0.0, 0.0, false),

@@ -1,6 +1,8 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:intl/intl.dart';
 
 import '../../../app/theme/stage_theme.dart';
@@ -266,6 +268,87 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   _ShineFilter _shine = _ShineFilter.all;
   bool _newOnly = false;
   _WardrobeSort _sort = _WardrobeSort.rarity;
+
+  Wardrobe? _overviewFor;
+  bool _overviewUnique = false;
+  WardrobeOverview? _cachedOverview;
+
+  Wardrobe? _charBaseFor;
+  bool _charBaseUnique = false;
+  ({
+    List<WardrobeItem> all,
+    List<WardrobeItem> collectible,
+    Map<String, int> allYears,
+    bool allHasTech,
+    Map<int, String> allPeople,
+    List<WardrobeItem> uniqueCards,
+  })?
+  _cachedCharBase;
+
+  Wardrobe? _haystackFor;
+  final _haystacks = <String, String>{};
+  static final _whitespaceRe = RegExp(r'\s+');
+  static final _percentOneDecimal = NumberFormat('0.0', 'de');
+  static final _percentWhole = NumberFormat('0', 'de');
+
+  WardrobeOverview _overviewOf(Wardrobe w) {
+    final u = _unique;
+    if (!identical(_overviewFor, w) ||
+        _overviewUnique != u ||
+        _cachedOverview == null) {
+      _overviewFor = w;
+      _overviewUnique = u;
+      _cachedOverview = WardrobeOverview.of(w, unique: u);
+    }
+    return _cachedOverview!;
+  }
+
+  ({
+    List<WardrobeItem> all,
+    List<WardrobeItem> collectible,
+    Map<String, int> allYears,
+    bool allHasTech,
+    Map<int, String> allPeople,
+    List<WardrobeItem> uniqueCards,
+  })
+  _characterBaseOf(Wardrobe w) {
+    final u = _unique;
+    if (!identical(_charBaseFor, w) ||
+        _charBaseUnique != u ||
+        _cachedCharBase == null) {
+      _charBaseFor = w;
+      _charBaseUnique = u;
+      final all = <WardrobeItem>[];
+      final collectible = <WardrobeItem>[];
+      final allYears = <String, int>{};
+      final allPeople = <int, String>{};
+      var allHasTech = false;
+      for (final i in w.catalog.items) {
+        if (i.kind != WardrobeKind.character) continue;
+        all.add(i);
+        if (i.isDefault || i.unique) continue;
+        collectible.add(i);
+        final role = i.role;
+        if (role != null) {
+          if (role.production case final prod?) {
+            allYears[prod] = role.year ?? 0;
+          } else if (role.isFunction) {
+            allHasTech = true;
+          }
+        }
+        if (i.personId case final pid?) allPeople[pid] = i.name;
+      }
+      _cachedCharBase = (
+        all: all,
+        collectible: collectible,
+        allYears: allYears,
+        allHasTech: allHasTech,
+        allPeople: allPeople,
+        uniqueCards: u ? uniqueCards(w) : const <WardrobeItem>[],
+      );
+    }
+    return _cachedCharBase!;
+  }
 
   bool get _waitForEntrance => widget.initial != null && widget.initialTab == 0;
 
@@ -721,7 +804,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                             ...rarities.map((r) => r.name),
                           ].join(' · '),
                           style: TextStyle(
-                            color: StageTheme.legible(
+                            color: legibleColor(
                               rarities.first.color,
                               Theme.of(sheetContext).colorScheme.surface,
                               minimum: 3,
@@ -1048,8 +1131,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   }
 
   static WardrobeRarity _rarity(Wardrobe w, String id) =>
-      w.catalog.rarities.where((r) => r.id == id).firstOrNull ??
-      WardrobeRarity.unknown;
+      w.catalog.rarity(id) ?? WardrobeRarity.unknown;
 
   /// Runs a trade or purchase and shows what it brought.
   Future<void> _deal(Future<GageDeal> Function() run) async {
@@ -1242,11 +1324,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final selected = kinds.contains(_selectedKind)
         ? _selectedKind
         : kinds.firstOrNull;
-    final overview = WardrobeOverview.of(w, unique: _unique);
+    final overview = _overviewOf(w);
     final plays = overview.plays;
     final outfitBar = _outfitBar(context, w, kinds, selected);
     return CustomScrollView(
       key: const PageStorageKey('wardrobe-costumes'),
+      scrollCacheExtent: kIsWeb ? const ScrollCacheExtent.pixels(300) : null,
       slivers: [
         SliverPadding(
           padding: padding.copyWith(bottom: 8),
@@ -1331,9 +1414,17 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         if (w.worn(kind) case final item?) (kind, item),
     ];
     if (slots.isEmpty) return null;
-    final canRandomize = kinds.any(
-      (kind) => w.catalog.items.where((i) => i.kind == kind && w.owns(i)).length >= 2,
-    );
+    final ownedPerKind = <WardrobeKind, int>{};
+    var canRandomize = false;
+    for (final i in w.catalog.items) {
+      if (!w.owns(i)) continue;
+      final n = (ownedPerKind[i.kind] ?? 0) + 1;
+      ownedPerKind[i.kind] = n;
+      if (n >= 2 && kinds.contains(i.kind)) {
+        canRandomize = true;
+        break;
+      }
+    }
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Container(
@@ -1532,18 +1623,25 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final price = _gageCrates ? w.catalog.dupes.crateGage : null;
     final surface = Theme.of(context).colorScheme.surface;
     final aimed = _targets && w.crateTargets.isNotEmpty;
-    // What the details of a missing card would sell: the same rule.
-    final costs = [
-      for (final i in w.catalog.collectible.where(w.counts))
-        if (w.buyCost(i) case final cost?)
-          if ((w.lockHint(i) ?? rewardHint(w, i) ?? uniqueHint(w, i)) == null)
-            cost,
-    ];
+    // Single pass over collectible items for both min buy cost and trade counts.
+    int? minCost;
+    final missingByRarity = <String, int>{};
+    for (final i in w.catalog.collectible) {
+      if (!w.counts(i)) continue;
+      if (!w.owns(i)) {
+        for (final r in i.rarities) {
+          missingByRarity[r] = (missingByRarity[r] ?? 0) + 1;
+        }
+      }
+      if (w.buyCost(i) case final cost?) {
+        if ((w.lockHint(i) ?? rewardHint(w, i) ?? uniqueHint(w, i)) == null) {
+          if (minCost == null || cost < minCost) minCost = cost;
+        }
+      }
+    }
     GageOffer trade(TradeOption t) {
       final to = _rarity(w, t.to);
-      final remaining = w.catalog.collectible
-          .where((i) => w.counts(i) && i.rarities.contains(t.to) && !w.owns(i))
-          .length;
+      final remaining = missingByRarity[t.to] ?? 0;
       final subtitle = switch (remaining) {
         1 => 'Tauschvertrag · noch 1 offen (garantiert!)',
         final n when n > 1 => 'Tauschvertrag · noch $n offen',
@@ -1561,7 +1659,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         trade: true,
         leading: GageOfferIcon(
           Icons.handshake_outlined,
-          color: StageTheme.legible(to.color, surface, minimum: 3),
+          color: legibleColor(to.color, surface, minimum: 3),
         ),
         onBuy: () => _tradeOffer(t),
       );
@@ -1570,7 +1668,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     return GageCard(
       gage: w.gage,
       gala: _gala,
-      complete: WardrobeOverview.of(w, unique: _unique).all.complete,
+      complete: _overviewOf(w).all.complete,
       busy: _busy,
       offers: [
         if (price != null)
@@ -1591,10 +1689,10 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
           ),
         for (final t in w.trades) trade(t),
       ],
-      shop: costs.isEmpty
+      shop: minCost == null
           ? null
           : GageShop(
-              from: costs.reduce((a, b) => a < b ? a : b),
+              from: minCost,
               onShow: () {
                 _search.clear();
                 setState(() {
@@ -1832,12 +1930,10 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            ClipRRect(
+            LinearProgressIndicator(
+              value: p.complete ? 1 : p.fraction,
+              minHeight: 6,
               borderRadius: BorderRadius.circular(6),
-              child: LinearProgressIndicator(
-                value: p.complete ? 1 : p.fraction,
-                minHeight: 6,
-              ),
             ),
             const SizedBox(height: 8),
             Text(nextCrateText(p), style: theme.textTheme.bodyMedium),
@@ -1925,7 +2021,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final lockedNotes = [
       for (final r in catalog.rarities.reversed)
         if (w.lockedRarities.contains(r.id) &&
-            catalog.collectible.any((i) => i.rarities.contains(r.id)))
+            catalog.hasCollectibleRarity(r.id))
           if ((w.lockProgress(r), r.hint) case (final progress, final hint)
               when progress != null || hint != null)
             (
@@ -1940,8 +2036,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final dupeGage = _dupes
         ? [
             for (final r in catalog.rarities)
-              if (r.gage > 0 &&
-                  catalog.collectible.any((i) => i.rarities.contains(r.id)))
+              if (r.gage > 0 && catalog.hasCollectibleRarity(r.id))
                 '${r.name} ${r.gage}',
           ]
         : const <String>[];
@@ -1971,7 +2066,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
           runSpacing: 6,
           children: [
             for (final r in catalog.rarities.reversed)
-              if (catalog.collectible.any((i) => i.rarities.contains(r.id)))
+              if (catalog.hasCollectibleRarity(r.id))
                 Chip(
                   visualDensity: VisualDensity.compact,
                   avatar: CircleAvatar(backgroundColor: r.color, radius: 6),
@@ -2021,7 +2116,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
 
   static String _percent(double share) {
     final p = share * 100;
-    return '${NumberFormat(p < 10 ? '0.0' : '0', 'de').format(p)} %';
+    return '${(p < 10 ? _percentOneDecimal : _percentWhole).format(p)} %';
   }
 
   // The figures' filters: a play ("Creepshow 2026") or the technicians
@@ -2086,46 +2181,70 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
 
   bool _matchesNew(WardrobeItem i) => !_newOnly || _newIds.contains(i.id);
 
-  /// Multi-token search across visible metadata without spoiling secret names
-  /// or roles of unowned figures.
-  bool _matchesQuery(Wardrobe w, WardrobeItem item) {
+  List<String> _queryTokens() {
     final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return true;
-    final tokens = q.split(RegExp(r'\s+')).where((t) => t.isNotEmpty);
-    final owned = w.owns(item);
-    final catalog = w.catalog;
-    final role = owned ? (w.roleOf(item) ?? item.role) : item.role;
-    final unique = item.unique ? uniqueProgressOf(w, item) : null;
-    final haystack = [
-      if (owned || item.reward) item.name,
-      if (owned && role != null) role.role,
-      if (role?.play != null) role!.play!,
-      if (role?.year != null) '${role!.year}',
-      if (role?.isFunction == true) 'technik',
-      if (owned && catalog.labelOf(item) != null) catalog.labelOf(item)!,
-      if (owned)
-        for (final d in item.departments) ?catalog.department(d)?.name,
-      for (final r in catalog.raritiesOf(item)) r.name,
-      if (item.unique) 'unique',
-      if (unique != null) ...[
-        unique.play,
-        if (unique.allTechnicians) 'technik',
-        if (unique.itemSet) ...[unique.itemNoun!.one, unique.itemNoun!.many],
-        for (final p in unique.parts) p.production,
-      ],
-      if (owned && w.isShiny(item)) 'glanz shiny',
-      item.kind.singular,
-      item.kind.plural,
-    ].join(' ').toLowerCase();
-    return tokens.every(haystack.contains);
+    if (q.isEmpty) return const [];
+    return [
+      for (final t in q.split(_whitespaceRe))
+        if (t.isNotEmpty) t,
+    ];
   }
 
-  bool _matchesCommonFilters(Wardrobe w, WardrobeItem i) =>
+  String _haystackOf(Wardrobe w, WardrobeItem item) {
+    if (!identical(_haystackFor, w)) {
+      _haystackFor = w;
+      _haystacks.clear();
+    }
+    return _haystacks[item.id] ??= () {
+      final owned = w.owns(item);
+      final catalog = w.catalog;
+      final role = owned ? (w.roleOf(item) ?? item.role) : item.role;
+      final unique = item.unique ? uniqueProgressOf(w, item) : null;
+      return [
+        if (owned || item.reward) item.name,
+        if (owned && role != null) role.role,
+        if (role?.play != null) role!.play!,
+        if (role?.year != null) '${role!.year}',
+        if (role?.isFunction == true) 'technik',
+        if (owned && catalog.labelOf(item) != null) catalog.labelOf(item)!,
+        if (owned)
+          for (final d in item.departments) ?catalog.department(d)?.name,
+        for (final r in catalog.raritiesOf(item)) r.name,
+        if (item.unique) 'unique',
+        if (unique != null) ...[
+          unique.play,
+          if (unique.allTechnicians) 'technik',
+          if (unique.itemSet) ...[unique.itemNoun!.one, unique.itemNoun!.many],
+          for (final p in unique.parts) p.production,
+        ],
+        if (owned && w.isShiny(item)) 'glanz shiny',
+        item.kind.singular,
+        item.kind.plural,
+      ].join(' ').toLowerCase();
+    }();
+  }
+
+  /// Multi-token search across visible metadata without spoiling secret names
+  /// or roles of unowned figures.
+  bool _matchesQuery(Wardrobe w, WardrobeItem item, List<String> tokens) {
+    if (tokens.isEmpty) return true;
+    final haystack = _haystackOf(w, item);
+    for (final t in tokens) {
+      if (!haystack.contains(t)) return false;
+    }
+    return true;
+  }
+
+  bool _matchesCommonFilters(
+    Wardrobe w,
+    WardrobeItem i,
+    List<String> queryTokens,
+  ) =>
       _matchesOwnership(w, i) &&
       _matchesShine(w, i) &&
       _matchesRarity(i) &&
       _matchesNew(i) &&
-      _matchesQuery(w, i);
+      _matchesQuery(w, i, queryTokens);
 
   Widget _dropdownBox<T>(
     BuildContext context, {
@@ -2271,10 +2390,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         : 0;
     final selectedRarityObj = _rarityFilter == null
         ? null
-        : w.catalog.rarities.where((r) => r.id == _rarityFilter).firstOrNull ??
-              (w.catalog.uniqueRarity?.id == _rarityFilter
-                  ? w.catalog.uniqueRarity
-                  : null);
+        : w.catalog.rarity(_rarityFilter!);
     return Wrap(
       spacing: 6,
       runSpacing: 6,
@@ -2458,9 +2574,10 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       for (final i in w.catalog.items)
         if (i.kind == kind) i,
     ];
+    final queryTokens = _queryTokens();
     final items = [
       for (final i in allOfKind)
-        if (_matchesCommonFilters(w, i)) i,
+        if (_matchesCommonFilters(w, i, queryTokens)) i,
     ];
     items.sort((a, b) {
       if (_sort == _WardrobeSort.alpha) {
@@ -2588,21 +2705,12 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
   ) {
     final theme = Theme.of(context);
     final catalog = w.catalog;
-    final all = [
-      for (final i in catalog.items)
-        if (i.kind == WardrobeKind.character) i,
-    ];
-    final collectible = [
-      for (final i in all)
-        if (!i.isDefault && !i.unique) i,
-    ];
-    final allYears = <String, int>{
-      for (final i in collectible) ?i.role?.production: i.role?.year ?? 0,
-    };
-    final allHasTech = collectible.any((i) => i.role?.isFunction == true);
-    final allPeople = <int, String>{
-      for (final i in collectible) ?i.personId: i.name,
-    };
+    final base = _characterBaseOf(w);
+    final all = base.all;
+    final collectible = base.collectible;
+    final allYears = base.allYears;
+    final allHasTech = base.allHasTech;
+    final allPeople = base.allPeople;
     bool matchesPlay(WardrobeItem i, String? p) =>
         p == null ||
         (p == _techFilter
@@ -2641,9 +2749,11 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final persons = people.entries.toList()
       ..sort((a, b) => a.value.compareTo(b.value));
 
+    final queryTokens = _queryTokens();
     bool selection(WardrobeItem i) =>
         matchesPlay(i, play) && (person == null || i.personId == person);
-    bool shown(WardrobeItem i) => selection(i) && _matchesCommonFilters(w, i);
+    bool shown(WardrobeItem i) =>
+        selection(i) && _matchesCommonFilters(w, i, queryTokens);
     int order(WardrobeItem a, WardrobeItem b) {
       if (w.owns(a) != w.owns(b)) return w.owns(a) ? -1 : 1;
       final weight = (b.importance ?? 0).compareTo(a.importance ?? 0);
@@ -2678,16 +2788,19 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
           _ownership != _OwnershipFilter.buyable &&
           _shine == _ShineFilter.all &&
           !_newOnly &&
-          _query.trim().isEmpty)
+          queryTokens.isEmpty)
         for (final i in all)
           if (i.isDefault && w.owns(i)) i,
     ];
     // The unique figures (unlocked or hidden), including Technik and
     // multi-play figures under every involved play.
+    final allUniqueCards = base.uniqueCards;
     final uniques = [
       if (_unique && person == null)
-        for (final i in uniqueCards(w))
-          if (matchesUniquePlay(i) && _matchesCommonFilters(w, i)) i,
+        for (final i in allUniqueCards)
+          if (matchesUniquePlay(i) &&
+              _matchesCommonFilters(w, i, queryTokens))
+            i,
     ];
     final filtered = [
       for (final i in collectible)
@@ -2735,7 +2848,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       for (final r in overview.rarities) (r.rarity.id, r.rarity.name),
       if (_unique &&
           catalog.uniqueRarity != null &&
-          uniqueCards(w).isNotEmpty)
+          allUniqueCards.isNotEmpty)
         (catalog.uniqueRarity!.id, catalog.uniqueRarity!.name),
     ];
     final activeRarity = rarityOptions.any((o) => o.$1 == _rarityFilter)
@@ -2760,20 +2873,24 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final sectionSlivers = <Widget>[];
     switch (_sort) {
       case _WardrobeSort.rarity:
+        final byRarity = <String, List<WardrobeItem>>{};
+        for (final i in filtered) {
+          (byRarity[i.rarity] ??= []).add(i);
+        }
+        final selOwned = <String, int>{};
+        final selTotal = <String, int>{};
+        for (final i in collectible) {
+          if (!selection(i)) continue;
+          selTotal[i.rarity] = (selTotal[i.rarity] ?? 0) + 1;
+          if (w.owns(i)) selOwned[i.rarity] = (selOwned[i.rarity] ?? 0) + 1;
+        }
         final groups = [
           for (final r in catalog.rarities.reversed)
-            if ([
-                  for (final i in filtered)
-                    if (i.rarity == r.id) i,
-                ]..sort(order)
-                case final items when items.isNotEmpty)
+            if (byRarity[r.id] case final items? when items.isNotEmpty)
               (
                 r,
-                items,
-                Tally.of(
-                  collectible.where((i) => i.rarity == r.id && selection(i)),
-                  w,
-                ),
+                items..sort(order),
+                Tally(selOwned[r.id] ?? 0, selTotal[r.id] ?? 0),
               ),
         ];
         for (final (rarity, items, groupTally) in groups) {
@@ -2906,13 +3023,15 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
         }
       case _WardrobeSort.alpha:
         if (filtered.isNotEmpty) {
+          final lowerKeys = <String, String>{
+            for (final i in filtered)
+              if (w.owns(i)) i.id: nameInRole(i.name, i.role).toLowerCase(),
+          };
           final sorted = [...filtered]
             ..sort((a, b) {
               if (w.owns(a) != w.owns(b)) return w.owns(a) ? -1 : 1;
               if (w.owns(a)) {
-                return nameInRole(a.name, a.role)
-                    .toLowerCase()
-                    .compareTo(nameInRole(b.name, b.role).toLowerCase());
+                return lowerKeys[a.id]!.compareTo(lowerKeys[b.id]!);
               }
               // Keep unowned cards spoiler-free: never reveal alphabetical name.
               final prodA = a.role?.production ?? 'Technik';
@@ -3225,13 +3344,11 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
                 ],
               ),
               const SizedBox(height: 4),
-              ClipRRect(
+              LinearProgressIndicator(
+                value: count / most,
+                minHeight: 6,
                 borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: count / most,
-                  minHeight: 6,
-                  color: StageTheme.orange,
-                ),
+                color: StageTheme.orange,
               ),
             ],
           ),

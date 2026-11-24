@@ -38,9 +38,17 @@ class RunnerFx {
   final tint = Uint8List(maxParticles);
   static const dust = 3;
   int _nextParticle = 0;
+  int _activeParticles = 0;
+
+  /// Whether any burst or crash particles are currently alive.
+  bool get hasParticles => _activeParticles > 0;
 
   final popups = List.generate(6, (_) => RunnerPopup());
   int _nextPopup = 0;
+  int _activePopups = 0;
+
+  /// Whether any floating score popups are currently alive.
+  bool get hasPopups => _activePopups > 0;
 
   String? banner;
   double bannerAge = bannerLife;
@@ -84,6 +92,7 @@ class RunnerFx {
     });
     final p = popups[_nextPopup];
     _nextPopup = (_nextPopup + 1) % popups.length;
+    if (!p.alive) _activePopups++;
     p
       ..text = '+${kind.points}'
       ..x = viewX
@@ -116,6 +125,7 @@ class RunnerFx {
   ) {
     final i = _nextParticle;
     _nextParticle = (i + 1) % maxParticles;
+    if (life[i] <= 0 && lifetime > 0) _activeParticles++;
     px[i] = x;
     py[i] = y;
     vx[i] = vx0;
@@ -131,15 +141,30 @@ class RunnerFx {
     _sinceWhoosh += dt;
     cheer = max(0, cheer - dt);
     if (bannerAge < bannerLife) bannerAge += dt;
-    for (final p in popups) {
-      if (p.alive) p.age += dt;
+    if (_activePopups > 0) {
+      var alivePopups = 0;
+      for (var i = 0; i < popups.length; i++) {
+        final p = popups[i];
+        if (p.alive) {
+          p.age += dt;
+          if (p.alive) alivePopups++;
+        }
+      }
+      _activePopups = alivePopups;
     }
-    for (var i = 0; i < maxParticles; i++) {
-      if (life[i] <= 0) continue;
-      life[i] -= dt;
-      vy[i] += 1.4 * dt;
-      px[i] += vx[i] * dt;
-      py[i] += vy[i] * dt;
+    if (_activeParticles > 0) {
+      var aliveParticles = 0;
+      for (var i = 0; i < maxParticles; i++) {
+        final remaining = life[i];
+        if (remaining <= 0) continue;
+        final next = remaining - dt;
+        life[i] = next;
+        vy[i] += 1.4 * dt;
+        px[i] += vx[i] * dt;
+        py[i] += vy[i] * dt;
+        if (next > 0) aliveParticles++;
+      }
+      _activeParticles = aliveParticles;
     }
     if (game.over) {
       if (!_crashed) {

@@ -180,69 +180,74 @@ class _CueCardState extends State<CueCard> {
       ],
     );
     final showButton = _hovering || _focused;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Focus(
-        canRequestFocus: false,
-        skipTraversal: true,
-        onFocusChange: (focused) => setState(() => _focused = focused),
-        child: MouseRegion(
-          onEnter: (_) => setState(() => _hovering = true),
-          onExit: (_) => setState(() => _hovering = false),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: widget.onTap,
-              onLongPress: widget.onActions,
-              onSecondaryTap: widget.onActions,
-              child: Container(
-                decoration: BoxDecoration(
-                  border: Border(
-                    left: BorderSide(
-                      color: widget.own
-                          ? readerAccent
-                          : widget.active
-                          ? theme.colorScheme.secondary
-                          : Colors.transparent,
-                      width: widget.own ? 3 : 2,
-                    ),
-                  ),
-                  color: widget.active
-                      ? theme.colorScheme.secondary.withValues(alpha: .08)
-                      : Colors.transparent,
-                ),
-                padding: EdgeInsets.fromLTRB(
-                  16,
-                  7,
-                  widget.showActionsButton ? 4 : 12,
-                  9,
-                ),
-                child: widget.showActionsButton
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(child: content),
-                          SizedBox(
-                            width: 40,
-                            child: AnimatedOpacity(
-                              opacity: showButton ? 1 : 0,
-                              duration: const Duration(milliseconds: 120),
-                              child: IconButton(
-                                tooltip: 'Aktionen zur Textstelle',
-                                visualDensity: VisualDensity.compact,
-                                onPressed: widget.onActions,
-                                icon: const Icon(Icons.more_vert, size: 20),
-                              ),
-                            ),
-                          ),
-                        ],
-                      )
-                    : content,
+    final tile = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: widget.onTap,
+        onLongPress: widget.onActions,
+        onSecondaryTap: widget.onActions,
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(
+                color: widget.own
+                    ? readerAccent
+                    : widget.active
+                    ? theme.colorScheme.secondary
+                    : Colors.transparent,
+                width: widget.own ? 3 : 2,
               ),
             ),
+            color: widget.active
+                ? theme.colorScheme.secondary.withValues(alpha: .08)
+                : Colors.transparent,
           ),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            7,
+            widget.showActionsButton ? 4 : 12,
+            9,
+          ),
+          child: widget.showActionsButton
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: content),
+                    SizedBox(
+                      width: 40,
+                      child: AnimatedOpacity(
+                        opacity: showButton ? 1 : 0,
+                        duration: const Duration(milliseconds: 120),
+                        child: IconButton(
+                          tooltip: 'Aktionen zur Textstelle',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: widget.onActions,
+                          icon: const Icon(Icons.more_vert, size: 20),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : content,
         ),
       ),
+    );
+    // On phones there is no hover action button, so skip per-cue Focus +
+    // MouseRegion wrappers that otherwise attach listeners to every cue.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: widget.showActionsButton
+          ? Focus(
+              canRequestFocus: false,
+              skipTraversal: true,
+              onFocusChange: (focused) => setState(() => _focused = focused),
+              child: MouseRegion(
+                onEnter: (_) => setState(() => _hovering = true),
+                onExit: (_) => setState(() => _hovering = false),
+                child: tile,
+              ),
+            )
+          : tile,
     );
   }
 }

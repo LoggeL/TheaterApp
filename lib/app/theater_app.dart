@@ -45,7 +45,7 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
   late final _navigatorObservers = [
     if (_perf.available) _perf.navigatorObserver,
   ];
-  String? _identity;
+  Object? _identity;
   bool _starting = true, _devicesStarted = false;
   Object? _startupError;
 
@@ -127,9 +127,18 @@ class _TheaterAppState extends State<TheaterApp> with WidgetsBindingObserver {
     if (mounted) await _devices.restorePush();
   }
 
-  String? get _sessionIdentity => widget.controller.user == null
-      ? null
-      : '${widget.controller.apiBaseUrl}:${widget.controller.user!.id}:${widget.controller.user!.status}:${widget.controller.user!.role}:${widget.controller.isDemo}:${widget.controller.sessionEpoch}';
+  Object? get _sessionIdentity {
+    final user = widget.controller.user;
+    if (user == null) return null;
+    return (
+      widget.controller.apiBaseUrl,
+      user.id,
+      user.status,
+      user.role,
+      widget.controller.isDemo,
+      widget.controller.sessionEpoch,
+    );
+  }
 
   Object? get _rootKey {
     final c = widget.controller;

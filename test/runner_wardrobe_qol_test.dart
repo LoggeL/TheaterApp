@@ -12,9 +12,11 @@ import 'package:theater_app/features/games/data/wardrobe_api.dart';
 import 'package:theater_app/features/games/ui/admin_skin_viewer.dart';
 import 'package:theater_app/features/games/ui/ensemble_card.dart';
 import 'package:theater_app/features/games/ui/figure_detail.dart';
+import 'package:theater_app/features/games/ui/secret_tap.dart';
 import 'package:theater_app/features/games/ui/stage_runner_look.dart';
 import 'package:theater_app/features/games/ui/stage_runner_sound.dart';
 import 'package:theater_app/features/games/ui/unique_figures.dart';
+import 'package:theater_app/features/games/ui/wardrobe_cards.dart';
 import 'package:theater_app/features/games/ui/wardrobe_overview.dart';
 import 'package:theater_app/features/games/ui/wardrobe_screen.dart';
 
@@ -1265,6 +1267,95 @@ void main() {
       await _settle(tester);
       expect(find.byKey(const ValueKey('wardrobe-source')), findsOneWidget);
       expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'HoloOverlay, ShineOverlay and SecretTap schedule no frames when static or reduced-motion',
+    (tester) async {
+      Widget harness({required bool disableAnimations, required Widget child}) =>
+          MaterialApp(
+            home: MediaQuery(
+              data: MediaQueryData(disableAnimations: disableAnimations),
+              child: Scaffold(body: child),
+            ),
+          );
+
+      await tester.pumpWidget(
+        harness(
+          disableAnimations: false,
+          child: Column(
+            children: [
+              const SizedBox(
+                width: 120,
+                height: 150,
+                child: HoloOverlay(animate: false),
+              ),
+              const SizedBox(
+                width: 120,
+                height: 150,
+                child: ShineOverlay(animate: false),
+              ),
+              SecretTap(
+                taps: 3,
+                onUnlocked: () {},
+                child: const SizedBox(width: 32, height: 32),
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(tester.binding.hasScheduledFrame, isFalse);
+
+      // Animated overlays stop immediately when system disableAnimations is on.
+      await tester.pumpWidget(
+        harness(
+          disableAnimations: true,
+          child: const Column(
+            children: [
+              SizedBox(
+                width: 120,
+                height: 150,
+                child: HoloOverlay(animate: true),
+              ),
+              SizedBox(
+                width: 120,
+                height: 150,
+                child: ShineOverlay(animate: true),
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(tester.binding.hasScheduledFrame, isFalse);
+
+      // Toggling animate from true -> false stops tickers cleanly.
+      await tester.pumpWidget(
+        harness(
+          disableAnimations: false,
+          child: const SizedBox(
+            width: 120,
+            height: 150,
+            child: HoloOverlay(animate: true),
+          ),
+        ),
+      );
+      expect(tester.binding.hasScheduledFrame, isTrue);
+      await tester.pumpWidget(
+        harness(
+          disableAnimations: false,
+          child: const SizedBox(
+            width: 120,
+            height: 150,
+            child: HoloOverlay(animate: false),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(tester.binding.hasScheduledFrame, isFalse);
       await tester.pumpWidget(const SizedBox());
     },
   );

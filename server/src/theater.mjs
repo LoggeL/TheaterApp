@@ -524,8 +524,8 @@ export class Theater {
   /**
    * Ends one of the caller's open runs with its score and keeps the person's best score. The same
    * result sent again gets the first answer and counts no second time. A run of the Wochenprobe
-   * (`weekly`, from its start) counts for its week with `ghost` and for the progress, never for the
-   * all-time or the month's list.
+   * (`weekly`, from its start) counts for its week with `ghost` and for the progress; a ranked one
+   * also counts for the all-time and the month's list, training does not.
    */
   runnerScore(uid, b) {
     return this.store.transaction(() => {
@@ -545,20 +545,28 @@ export class Theater {
       const stats = checkRunStats(b.missionStats, { meters, score: b.score, metersSent: Number.isInteger(b.meters), course: weekly ? runnerCourse : b.course });
       const progress = recordRun(this, a.personId, meters, b.hitBy, new Date(at), { score: b.score, points, stats, statsSent, weekly: !!weekly, startedAt: new Date(round.startedAt) });
       const old = this.store.get('runnerScores', a.personId), when = new Date(at).toISOString();
-      // Every run counts as one (`rounds`, beside the deaths of `recordRun`); only a normal one can
-      // be the all-time best.
-      const counted = (best, bestAt) => this.store.put('runnerScores', a.personId, { personId: a.personId, best, bestAt, rounds: (old?.rounds ?? 0) + 1, lastPlayedAt: when });
-      if (weekly) {
-        counted(old?.best ?? 0, old?.bestAt ?? null);
-        // `character`: the figure the ghost was run in (`runnerGhostFigures`), checked there.
-        const run = recordWeeklyRun(this, a.personId, weekly, { score: b.score, meters, ghost, at: when, character: b.character });
-        finishRound(this, a.personId, b.roundId, b, { improved: false, progress, weekly: run });
-        return { score: b.score, improved: false, leaderboard: this.runnerBoard(a), progress, weekly: weeklyAnswer(this, a.personId, run) };
-      }
-      const improved = b.score > (old?.best ?? 0);
+      // `character`: the figure the ghost was run in (`runnerGhostFigures`), checked there.
+      // Recorded before leaderboard ranking so a late weekly run downgraded to training stays off
+      // the all-time and monthly leaderboards.
+      const run = weekly ? recordWeeklyRun(this, a.personId, weekly, { score: b.score, meters, ghost, at: when, character: b.character }) : null;
+      // Every run counts as one (`rounds`, beside the deaths of `recordRun`); normal runs and
+      // ranked runs of the Wochenprobe count for the all-time and the month's list, training does
+      // not.
+      const ranksBoard = !weekly || run.ranked;
+      const improved = ranksBoard && b.score > (old?.best ?? 0);
       // The Monatsrangliste (runner-monthly.mjs) keeps the best of the Berlin month beside it.
-      recordMonthRun(this, a.personId, b.score, when, old);
-      counted(improved ? b.score : old?.best ?? 0, improved ? when : old?.bestAt ?? null);
+      if (ranksBoard) recordMonthRun(this, a.personId, b.score, when, old);
+      this.store.put('runnerScores', a.personId, {
+        personId: a.personId,
+        best: improved ? b.score : old?.best ?? 0,
+        bestAt: improved ? when : old?.bestAt ?? null,
+        rounds: (old?.rounds ?? 0) + 1,
+        lastPlayedAt: when,
+      });
+      if (weekly) {
+        finishRound(this, a.personId, b.roundId, b, { improved, progress, weekly: run });
+        return { score: b.score, improved, leaderboard: this.runnerBoard(a), progress, weekly: weeklyAnswer(this, a.personId, run) };
+      }
       // Each run counts once; a repeat of this result gets this answer (see runner-rounds.mjs).
       finishRound(this, a.personId, b.roundId, b, { improved, progress });
       return { score: b.score, improved, leaderboard: this.runnerBoard(a), progress };

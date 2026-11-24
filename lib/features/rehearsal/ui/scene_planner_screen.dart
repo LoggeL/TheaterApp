@@ -204,6 +204,8 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
     return DiscardGuard(dirty: manager && _dirty, child: page);
   }
 
+  static final _planTimeFormat = DateFormat('EEE, dd.MM. · HH:mm', 'de');
+
   List<Widget> _content(BuildContext context) {
     final doc = _production == null
         ? null
@@ -211,27 +213,29 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
     final production = widget.controller.productionRecords
         .where((p) => p['id'] == _production)
         .firstOrNull;
-    final currentEvent = widget.controller.events
-        .where((e) => e.id == widget.event.id)
-        .firstOrNull;
+    final currentEvent = widget.controller.eventById(widget.event.id);
+    final casting = readJsonMap(production?['casting']);
+    final checkins = readJsonMap(
+      widget.controller.checkinsByEvent[widget.event.id],
+    );
+    // Implicit attendees of an auto-accepted event are planned in.
+    final responses = plannedResponses(
+      widget.controller,
+      currentEvent ?? widget.event,
+    );
+    final arrivals = readJsonMap(
+      widget.controller.arrivalsByEvent[widget.event.id],
+    );
     final scenes = [
       for (final scene in doc?.scenes ?? const <ScriptScene>[])
         (
           scene: scene,
           state: evaluateScene(
             scene: scene,
-            casting: jsonMap(production?['casting']),
-            checkins: jsonMap(
-              widget.controller.checkinsByEvent[widget.event.id],
-            ),
-            // Implicit attendees of an auto-accepted event are planned in.
-            responses: plannedResponses(
-              widget.controller,
-              currentEvent ?? widget.event,
-            ),
-            arrivals: jsonMap(
-              widget.controller.arrivalsByEvent[widget.event.id],
-            ),
+            casting: casting,
+            checkins: checkins,
+            responses: responses,
+            arrivals: arrivals,
             useCheckins: _useCheckins,
             at: _at,
           ),
@@ -284,9 +288,7 @@ class _ScenePlannerScreenState extends State<ScenePlannerScreen> {
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.schedule),
-          title: Text(
-            'Planen ab ${DateFormat('EEE, dd.MM. · HH:mm', 'de').format(_at)}',
-          ),
+          title: Text('Planen ab ${_planTimeFormat.format(_at)}'),
           trailing: const Icon(Icons.edit_outlined),
           onTap: () async {
             final time = await showTimePicker(

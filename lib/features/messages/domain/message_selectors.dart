@@ -38,7 +38,7 @@ int unreadMessageCount(AppController controller) =>
 /// Whether [message] carries an open form addressed to [user] that they have
 /// not submitted yet.
 bool messageHasOpenFormFor(AppUser? user, JsonMap message) =>
-    jsonMap(message['form']).isNotEmpty &&
+    readJsonMap(message['form']).isNotEmpty &&
     message['formClosed'] != true &&
     textValue(message['myFormSubmittedAt']).isEmpty &&
     messageAddressedTo(user, message);

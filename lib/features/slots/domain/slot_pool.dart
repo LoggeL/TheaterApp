@@ -26,7 +26,7 @@ class TimeSlot {
     endsAt: dateValue(json['endsAt'])!.toLocal(),
     capacity: intValue(json['capacity'], 1),
     people: [
-      for (final p in jsonList(json['people']).map(jsonMap))
+      for (final p in jsonList(json['people']).map(readJsonMap))
         (personId: intValue(p['personId']), name: textValue(p['name'])),
     ],
   );
@@ -87,7 +87,7 @@ class SlotPool {
     closed: json['closed'] == true,
     version: intValue(json['version'], 1),
     slots: [
-      for (final s in jsonList(json['slots']).map(jsonMap))
+      for (final s in jsonList(json['slots']).map(readJsonMap))
         if (dateValue(s['startsAt']) != null && dateValue(s['endsAt']) != null)
           TimeSlot.fromJson(s),
     ]..sort((a, b) => a.startsAt.compareTo(b.startsAt)),
@@ -100,8 +100,18 @@ class SlotPool {
   );
 }
 
-List<SlotPool> slotPoolsOf(AppController controller) =>
-    controller.slotPools.map(SlotPool.fromJson).toList();
+final _slotPoolsCache = Expando<({List<JsonMap> raw, List<SlotPool> parsed})>(
+  'slotPoolsCache',
+);
+
+List<SlotPool> slotPoolsOf(AppController controller) {
+  final raw = controller.slotPools;
+  final cached = _slotPoolsCache[controller];
+  if (cached != null && identical(cached.raw, raw)) return cached.parsed;
+  final parsed = List<SlotPool>.unmodifiable(raw.map(SlotPool.fromJson));
+  _slotPoolsCache[controller] = (raw: raw, parsed: parsed);
+  return parsed;
+}
 
 /// Only invited people may book; admins see every pool without being invited.
 /// Newer servers mark the pools meant for the person (`addressedToMe`).

@@ -1,6 +1,6 @@
 import 'dart:math';
 
-import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart' show visibleForTesting;
 
 import 'course_random.dart';
 
@@ -282,6 +282,7 @@ class StageRunner {
   final List<Pickup> pickups = [];
   final List<Obstacle> _spareObstacles = [];
   final List<Pickup> _sparePickups = [];
+  final List<ObstacleKind> _kindScratch = [];
 
   /// Where the next section starts, and the centre of the last gap.
   double _nextX = viewWidth + .3, _lastGapX = 0, _lastGapCenter = .5;
@@ -377,10 +378,13 @@ class StageRunner {
     }
     _layOut();
     final x = runnerWorldX;
-    for (final o in obstacles) {
+    final obsLen = obstacles.length;
+    final currentSpeed = speed;
+    for (var i = 0; i < obsLen; i++) {
+      final o = obstacles[i];
       switch (o.kind) {
         case ObstacleKind.sandbag:
-          if (!o.falling && o.left - x < speed * .9) o.falling = true;
+          if (!o.falling && o.left - x < currentSpeed * .9) o.falling = true;
           if (o.falling && o.bottom < floor) {
             final drop = min(1.3 * dt, floor - o.bottom);
             o
@@ -395,12 +399,14 @@ class StageRunner {
       }
     }
     const hw = hitHalfWidth, hh = hitHalfHeight;
+    final xRight = x + hw, xLeft = x - hw, yBottom = y + hh, yTop = y - hh;
     if (!invincible) {
-      for (final o in obstacles) {
-        if (o.left < x + hw &&
-            o.right > x - hw &&
-            o.top < y + hh &&
-            o.bottom > y - hh) {
+      for (var i = 0; i < obsLen; i++) {
+        final o = obstacles[i];
+        if (o.left < xRight &&
+            o.right > xLeft &&
+            o.top < yBottom &&
+            o.bottom > yTop) {
           over = true;
           hitBy = o.kind;
           hitTall = o.tall;
@@ -411,14 +417,16 @@ class StageRunner {
       }
     }
     if (!over) {
-      for (final o in obstacles) {
-        if (o.counted && !o.passed && o.right < x - hw) {
+      for (var i = 0; i < obsLen; i++) {
+        final o = obstacles[i];
+        if (o.counted && !o.passed && o.right < xLeft) {
           o.passed = true;
           passedBy[o.kind.index]++;
         }
       }
     }
-    for (final p in pickups) {
+    for (var i = 0, pLen = pickups.length; i < pLen; i++) {
+      final p = pickups[i];
       if (!p.taken && (p.x - x).abs() < .06 && (p.y - y).abs() < .075) {
         p.taken = true;
         _firstPickupAt ??= meters;
@@ -433,16 +441,29 @@ class StageRunner {
 
   void _recycle() {
     final left = distance - .2;
-    obstacles.removeWhere((o) {
-      if (o.right >= left) return false;
-      _spareObstacles.add(o);
-      return true;
-    });
-    pickups.removeWhere((p) {
-      if (p.x >= left && !p.taken) return false;
-      _sparePickups.add(p);
-      return true;
-    });
+    var write = 0;
+    for (var i = 0, len = obstacles.length; i < len; i++) {
+      final o = obstacles[i];
+      if (o.right >= left) {
+        if (write != i) obstacles[write] = o;
+        write++;
+      } else {
+        _spareObstacles.add(o);
+      }
+    }
+    obstacles.length = write;
+
+    write = 0;
+    for (var i = 0, len = pickups.length; i < len; i++) {
+      final p = pickups[i];
+      if (p.x >= left && !p.taken) {
+        if (write != i) pickups[write] = p;
+        write++;
+      } else {
+        _sparePickups.add(p);
+      }
+    }
+    pickups.length = write;
   }
 
   Obstacle _obstacle(
@@ -499,14 +520,20 @@ class StageRunner {
       kind = debuts[_debuted++].$2;
       debut = (kind: kind, x: x);
     } else {
-      final kinds = [
-        ObstacleKind.crate,
-        ObstacleKind.flat,
-        ObstacleKind.lamp,
-        if (m >= 80) ...[ObstacleKind.border, ObstacleKind.border],
-        if (m >= 150) ObstacleKind.sandbag,
-        for (final (_, kind) in debuts.take(unlocked)) kind,
-      ];
+      final kinds = _kindScratch..clear();
+      kinds
+        ..add(ObstacleKind.crate)
+        ..add(ObstacleKind.flat)
+        ..add(ObstacleKind.lamp);
+      if (m >= 80) {
+        kinds
+          ..add(ObstacleKind.border)
+          ..add(ObstacleKind.border);
+      }
+      if (m >= 150) kinds.add(ObstacleKind.sandbag);
+      for (var i = 0; i < unlocked; i++) {
+        kinds.add(debuts[i].$2);
+      }
       kind = kinds[_random.nextInt(kinds.length)];
     }
     final first = obstacles.length;
@@ -626,16 +653,23 @@ class StageRunner {
         (length * RunnerRules.metersPerUnit * RunnerRules.pickupPointsPerMeter)
             .floor();
     final roll = _random.nextDouble();
-    final row = roll < .1
-        ? [PickupKind.star]
-        : roll < .4
-        ? [PickupKind.mask, PickupKind.mask]
-        : [PickupKind.rose, PickupKind.rose, PickupKind.rose];
+    final PickupKind kind;
+    final int count;
+    if (roll < .1) {
+      kind = PickupKind.star;
+      count = 1;
+    } else if (roll < .4) {
+      kind = PickupKind.mask;
+      count = 2;
+    } else {
+      kind = PickupKind.rose;
+      count = 3;
+    }
     var points = 0;
-    for (final (i, kind) in row.indexed) {
+    for (var i = 0; i < count; i++) {
       if (points + kind.points > budget) break;
       points += kind.points;
-      _pickup(kind, x + (i - (row.length - 1) / 2) * .09, y);
+      _pickup(kind, x + (i - (count - 1) / 2) * .09, y);
     }
     placedPickupPoints += points;
   }

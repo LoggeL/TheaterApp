@@ -179,22 +179,23 @@ class PreferencesLocalStore implements LocalStore {
 
 class PreferencesCredentialStore implements CredentialStore {
   static const _key = 'theater.session';
+  SharedPreferences? _preferences;
+  Future<SharedPreferences> _prefs() async =>
+      _preferences ??= await SharedPreferences.getInstance();
+
   @override
   Future<JsonMap?> read() async {
-    final value = (await SharedPreferences.getInstance()).getString(_key);
+    final value = (await _prefs()).getString(_key);
     return value == null ? null : jsonMap(jsonDecode(value));
   }
 
   @override
   Future<void> write(JsonMap value) async {
-    await (await SharedPreferences.getInstance()).setString(
-      _key,
-      jsonEncode(value),
-    );
+    await (await _prefs()).setString(_key, jsonEncode(value));
   }
 
   @override
   Future<void> clear() async {
-    await (await SharedPreferences.getInstance()).remove(_key);
+    await (await _prefs()).remove(_key);
   }
 }

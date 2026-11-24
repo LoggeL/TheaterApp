@@ -9,18 +9,24 @@ class BrandLogo extends StatelessWidget {
   const BrandLogo({super.key, this.size = 36});
   final double size;
   @override
-  Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
-    padding: EdgeInsets.all(size * .08),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(size * .16),
-    ),
-    child: Image.asset(
-      'assets/brand/kolpingtheater-ramsen-256.png',
-      fit: BoxFit.contain,
-      semanticLabel: Brand.organization,
-    ),
-  );
+  Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final decodeWidth = (size * dpr).round().clamp(48, 256);
+    return Container(
+      width: size,
+      height: size,
+      padding: EdgeInsets.all(size * .08),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(size * .16),
+      ),
+      child: Image.asset(
+        'assets/brand/kolpingtheater-ramsen-256.png',
+        cacheWidth: decodeWidth,
+        filterQuality: FilterQuality.low,
+        fit: BoxFit.contain,
+        semanticLabel: Brand.organization,
+      ),
+    );
+  }
 }

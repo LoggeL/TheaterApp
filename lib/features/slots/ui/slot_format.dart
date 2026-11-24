@@ -3,13 +3,17 @@ import 'package:intl/intl.dart';
 
 import '../domain/slot_pool.dart';
 
+final _slotWeekday = DateFormat.E('de');
+final _slotDayMonth = DateFormat('d.M.', 'de');
+final _slotHm = DateFormat.Hm('de');
+
 String slotDay(DateTime day) =>
-    '${DateFormat.E('de').format(day).replaceAll('.', '')} '
-    '${DateFormat('d.M.', 'de').format(day)}';
+    '${_slotWeekday.format(day).replaceAll('.', '')} '
+    '${_slotDayMonth.format(day)}';
 
 String slotTime(TimeSlot slot) =>
-    '${DateFormat.Hm('de').format(slot.startsAt)}–'
-    '${DateFormat.Hm('de').format(slot.endsAt)}';
+    '${_slotHm.format(slot.startsAt)}–'
+    '${_slotHm.format(slot.endsAt)}';
 
 String slotLabel(TimeSlot slot) =>
     '${slotDay(slot.startsAt)}, ${slotTime(slot)}';
@@ -22,8 +26,8 @@ String slotPoolRange(SlotPool pool) {
     return a.isAfter(b) ? a : b;
   });
   if (DateUtils.isSameDay(first, last)) {
-    return '${slotDay(first)}, ${DateFormat.Hm('de').format(first)}–'
-        '${DateFormat.Hm('de').format(last)}';
+    return '${slotDay(first)}, ${_slotHm.format(first)}–'
+        '${_slotHm.format(last)}';
   }
   return '${slotDay(first)} – ${slotDay(last)}';
 }

@@ -1,5 +1,5 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 
 abstract final class StageTheme {
@@ -54,6 +54,9 @@ abstract final class StageTheme {
   static Color labelBase(Brightness brightness) =>
       brightness == Brightness.dark ? inkCard : cream;
 
+  static final _tintedLabelCache =
+      <(int, Brightness, double, double), ({Color fill, Color foreground})>{};
+
   /// Fill and foreground of a label tinted with [accent]. The fill is the
   /// accent's tone at [alpha]; the foreground keeps the tone's hue and
   /// reaches [minimum] contrast on that fill over [labelBase].
@@ -63,13 +66,18 @@ abstract final class StageTheme {
     double alpha = tintAlpha,
     double minimum = 4.5,
   }) {
+    final key = (accent.toARGB32(), brightness, alpha, minimum);
+    final cached = _tintedLabelCache[key];
+    if (cached != null) return cached;
     final tone = accentText(accent, brightness);
     final fill = tone.withValues(alpha: alpha);
     final background = Color.alphaBlend(fill, labelBase(brightness));
-    return (
+    final result = (
       fill: fill,
       foreground: legible(tone, background, minimum: minimum),
     );
+    if (_tintedLabelCache.length < 128) _tintedLabelCache[key] = result;
+    return result;
   }
 
   /// WCAG 2 contrast ratio of two opaque colours (1 to 21).
@@ -131,6 +139,10 @@ abstract final class StageTheme {
       useMaterial3: true,
       colorScheme: scheme,
       brightness: brightness,
+      // Material 3's InkSparkle compiles a custom GLSL fragment shader on
+      // the first tap, causing a noticeable freeze on WebGL / iOS Safari.
+      // InkRipple renders smoothly without custom shader compilation.
+      splashFactory: kIsWeb ? InkRipple.splashFactory : null,
     );
     return base.copyWith(
       scaffoldBackgroundColor: scheme.surface,
@@ -156,12 +168,14 @@ abstract final class StageTheme {
       appBarTheme: AppBarTheme(
         backgroundColor: scheme.surface,
         foregroundColor: scheme.onSurface,
+        surfaceTintColor: Colors.transparent,
         centerTitle: false,
         elevation: 0,
         scrolledUnderElevation: 0,
       ),
       cardTheme: CardThemeData(
         elevation: 0,
+        surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
         color: dark ? inkCard : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
@@ -205,6 +219,8 @@ abstract final class StageTheme {
       ),
       navigationBarTheme: NavigationBarThemeData(
         height: 68,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
         backgroundColor: dark ? const Color(0xFF1F2521) : Colors.white,
         indicatorColor: selectedTint(brightness),
         labelTextStyle: const WidgetStatePropertyAll(
@@ -222,15 +238,26 @@ abstract final class StageTheme {
         color: scheme.outlineVariant.withValues(alpha: .45),
         space: 1,
       ),
-      // A calm fade-through everywhere; iOS keeps its swipe-back gesture.
+      // On the web (especially iOS Safari at 3x DPR), Cupertino's dual-page
+      // slide with edge shadow and Material's full-screen fade saveLayer are
+      // heavy; use a lightweight GPU transform transition on web. Native iOS
+      // keeps its swipe-back gesture.
       pageTransitionsTheme: const PageTransitionsTheme(
-        builders: {
-          TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
-          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-          TargetPlatform.macOS: FadeForwardsPageTransitionsBuilder(),
-          TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
-          TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
-        },
+        builders: kIsWeb
+            ? {
+                TargetPlatform.android: _WebSlidePageTransitionsBuilder(),
+                TargetPlatform.iOS: _WebSlidePageTransitionsBuilder(),
+                TargetPlatform.macOS: _WebFadePageTransitionsBuilder(),
+                TargetPlatform.windows: _WebFadePageTransitionsBuilder(),
+                TargetPlatform.linux: _WebFadePageTransitionsBuilder(),
+              }
+            : {
+                TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+                TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+                TargetPlatform.macOS: FadeForwardsPageTransitionsBuilder(),
+                TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
+                TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
+              },
       ),
       chipTheme: ChipThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -297,4 +324,52 @@ class AccentTone {
   final Color light, dark;
   Color of(Brightness brightness) =>
       brightness == Brightness.dark ? dark : light;
+}
+
+/// Pure GPU transform slide-in for mobile web (especially iOS Safari): no
+/// full-screen Opacity saveLayer, no edge shadow, no secondary-page parallax.
+class _WebSlidePageTransitionsBuilder extends PageTransitionsBuilder {
+  const _WebSlidePageTransitionsBuilder();
+
+  static final _tween = Tween<Offset>(
+    begin: const Offset(1, 0),
+    end: Offset.zero,
+  ).chain(CurveTween(curve: Curves.easeOutCubic));
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (animation.status == AnimationStatus.completed) return child;
+    return SlideTransition(
+      position: animation.drive(_tween),
+      child: child,
+    );
+  }
+}
+
+/// Fast incoming-only fade for desktop web without secondary-route overdraw.
+class _WebFadePageTransitionsBuilder extends PageTransitionsBuilder {
+  const _WebFadePageTransitionsBuilder();
+
+  static final _curve = CurveTween(curve: Curves.easeOut);
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (animation.status == AnimationStatus.completed) return child;
+    return FadeTransition(
+      opacity: animation.drive(_curve),
+      child: child,
+    );
+  }
 }

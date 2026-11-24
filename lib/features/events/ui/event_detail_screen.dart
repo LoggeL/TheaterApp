@@ -10,6 +10,7 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/first_sync_placeholder.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/state_pill.dart';
+import '../../../shared/widgets/visible_listenable_builder.dart';
 import '../../rehearsal/ui/attendance_screen.dart';
 import '../../rehearsal/ui/responses_screen.dart';
 import '../../rehearsal/ui/scene_planner_screen.dart';
@@ -69,12 +70,12 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: controller,
+  Widget build(BuildContext context) => VisibleListenableBuilder(
+    listenable: controller,
     builder: (context, _) {
-      final matches = controller.events.where((e) => e.id == widget.eventId);
-      if (_declinePending && matches.isNotEmpty) _offerDecline(matches.first);
-      if (matches.isEmpty) {
+      final event = controller.eventById(widget.eventId);
+      if (_declinePending && event != null) _offerDecline(event);
+      if (event == null) {
         return DesktopRouteFrame(
           controller: controller,
           selectedIndex: AppSection.schedule.index,
@@ -92,7 +93,6 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
           ),
         );
       }
-      final event = matches.first;
       return DesktopRouteFrame(
         controller: controller,
         selectedIndex: AppSection.schedule.index,
@@ -169,10 +169,7 @@ class EventDetailContent extends StatelessWidget {
       final manager = user?.canManageEvents == true;
       final editor = event.lastEditedBy == null
           ? null
-          : controller.members
-                .where((m) => m.id == event.lastEditedBy)
-                .firstOrNull
-                ?.name;
+          : controller.memberById(event.lastEditedBy!)?.name;
       final gap = SizedBox(height: embedded ? 10 : 17);
       return ListView(
         primary: false,
@@ -236,10 +233,7 @@ class EventDetailContent extends StatelessWidget {
             _CancelledNotice(
               event: event,
               by: manager && event.cancelledBy != null
-                  ? controller.members
-                        .where((m) => m.id == event.cancelledBy)
-                        .firstOrNull
-                        ?.name
+                  ? controller.memberById(event.cancelledBy!)?.name
                   : null,
             )
           else if (event.fromSlotPool)

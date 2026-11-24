@@ -18,11 +18,23 @@ class PollUpdates extends StatefulWidget {
 
 class _PollUpdatesState extends State<PollUpdates> {
   Timer? _deadline;
+  bool _visible = true;
+
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_changed);
     _scheduleDeadline();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final visible = TickerMode.valuesOf(context).enabled;
+    if (visible != _visible) {
+      _visible = visible;
+      if (_visible) _scheduleDeadline();
+    }
   }
 
   @override
@@ -38,23 +50,23 @@ class _PollUpdatesState extends State<PollUpdates> {
   void _scheduleDeadline() {
     _deadline?.cancel();
     final now = widget.controller.now;
-    final deadlines =
-        widget.controller.polls
-            .where(
-              (poll) => !poll.closed && poll.closesAt?.isAfter(now) == true,
-            )
-            .map((poll) => poll.closesAt!)
-            .toList()
-          ..sort();
-    if (deadlines.isNotEmpty) {
+    DateTime? earliest;
+    for (final poll in widget.controller.polls) {
+      final close = poll.closesAt;
+      if (!poll.closed && close != null && close.isAfter(now)) {
+        if (earliest == null || close.isBefore(earliest)) earliest = close;
+      }
+    }
+    if (earliest != null) {
       _deadline = Timer(
-        deadlines.first.difference(now) + const Duration(milliseconds: 25),
+        earliest.difference(now) + const Duration(milliseconds: 25),
         _changed,
       );
     }
   }
 
   void _changed() {
+    if (!_visible) return;
     _scheduleDeadline();
     if (mounted) setState(() {});
   }

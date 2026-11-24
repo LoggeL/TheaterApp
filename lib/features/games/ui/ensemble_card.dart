@@ -6,7 +6,7 @@ import '../../../app/theme/stage_theme.dart';
 import '../../../core/app_controller.dart';
 import '../data/wardrobe_api.dart';
 import 'stage_runner_art.dart';
-import 'stage_runner_look.dart' show paintGlint, shineColors;
+import 'stage_runner_look.dart' show paintGlintAt, shineColors;
 import 'wardrobe_cards.dart';
 
 /// "Ensemble-Strecke": the metres of all players together, the way to the
@@ -70,13 +70,11 @@ class EnsembleCard extends StatelessWidget {
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 14),
-            ClipRRect(
+            LinearProgressIndicator(
+              value: e.fraction,
+              minHeight: 18,
               borderRadius: BorderRadius.circular(9),
-              child: LinearProgressIndicator(
-                value: e.fraction,
-                minHeight: 18,
-                color: StageTheme.orange,
-              ),
+              color: StageTheme.orange,
             ),
             const SizedBox(height: 6),
             Row(
@@ -383,13 +381,11 @@ class EnsembleStrip extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              ClipRRect(
+              LinearProgressIndicator(
+                value: fraction,
+                minHeight: 10,
                 borderRadius: BorderRadius.circular(6),
-                child: LinearProgressIndicator(
-                  value: fraction,
-                  minHeight: 10,
-                  color: StageTheme.orange,
-                ),
+                color: StageTheme.orange,
               ),
               const SizedBox(height: 6),
               Text(
@@ -456,55 +452,77 @@ class EnsembleSurprise extends StatelessWidget {
 }
 
 /// A stage curtain in folds; [open] from 0 (closed) to 1 pulls both halves
-/// aside, for the reveal.
+/// aside, for the reveal. Passing [progress] drives the opening directly on
+/// repaint without rebuilding widgets.
 class CurtainPainter extends CustomPainter {
-  const CurtainPainter({this.open = 0});
+  const CurtainPainter({this.open = 0, this.progress})
+    : super(repaint: progress);
   final double open;
+  final Animation<double>? progress;
 
   static const _deep = Color(0xFF5A0F18), _light = Color(0xFFB3263A);
+  static const _foldGradient = LinearGradient(
+    colors: [_deep, _light, _deep],
+    tileMode: TileMode.repeated,
+  );
+  static const _leftShade = LinearGradient(
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+    colors: [Color(0x00000000), Color(0x55000000)],
+  );
+  static const _rightShade = LinearGradient(
+    begin: Alignment.centerRight,
+    end: Alignment.centerLeft,
+    colors: [Color(0x00000000), Color(0x55000000)],
+  );
+  static final _foldPaint = Paint();
+  static final _shadePaint = Paint();
+  static final _fringePaint = Paint()..color = const Color(0xFFE4AE39);
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (open >= 1) return;
-    final half = size.width / 2, shift = half * open;
-    for (final (left, from) in [(true, -shift), (false, half + shift)]) {
-      final rect = Rect.fromLTWH(from, 0, half, size.height);
-      canvas.save();
-      canvas.clipRect(rect);
-      // Folds: light and dark stripes across each half.
-      const folds = 3;
-      final fold = half / folds;
-      for (var i = 0; i < folds; i++) {
-        final r = Rect.fromLTWH(from + i * fold, 0, fold, size.height);
-        canvas.drawRect(
-          r,
-          Paint()
-            ..shader = const LinearGradient(
-              colors: [_deep, _light, _deep],
-            ).createShader(r),
-        );
-      }
-      // Darker towards the middle, where the halves meet.
-      canvas.drawRect(
-        rect,
-        Paint()
-          ..shader = LinearGradient(
-            begin: left ? Alignment.centerLeft : Alignment.centerRight,
-            end: left ? Alignment.centerRight : Alignment.centerLeft,
-            colors: const [Color(0x00000000), Color(0x55000000)],
-          ).createShader(rect),
+    final openValue = progress == null
+        ? open
+        : Curves.easeInOut.transform((progress!.value / .6).clamp(0.0, 1.0));
+    if (openValue >= 1) return;
+    final half = size.width / 2, shift = half * openValue;
+    final fold = half / 3;
+    // Left half clamped to [0, half - shift] avoids per-half clipRect passes.
+    final leftRight = half - shift;
+    if (leftRight > 0) {
+      final visible = Rect.fromLTRB(0, 0, leftRight, size.height);
+      _foldPaint.shader = _foldGradient.createShader(
+        Rect.fromLTWH(-shift, 0, fold, size.height),
       );
-      canvas.restore();
+      canvas.drawRect(visible, _foldPaint);
+      _shadePaint.shader = _leftShade.createShader(
+        Rect.fromLTWH(-shift, 0, half, size.height),
+      );
+      canvas.drawRect(visible, _shadePaint);
+    }
+    // Right half clamped to [half + shift, size.width].
+    final rightLeft = half + shift;
+    if (rightLeft < size.width) {
+      final visible = Rect.fromLTRB(rightLeft, 0, size.width, size.height);
+      _foldPaint.shader = _foldGradient.createShader(
+        Rect.fromLTWH(rightLeft, 0, fold, size.height),
+      );
+      canvas.drawRect(visible, _foldPaint);
+      _shadePaint.shader = _rightShade.createShader(
+        Rect.fromLTWH(rightLeft, 0, half, size.height),
+      );
+      canvas.drawRect(visible, _shadePaint);
     }
     // The gold fringe on top.
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, size.height * .07),
-      Paint()..color = const Color(0xFFE4AE39),
+      _fringePaint,
     );
   }
 
   @override
-  bool shouldRepaint(CurtainPainter old) => old.open != open;
+  bool shouldRepaint(CurtainPainter old) =>
+      old.open != open || old.progress != progress;
 }
 
 /// The celebration of reached milestones, shown once when the wardrobe opens
@@ -531,7 +549,20 @@ class _EnsembleCelebrationState extends State<EnsembleCelebration>
   late final AnimationController _burst = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1800),
-  )..forward();
+  );
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      _burst.value = 1;
+    } else {
+      _burst.forward();
+    }
+  }
 
   @override
   void dispose() {
@@ -557,10 +588,8 @@ class _EnsembleCelebrationState extends State<EnsembleCelebration>
         children: [
           Positioned.fill(
             child: IgnorePointer(
-              child: AnimatedBuilder(
-                animation: _burst,
-                builder: (context, _) =>
-                    CustomPaint(painter: _BurstPainter(_burst.value)),
+              child: RepaintBoundary(
+                child: CustomPaint(painter: _BurstPainter(_burst)),
               ),
             ),
           ),
@@ -617,16 +646,10 @@ class _EnsembleCelebrationState extends State<EnsembleCelebration>
                                       // The curtain opens on what was a
                                       // surprise until now.
                                       IgnorePointer(
-                                        child: AnimatedBuilder(
-                                          animation: _burst,
-                                          builder: (context, _) => CustomPaint(
+                                        child: RepaintBoundary(
+                                          child: CustomPaint(
                                             painter: CurtainPainter(
-                                              open: Curves.easeInOut.transform(
-                                                (_burst.value / .6).clamp(
-                                                  0.0,
-                                                  1.0,
-                                                ),
-                                              ),
+                                              progress: _burst,
                                             ),
                                           ),
                                         ),
@@ -696,30 +719,44 @@ class _EnsembleCelebrationState extends State<EnsembleCelebration>
 
 /// Glints flying out of the middle once.
 class _BurstPainter extends CustomPainter {
-  _BurstPainter(this.t);
-  final double t;
+  _BurstPainter(this.animation) : super(repaint: animation);
+  final Animation<double> animation;
+
+  static final _paint = Paint();
+  static final _glints = () {
+    final random = Random(5);
+    return [
+      for (var i = 0; i < 40; i++)
+        () {
+          final a = random.nextDouble() * 2 * pi;
+          return (
+            cos(a),
+            sin(a),
+            .2 + random.nextDouble() * .6,
+            3.0 + random.nextDouble() * 6.0,
+          );
+        }(),
+    ];
+  }();
 
   @override
   void paint(Canvas canvas, Size size) {
+    final t = animation.value;
     if (t <= 0 || t >= 1) return;
-    final c = Offset(size.width / 2, size.height * .2);
-    final random = Random(5);
-    final paint = Paint();
-    for (var i = 0; i < 40; i++) {
-      final a = random.nextDouble() * 2 * pi;
-      final d = size.shortestSide * (.2 + random.nextDouble() * .6) * t;
-      paint.color = shineColors[i % shineColors.length].withValues(
-        alpha: (1 - t) * .9,
+    final cx = size.width / 2, cy = size.height * .2;
+    final shortest = size.shortestSide;
+    final dropY = 80 * t * t;
+    final alpha = (1 - t) * .9;
+    for (var i = 0; i < _glints.length; i++) {
+      final (ca, sa, spread, radius) = _glints[i];
+      final d = shortest * spread * t;
+      _paint.color = shineColors[i % shineColors.length].withValues(
+        alpha: alpha,
       );
-      paintGlint(
-        canvas,
-        c + Offset(cos(a) * d, sin(a) * d + 80 * t * t),
-        3 + random.nextDouble() * 6,
-        paint,
-      );
+      paintGlintAt(canvas, cx + ca * d, cy + sa * d + dropY, radius, _paint);
     }
   }
 
   @override
-  bool shouldRepaint(_BurstPainter old) => old.t != t;
+  bool shouldRepaint(_BurstPainter old) => old.animation != animation;
 }

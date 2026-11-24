@@ -10,6 +10,7 @@ import '../../../shared/navigation.dart';
 import '../../../shared/layout/content_width.dart';
 import '../../../shared/widgets/one_line_segmented_button.dart';
 import '../../../shared/widgets/page_header.dart';
+import '../../../shared/widgets/visible_listenable_builder.dart';
 import '../../games/games.dart'
     show
         adminReleasesAvailable,
@@ -122,8 +123,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   );
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: controller,
+  Widget build(BuildContext context) => VisibleListenableBuilder(
+    listenable: controller,
     builder: (context, _) {
       final theme = Theme.of(context);
       final user = controller.user;

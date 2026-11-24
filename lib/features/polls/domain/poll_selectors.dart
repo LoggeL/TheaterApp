@@ -13,7 +13,7 @@ bool pollAddressesUser(AppController controller, Poll poll) {
   final personId = user!.personId;
   if (personId == null) return false;
   final member =
-      controller.members.where((m) => m.id == personId).firstOrNull ??
+      controller.memberById(personId) ??
       TheaterMember(id: personId, name: user.name, roleIds: user.roleIds);
   return member.inAudience(
     poll.roleIds,

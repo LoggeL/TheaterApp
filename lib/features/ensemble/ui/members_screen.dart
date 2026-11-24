@@ -59,22 +59,23 @@ class _MembersScreenState extends State<MembersScreen> {
               ),
             ),
             Expanded(
-              child: ListView(
-                children: [
-                  if (members.isEmpty)
-                    EmptyState(
-                      icon: Icons.person_search_outlined,
-                      title: 'Niemand gefunden',
-                      message: _query.trim().isEmpty
-                          ? 'Im Ensemble ist noch niemand eingetragen.'
-                          : 'Zu „${_query.trim()}“ passt kein Name und keine Rolle.',
+              child: members.isEmpty
+                  ? ListView(
+                      children: [
+                        EmptyState(
+                          icon: Icons.person_search_outlined,
+                          title: 'Niemand gefunden',
+                          message: _query.trim().isEmpty
+                              ? 'Im Ensemble ist noch niemand eingetragen.'
+                              : 'Zu „${_query.trim()}“ passt kein Name und keine Rolle.',
+                        ),
+                      ],
+                    )
+                  : ListView.separated(
+                      itemCount: members.length,
+                      separatorBuilder: (_, _) => const Divider(indent: 82),
+                      itemBuilder: (_, index) => _member(members[index]),
                     ),
-                  for (final (i, member) in members.indexed) ...[
-                    if (i > 0) const Divider(indent: 82),
-                    _member(member),
-                  ],
-                ],
-              ),
             ),
           ],
         ),

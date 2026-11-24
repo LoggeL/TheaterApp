@@ -7,6 +7,9 @@ const remindCooldown = Duration(minutes: 10);
 bool remindCoolingDown(DateTime? last, DateTime now) =>
     last != null && now.difference(last) < remindCooldown;
 
+final _nudgeDateFormat = DateFormat('d. MMMM', 'de');
+final _nudgeHmFormat = DateFormat.Hm('de');
+
 /// "Zuletzt erinnert: heute, 18:30 (2×)" for a reminder sent at [at].
 String lastRemindedLabel(DateTime at, int count, DateTime now) {
   final local = at.toLocal(), today = DateTime(now.year, now.month, now.day);
@@ -14,8 +17,8 @@ String lastRemindedLabel(DateTime at, int count, DateTime now) {
   final date = switch (today.difference(day).inDays) {
     0 => 'heute',
     1 => 'gestern',
-    _ => DateFormat('d. MMMM', 'de').format(local),
+    _ => _nudgeDateFormat.format(local),
   };
   final times = count > 1 ? ' ($count×)' : '';
-  return 'Zuletzt erinnert: $date, ${DateFormat.Hm('de').format(local)}$times';
+  return 'Zuletzt erinnert: $date, ${_nudgeHmFormat.format(local)}$times';
 }

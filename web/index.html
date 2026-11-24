@@ -23,6 +23,9 @@
   <meta name="theme-color" content="#E96131">
   <meta name="theater-pwa-version" content="development">
 
+  <!-- Warm the TLS connection for the pinned Firebase web SDK loaded during startup. -->
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -37,10 +40,12 @@
   <link rel="manifest" href="manifest.json">
   <!-- Start screen until Flutter's first frame (removed by pwa.js); no external resources. -->
   <style>
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; overscroll-behavior: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; -webkit-text-size-adjust: 100%; touch-action: manipulation; }
+    input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
     html { background: #F8F6F0; }
-    #theater-splash { position: fixed; inset: 0; z-index: -1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; pointer-events: none; }
+    #theater-splash { position: fixed; inset: 0; z-index: -1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; pointer-events: none; contain: strict; }
     #theater-splash svg { width: 72px; height: 72px; border-radius: 12px; }
-    #theater-splash .spinner { width: 32px; height: 32px; box-sizing: border-box; border: 4px solid #B83E1633; border-top-color: #B83E16; border-radius: 50%; animation: theater-spin 1s linear infinite; }
+    #theater-splash .spinner { width: 32px; height: 32px; box-sizing: border-box; border: 4px solid #B83E1633; border-top-color: #B83E16; border-radius: 50%; animation: theater-spin 1s linear infinite; will-change: transform; }
     @keyframes theater-spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { #theater-splash .spinner { animation-duration: 3s; } }
     @media (prefers-color-scheme: dark) {

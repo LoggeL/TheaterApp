@@ -39,7 +39,9 @@ class CrateReel {
     if (t < brake) {
       // Quartic ease-out: full speed at once, then a long, even braking.
       final u = t / brake;
-      return (stop + overshoot) * (1 - pow(1 - u, 4));
+      final d = 1 - u;
+      final d2 = d * d;
+      return (stop + overshoot) * (1 - d2 * d2);
     }
     final u = (t - brake) / (duration - brake);
     final ease = u * u * (3 - 2 * u);

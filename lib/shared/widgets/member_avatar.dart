@@ -21,30 +21,52 @@ class MemberAvatar extends StatelessWidget {
   final Alignment alignment;
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final diameter = radius * 2;
+    if (avatarId == null) {
+      return SizedBox.square(
+        dimension: diameter,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: scheme.secondaryContainer,
+          ),
+          child: Center(
+            child: Text(
+              initials,
+              style: TextStyle(
+                color: scheme.onSecondaryContainer,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     final fallback = ColoredBox(
-      color: Theme.of(context).colorScheme.secondaryContainer,
+      color: scheme.secondaryContainer,
       child: Center(
         child: Text(
           initials,
           style: TextStyle(
-            color: Theme.of(context).colorScheme.onSecondaryContainer,
+            color: scheme.onSecondaryContainer,
             fontWeight: FontWeight.w700,
           ),
         ),
       ),
     );
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final decodeWidth = (diameter * dpr).round().clamp(64, 256);
     return SizedBox.square(
-      dimension: radius * 2,
+      dimension: diameter,
       child: ClipOval(
-        child: avatarId == null
-            ? fallback
-            : ProtectedImage(
-                controller: controller,
-                path: '/media/$avatarId',
-                alignment: alignment,
-                decodeWidth: 256,
-                fallback: fallback,
-              ),
+        child: ProtectedImage(
+          controller: controller,
+          path: '/media/$avatarId',
+          alignment: alignment,
+          decodeWidth: decodeWidth,
+          fallback: fallback,
+        ),
       ),
     );
   }

@@ -54,6 +54,16 @@ const _accusatives = {
 String collectibleAccusative(String name) =>
     _accusatives[name.trim()] ?? name.trim();
 
+final _pluralKeys = _plurals.keys.toList()
+  ..sort((a, b) => b.length - a.length);
+final _pluralKeysLower = [for (final k in _pluralKeys) k.toLowerCase()];
+final _pluralValuesLower = [
+  for (final k in _pluralKeys) _plurals[k]!.toLowerCase(),
+];
+final _pluralUnchangedRe = RegExp(r'(chen|lein|el|er|en)$');
+final _pluralEnRe = RegExp(r'(ung|heit|keit|schaft|ion)$');
+final _pluralSRe = RegExp(r'([aiouy]|ip|on)$');
+
 /// The German plural of a pickup's [name]: known words (also as the end of
 /// a compound, "Teufelsstern" → "Teufelssterne", and the last of several,
 /// "Julias Rose" → "Julias Rosen"), else the usual endings.
@@ -65,18 +75,18 @@ String collectiblePlural(String name) {
     return '${word.substring(0, space + 1)}${collectiblePlural(word.substring(space + 1))}';
   }
   final lower = word.toLowerCase();
-  final keys = _plurals.keys.toList()..sort((a, b) => b.length - a.length);
-  for (final key in keys) {
-    if (lower.length > key.length && lower.endsWith(key.toLowerCase())) {
-      return word.substring(0, word.length - key.length) +
-          _plurals[key]!.toLowerCase();
+  for (var i = 0; i < _pluralKeys.length; i++) {
+    final keyLower = _pluralKeysLower[i];
+    if (lower.length > keyLower.length && lower.endsWith(keyLower)) {
+      return word.substring(0, word.length - keyLower.length) +
+          _pluralValuesLower[i];
     }
   }
-  if (RegExp(r'(chen|lein|el|er|en)$').hasMatch(word)) return word;
+  if (_pluralUnchangedRe.hasMatch(word)) return word;
   if (word.endsWith('e')) return '${word}n';
   if (word.endsWith('nis')) return '${word}se';
-  if (RegExp(r'(ung|heit|keit|schaft|ion)$').hasMatch(word)) return '${word}en';
-  if (RegExp(r'([aiouy]|ip|on)$').hasMatch(word)) return '${word}s';
+  if (_pluralEnRe.hasMatch(word)) return '${word}en';
+  if (_pluralSRe.hasMatch(word)) return '${word}s';
   return '${word}e';
 }
 
