@@ -27,6 +27,13 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.17.3',
+    date: '24. November 2026',
+    items: [
+      'Überarbeitete Sagenhaft-Figuren mit ihren vertrauten Kostümen im einheitlichen Stil der übrigen Figuren.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.17.2',
     date: '24. November 2026',
     items: [
