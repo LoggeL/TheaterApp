@@ -27,6 +27,13 @@ class ChangelogEntry {
 /// matches the app version.
 const changelog = [
   ChangelogEntry(
+    version: '0.17.2',
+    date: '24. November 2026',
+    items: [
+      'Behebt einen Darstellungsfehler im Querformat im Browser, bei dem die Anzeige nach dem Drehen dunkel bleiben konnte.',
+    ],
+  ),
+  ChangelogEntry(
     version: '0.17.1',
     date: '24. November 2026',
     items: [
