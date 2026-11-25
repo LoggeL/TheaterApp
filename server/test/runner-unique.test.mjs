@@ -364,9 +364,9 @@ test('the bundled catalog: play-specific uniques and Kolping for the complete te
   const raw = JSON.parse(readFileSync(new URL('../src/wardrobe/catalog.json', import.meta.url), 'utf8')).items;
   const beatrice = c.byId.get('character.unique-beatrice');
   assert.deepEqual([beatrice.name, beatrice.play, beatrice.year, beatrice.unlock], ['Beatrice', 'Creepshow', 2026, { play: 'Creepshow' }]);
-  // The Christmas reward retains the calendar gate; the others wait for pictures.
+  // The remaining disabled uniques wait for pictures; Day 24 Kuschel is a Gold Advent collectible.
   assert.deepEqual(raw.filter(x => x.rarity === 'unique' && x.disabled).map(x => x.id),
-    ['character.kuschel--weihnachten', 'character.unique-kristall', 'character.unique-rabe']);
+    ['character.unique-kristall', 'character.unique-rabe']);
   // Willi requires the whole Hölle cast, including Hatice's documented role without an app account.
   const willi = c.byId.get('character.unique-willi'), hell = uniqueRequirement(c, willi)[0].ids;
   assert.equal(hell.length, 11);
@@ -461,7 +461,7 @@ test('the calendar requirement stays 23 and cannot unlock while a calendar skin 
   assert.equal(uniqueCount(released, active.byId.get(christmas.id), new Set(days.map(x => x.id))).total, 23);
 });
 
-test('the Christmas reward validates the full calendar and its bundled Unique classification', () => {
+test('allAdventCalendar validates the full calendar; bundled Day 24 Kuschel is a Gold Advent skin', () => {
   const days = Array.from({ length: 23 }, (_, i) => role(`day.${i + 1}`, 1000 + i, 'Spuk', 2026));
   const christmas = { ...kuschel, id: 'u.advent', unlock: { allAdventCalendar: true } };
   const items = [...defaults, ...days, christmas];
@@ -471,7 +471,8 @@ test('the Christmas reward validates the full calendar and its bundled Unique cl
   }
   assert.throws(() => catalogOf(items.map(x => x.id === christmas.id ? { ...x, unlock: { allAdventCalendar: true, play: 'Spuk' } } : x), { adventCalendar }), /allAdventCalendar/);
   const c = bundledCatalog(), entry = c.source.data.items.find(x => x.id === 'character.kuschel--weihnachten');
-  assert.equal(entry.rarity, 'unique');
-  assert.deepEqual(entry.unlock, { allAdventCalendar: true });
-  assert.equal(entry.disabled, true, 'retain the existing calendar release gate');
+  assert.equal(entry.rarity, 'gold');
+  assert.equal(entry.unlock, undefined);
+  assert.equal(entry.disabled, undefined);
+  assert.ok(c.byId.get('character.kuschel--weihnachten')?.generalCrateOnly);
 });

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { AppError } from './theater.mjs';
 import { releaseIsActive, releasePackReady } from './runner-content-releases.mjs';
+import { adventAdminRelease } from './runner-advent.mjs';
 import { isUniqueEntry } from './runner-unique.mjs';
 
 // The admins' Skin-Viewer of the stage runner (`runnerAdminCatalog`): every entry of the wardrobe
@@ -156,17 +157,19 @@ export function adminRunnerCatalog(t, uid) {
   const releases = releasesOf(t, base, at, names), byRelease = releasesById(releases);
   const milestones = new Map((base.ensemble?.milestones ?? []).filter(m => m.item).map(m => [m.item, m.km]));
   const state = (x, isDisabled) => {
-    const release = byRelease.get(x.id) ?? null;
+    const isLive = !isDisabled && live.byId.has(x.id);
+    const release = byRelease.get(x.id) ?? adventAdminRelease(base.adventCalendar, x.id, isLive);
     // As `releasedCatalog` holds them back: the set and its gated items, a gated backdrop excepted.
     const held = release && (release.part === 'items' || (release.part === 'gated' && x.kind !== 'backdrop'));
     return {
-      disabled: isDisabled, live: !isDisabled && live.byId.has(x.id), release,
+      disabled: isDisabled, live: isLive, release,
       waiting: !!(held && release.active && !release.ready),
       secret: x.unique ? 'unique' : x.reward ? 'reward' : null,
       ...(milestones.has(x.id) ? { milestoneKm: milestones.get(x.id) } : {}),
     };
   };
   const calendar = base.source?.data?.adventCalendar ?? [];
+  const heading = base.adventCalendar?.heading ?? scheduleLabels.heading;
   const shown = x => Object.fromEntries(Object.entries(x).filter(([key]) => key !== 'music').map(([key, value]) => [key, pictureKeys.includes(key) ? adminLink(value) : value]));
   return {
     kinds: ['character', 'backdrop', 'obstacles', 'fx'],
@@ -180,7 +183,7 @@ export function adminRunnerCatalog(t, uid) {
     // Apps up to 0.16.4 read `adventCalendar`; later ones `schedule`, whose labels keep the
     // wording out of the app bundle.
     adventCalendar: calendar,
-    schedule: { ...scheduleLabels, entries: calendar },
+    schedule: { ...scheduleLabels, heading, entries: calendar },
     releases: releases.map(({ shown, missing }) => ({ ...shown, missing })),
     serverTime: at.toISOString(),
   };

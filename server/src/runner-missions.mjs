@@ -3,7 +3,8 @@ import { missionEffort, recentMissionOptions } from './runner-mission-effort.mjs
 import { AppError } from './theater.mjs';
 import { berlinDay } from './event-series.mjs';
 import { logMissionRebalance, logMissionReroll, logMissionRun, logMissionsMade } from './runner-mission-log.mjs';
-import { runnerProgress } from './runner-wardrobe.mjs';
+import { adventDailyReward, adventRewardDisplayName } from './runner-advent.mjs';
+import { grantMissionRewards } from './runner-wardrobe.mjs';
 
 // "Tagesmissionen" of the stage runner (`runnerMissions`): every person gets three missions per
 // Europe/Berlin calendar day, easy, medium and hard, measured on recent ordinary performance.
@@ -306,6 +307,13 @@ function completeMissions(rec, candidates, at, source) {
     crate: !rec.crate && missions.length === missionSlots.length && missions.every(m => m.done) ? 1 : 0 };
 }
 
+/** On Advent calendar days (Dec 1–24), all three missions award that day's skin instead of a crate. */
+function resolveDailyBonus(t, day, crateCount) {
+  if (!crateCount) return { crate: 0, rewardItem: null };
+  const daily = adventDailyReward(t, day);
+  return daily ? { crate: 0, rewardItem: daily.item.id } : { crate: 1, rewardItem: null };
+}
+
 /** Once per legacy day, lower open goals without replacing slots or reconstructing old runs. */
 function rebalanceToday(t, rec, at) {
   if ((rec.effortVersion ?? 0) >= missionEffort.version) return rec;
@@ -334,14 +342,14 @@ function rebalanceToday(t, rec, at) {
     return next;
   });
   const settled = completeMissions(rec, candidates, at, 'effortRebalance');
+  const bonus = resolveDailyBonus(t, rec.day, settled.crate);
   const { best, runs, recent } = basis;
-  const next = t.store.put('runnerMissions', rec.personId, { ...rec, missions: settled.missions, crate: rec.crate || !!settled.crate,
-    effortVersion: missionEffort.version, effortBasis: { best, runs, recent }, effortRebalance: { version: missionEffort.version, at: at.toISOString(), changes } });
-  if (settled.rewardPoints || settled.crate) {
-    const p = runnerProgress(t, rec.personId);
-    t.store.put('runnerProgress', rec.personId, { ...p, missionPoints: (p.missionPoints ?? 0) + settled.rewardPoints,
-      missionCrates: (p.missionCrates ?? 0) + settled.crate });
-  }
+  const next = t.store.put('runnerMissions', rec.personId, {
+    ...rec, missions: settled.missions, crate: rec.crate || !!settled.crate,
+    ...(bonus.rewardItem ? { rewardItem: bonus.rewardItem } : {}),
+    effortVersion: missionEffort.version, effortBasis: { best, runs, recent }, effortRebalance: { version: missionEffort.version, at: at.toISOString(), changes },
+  });
+  grantMissionRewards(t, rec.personId, { rewardPoints: settled.rewardPoints, ...bonus });
   logMissionRebalance(t, rec, next, at);
   t.store.audit('system', 'runner.mission.rebalance', JSON.stringify({ personId: rec.personId, day: rec.day, version: missionEffort.version, changes, completed: settled.completed }));
   return next;
@@ -355,7 +363,8 @@ export function missionsToday(t, personId, at, stats) {
   const basis = context(t, rec, stats, at);
   const missions = dayMissions(personId, day, basis, new Set(previous));
   const { best, runs, recent } = basis;
-  const made = t.store.put('runnerMissions', personId, { ...rec, day, stats, missions, effortBasis: { best, runs, recent }, effortVersion: missionEffort.version, rerolled: false, crate: false, todayMeters: 0, previousTypes: previous });
+  const { rewardItem: _prevReward, ...baseRec } = rec;
+  const made = t.store.put('runnerMissions', personId, { ...baseRec, day, stats, missions, effortBasis: { best, runs, recent }, effortVersion: missionEffort.version, rerolled: false, crate: false, todayMeters: 0, previousTypes: previous });
   // History for balancing (runner-mission-log.mjs), using the exact frozen generation basis.
   return logMissionsMade(t, made, basis);
 }
@@ -393,6 +402,7 @@ export function recordMissionRun(t, personId, run) {
     return { ...m, progress };
   });
   const { missions, completed, rewardPoints: reward, crate } = completeMissions(rec, candidates, run.at);
+  const bonus = resolveDailyBonus(t, rec.day, crate);
   // Preserve records separately from timestamped ordinary calibration samples. Neither changes
   // today's frozen missions or reroll basis. The old timestamp-less window is no longer needed.
   const { best, runs } = bestsOf(rec);
@@ -404,9 +414,10 @@ export function recordMissionRun(t, personId, run) {
       at: run.at.toISOString(), m: run.meters, s: run.score, ...(run.stats ? { st: run.stats } : {}),
     }] : recentOf(rec, run.at)).slice(-missionEffort.window),
     todayMeters: (rec.todayMeters ?? 0) + run.meters, crate: rec.crate || !!crate,
+    ...(bonus.rewardItem ? { rewardItem: bonus.rewardItem } : {}),
   });
   logMissionRun(t, rec, next, run);
-  return { rewardPoints: reward, crate: crate ? 1 : 0, completed, record: next };
+  return { rewardPoints: reward, crate: bonus.crate, rewardItem: bonus.rewardItem, completed, record: next };
 }
 
 const plural = (n, one, many) => n === 1 ? one : many;
@@ -463,9 +474,32 @@ export function missionsView(t, rec, completed = []) {
     ...(completed.includes(m.slot) ? { justDone: true } : {}),
     ...(m.rerolled ? { rerolled: true } : {}),
   }));
+  const daily = adventDailyReward(t, rec.day);
+  const rewardEarned = rec.crate === true;
+  const dailyReward = daily ? (() => {
+    const display = rewardEarned ? adventRewardDisplayName(daily.item) : null;
+    return {
+      kind: 'item',
+      earned: rewardEarned,
+      itemId: daily.item.id,
+      rarity: daily.item.rarity,
+      ...(daily.item.thumb || daily.item.portrait ? { portrait: daily.item.thumb ?? daily.item.portrait } : {}),
+      summary: 'Alle drei an einem Tag: heute schaltest du das Tageskostüm statt einer Missionskiste frei.',
+      ...(rewardEarned ? {
+        name: daily.item.name,
+        ...(daily.item.role ? { role: daily.item.role } : {}),
+        ...(daily.item.play ? { play: daily.item.play } : {}),
+        ...(daily.item.year !== undefined ? { year: daily.item.year } : {}),
+        earnedSummary: `Alle drei geschafft – „${display}“ ist jetzt in deiner Garderobe.`,
+        runNote: `Alle drei Tagesmissionen geschafft! Freigeschaltet: ${display} – jetzt in deiner Garderobe.`,
+      } : {}),
+    };
+  })() : null;
   return {
     day: rec.day, missions, rerollAvailable: !rec.rerolled && missions.some(m => !m.done), allDone: missions.length > 0 && missions.every(m => m.done),
-    crate: { earned: rec.crate === true, shinyChance: missionShine(t) }, ...(completed.length ? { completed } : {}),
+    crate: { earned: !daily && rewardEarned, shinyChance: missionShine(t) },
+    ...(dailyReward ? { dailyReward } : {}),
+    ...(completed.length ? { completed } : {}),
   };
 }
 
@@ -497,11 +531,12 @@ export function rerollMission(t, uid, requestId, b) {
     const mission = { ...fresh, rerolled: true, progress: fresh.type === 'dailyDistance' ? rec.todayMeters ?? 0 : 0 };
     const candidates = rec.missions.map(m => m.slot === b.slot ? mission : m);
     const settled = completeMissions(rec, candidates, at, 'reroll');
-    const saved = t.store.put('runnerMissions', a.personId, { ...rec, rerolled: true, missions: settled.missions, crate: rec.crate || !!settled.crate });
-    if (settled.rewardPoints || settled.crate) {
-      const p = runnerProgress(t, a.personId);
-      t.store.put('runnerProgress', a.personId, { ...p, missionPoints: (p.missionPoints ?? 0) + settled.rewardPoints, missionCrates: (p.missionCrates ?? 0) + settled.crate });
-    }
+    const bonus = resolveDailyBonus(t, rec.day, settled.crate);
+    const saved = t.store.put('runnerMissions', a.personId, {
+      ...rec, rerolled: true, missions: settled.missions, crate: rec.crate || !!settled.crate,
+      ...(bonus.rewardItem ? { rewardItem: bonus.rewardItem } : {}),
+    });
+    grantMissionRewards(t, a.personId, { rewardPoints: settled.rewardPoints, ...bonus });
     const result = missionsView(t, saved, settled.completed);
     t.store.db.prepare('INSERT INTO requests VALUES(?,?,?,?,?)').run(uid, key, 'runner.mission.reroll', JSON.stringify(result), at.toISOString());
     t.store.audit(uid, 'runner.mission.reroll', `${b.slot} ${old.type}->${fresh.type}`);

@@ -10,6 +10,7 @@ import { findRound, finishRound, roundOrder, startRound } from './runner-rounds.
 import { autoCheckins, eventCrateNotice, forgetEventCrates, settleCheckinCrate } from './runner-event-crates.mjs';
 import { buyItem, bundledCatalog, collectionBoard, ensembleSeen, galaSeen, openCrate, recordRun, runMeters, runPoints, secureRandom, selectOutfit, skinFile, tradeGage, uniqueSeen, wardrobe } from './runner-wardrobe.mjs';
 import { bundledContentReleases, parseContentReleases, releasedCatalog, releaseIsActive } from './runner-content-releases.mjs';
+import { adventPhase } from './runner-advent.mjs';
 import { packGoalsView } from './runner-pack-goals.mjs';
 import { adminRunnerCatalog, adminRunnerSkin } from './runner-admin-catalog.mjs';
 import { adminReleaseSchedule, rescheduleRelease, withReleaseOverrides } from './runner-release-schedule.mjs';
@@ -198,7 +199,8 @@ const initials = name => name.split(/\s+/).filter(Boolean).slice(0, 2).map(n => 
 export class Theater {
   // The next request after a launch instant sees the new catalog, without restarting the server.
   get runnerCatalog() {
-    const at = this.clock(), phase = this.runnerReleases.map(r => releaseIsActive(r, at) ? '1' : '0').join('');
+    const at = this.clock();
+    const phase = `${this.runnerReleases.map(r => releaseIsActive(r, at) ? '1' : '0').join('')}|${adventPhase(this._runnerCatalog?.adventCalendar, at)}`;
     if (!this._releasedRunnerCatalog || this._runnerReleasePhase !== phase) {
       this._releasedRunnerCatalog = releasedCatalog(this._runnerCatalog, this.runnerReleases, at);
       this._runnerReleasePhase = phase;

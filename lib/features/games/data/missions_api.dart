@@ -248,6 +248,56 @@ class MissionWatch {
   }
 }
 
+/// Server-driven special reward for completing all three daily missions
+/// instead of a crate (e.g. a direct daily costume unlock).
+class DailyMissionReward {
+  const DailyMissionReward({
+    required this.kind,
+    this.earned = false,
+    this.itemId,
+    this.name,
+    this.role,
+    this.play,
+    this.year,
+    this.rarity,
+    this.portrait,
+    this.summary,
+    this.earnedSummary,
+    this.runNote,
+  });
+
+  final String kind;
+  final bool earned;
+  final String? itemId, name, role, play, rarity, portrait;
+  final int? year;
+  final String? summary, earnedSummary, runNote;
+
+  bool get isItem => kind == 'item';
+
+  static DailyMissionReward? fromJson(Object? value) {
+    if (value is! Map) return null;
+    final json = jsonMap(value);
+    final kind = textValue(json['kind']);
+    if (kind.isEmpty) return null;
+    String? opt(Object? v) =>
+        v is String && v.trim().isNotEmpty ? v.trim() : null;
+    return DailyMissionReward(
+      kind: kind,
+      earned: json['earned'] == true,
+      itemId: opt(json['itemId']),
+      name: opt(json['name']),
+      role: opt(json['role']),
+      play: opt(json['play']),
+      year: json['year'] is num ? intValue(json['year']) : null,
+      rarity: opt(json['rarity']),
+      portrait: opt(json['portrait']),
+      summary: opt(json['summary']),
+      earnedSummary: opt(json['earnedSummary']),
+      runNote: opt(json['runNote']),
+    );
+  }
+}
+
 /// The day's three missions.
 class DailyMissions {
   const DailyMissions({
@@ -257,6 +307,7 @@ class DailyMissions {
     this.allDone = false,
     this.crateEarned = false,
     this.shinyChance = 0,
+    this.dailyReward,
   });
   final String day;
   final List<DailyMission> missions;
@@ -265,6 +316,10 @@ class DailyMissions {
   /// Whether all three brought today's Missionskiste, and its shine chance.
   final bool crateEarned;
   final double shinyChance;
+
+  /// Special server-configured completion reward when today awards a direct
+  /// item instead of a crate; null on ordinary days and older servers.
+  final DailyMissionReward? dailyReward;
 
   /// Missions the run of this reply completed.
   List<DailyMission> get justDone => [
@@ -289,6 +344,7 @@ class DailyMissions {
       shinyChance: crate['shinyChance'] is num
           ? (crate['shinyChance'] as num).toDouble()
           : 0,
+      dailyReward: DailyMissionReward.fromJson(json['dailyReward']),
     );
   }
 }

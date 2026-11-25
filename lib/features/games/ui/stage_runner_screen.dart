@@ -1844,7 +1844,13 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
           ? () => _openWardrobe(initialTab: 1)
           : null,
       onChanged: (m) {
-        if (mounted) setState(() => _missions = m);
+        if (!mounted) return;
+        setState(() => _missions = m);
+        if (m.justCompletedAll &&
+            m.dailyReward?.isItem == true &&
+            _dressable) {
+          unawaited(_refreshWardrobe());
+        }
       },
     );
   }
@@ -1983,7 +1989,8 @@ class _StageRunnerScreenState extends State<StageRunnerScreen>
     final waitingCrates = _progress?.waiting ?? _wardrobe?.progress.waiting ?? 0;
     final earnedCrate =
         (_progress?.newCrates ?? 0) > 0 ||
-        (_progress?.missions?.justCompletedAll ?? false);
+        ((_progress?.missions?.justCompletedAll ?? false) &&
+            (_progress?.missions?.dailyReward?.isItem != true));
     final outboxWaiting = _ranked ? _outbox.waiting : 0;
     final weeklyImproved =
         weekly != null && weekly.ranked && (_weeklyResult?.improved ?? false);

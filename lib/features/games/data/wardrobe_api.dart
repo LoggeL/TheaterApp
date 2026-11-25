@@ -552,7 +552,19 @@ class WardrobeItem {
     this.borderColor,
     this.music,
     this.importance,
+    this.generalCrateOnly = false,
+    this.lockHint,
+    this.lockDetail,
   });
+
+  /// Whether this item only drops from the general random crate (never from
+  /// play- or crew-targeted crates).
+  final bool generalCrateOnly;
+
+  /// Optional server-provided lock reason (short card label and longer detail
+  /// copy) while the item is visible in the wardrobe but not yet drawable or
+  /// buyable.
+  final String? lockHint, lockDetail;
 
   /// How much the role carries its play (0–100), from which its rarity was
   /// chosen; null for other items and older servers.
@@ -659,6 +671,9 @@ class WardrobeItem {
           borderColor: borderColor,
           music: music,
           importance: importance,
+          generalCrateOnly: generalCrateOnly,
+          lockHint: lockHint,
+          lockDetail: lockDetail,
         );
 
   static WardrobeItem? fromJson(JsonMap json) {
@@ -717,6 +732,9 @@ class WardrobeItem {
       importance: json['importance'] is num
           ? (json['importance'] as num).round()
           : null,
+      generalCrateOnly: json['generalCrateOnly'] == true,
+      lockHint: path(json['lockHint']),
+      lockDetail: path(json['lockDetail']),
     );
   }
 }
@@ -1928,9 +1946,15 @@ class Wardrobe {
   }
 
   /// What one chosen missing [item] costs; null if it cannot be bought
-  /// (owned, a reward, gold).
+  /// (owned, a reward, gold, or locked by a server rule).
   int? buyCost(WardrobeItem item) {
-    if (owns(item) || item.reward || item.unique || item.isDefault) return null;
+    if (owns(item) ||
+        item.reward ||
+        item.unique ||
+        item.isDefault ||
+        item.lockHint != null) {
+      return null;
+    }
     final rarity = catalog.rarityOf(item);
     if (!rarity.buyable || rarity.gage <= 0) return null;
     return catalog.dupes.buyDupes * rarity.gage;
@@ -1953,12 +1977,20 @@ class Wardrobe {
   /// What unlocks [item] while it cannot come from a crate yet; null if it
   /// can.
   String? lockHint(WardrobeItem item) {
-    if (owns(item) ||
-        item.rarities.isEmpty ||
+    if (owns(item)) return null;
+    if (item.lockHint != null) return item.lockHint;
+    if (item.rarities.isEmpty ||
         !item.rarities.every(lockedRarities.contains)) {
       return null;
     }
     return catalog.rarityOf(item).hint ?? 'Noch gesperrt';
+  }
+
+  /// Detailed lock explanation for the item's sheet, falling back to
+  /// [lockHint].
+  String? lockDetail(WardrobeItem item) {
+    if (owns(item)) return null;
+    return item.lockDetail ?? lockHint(item);
   }
 
   /// Unlock progress `(have, need)` towards [rarity]'s `requires` while it is

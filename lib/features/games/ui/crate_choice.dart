@@ -121,9 +121,12 @@ class CrateChoiceSheet extends StatelessWidget {
 /// The catalog's collectible items belonging to [target], for showing how
 /// many shiny versions are owned once the pool is complete.
 List<WardrobeItem> crateTargetItems(Wardrobe wardrobe, CrateTarget target) {
-  final collectible = wardrobe.catalog.collectible;
+  final collectible = wardrobe.catalog.collectible.where(
+    (i) => i.lockHint == null,
+  );
   bool isTech(WardrobeItem item) =>
       item.kind == WardrobeKind.character &&
+      !item.generalCrateOnly &&
       ((item.role?.isFunction ?? false) || item.rarities.contains('gruen'));
   return switch (target.kind) {
     CrateTargetKind.random ||
@@ -136,6 +139,7 @@ List<WardrobeItem> crateTargetItems(Wardrobe wardrobe, CrateTarget target) {
     CrateTargetKind.play => [
       for (final i in collectible)
         if (i.kind == WardrobeKind.character &&
+            !i.generalCrateOnly &&
             !isTech(i) &&
             i.role?.play == (target.play ?? target.name) &&
             (target.year == null || i.role?.year == target.year))

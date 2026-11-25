@@ -58,8 +58,8 @@ const playsKey = plays => plays.map(p => `${p.play}\u0000${p.year ?? ''}`).sort(
 /** "Creepshow", "Creepshow und Nexus", "A, B und C". */
 export const playsText = names => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} und ${names.at(-1)}`;
 // Historical cast members may have a documented role without a linked app account. Their
-// collectible roles still count towards the complete play; unique/default figures never do.
-const isRoleOf = (x, p) => x?.kind === 'character' && !x.default && !x.unlock && text(x.role)
+// collectible roles still count towards the complete play; unique/default/calendar figures never do.
+const isRoleOf = (x, p, exclude = null) => x?.kind === 'character' && !x.default && !x.unlock && !x.generalCrateOnly && !exclude?.has(x.id) && text(x.role)
   && x.play === p.play && (p.year === undefined || x.year === p.year);
 
 /** Whether the raw catalog entry [x] is a unique figure. */
@@ -100,7 +100,8 @@ export function checkUniqueEntry(x, rarity, raw, bad, calendar = []) {
   const plays = unlockPlays(u);
   if (plays.some(p => !text(p.play) || (p.year !== undefined && !Number.isInteger(p.year)))) bad(`unlock of ${what}`);
   if (new Set(plays.map(p => playsKey([p]))).size !== plays.length) bad(`unlock of ${what}: a play twice`);
-  for (const p of plays) if (!raw.some(o => isRoleOf(o, p))) bad(`unlock of ${what}: no role figure of ${p.play}`);
+  const exclude = new Set(list(calendar).map(d => d?.item));
+  for (const p of plays) if (!raw.some(o => isRoleOf(o, p, exclude))) bad(`unlock of ${what}: no role figure of ${p.play}`);
   const key = playsKey(plays);
   const same = raw.filter(o => o?.unlock && !o.unlock.allTechnicians && !o.unlock.allAdventCalendar && typeof o.unlock === 'object' && isUniqueEntry(o, rarity) && playsKey(unlockPlays(o.unlock)) === key);
   if (same.length > 1) bad(`${what}: one unique figure per play (${same.map(o => o.id).join(', ')})`);
@@ -124,7 +125,7 @@ export function uniqueRequirement(c, u) {
       return byUnique.get(u.id);
     }
     if (u.unlock.allTechnicians) {
-      const ids = c.items.filter(x => x.kind === 'character' && !x.default && !x.reward && !x.unique
+      const ids = c.items.filter(x => x.kind === 'character' && !x.default && !x.reward && !x.unique && !x.generalCrateOnly
         && list(x.rarities).some(id => c.rarities.some(r => r.id === id && r.crew))).map(x => x.id);
       byUnique.set(u.id, [{ play: 'Technik', ids }]);
       return byUnique.get(u.id);

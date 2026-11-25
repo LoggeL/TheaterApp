@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { adventState } from './runner-advent.mjs';
 
 /** Scheduled runner content is enforced by server time on every catalog access. */
 export function parseContentReleases(data) {
@@ -41,17 +42,24 @@ const filesOf = entries => new Set(entries.flatMap(x => assetKeys.flatMap(key =>
 
 /** Preserves parsed item objects (including non-enumerable draw/legacy metadata). */
 export function releasedCatalog(base, releases, at) {
-  const hidden = new Set(releases.flatMap(r => {
-    if (!releaseIsActive(r, at)) return [...r.itemIds, ...r.gatedItemIds];
-    if (releasePackReady(base, r)) return [];
-    // Milestone backdrops have their own unlock. A free pack backdrop arrives with its roles.
-    return [...r.itemIds, ...r.gatedItemIds.filter(id => r.freeItemIds.includes(id) || base.byId.get(id)?.kind !== 'backdrop')];
-  }));
-  if (!hidden.size) return base;
+  const adv = adventState(base.adventCalendar, at);
+  const hidden = new Set([
+    ...releases.flatMap(r => {
+      if (!releaseIsActive(r, at)) return [...r.itemIds, ...r.gatedItemIds];
+      if (releasePackReady(base, r)) return [];
+      // Milestone backdrops have their own unlock. A free pack backdrop arrives with its roles.
+      return [...r.itemIds, ...r.gatedItemIds.filter(id => r.freeItemIds.includes(id) || base.byId.get(id)?.kind !== 'backdrop')];
+    }),
+    ...adv.hiddenIds,
+  ]);
+  const exclusive = adv.exclusiveIds;
+  if (!hidden.size && !exclusive.size) return base;
   const items = base.items.filter(x => !hidden.has(x.id));
   const byId = new Map(items.map(x => [x.id, x]));
-  const collectible = base.collectible.filter(x => byId.has(x.id));
-  const targetItems = new Map([...base.targetItems].map(([id, pool]) => [id, pool.filter(x => byId.has(x.id))]));
+  // Day-exclusive calendar items stay visible in the wardrobe (`items` / `byId` / `files`)
+  // while staying out of every crate pool, trade, and purchase (`collectible` / `targetItems`).
+  const collectible = base.collectible.filter(x => byId.has(x.id) && !exclusive.has(x.id));
+  const targetItems = new Map([...base.targetItems].map(([id, pool]) => [id, pool.filter(x => byId.has(x.id) && !exclusive.has(x.id))]));
   const crateTargets = base.crateTargets.filter(x => x.id === 'random' || targetItems.get(x.id)?.length);
   for (const id of targetItems.keys()) if (!crateTargets.some(x => x.id === id)) targetItems.delete(id);
   // The Gala-Kiste, the Wochenkiste and the masks belong to no release: their pictures stay whatever is hidden.
@@ -60,9 +68,12 @@ export function releasedCatalog(base, releases, at) {
   const baseOf = new Map([...base.baseOf].filter(([id, parent]) => byId.has(id) && byId.has(parent)));
   const rolesOf = new Map();
   for (const [id, parent] of baseOf) rolesOf.set(parent, [...(rolesOf.get(parent) ?? []), byId.get(id)]);
-  return { ...base, items, byId, collectible, uniques: base.uniques.filter(x => byId.has(x.id)), targetItems, crateTargets,
+  const result = { ...base, items, byId, collectible, uniques: base.uniques.filter(x => byId.has(x.id)), targetItems, crateTargets,
     files: new Map([...base.files].filter(([name]) => allowedFiles.has(name))),
     rewardFiles: restrictedFiles(base.rewardFiles), uniqueFiles: restrictedFiles(base.uniqueFiles), baseOf, rolesOf,
     ensemble: base.ensemble ? { ...base.ensemble, milestones: base.ensemble.milestones.map(m => hidden.has(m.item) ? { km: m.km, item: m.item, releasePending: true } : m) } : null,
   };
+  if (base.adventCalendar) Object.defineProperty(result, 'adventCalendar', { value: base.adventCalendar, enumerable: false });
+  if (exclusive.size) Object.defineProperty(result, 'adventExclusive', { value: exclusive, enumerable: false });
+  return result;
 }

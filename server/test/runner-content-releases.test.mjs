@@ -247,8 +247,9 @@ test('bundled manifest pins the approved Berlin dates and known role pools', () 
     ['dystopia-2027', '2027-02-14T17:00:00.000Z'], ['bluttribut-2027', '2027-02-28T17:00:00.000Z'],
     ['verrat-2027', '2027-03-14T17:00:00.000Z'], ['sagenhaft-2027', '2027-03-28T16:00:00.000Z'],
     ['black-swan-2027', '2027-04-11T16:00:00.000Z'], ['anno-2027', '2027-04-25T16:00:00.000Z'],
-    ['creepshow-2027', '2027-05-09T16:00:00.000Z'], ['nexus-2027', '2027-05-23T16:00:00.000Z'],
+    ['nexus-2027', '2027-05-23T16:00:00.000Z'],
   ]);
+  assert.deepEqual(releases.find(x => x.id === 'anno-2027').itemIds, ['character.logge--anno']);
   assert.ok(!releases.some(x => x.startsAt.startsWith('2026-11-22')), 'nothing releases on 22 November 2026');
   assert.equal(releases.find(x => x.id === 'hell-2026').itemIds.length, 11);
   assert.equal(releases.find(x => x.id === 'romeo-julia-2026').itemIds.length, 9);

@@ -397,11 +397,13 @@ test('the bundled catalog is valid and ships only finished costumes', () => {
   assert.equal(c.rarities.at(-1).id, 'gold');
   assert.ok(c.rarities.some(r => r.id === 'technik'));
   assert.ok(c.items.every(x => (x.departments ?? []).every(id => c.departments.some(d => d.id === id))));
-  // Linked people's characters belong to them. Documented former cast members may have no app
-  // account; they remain collectible Legacy roles, never silently assigned to another person.
+  // Linked people's characters belong to them. Documented former cast members without an app
+  // account (Hatice) and non-human mascot figures (Captain Kuschel Weihnachtsedition) keep no personId.
   const unlinked = drawable.filter(x => x.kind === 'character' && !x.unique && !Number.isInteger(x.personId));
-  assert.deepEqual(unlinked.map(x => x.id), ['character.hatice--hell']);
-  assert.ok(unlinked.every(x => x.personId === undefined && x.rarity === 'legacy' && x.role && x.play && Number.isInteger(x.year)));
+  assert.deepEqual(unlinked.map(x => x.id), ['character.kuschel--weihnachten', 'character.hatice--hell']);
+  assert.ok(unlinked.every(x => x.personId === undefined && x.role && x.play && Number.isInteger(x.year)));
+  assert.equal(c.byId.get('character.hatice--hell').rarity, 'legacy');
+  assert.equal(c.byId.get('character.kuschel--weihnachten').rarity, 'gold');
   assert.ok(c.uniques.every(x => x.personId === undefined && !c.collectible.includes(x)));
 });
 

@@ -13,6 +13,7 @@ import { giftOf, ownFiguresCutover, settleOwnFigures } from './runner-own-figure
 import { galaCrates, galaTrophies, galaWardrobe, markGalaCrateOpened, markGalaSeen, nextGalaCrate } from './runner-gala.mjs';
 import { markWeeklyCrateOpened, nextWeeklyCrate, weeklyCrates, weeklyWardrobe } from './runner-weekly.mjs';
 import { nextDropFields } from './runner-next-drop.mjs';
+import { adventLockInfo, parseAdventCalendar } from './runner-advent.mjs';
 
 // "Garderobe" of the stage runner: every metre run counts towards costume crates; a crate holds one
 // item (a character, a backdrop, an obstacle set or an effect) that the person does not own yet.
@@ -280,6 +281,7 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
     dupes[key] = value;
   }
   const rawIds = new Set(list(data?.items).map(x => x?.id));
+  const adventCalendar = parseAdventCalendar(data, rawIds, bad);
   // Role figures: every figure of a person is one role, waiting ones (`disabled`) included.
   const roleFigures = data?.roleFigures === true;
   if (roleFigures) for (const x of list(data?.items)) checkRoleFigure(x, rarity, rawIds, list(data?.items), bad);
@@ -335,6 +337,7 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
       ...(x.placeholder === true ? { placeholder: true } : {}),
       ...(reward ? { reward: true } : {}),
       ...(unique ? { unique: true, unlock } : {}),
+      ...(adventCalendar?.itemIds.has(x.id) ? { generalCrateOnly: true } : {}),
       ...(departmentIds.length ? { departments: [...departmentIds] } : {}),
       ...(typeof x.rarityReason === 'string' && x.rarityReason ? { rarityReason: x.rarityReason } : {}),
       // A free label instead of the department names, e.g. "Bühnentechnik · Ensemble".
@@ -433,6 +436,7 @@ export function loadCatalog(data, imageDir = null, musicDir = imageDir) {
   // The masks of the Monatsgala, by name like the crates; without its picture the app draws an icon.
   const galaMasks = Object.fromEntries(galaTrophies.flatMap(id => { const image = picture(`trophy-mask-${id}.webp`); return image ? [[id, image]] : []; }));
   const result = { rarities, departments, items, collectible, uniques, uniqueRarity, byId, files, rewardFiles, uniqueFiles, rarity, dupes, ensemble, roleFigures, baseOf, rolesOf, crateTargets, targetItems, galaCrate, weeklyCrate, galaMasks, defaults: Object.fromEntries(wardrobeKinds.map(k => [k, items.find(x => x.kind === k && x.default).id])) };
+  if (adventCalendar) Object.defineProperty(result, 'adventCalendar', { value: adventCalendar, enumerable: false });
   // The raw entries and their folder, only for the admins' full view (runner-admin-catalog.mjs), which
   // also lists the `disabled` ones; never part of what members get (not enumerable, not spread).
   Object.defineProperty(result, 'source', { value: { data, imageDir }, enumerable: false });
@@ -472,7 +476,7 @@ function crateTargetsOf(collectible, rarity, data, picture, bad) {
   const crew = x => x.rarities.some(id => rarity.get(id)?.crew);
   const plays = new Map();
   for (const x of collectible) {
-    if (x.kind !== 'character' || typeof x.play !== 'string' || crew(x)) continue;
+    if (x.kind !== 'character' || typeof x.play !== 'string' || crew(x) || x.generalCrateOnly) continue;
     const key = `${x.play}\u0000${x.year ?? ''}`;
     if (!plays.has(key)) plays.set(key, { play: x.play, year: x.year, items: [] });
     plays.get(key).items.push(x);
@@ -481,7 +485,7 @@ function crateTargetsOf(collectible, rarity, data, picture, bad) {
   const slugs = new Map();
   for (const p of plays.values()) slugs.set(playSlug(p.play), (slugs.get(playSlug(p.play)) ?? 0) + 1);
   const sorted = [...plays.values()].sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.play.localeCompare(b.play, 'de'));
-  const tech = collectible.filter(x => x.kind === 'character' && crew(x));
+  const tech = collectible.filter(x => x.kind === 'character' && crew(x) && !x.generalCrateOnly);
   const entries = [
     { id: 'random', kind: 'random', name: 'Zufallskiste', file: 'random', items: collectible },
     ...(tech.length ? [{ id: 'tech', kind: 'tech', name: 'Technik-Kiste', file: 'tech', items: tech }] : []),
@@ -627,6 +631,23 @@ export const missionCrates = p => Math.max(0, (p.missionCrates ?? 0) - (p.missio
 /** Whether [p]'s Tagesbonus of the Berlin calendar day of [at] is still open. */
 export const bonusOpen = (p, at) => p.bonusDay !== berlinDay(at.toISOString());
 
+/**
+ * Credits daily mission rewards (crate points, Missionskiste, or a direct daily skin unlock)
+ * inside an active transaction, keeping `owned` deduplicated and settling derived unlocks.
+ */
+export function grantMissionRewards(t, personId, { rewardPoints = 0, crate = 0, rewardItem = null }) {
+  if (!rewardPoints && !crate && !rewardItem) return;
+  const p = runnerProgress(t, personId);
+  const owned = rewardItem && !list(p.owned).includes(rewardItem) ? [...list(p.owned), rewardItem] : p.owned;
+  const updated = {
+    ...p,
+    ...(rewardPoints ? { missionPoints: (p.missionPoints ?? 0) + rewardPoints } : {}),
+    ...(crate ? { missionCrates: (p.missionCrates ?? 0) + crate } : {}),
+    ...(owned !== p.owned ? { owned } : {}),
+  };
+  t.store.put('runnerProgress', personId, rewardItem ? settleUnlocks(t, updated) : updated);
+}
+
 /** Credits [gage] to the person like a duplicate does (the Applaus of the Monatsgala). */
 export function creditGage(t, personId, gage) {
   const p = runnerProgress(t, personId);
@@ -771,7 +792,7 @@ const collectibleNow = x => !!(x.image || x.placeholder || (x.kind === 'fx' && x
  */
 const countedItems = (t, c = catalog(t)) => {
   const free = new Set(releasedFreeItems(t));
-  return [...c.collectible, ...c.uniques].filter(x => collectibleNow(x) && !free.has(x.id)).map(x => x.id);
+  return c.items.filter(x => !x.default && !x.reward && collectibleNow(x) && !free.has(x.id)).map(x => x.id);
 };
 /** [p]'s collection: `owned` of the `total` [counted] items, `shiny` of those. */
 const collectionOf = (t, p, counted = countedItems(t)) => {
@@ -804,10 +825,15 @@ export function collectionBoard(t, uid) {
 // of reached milestones: until then a reward is a surprise (name, pictures and id stay on the server).
 // Unique figures likewise, and only the person's own ([owned]) for apps that ask with [unique].
 const catalogView = (t, owned, unique) => {
-  const c = catalog(t), revealed = revealedRewards(t, credit);
+  const c = catalog(t), revealed = revealedRewards(t, credit), at = t.clock();
+  const items = c.items.filter(x => !x.reward && !x.unique).map(x => {
+    if (!c.adventExclusive?.has(x.id) || owned.has(x.id)) return x;
+    const lock = adventLockInfo(c.adventCalendar, x.id, at);
+    return lock ? { ...x, lockHint: lock.hint, lockDetail: lock.detail } : x;
+  });
   return {
     kinds: [...wardrobeKinds], rarities: c.rarities.map(({ rank, ...r }) => r), departments: c.departments,
-    items: c.items.filter(x => !x.reward && !x.unique), rewards: c.items.filter(x => x.reward && revealed.has(x.id)), dupes: c.dupes,
+    items, rewards: c.items.filter(x => x.reward && revealed.has(x.id)), dupes: c.dupes,
     ...(c.ensemble ? { ensembleRarity: c.ensemble.rarity } : {}),
     ...(unique ? { uniqueRarity: c.uniqueRarity, uniques: c.uniques.filter(x => owned.has(x.id)) } : {}),
   };
@@ -892,12 +918,15 @@ export function recordRun(t, personId, meters, hitBy, at = t.clock(), run = {}) 
   const reachedNow = addEnsembleMeters(t, meters, credit);
   const packGoals = recordPackRun(t, personId, meters, run.startedAt ?? at);
   // Tagesmissionen use the shared completion rules; rewards never count toward the ensemble.
-  const next = grantEnsembleCrates(t, t.store.put('runnerProgress', personId, {
+  const ownNext = mission.rewardItem && !list(p.owned).includes(mission.rewardItem) ? [...list(p.owned), mission.rewardItem] : p.owned;
+  const updated = {
     ...p, meters: p.meters + meters, points: (p.points ?? 0) + points, deaths: { ...p.deaths, [kind]: (p.deaths?.[kind] ?? 0) + 1 },
     ...(daily ? { bonusPoints: (p.bonusPoints ?? 0) + bonus, bonusDay: berlinDay(at.toISOString()) } : {}),
     ...(mission.rewardPoints ? { missionPoints: (p.missionPoints ?? 0) + mission.rewardPoints } : {}),
     ...(mission.crate ? { missionCrates: (p.missionCrates ?? 0) + mission.crate } : {}),
-  }), credit);
+    ...(ownNext !== p.owned ? { owned: ownNext } : {}),
+  };
+  const next = grantEnsembleCrates(t, t.store.put('runnerProgress', personId, mission.rewardItem ? settleUnlocks(t, updated) : updated), credit);
   const progress = progressView(t, next), ensemble = ensembleRunView(t, meters, reachedNow, credit);
   // `gained` and `bonus` stay metres for older apps ("+812 m · Tagesbonus +812 m"); `missionBonus`
   // and `gainedPoints` are crate points.
@@ -1056,6 +1085,10 @@ export function buyItem(t, uid, requestId, b) {
     if (!item || item.default || item.reward || item.unique) fail(404, 'Dieses Teil gibt es nicht.');
     const p = progressOf(t, a.personId), owned = ownedIds(t, p), open = openFor(c, p, owned);
     if (owned.has(item.id)) fail(409, 'Das hast du schon.', 'already_owned');
+    if (c.adventExclusive?.has(item.id)) {
+      const lock = adventLockInfo(c.adventCalendar, item.id, t.clock());
+      fail(409, lock?.detail ?? 'Noch gesperrt.', 'locked');
+    }
     const cost = buyCost(c, item);
     if (cost === null) fail(409, `${c.rarity.get(item.rarity)?.name ?? 'Diese Stufe'} gibt es nur aus Kisten und Tauschverträgen.`, 'not_buyable');
     if (!item.drawnBy.some(r => open.has(r))) fail(409, c.rarity.get(item.rarity)?.hint ?? 'Noch gesperrt.', 'locked');

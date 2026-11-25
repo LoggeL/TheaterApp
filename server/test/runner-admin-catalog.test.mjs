@@ -203,9 +203,10 @@ test('the bundled catalog: the admin view holds every entry of catalog.json', t 
   for (const release of view.releases) assert.equal(release.ready, release.missing.length === 0, release.id);
 });
 
-test('the 24 Advent doors preview their own figures and pictures without unlocking them', t => {
+test('the 24 Advent doors preview their own figures and pictures before their scheduled Berlin dates', t => {
   const store = new Store(); t.after(() => store.close());
-  const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', clock: () => new Date('2026-12-24T12:00:00Z') });
+  const clock = { at: new Date('2026-11-30T22:59:59.000Z') }; // 23:59:59 Berlin on Nov 30
+  const app = new Theater(store, { bootstrapEmail: 'admin@example.invalid', clock: () => clock.at });
   app.session({ uid: 'admin', name: 'Admin', email: 'admin@example.invalid', email_verified: true });
   const personId = app.action('admin', { action: 'member.save', name: 'Sam' }, 'member-sam').id;
   app.session({ uid: 'sam', name: 'Sam', email: 'sam@example.invalid', email_verified: true });
@@ -228,10 +229,13 @@ test('the 24 Advent doors preview their own figures and pictures without unlocki
   assert.ok(!wardrobe.includes('adventCalendar'));
   assert.ok(!wardrobe.includes('"schedule"'));
   assert.throws(() => app.runnerAdminCatalog('sam'), { status: 403 });
-  for (const id of ids) {
+  for (const [index, id] of ids.entries()) {
     const item = byId.get(id);
     assert.equal(item?.kind, 'character', id);
-    assert.equal(item.admin.disabled, true, id);
+    assert.equal(item.admin.disabled, false, id);
+    assert.equal(item.admin.live, false, `${id} not live before Dec 1`);
+    assert.equal(item.admin.release?.part, 'calendar', id);
+    assert.equal(item.admin.release?.name, `Adventskalender · Türchen ${index + 1}`, id);
     assert.ok(!wardrobe.includes(`"${id}"`), id);
     for (const key of ['image', 'portrait', 'thumb']) {
       assert.match(item[key] ?? '', /^\/admin\/runner\/skins\//, `${id} ${key}`);
@@ -245,6 +249,13 @@ test('the 24 Advent doors preview their own figures and pictures without unlocki
   assert.equal(byId.get('character.carina--anno-mathilde').role, 'Mathilde');
   assert.equal(byId.get('character.carina--anno').role, 'Maribel');
   assert.notEqual(byId.get('character.carina--anno-mathilde').image, byId.get('character.carina--anno').image);
+  // At Dec 1 00:00 Berlin, Door 1 goes live while Doors 2–24 stay scheduled and hidden.
+  clock.at = new Date('2026-11-30T23:00:00.000Z');
+  const dec1 = new Map(app.runnerAdminCatalog('admin').items.map(item => [item.id, item]));
+  assert.equal(dec1.get(ids[0]).admin.live, true);
+  assert.equal(dec1.get(ids[0]).admin.release.active, true);
+  assert.equal(dec1.get(ids[1]).admin.live, false);
+  assert.equal(dec1.get(ids[1]).admin.release.active, false);
 });
 
 test('admins can preview every Sagenhaft image before the scheduled March release', t => {

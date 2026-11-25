@@ -281,22 +281,8 @@
     "goalMeters": 100000,
     "crateCount": 3,
     "itemIds": [
-      "character.carina--anno-mathilde",
-      "character.logge--anno",
-      "character.lena--anno"
+      "character.logge--anno"
     ]
-  },
-  {
-    "id": "creepshow-2027",
-    "name": "Creepshow",
-    "startsAt": "2027-05-09T18:00:00+02:00",
-    "goalMeters": 100000,
-    "crateCount": 3,
-    "itemIds": [
-      "character.till--creepshow",
-      "character.logge--creepshow"
-    ],
-    "gatedItemIds": []
   },
   {
     "id": "nexus-2027",

@@ -1143,9 +1143,10 @@ class _AdminSkinDetailPageState extends State<AdminSkinDetailPage> {
             switch (release.part) {
               'gated' => 'gated bis zum Start',
               'free' => 'für alle frei',
+              'calendar' => release.active ? 'freigeschaltet' : 'geplant',
               _ => release.active ? 'gestartet' : 'noch nicht gestartet',
             },
-            if (release.part != 'free')
+            if (release.part != 'free' && release.part != 'calendar')
               release.ready ? 'Set vollständig' : 'Set unvollständig',
           ].join(' · '),
         ),

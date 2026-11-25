@@ -38,7 +38,7 @@ export const ownFigures = (c, personId) => personId === null || personId === und
 /** The figure [personId] gets as a gift from [c] now, or null if none is ready. */
 export function giftFigure(c, personId) {
   const rank = x => c.rarity.get(x.rarity)?.rank ?? Infinity, importance = x => x.importance ?? Infinity;
-  const ready = ownFigures(c, personId).filter(x => x.image && !x.default && !x.reward && !x.unique);
+  const ready = ownFigures(c, personId).filter(x => x.image && !x.default && !x.reward && !x.unique && !x.generalCrateOnly);
   return ready.sort((a, b) => rank(a) - rank(b) || importance(a) - importance(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0] ?? null;
 }
 
@@ -53,7 +53,7 @@ export function ownFiguresCutover(t) {
   const existing = t.store.get(...cutoverKey);
   if (existing) return existing;
   const figures = {};
-  for (const x of t.runnerCatalog.items) if (x.kind === 'character' && Number.isInteger(x.personId)) (figures[x.personId] ??= []).push(x.id);
+  for (const x of t.runnerCatalog.items) if (x.kind === 'character' && Number.isInteger(x.personId) && !x.generalCrateOnly) (figures[x.personId] ??= []).push(x.id);
   return t.store.put(...cutoverKey, { at: t.clock().toISOString(), figures });
 }
 

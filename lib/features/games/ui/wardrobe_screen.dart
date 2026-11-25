@@ -671,7 +671,9 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
       if (w.crateTargets.any((t) => t.isRandom)) {
         sources.add('Zufallskiste');
       }
-      if (item.kind == WardrobeKind.character && item.role != null) {
+      if (!item.generalCrateOnly &&
+          item.kind == WardrobeKind.character &&
+          item.role != null) {
         final role = item.role!;
         if (role.isFunction) {
           final tech = w.crateTargets
@@ -729,14 +731,16 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final catalog = w.catalog;
     final owned = w.owns(item);
     final worn = w.worn(item.kind)?.id == item.id;
-    final hint = w.lockHint(item) ?? rewardHint(w, item) ?? uniqueHint(w, item);
+    final hint =
+        w.lockDetail(item) ?? rewardHint(w, item) ?? uniqueHint(w, item);
     final rarities = catalog.raritiesOf(item);
     final label = catalog.labelOf(item);
     final shiny = owned && w.isShiny(item);
     final cost = _dupes ? w.buyCost(item) : null;
     final milestone = item.reward ? w.ensemble?.rewardOf(item) : null;
     final unique = uniqueProgressOf(w, item);
-    final lockProgress = !owned && !item.unique && !item.reward
+    final lockProgress =
+        !owned && !item.unique && !item.reward && item.lockHint == null
         ? w.lockProgress(catalog.rarityOf(item))
         : null;
     final sources = !owned && !item.unique && !item.reward && hint == null
@@ -1533,6 +1537,14 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
             collectibleNames:
                 w.worn(WardrobeKind.backdrop)?.collectibleNames ?? const {},
             onOpenCrate: _busy ? null : () => _open(mission: true),
+            onChanged: (m) {
+              if (m.justCompletedAll &&
+                  m.dailyReward?.isItem == true &&
+                  mounted &&
+                  !_loading) {
+                _load();
+              }
+            },
           ),
         ),
       if (_ensemble && w.ensemble != null)
@@ -1628,7 +1640,7 @@ class _WardrobeScreenState extends State<WardrobeScreen> {
     final missingByRarity = <String, int>{};
     for (final i in w.catalog.collectible) {
       if (!w.counts(i)) continue;
-      if (!w.owns(i)) {
+      if (!w.owns(i) && i.lockHint == null) {
         for (final r in i.rarities) {
           missingByRarity[r] = (missingByRarity[r] ?? 0) + 1;
         }

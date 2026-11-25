@@ -287,8 +287,9 @@ class _DailyMissionsCardState extends State<DailyMissionsCard> {
                 padding: const EdgeInsets.only(right: 8),
                 child: Text(
                   m.allDone
-                      ? 'Alle drei geschafft – die Missionskiste ist verdient.'
-                      : 'Alle drei an einem Tag: eine Missionskiste dazu${m.shinyChance > 0 ? ' (${_number.format((m.shinyChance * 100).round())} % Glanzchance)' : ''}. ${m.rerollAvailable ? 'Eine Mission am Tag lässt sich neu würfeln.' : 'Heute schon neu gewürfelt.'}',
+                      ? (m.dailyReward?.earnedSummary ??
+                            'Alle drei geschafft – die Missionskiste ist verdient.')
+                      : '${m.dailyReward?.summary ?? 'Alle drei an einem Tag: eine Missionskiste dazu${m.shinyChance > 0 ? ' (${_number.format((m.shinyChance * 100).round())} % Glanzchance)' : ''}.'} ${m.rerollAvailable ? 'Eine Mission am Tag lässt sich neu würfeln.' : 'Heute schon neu gewürfelt.'}',
                   style: theme.textTheme.bodySmall,
                 ),
               ),
@@ -484,7 +485,8 @@ class MissionRunNote extends StatelessWidget {
                 const Icon(Icons.celebration, color: StageTheme.orange),
                 const SizedBox(height: 4),
                 Text(
-                  'Alle drei Tagesmissionen geschafft! Eine Missionskiste wartet in der Garderobe.',
+                  missions.dailyReward?.runNote ??
+                      'Alle drei Tagesmissionen geschafft! Eine Missionskiste wartet in der Garderobe.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: StageTheme.orange,
