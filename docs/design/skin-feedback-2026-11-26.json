@@ -1,0 +1,311 @@
+{
+  "date": "2026-11-26",
+  "baseline": "f2505bc",
+  "imageTool": "Codex image_gen, zusätzliche Montage geschützter Originalpartien und verlustfreier Master vor dem WebP-Export.",
+  "items": [
+    {
+      "item": "character.kuschel--weihnachten",
+      "role": "Captain Kuschel (Weihnachten)",
+      "play": "Creepshow",
+      "identityReference": "character.unique-captain-kuschel",
+      "changedImages": [
+        "character-advent-24.webp",
+        "character-advent-24-portrait.webp",
+        "character-advent-24-thumb.webp"
+      ],
+      "edit": "Mütze und Fliege aus dem früheren Festporträt auf Porträt und Posen des regulären Plüschhasen gelegt."
+    },
+    {
+      "item": "character.sophie--waisenhaus",
+      "role": "Mia (Waisenhauskleid)",
+      "play": "Creepshow",
+      "identityReference": "character.sophie",
+      "changedImages": [
+        "character-advent-03.webp"
+      ],
+      "edit": "Die Gesichtspartie der Jubelpose aus b08027c an derselben Stelle eingesetzt. Die sichtbaren Pixel der anderen sieben Posen stimmen mit dem vorherigen Export überein."
+    },
+    {
+      "item": "character.nele--mumie",
+      "role": "Prinzessin Iset (Mumie)",
+      "play": "Creepshow",
+      "identityReference": "character.nele",
+      "changedImages": [
+        "character-advent-02.webp",
+        "character-advent-02-portrait.webp",
+        "character-advent-02-thumb.webp"
+      ],
+      "edit": "Gewickelte Hände und geschlossener Kopfverband wie auf der Bühne. Neles gezeichnete Augen sitzen unter den Öffnungen der Bandagen.",
+      "costumePhoto": "DSC02333.jpeg",
+      "generations": [
+        "mummy-grid",
+        "mummy-portrait"
+      ]
+    },
+    {
+      "item": "character.nele--ballkleid",
+      "role": "Prinzessin Iset (Ballkleid)",
+      "play": "Creepshow",
+      "identityReference": "character.nele",
+      "changedImages": [
+        "character-advent-08.webp",
+        "character-advent-08-portrait.webp",
+        "character-advent-08-thumb.webp"
+      ],
+      "edit": "Schwarzes Oberteil, schimmernder taupefarbener Rock, Armwickel und Federkopfschmuck. Gesichtspartien aus der regulären Iset. Der zweite Laufschritt erhielt eine eigene Gegenbewegung.",
+      "costumePhoto": "DSC01257.ARW",
+      "generations": [
+        "isetdress-grid",
+        "isetdress-portrait",
+        "iset-opposite-stride"
+      ]
+    },
+    {
+      "item": "character.elena--strohkleid",
+      "role": "Johanna (Strohkleid)",
+      "play": "Anno 1146",
+      "identityReference": "character.elena--anno",
+      "changedImages": [
+        "character-advent-16.webp",
+        "character-advent-16-portrait.webp",
+        "character-advent-16-thumb.webp"
+      ],
+      "edit": "Naturfarbenes Kleid mit Kordelgürtel, wenige Halme in den Locken, Holzschwert und nackte Füße. In der Hängepose greift die Hand um den Schwertgriff. Gesichtspartien aus Johannas Anno-Figur.",
+      "costumePhoto": "DSC05940.jpg",
+      "generations": [
+        "straw-grid",
+        "straw-portrait",
+        "straw-dangle"
+      ]
+    },
+    {
+      "item": "character.elena--ritterin",
+      "role": "Johanna (Ritterin)",
+      "play": "Anno 1146",
+      "identityReference": "character.elena--anno",
+      "changedImages": [
+        "character-advent-04.webp",
+        "character-advent-04-portrait.webp",
+        "character-advent-04-thumb.webp"
+      ],
+      "edit": "Rotes Cape, dunkle Rüstung und braune Riemenschuhe nach der Bühne. Gesichtspartien aus derselben Anno-Figur wie beim Strohkleid.",
+      "costumePhoto": "DSC07802+1.jpg",
+      "generations": [
+        "knight-grid",
+        "knight-portrait"
+      ]
+    },
+    {
+      "item": "character.marcella--dienerin",
+      "role": "Marcella (Dienerin)",
+      "play": "Creepshow",
+      "identityReference": "character.marcella",
+      "changedImages": [
+        "character-advent-05.webp"
+      ],
+      "edit": "Die WebP-Datei und alle sieben Seilpunkte stammen byte- bzw. koordinatengleich aus b08027c. Das vorhandene Porträt und Kartenbild entsprechen ebenfalls dieser Fassung.",
+      "costumePhoto": "DSC07448.JPG"
+    },
+    {
+      "item": "character.logge--anno",
+      "role": "Logge (Ensemble)",
+      "play": "Anno 1146",
+      "identityReference": "character.logge--anno",
+      "changedImages": [
+        "character-logge--anno.webp",
+        "character-logge--anno-portrait.webp",
+        "character-logge--anno-thumb.webp"
+      ],
+      "edit": "Für die einzige Anno-Figur von Logge dienten ihr ursprüngliches Porträt und das Bühnenfoto als Referenzen. Leon aus Anno gab die Malweise vor. Der Bote aus Creepshow diente ergänzend als Gesichtsvergleich.",
+      "costumePhoto": "DSC05630.jpg",
+      "generations": [
+        "logge-portrait",
+        "logge-grid"
+      ]
+    },
+    {
+      "item": "character.jule--partygast",
+      "role": "Motte (Partyoutfit)",
+      "play": "Creepshow",
+      "identityReference": "character.jule",
+      "changedImages": [
+        "character-jule--partygast.webp",
+        "character-jule--partygast-portrait.webp",
+        "character-jule--partygast-thumb.webp"
+      ],
+      "edit": "Partymaskierung und Rock der bisherigen Variante, lange gestreifte Bluse nach der regulären Motte. Der Bund überdeckt die Bluse auch beim Hängen, Fliegen und Liegen. Jule ist die Darstellerin.",
+      "costumePhoto": "DSC01721.jpeg",
+      "generations": [
+        "motte-portrait",
+        "motte-final-grid"
+      ]
+    }
+  ],
+  "prompts": [
+    {
+      "id": "iset-opposite-stride",
+      "prompt": "Use case: identity-preserve. ONE full body running animation cel for a theatre game on real transparent background, facing and travelling to the RIGHT. Image 1 is the existing Iset ball dress for identity and consistent clothing, golden shoes, long mushroom-pink-beige skirt, black bodice, gilded sash, white arm wraps, flowing chestnut hair with black feather/gold masquerade mask up on hair. Image 2 is the final sheet for rendering and costume. Draw the OPPOSITE contact phase to that sheet's top left. The NEAR arm swings FORWARD across the front of her chest, elbow bent, clearly visible wrapped forearm and fist in front of the gold collar toward the right; far arm swings backward past hip toward left, only partially visible behind torso. Near knee and lower leg drive BACK toward left, near gold sandal tucked high behind; far knee goes up visibly forward, the far sandal reaching right. A different flowing S-shaped fold in the soft ball skirt reveals these two distinct different leg positions. Adult Nele's original side-view face, features and settled running expression, high quality warm painterly shading and thin brown contour matching the existing portrait, tiny black shoulder harness with a small theatre strap fitting. No fan, extra stuff, text, floor or shadow. One isolated complete figure, transparent margin around raised feather and both feet.",
+      "references": [
+        "iset-runB-action.png",
+        "result/isetdress-grid.png"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "isetdress-grid",
+      "prompt": "Use case: identity-preserve. Image 1 is Nele's ORIGINAL established Creepshow Iset model, the edit target. Image 2 is for the ballroom costume and stage-harness fit only. Image 3 is the actual COSTUME on stage at left: dark sleeveless bodice with Egyptian gold collar, broad metallic gold sash and long draped, pale muted greige/mushroom-satin skirt; ivory fabric wraps on the ARMS to below the shoulders, gold flat strapped sandals. Image 4 is this same actor's variant portrait for the filigree gold mask resting UP ON HER HAIR and the little black feather, leave face fully visible. Re-dress character 1 in that costume through all eight poses preserving the exact shape of her forehead, brows, long nose, calm eyes, cheeks, chin and long, individually drawn dark chestnut flowing hair, height, broad gestures and proportions. Remove the original fan. Maintain the SAME warm, richly painted theatre game art as image 1 with delicate tapered dark umber lines, graded light on skin/hair/fabric. Preserve adult age and face at smaller scale, no big grinning child or oversized fluttery eyelashes. Skirt hangs in long, heavy fluid folds, reacts to strides. Consistent narrow gold center sash panel; mask sits on HEAD above forehead and black feather rises from it in every pose. Arrange in exactly 4 columns 2 rows in same order, facing right: four distinct consecutive run phases (near leg ahead, passing with leg down, opposite leg ahead, opposite passing with knee high); cheer arms up, dangling seated, stretched horizontal flight then prone horizontal crash with tiny dizzy stars. Same feet lower line in first row. Truly transparent background, each full body completely separate with gaps. No boxes, crop, lettering, floor or thick sticker borders.",
+      "references": [
+        "isetmummy-base-grid.png",
+        "isetdress-ground-grid.png",
+        "isetdress-stage.jpg",
+        "isetdress-ground-portrait.png"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "isetdress-portrait",
+      "prompt": "Use case: identity-preserve. Image 1 is the EXISTING portrait of Nele as Iset in the ball dress and must be the base drawing including the exact actress, eyes, brows, nose, lips, head scale, face angle, slender body, long chestnut waves and hands. Image 2 is the matched new game animation for costume continuity. Image 3 is the stage costume at left, for materials only. Create a polished final Anno-independent CREEPSHOW game card, matched to image 1. Make room above the golden mask that sits UP ON HER HAIR so every black feather is visible with real transparent headroom; show both shoulders, black sleeveless bodice, ancient-gold necklace, narrow shoulder harness, broad metallic gold sash, pale muted mushroom-greige long draped ball skirt and ivory bands around arms, delicate gold earrings and wrist bangles. Keep exactly her individual face from image 1, warm original theatre-game paint and fine dark-brown contours, with hand-painted highlights on hair and the fabric of skirt, as in image 2. No fan or objects, no mask over her eyes, no extra headdress. Preserve pose, complete feather, square image with genuine transparency and bottom-only crop at hips.",
+      "references": [
+        "isetdress-ground-portrait.png",
+        "result/isetdress-grid.png",
+        "isetdress-stage.jpg"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "knight-grid",
+      "prompt": "Use case: identity-preserve costume edit. Image 1 is the original hand-painted JOHANNA game model of Elena in Anno 1146, the edit target for identity, figure and eight poses. Image 2 shows her knight costume in matching poses and required small sheathed sword on belt. Image 3 is the real stage COSTUME only. Paint a finished coherent costume-variant sheet for image 1 in the identical warm, fine brown-line Anno storybook-game rendering. Keep her specific side profile, upturned brows, eyes, ear, nose, jaw, skin, abundant individual dark chestnut ringlets with warm highlights and their exact silhouette, body proportions and expressive gestures. The knight wears a red wool cape fastened at throat with gold clasp, flowing BEHIND the shoulders, blouse in warm ivory with wide gathered sleeves, brown cuffs and broad waist cincher, dark near-black slim leggings, small practical leather thigh straps, dark strap sandals, single sheathed stage sword at hip. Use the real cloth, silhouette and folds evident in image 3. No full metal armor. Match the anatomy, exact order and orientation of image 1 in 4 columns by 2 rows: wide run, passing, opposite wide run, opposite passing; cheer, seated suspended dangle, horizontal fly, face-down horizontal crash with two tiny stars. Run legs alternate. Fine ink, modeled shadows and hair, not heavy black vector outlines. Keep each head in the position, size and facing direction of the source pose, all hands clear, no extra characters, props or outlines. One whole body per cell, generous clear space. Single wide transparent sheet, no ropes, floor, scenery, labels or border.",
+      "references": [
+        "knight-base-grid.png",
+        "knight-ground-grid.png",
+        "knight-photo.jpg"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "knight-portrait",
+      "prompt": "Use case: identity-preserve costume edit. Image 1 is the original painted Johanna portrait of Elena in her knight outfit, editing target. Preserve her exact head shape and size, sideways gaze, eye/eyebrow placement, mouth, nose, striking dark brown ringlets, neck, hands on belt, and painterly warm storybook technique. Image 2 is the real stage costume, ONLY use for wardrobe construction. Image 3 is the new game sheet for wardrobe continuity and palette. Refine her knight's clothes to the stage image: matte red fabric cape clasped at throat with small antique gold round brooch, cream gathered blouse with cuffs, brown leather at wrists, broad practical brown belt and narrower plain dark thigh/scabbard straps, sheathed wood-and-metal stage sword at the hip. Consistent small black stage harness, fine brown contours and modeled Anno lighting/shading, subtle folds with no metal suit of armour. Preserve figure scale and framing, transparent headroom above her curls and visible cape at shoulders. Single square waist-up game card, genuine transparent alpha, no props in hands, text, background or vignette.",
+      "references": [
+        "knight-ground-portrait.png",
+        "knight-photo.jpg",
+        "result/knight-grid.png"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "logge-grid",
+      "prompt": "Use case: style-transfer. Production 2D TheaterApp sprite sheet, exactly eight isolated full bodies of ONE theatre actor in 4 equal columns x 2 rows, wide landscape, real transparent background. Image 1 is the FINAL painted portrait of the character Logge in Anno 1146: carry face identity, hair, tunic dye, fold rendering to every frame. Image 2 is the SAME man's previous GAME POSES and costume. Image 3 is the standard GAME SHEET from the SAME PRODUCTION, for the painterly storybook rendering, head scale, athletic articulated limbs, soft ochre highlights and dark umber tapered contours. Do not copy the third character, hair or axe. Depict Logge, modest adult grin, short curly dark-blond hair, little cheek creases; avoid squinting/smiling during flight or dangling as if posing for camera. Narrow detailed woven trim, red long-sleeve tunic belted with a black belt, dark charcoal ankle trousers, bare undamaged feet, small round dark metal stage-harness fitting flush behind shoulder. Top left to right: right-facing RUNNING wide split near leg ahead, PASSING pose one leg straight and other bent at knee, opposite wide stride, opposite passing. Bottom left to right: cheerful arms overhead standing tall, dangling seated legs hanging frightened, stretched rightward horizontal flight, flat horizontal crash facing right with two small illustrated golden dizzy stars. Use the order and gestures of image 2, and the weight, body proportions, silhouette/shading complexity of image 3. Natural foot soles, individual hands, all facing right. Do not add weapons, props, large metal loops, black outer stroke, flat vectors, oversize mugging eyes or caption. Preserve generous transparent gaps around/between figures, keep fly and crash in bottom columns 3 and 4. No stage, platform, shadows, dividers or type.",
+      "references": [
+        "result/logge-portrait.png",
+        "logge-current-grid.png",
+        "logge-anno2-grid.png"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "logge-portrait",
+      "prompt": "Use case: style-transfer and identity-preserve. Production transparent 512x512 wardrobe card (generate high resolution square). Repaint this specific male actor as the Anno 1146 ENSEMBLE villager, in the same illustrator's hand as the established neighboring cards. Image 1 is the existing Logge Anno portrait for his individual identity, head angle, friendly modest grin, narrow angular chin, clear light eyes, short wavy dark-blond hair and the red costume. Image 2 is an established Anno 1146 painted card for rendering/method only, never that man's face, ax, blue costume or hair. Image 3 is Logge's established drawn facial likeness only, ignore the cap and delivery costume. Image 4 is the actual stage costume reference only. Red, long-sleeved, simple woven tunic, modest V-neck with narrow patterned edging, black belt, tiny glimpse of black trousers; black narrow stage harness with small buckles as in the cards. Fair adult face with natural cheek planes and smile creases; painted strands along temples, not solid fills, relaxed eyes and a recognisable nose. Rich warm theatrical storybook-game illustration, graduated shadow in cloth folds, fine warm brown contour subtly varying in weight, warm bounced light against cooler red fold shadows, same ink-and-paint detail and face scale as image 2. No flat outlined comic shapes, exaggerated grin, big bobble head, stubble if absent, points, magic or equipment. No axe, no broom, no staff. Single waist-up three-quarter composition, hands gently at waist; 5% headroom over hair, cropped at lower hips at bottom only. Genuine transparent background, no vignette, labels, frame or other figures.",
+      "references": [
+        "logge-current-portrait.png",
+        "logge-anno2-portrait.png",
+        "logge-otherrole-portrait.png",
+        "logge-photo.jpg"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "motte-final-grid",
+      "prompt": "Use case: identity-preserve. Image 1 is the FINAL Motte (Partyoutfit) portrait and the definitive costume model: full-length lavender pinstriped button blouse, long sleeves, button cuffs, tucked deeply into broad opaque black waistband. Trace that exact unbroken join between purple fabric and black skirt around her entire body. Her waist and back are ALWAYS fully covered with cloth, in every pose including stretched flight or lying down. Image 2 supplies EIGHT FULL-BODY POSES and layout ONLY. Replace its short top entirely with image 1's long-sleeve blouse. In the two horizontal poses the waistband must overlap the purple blouse by several centimeters at the back; the view from the side shows continuous purple cloth meeting black with absolutely NO skin-colored band, ocher line, light gap, exposed lower back, navel or ties. Flesh only on face, fingers and any legitimately exposed shins. Same theatre masquerade mask, feather, long dark curls, black skirt with multicolour patchwork inset and boots. Match her expressive face in each source pose. Eight fully separated clear silhouettes on an ACTUAL TRANSPARENT ALPHA canvas, no white matte, no shadow, no particle, no labels, no floor or frame. Four columns/two rows, order exactly top alternating wide run, passing, opposite run, opposite passing; bottom cheer, dangle, horizontal fly right, horizontal face-down crash with eyes closed/dizzy cartoon expression and yellow stars. Give each enough empty transparent gutter, keep the character scale constant. Match drawing style and waist geometry of the FIRST portrait; use second only for placement and pose.",
+      "references": [
+        "result/motte-portrait.png",
+        "motte-current-grid.png"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "motte-grid",
+      "prompt": "Use case: precise-object-edit. Production EDIT of image 1, the EXISTING eight animation frames of Motte (Partyoutfit), played by Jule. Image 2 is her established same-play Motte skin for blouse tailoring only, not a competing face or hairstyle. Image 3 is her party card for identity and skirt. Change only her top. Give Motte a proper full-length softly striped dusty-lilac button-front blouse, gently loose, with her classic collar, long sleeves and buttoned cuffs as in her established Creepshow costume. All of the cloth is TUCKED INTO the waistband of her EXISTING black party skirt so it stays closed over stomach and back in every movement, including with both arms high. No bare midriff, cutout, knotted/cropped hem or belly tie. Keep mask in place over eyes, the delicate feather, her original loose dark chestnut curls, face, skin tone, head, harness webbing, boots, and black skirt with small burgundy/ochre/teal patchwork inset. Do not add her everyday black overalls. Match the target full bodies' exact height, face, expressions, anatomy, silhouettes, orientations, hand positions and foot positions. Four poses wide on top (rightward run, pass, opposite run, opposite pass), then cheer with both arms high, seated dangle, horizontal fly, horizontal crash with small dizzy stars. One clear full-body image per cell, generous transparent gutters. True transparent background; no captions, floor, effects or thick outline.",
+      "references": [
+        "motte-current-grid.png",
+        "motte-base-portrait.png",
+        "motte-current-portrait.png"
+      ],
+      "transparent_background": true,
+      "used": false,
+      "reason": "Blick auf den unteren Rücken in der Flugpose und zu heller Hintergrund. Ersetzt durch motte-final-grid."
+    },
+    {
+      "id": "motte-portrait",
+      "prompt": "Use case: precise-object-edit. Image 1 is the actual wardrobe card to EDIT for Motte (Partyoutfit), played by Jule. Image 2 is her original Motte card for blouse construction only. Image 3 is a stage photo of her everyday lilac blouse on the seated figure at left (costume reference only). Change only her top. Give Motte a proper full-length softly striped dusty-lilac button-front blouse, gently loose, with her classic collar, long sleeves and buttoned cuffs as in her established Creepshow costume. All of the cloth is TUCKED INTO the waistband of her EXISTING black party skirt so it stays closed over stomach and back in every movement, including with both arms high. No bare midriff, cutout, knotted/cropped hem or belly tie. Keep mask in place over eyes, the delicate feather, her original loose dark chestnut curls, face, skin tone, head, harness webbing, boots, and black skirt with small burgundy/ochre/teal patchwork inset. Do not add her everyday black overalls. Tiny fabric stripes and cloth folds painted with the same lighting and edges as image 1. Keep the exact card framing, head and hair silhouette, nose, eyes, hands with intact harness straps in the same positions, and skirt. Same square cutout on transparent background with no text, border or shadow.",
+      "references": [
+        "motte-current-portrait.png",
+        "motte-base-portrait.png",
+        "party-scene-1.jpg"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "mummy-grid",
+      "prompt": "Use case: identity-preserve costume edit. Create one 4-column by 2-row game sheet with exactly eight cutouts on true transparent alpha. First image is Nele as Iset in Creepshow: original game character to preserve in body shape, face angle and the visible eyes/brows in each pose, and painterly ink-and-wash rendering. Second image ONLY specifies the mummy costume and placement of the eight figures. Third image is the stage costume: clean pale whitish cotton bands wrapped overlapping around the limbs, body, head and feet. Paint eight poses of the SAME princess in an actual theatre mummy costume. Keep the muted ivory-white fabric with cool pearl-gray shadows and an occasional warm beige shadow, and fine drawn cloth edges with a few overlaps; soft original brown inks rather than thick black sticker outlines. Let several broad bands wrap naturally round the shoulders and head. Head covered with one narrow consistent open strip only at eye level showing her original eyebrows, dark eyes, upper nose and warm skin; no exposed hair or mouth, no cartoon doll, horror injury, or generic face. Hands in cloth as on the actual stage; small black shoulder harness for stage flight, a tiny flat upper-back loop, no protruding mechanisms. Two short tails of fabric move with the body. No fan. Top row: run A, pass A, run B opposite, pass B opposite, all facing right, feet on shared line. Bottom row: cheer standing with both arms overhead, seated dangling with relaxed bent legs, flying horizontally to right, crashed horizontal on belly facing right with two small gold dizzy stars. Match orientation and individual silhouettes of the source from pose to pose, don't crop fingers, bands or toes. Generous gaps, fully transparent around each separated character, no layout graphics or shadows.",
+      "references": [
+        "isetmummy-base-grid.png",
+        "isetmummy-ground-grid.png",
+        "mummy-photo.jpg"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "mummy-portrait",
+      "prompt": "Use case: identity-preserve. Image 1 is the existing card of Nele as Princess Iset, the edit target: preserve her precise natural dark eyes, brown brows as in this portrait, angle of nose bridge, age and distinctive almond eye shape. Image 2 shows the actual mummy costume of the play; image 3 is the new game sheet showing ONE eye-level opening for her eyes and eyebrows, with nose tip and mouth covered continuously and with wrists and hands wrapped. Revise only the clothing and leave her original pose, head scale, silhouette, expression and the eyes exactly as drawn. Soft pearl ivory and warm-white broad overlapping woven cloth bandages, a small gold pendant and same black stage harness. Keep natural readable hand silhouette under the cloth. Preserve the established warm dark contour and delicate painted shadows, no thick black exterior rim or cartoon oversize eyes. Three-quarter waist-up on same square crop, with comfortable transparent headroom over the wrapped forehead, extending to bottom edge. Real transparent background, no glow, shadow, text, scenic elements or props.",
+      "references": [
+        "isetmummy-ground-portrait.png",
+        "mummy-photo.jpg",
+        "result/mummy-grid.png"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "straw-dangle",
+      "prompt": "Use case: identity-preserve. ONE complete and isolated seated dangling sprite exactly matching the pose of IMAGE 1, Elena as Johanna in Anno 1146 with a wooden practice sword grasped in the hand on the RIGHT of the image. The fingers curl around its wood grip BELOW the crossguard; the wooden blade angles up beside the head. The OTHER hand hangs free on her knee. Keep her specific reference face and surprised open-mouthed expression, shoulder ring and narrow black webbing across the chest, her long dark tight curls, knees and bare feet precisely as pictured. Image 2 is the final set of seven matching animation poses for colors, art style, sword, a few tiny natural wheat straws caught in lower curls, ecru linen shift dress, rope belt and scale. Use the original painterly Anno character model with warm fine ink lines, no thick dark sticker outline. True transparent alpha all around whole figure, no shadow, frame, wording or extra objects. Grip must be visible; one sword only.",
+      "references": [
+        "straw-dangle-action.png",
+        "result/straw-grid.png"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "straw-grid",
+      "prompt": "Use case: identity-preserve stage costume edit. Image 1 is the existing Johanna (Elena, Anno 1146), original character identity and animation artwork. Image 2 is only a guide to the wooden stage sword, outfit and its placement in the eight poses. Image 3 shows the actual simple white theatrical linen nightdress and stage straw. Re-dress the original Johanna in the loose, modest, almost white ecru linen dress to her calves with lightly gathered cuffs, a narrow rope waist tie and bare feet. Cloth is subtle soft woven linen, not patterned floral brocade. A few short real light wheat-coloured straw stems caught in the LOWER masses of her brown curls and near the skirt; do not turn the hair into leaves, flame, plumes or a wreath. Use her exact original face shape/eyes/mouth, huge dark brown corkscrew curls, youthful body shape, proportions and gestures from image 1. Single consistent blunt wooden practice sword, handle held in near hand in running, dangle/flight, secure at belt for cheering, resting by hand on the ground in crash. Eight isolated, full-body game sprites, four columns two rows. Exactly the four alternating running phases, jubilant pose, seated dangle, horizontal fly and flat crash with dizzy stars of the supplied sheet. Real transparent backdrop and clear separation all around each cell. Same lovely brown ink line and delicate painted shadow and highlights as the original Anno game skin. Avoid oversaturated yellow decorative straw, black outer rim, simplified shiny modern cartoon, cropped tips and extra sword, text, frames or shadows.",
+      "references": [
+        "straw-base-grid.png",
+        "straw-ground-grid.png",
+        "straw-photo.jpg"
+      ],
+      "transparent_background": true,
+      "used": true
+    },
+    {
+      "id": "straw-portrait",
+      "prompt": "Use case: identity-preserve. Image 1 original Johanna Anno 1146 portrait in straw costume, EDIT TARGET. Image 2 the stage reference for her simple loose off-white linen (the hay is set dressing). Image 3 final sprite direction, carry fabric colour and the few small pieces of straw into card. Keep original face fully intact including eyes, nose, chin, expression, shading and neck, keep shape and texture of her mass of tight dark curls, her hands and the blunt wood sword, visible black stage harness and identical fit and pose. Repaint only the dress in soft neutral near-white plain linen: subtle gathered fold shadows but no floral pattern. Narrow simple straw-coloured cord belt; just a few small pale natural straw fibers caught individually lower down in her curls and near side. They should be subtle, no wreath, leaves or branches. Preserve all raised sword edges, warm painted Anno style, fine warm brown contour. Transparent square card, same proportions, no background or label.",
+      "references": [
+        "straw-ground-portrait.png",
+        "straw-photo.jpg",
+        "result/straw-grid.png"
+      ],
+      "transparent_background": true,
+      "used": true
+    }
+  ]
+}

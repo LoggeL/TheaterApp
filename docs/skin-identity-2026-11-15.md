@@ -218,3 +218,11 @@ Offene Punkte:
 - Punkt 5: Der Ruß im Sheet ist auf Spielgröße eher dezent.
 - Punkt 9: Die Gesichter in Flug- und Sturzpose stammen aus der Bearbeitung, nicht aus der Basis.
 - Die verkleinerten Posen sind bis zu 10 % kleiner als die übrigen Posen derselben Figur.
+
+## Korrekturen vom 26. November 2026
+
+Captain Kuschel trägt Mütze und Fliege auf dem regulären Plüschhasen. Mias Jubelgesicht stammt aus ihrer früheren Waisenhaus-Fassung. Die sichtbaren Pixel der sieben übrigen Posen sind im ausgelieferten Bild gleich geblieben. Für Marcella gilt wieder die Dienerinnen-Fassung aus `b08027c`, einschließlich ihrer damaligen Seilpunkte.
+
+Beide Iset-Kostüme verwenden Neles Creepshow-Figur als Gesichtsreferenz, beide Johanna-Kostüme Elenas Figur aus Anno 1146. Für Logges Ensemble waren sein vorhandener Anno-Skin, sein Bühnenfoto in der roten Tunika und die Malweise des Anno-Ensembles maßgeblich. Jule spielt Motte. Ihre Partyvariante trägt die geknöpfte, langärmlige Bluse im Rockbund.
+
+Die Prüfung umfasst neun Porträts und alle 72 Posen, auch im Spielrenderer bei 390 Pixeln Bühnenhöhe. Der Atlasprüfer meldet für diese Figuren keine Warnungen zu Zellgrenzen, Seilpunkten oder wechselnden Fußlinien. Die Bildbudgets und die Zuordnung der Thumbnails wurden mit dem Sprite-Optimierer geprüft. Die Stücke, Referenzen, Kostümfotos, bearbeiteten Dateien und Bildprompts stehen in der [Begleitdatei](design/skin-feedback-2026-11-26.json). In der [Figurenübersicht](runner-review.html) lassen sich Posen und Seilpunkte einzeln ansehen.
